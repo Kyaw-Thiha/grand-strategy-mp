@@ -14,6 +14,12 @@ grand-strategy-mp/
 └── package.json       # pnpm workspaces root
 ```
 
+## Workflow
+
+1. **Plan first.** Propose a plan, discuss, refine until we agree.
+2. **Store the plan.** Save as `plans/*.md` — one file per plan.
+3. **Execute phase-by-phase.** Work through the plan in ordered phases (not `docs/DEV_PHASES.md` phases). Complete each phase before moving to the next.
+
 ## Commands
 
 - `pnpm install` — install all workspaces
@@ -37,6 +43,13 @@ grand-strategy-mp/
 - **Do NOT use `getAuthSessionTicket()` for backend auth.** Use `getAuthTicketForWebApi()` with hex encoding.
 - **Service `identity` string** in `getAuthTicketForWebApi()` must match the `identity` param used in `AuthenticateUserTicket` on the server.
 - **Godot direct-read rule:** Use Supabase anon key + RLS for reading own/public data. Use Hono for writes, auth, and cross-player data.
+
+## Code Style
+
+- **Descriptive names.** Prefer long, clear names over short abbreviations. Clarity over brevity.
+- **Extract functions only for real functionalities.** Don't split code into functions just to have small functions. Only create functions when they represent a meaningful, reusable piece of logic.
+- **Document functions with full doc comments.** Every function worth creating should have: description, parameters, return value, and examples if helpful.
+- **Inline comments for navigation.** Use short, tactical comments within functions — not just at the top as doc strings — to help readers follow the logic flow.
 
 ## Testing
 
