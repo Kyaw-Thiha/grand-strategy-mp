@@ -10,14 +10,14 @@ import {
 /**
  * Import your Room files
  */
-import { MyRoom } from "./rooms/MyRoom.js";
+import { GameRoom } from "./rooms/GameRoom.js";
 
 const server = defineServer({
     /**
      * Define your room handlers:
      */
     rooms: {
-        my_room: defineRoom(MyRoom)
+        game_room: defineRoom(GameRoom)
     },
 
     /**
@@ -53,9 +53,9 @@ const server = defineServer({
          * Use @colyseus/playground
          * (It is not recommended to expose this route in a production environment)
          */
-        if (process.env.NODE_ENV !== "production") {
-            app.use("/", playground());
-        }
+        // if (process.env.NODE_ENV !== "production") {
+        //     app.use("/", playground());
+        // }
     }
 
 });
