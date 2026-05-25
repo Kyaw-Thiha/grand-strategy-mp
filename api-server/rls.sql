@@ -1,9 +1,9 @@
--- RLS policies for all Phase 1 tables.
+-- RLS policies
 -- Run this in Supabase SQL Editor after creating tables via drizzle-kit push.
 -- Writes always go through Hono (service_role key) which bypasses RLS.
 -- These policies only govern direct reads from Godot via the anon key.
 --
--- NOTE (Phase 6): For auth.jwt()->'sub' to work with Godot direct reads,
+-- For auth.jwt()->'sub' to work with Godot direct reads,
 -- the JWT sent by the Godot Supabase client must be signed with Supabase's
 -- own JWT secret. Revisit when implementing SupabaseClient in Godot.
 
