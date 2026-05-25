@@ -14,6 +14,13 @@ config/name="Grand Strategy Game"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+Config="*res://src/core/config.gd"
+APIClient="*res://src/net/api_client.gd"
+AuthManager="*res://src/auth/auth_manager.gd"
+NetManager="*res://src/net/net_manager.gd"
+
 [physics]
 
 3d/physics_engine="Jolt Physics"
@@ -22,9 +29,9 @@ config/icon="res://icon.svg"
 
 rendering_device/driver.windows="d3d12"
 
-[autoload]
+[steam]
 
-Config="*res://src/core/config.gd"
-APIClient="*res://src/net/api_client.gd"
-AuthManager="*res://src/auth/auth_manager.gd"
-NetManager="*res://src/net/net_manager.gd"
+initialization/app_id=0
+initialization/initialize_on_startup=false
+initialization/embed_callbacks=false
+multiplayer_peer/max_channels=4
