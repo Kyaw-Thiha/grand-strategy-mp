@@ -1,0 +1,18 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Export credentials (contain signing keys)
+export_credentials.cfg
+
+# Godot export output
+/builds/
+*.apk
+*.aab
+*.ipa
+*.exe
+*.dmg
+
+# OS noise
+.DS_Store
+Thumbs.db
