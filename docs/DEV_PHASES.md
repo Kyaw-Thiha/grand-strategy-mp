@@ -71,7 +71,7 @@ Write one bot script per scenario. They become your regression suite — run the
 ### Colyseus
 - [ ] Bare `GameRoom` with `onAuth()` verifying JWT signature
 - [ ] `GameRoomState` schema skeleton (players map only for now)
-- [ ] `/internal/verify-host-pass` route on Hono, called from Colyseus
+- [x] `/internal/verify-host-pass` route on Hono (Hono side done; Colyseus call deferred to Phase 3 — lobby system)
 
 ### Godot
 - [ ] `AuthManager` — email login flow (no Steam yet), stores JWT in memory
