@@ -21,3 +21,10 @@ config/icon="res://icon.svg"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+
+[autoload]
+
+Config="*res://src/core/config.gd"
+APIClient="*res://src/net/api_client.gd"
+AuthManager="*res://src/auth/auth_manager.gd"
+NetManager="*res://src/net/net_manager.gd"

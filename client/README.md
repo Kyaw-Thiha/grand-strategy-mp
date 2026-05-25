@@ -1,59 +1,28 @@
-<p align="center"><img src="addons/supabase/icon.svg" width="80px"/></p>
+# Grand Strategy Game — Godot Client
 
-👉 [3.x](https://github.com/supabase-community/godot-engine.supabase/tree/main)
+## Requirements
+- Godot 4.x (Forward+ renderer)
+- GodotSteam and Supabase addons (included in `addons/`)
 
-# Godot Engine - Supabase (4.x)
-A lightweight addon which integrates Supabase APIs for Godot Engine out of the box.  
+## Running Locally
+Open the project in Godot editor and press Play. The `Config` autoload automatically points to localhost in debug builds:
+- API server: `http://localhost:3000`
+- Game server: `ws://localhost:2567`
 
-- [x] Authentication (/auth)
-- [x] Database (/database)
-- [x] Realtime (/realtime)
-- [x] Storage (/storage)
+Make sure both servers are running locally before playing:
+```bash
+# api-server
+cd api-server && bun run src/index.ts
 
-
-### UI Library
-A drag&drop UI Library is available at [supabase-ui](https://github.com/fenix-hub/godot-engine.supabase-ui).
-
-### examples and demos
-A collection of examples and live demos is available at [*fenix-hub/godot-engine.supabase-examples*](https://github.com/fenix-hub/godot-engine.supabase-examples), both with source code and exported binaries.  
-
-### how to use
-A wiki is available [*here*](https://github.com/fenix-hub/godot-engine.supabase/wiki).  
-Even though it is still not complete, Classes and APIs references are always listed and updated.  
-
-### code snippet
-Multiple approaches!
-
-*Asynchronous (signals)*
-```gdscript
-# method 1 (connecting to `Supabase.auth.signed_in` signal)
-func _ready():
-	Supabase.auth.signed_in.connect(_on_signed_in)
-	Supabase.auth.sign_in(
-		"user@supabase.email",
-		"userpwd"
-	)
-
-func _on_signed_in(user: SupabaseUser) -> void:
-	print(user)
-
-# method 2 (using lambdas, connecting to the `AuthTask.completed` signal)
-func _ready():
-	Supabase.auth.sign_in(
-		"user@supabase.email",
-		"userpwd"
-	).completed.connect(
-		func(authTask: AuthTask) -> void:
-			print(auth_task.user)
-	)
+# game-server
+cd game-server && npm start
 ```
 
-*Synchronous (await)*
+## Before Deploying to Production
+Update the production URLs in `src/core/config.gd`:
 ```gdscript
-func _ready():
-	var auth_task: AuthTask = await Supabase.auth.sign_in(
-		"user@supabase.email",
-		"userpwd"
-	).completed
-	print(auth_task.user)
+API_URL = "https://your-api.railway.app"
+COLYSEUS_URL = "wss://your-colyseus.railway.app"
 ```
+
+These are only used in exported (release) builds — debug builds always use localhost.
