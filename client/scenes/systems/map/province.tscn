@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://province_template"]
+
+[node name="ProvinceNode" type="Node2D"]
+
+[node name="Fill" type="Polygon2D" parent="."]
+color = Color(0.55, 0.55, 0.55, 1)
+
+[node name="Border" type="Line2D" parent="."]
+default_color = Color(0.1, 0.1, 0.1, 0.8)
+width = 1.0
+
+[node name="Clickbox" type="Area2D" parent="."]
+
+[node name="Shape" type="CollisionPolygon2D" parent="Clickbox"]
+
+[node name="CityLabel" type="Label" parent="."]
+text = ""
+label_settings = null
+
+[node name="CityIcon" type="Sprite2D" parent="."]
+visible = false
+
+[node name="UnitAnchor" type="Node2D" parent="."]
