@@ -448,8 +448,9 @@ OWNS: Current overlay mode enum, colour assignment cache.
 EXPOSES:
   signals: (none)
   methods:
-    set_overlay_mode(mode: String)   # "political" | "terrain" | "supply" | ...
-    highlight_province(province_id: String, colour: Color)
+    set_overlay_mode(mode: String)   # "political" | "elevation" | "cover" | ...
+    highlight_province(province_id: String)   # darkens fill; transparent fills get dark tint
+    is_highlighted(province_id: String) -> bool
     clear_highlights()
     refresh_province(province_id: String)
 CONSUMES:

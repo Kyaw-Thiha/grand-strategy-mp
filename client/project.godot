@@ -11,6 +11,7 @@ config_version=5
 [application]
 
 config/name="Grand Strategy Game"
+run/main_scene="res://scenes/debug/map_debug.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -20,6 +21,11 @@ Config="*res://src/core/config.gd"
 APIClient="*res://src/net/api_client.gd"
 AuthManager="*res://src/auth/auth_manager.gd"
 NetManager="*res://src/net/net_manager.gd"
+Supabase="*uid://b5b8jokg2ngr3"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg", "res://addons/supabase/plugin.cfg")
 
 [physics]
 

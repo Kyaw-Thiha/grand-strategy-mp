@@ -50,6 +50,7 @@ grand-strategy-mp/
 - **Extract functions only for real functionalities.** Don't split code into functions just to have small functions. Only create functions when they represent a meaningful, reusable piece of logic.
 - **Document functions with full doc comments.** Every function worth creating should have: description, parameters, return value, and examples if helpful.
 - **Inline comments for navigation.** Use short, tactical comments within functions — not just at the top as doc strings — to help readers follow the logic flow.
+- **Strict type annotations in GDScript.** Always use explicit `var name: Type` or `func f() -> Type` annotations. Never rely on type inference (`:=`) for values that return `Variant` (e.g., `Dictionary.get()`, `get_node()`, `JSON.parse_string()`).
 
 ## Testing
 
