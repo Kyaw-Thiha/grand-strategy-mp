@@ -23,6 +23,7 @@ const MAP_ID := "western_europe_6"
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.20, 0.50, 0.80))
 	_camera_system.setup(_camera, _map_loader)
+	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
 	_map_loader.load_map(MAP_ID)

@@ -4,6 +4,8 @@ extends Node
 ## Edge scroll at constant speed with WASD priority.
 ## Smooth zoom via lerp for both scroll wheel and Ctrl++/Ctrl+-.
 
+signal zoom_changed(level: float)
+
 const BASE_SPEED     := 600.0
 const MAX_SPEED      := 3000.0
 const ACCELERATION   := 1000.0
@@ -14,12 +16,14 @@ const ZOOM_KB_STEP   := 0.25
 const ZOOM_SPEED     := 8.0
 const MIN_ZOOM       := 0.2
 const MAX_ZOOM       := 4.0
+const NATION_LABEL_ZOOM_THRESHOLD := 0.6
 
 var _camera: Camera2D = null
 var _move_speed: float = 0.0
 var _target_zoom: float = 1.0
 var _edge_scroll_enabled: bool = true
 var _map_loader: Node = null
+var _label_region_active := false  # true when zoom < threshold
 
 
 func setup(camera: Camera2D, map_loader: Node) -> void:
@@ -33,6 +37,10 @@ func _process(delta: float) -> void:
 		return
 	_handle_movement(delta)
 	_camera.zoom = _camera.zoom.lerp(Vector2(_target_zoom, _target_zoom), ZOOM_SPEED * delta)
+	var now_in_label_region := _camera.zoom.x < NATION_LABEL_ZOOM_THRESHOLD
+	if now_in_label_region != _label_region_active:
+		_label_region_active = now_in_label_region
+		zoom_changed.emit(_camera.zoom.x)
 
 
 func _unhandled_input(event: InputEvent) -> void:

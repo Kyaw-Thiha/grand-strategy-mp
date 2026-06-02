@@ -17,6 +17,7 @@ var _map_id: String = ""
 var _bounds: Dictionary = {}
 var _provinces: Dictionary = {}       # province_id → Node2D
 var _province_data: Dictionary = {}   # province_id → Dictionary (raw JSON data)
+var _adjacency: Array = []
 var _terrain_lookup: Dictionary = {}
 
 var _proj_center: Vector2 = Vector2.ZERO
@@ -33,6 +34,7 @@ func load_map(map_id: String) -> void:
 		return
 
 	_bounds = map_data.get("bounds", {})
+	_adjacency = map_data.get("adjacency", [])
 	_setup_projection()
 
 	var terrain_raw := _load_json("%s/terrain_lookup.json" % data_root)
@@ -76,6 +78,10 @@ func get_all_province_ids() -> Array[String]:
 	for k in _province_data.keys():
 		ids.append(k)
 	return ids
+
+
+func get_adjacency() -> Array:
+	return _adjacency
 
 
 func get_terrain_lookup() -> Dictionary:
@@ -282,6 +288,12 @@ func _add_overlay_polygon(parent: Node, ring: Array, props: Dictionary) -> void:
 			"town":                Color(0.65, 0.60, 0.55, 0.7),
 			"grassland":           Color(0.65, 0.80, 0.45, 0.7),
 			"mediterranean_scrub": Color(0.70, 0.65, 0.45, 0.7),
+			"heathland":           Color(0.65, 0.50, 0.55, 0.7),
+			"wetland":             Color(0.40, 0.60, 0.55, 0.7),
+			"glacier":             Color(0.85, 0.92, 0.97, 0.7),
+			"tundra":              Color(0.72, 0.78, 0.72, 0.7),
+			"jungle":              Color(0.20, 0.50, 0.20, 0.7),
+			"mangrove":            Color(0.30, 0.55, 0.40, 0.7),
 		}
 		poly.color = cover_colors.get(cover_type, Color(0.65, 0.80, 0.45, 0.7))
 	elif parent.name == "ElevationLayer":
