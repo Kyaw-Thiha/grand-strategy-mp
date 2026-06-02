@@ -6,6 +6,7 @@ signal logged_in(user_id: String)
 signal login_failed(message: String)
 
 var user_id: String = ""
+var has_host_pass: bool = false
 
 
 func login(email: String, password: String) -> void:
@@ -25,7 +26,9 @@ func login(email: String, password: String) -> void:
 		return
 
 	APIClient.jwt = token
-	user_id = _parse_sub(token)
+	var payload: Dictionary = _decode_payload(token)
+	user_id = payload.get("sub", "")
+	has_host_pass = payload.get("has_host_pass", false)
 	logged_in.emit(user_id)
 
 
@@ -36,17 +39,18 @@ func is_logged_in() -> bool:
 func logout() -> void:
 	APIClient.jwt = ""
 	user_id = ""
+	has_host_pass = false
 
 
-# Decodes the `sub` field from the JWT payload without verifying the signature.
-# Verification is done server-side — this is only for reading our own user_id.
-func _parse_sub(token: String) -> String:
+# Decodes the JWT payload without verifying the signature.
+# Verification is done server-side — this is only for reading our own claims.
+func _decode_payload(token: String) -> Dictionary:
 	var parts := token.split(".")
 	if parts.size() < 2:
-		return ""
+		return {}
 	var padded := parts[1]
 	while padded.length() % 4 != 0:
 		padded += "="
 	var decoded := Marshalls.base64_to_raw(padded).get_string_from_utf8()
-	var payload: Dictionary = JSON.parse_string(decoded)
-	return payload.get("sub", "")
+	var result: Variant = JSON.parse_string(decoded)
+	return result if result is Dictionary else {}

@@ -1,4 +1,4 @@
-class_name MsgPack
+extends Node
 ## Minimal msgpack encoder/decoder for the Colyseus WebSocket protocol.
 ## Handles all types Colyseus uses: nil, bool, int, float, string, array, map.
 ## Decode returns [value, new_offset]. Encode returns a PackedByteArray.
