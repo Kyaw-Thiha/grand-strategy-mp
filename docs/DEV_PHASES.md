@@ -259,6 +259,7 @@ Full contracts written when implementation begins. Prioritise based on playteste
 | `SpectatorSystem` | Observe ongoing sessions read-only |
 | `AchievementSystem` | Steam achievement unlocks from game events |
 | `AIPlayerSystem` | Server-side AI for unfilled nation slots (Colyseus module) |
+| `LobbyTimerSystem` | Auto-start lobby after configurable countdown (3–5 min). Used for auto-generated sessions with AI-filled slots. Requires `AIPlayerSystem`. |
 | `WeatherSystem` | Weather overlay, visual only |
 
 ---
