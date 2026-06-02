@@ -90,19 +90,21 @@ Godot logs in → receives JWT → connects to Colyseus room → Colyseus logs t
 **Why parallel:** No server dependency. GeoJSON pipeline is local work. Map rendering is the visual foundation everything else sits on — want it done early.
 
 ### Mapping pipeline
-- [ ] Download CShapes 1939 GeoJSON
-- [ ] Process in geojson.io / QGIS — clean borders, assign province IDs matching future nation data
-- [ ] Conversion script → `map_data.json` (province_id, polygon vertices, metadata)
-- [ ] Place `map_data.json` in `godot/assets/data/`
+- [x] Download CShapes 1939 GeoJSON
+- [x] Process in geojson.io / QGIS — clean borders, assign province IDs matching future nation data
+- [x] Conversion script → `map_data.json` (province_id, polygon vertices, metadata)
+- [x] Place `map_data.json` in `godot/assets/data/`
 
 ### Godot modules
-- [ ] `MapLoader` — parse `map_data.json`, instantiate Polygon2D nodes, build province registry
-- [ ] `MapRenderer` — colour provinces by owner (hardcoded test palette, no server state yet)
-- [ ] `MapInteraction` — click detection, hover highlight, province_clicked signal
-- [ ] `CameraSystem` — pan, zoom, zoom limits, edge scroll
+- [x] `MapLoader` — parse `map_data.json`, instantiate Polygon2D nodes, build province registry
+- [x] `MapRenderer` — colour provinces by owner (hardcoded test palette, no server state yet)
+- [x] `MapInteraction` — click detection, hover highlight, province_clicked signal
+- [x] `CameraSystem` — pan, zoom, zoom limits, edge scroll
 
 ### Verification gate
 Launch Godot → map renders → can click provinces → camera pans and zooms smoothly.
+
+> **Phase 2 completed 2026-06-01.** Pipeline: `map/tools/map_pipeline/pipeline.py`. Output: `client/assets/data/western_europe_6/` (89 provinces, 159 adjacency edges, 8 output files). Debug scene: `client/scenes/debug/map_debug.tscn`.
 
 ---
 
