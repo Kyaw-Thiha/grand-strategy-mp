@@ -40,10 +40,15 @@ func _apply_server_delta(delta: Dictionary) -> void:
 	game_speed = delta.get("game_speed", game_speed)
 
 	# Overwrite lobby collections with the full snapshot from the server
+	var lobby_changed := false
 	if delta.has("nations"):
 		nations = delta["nations"]
+		lobby_changed = true
 	if delta.has("players"):
 		players = delta["players"]
+		lobby_changed = true
+	if lobby_changed:
+		EventBus.lobby_state_updated.emit()
 
 
 # ── Getters ──────────────────────────────────────────────────────────────────

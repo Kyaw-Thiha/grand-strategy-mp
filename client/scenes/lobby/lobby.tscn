@@ -17,7 +17,8 @@ offset_bottom = -16.0
 
 [node name="Header" type="HBoxContainer" parent="VBox"]
 
-[node name="CodeLabel" type="Label" parent="VBox/Header" unique_name_in_owner=true]
+[node name="CodeLabel" type="Label" parent="VBox/Header"]
+unique_name_in_owner = true
 text = "Lobby  •  Code: ------"
 theme_override_font_sizes/font_size = 18
 
@@ -36,7 +37,8 @@ layout_mode = 2
 text = "Nations"
 theme_override_font_sizes/font_size = 14
 
-[node name="NationsList" type="VBoxContainer" parent="VBox/Content/NationsPane" unique_name_in_owner=true]
+[node name="NationsList" type="VBoxContainer" parent="VBox/Content/NationsPane"]
+unique_name_in_owner = true
 layout_mode = 2
 
 [node name="PlayersPane" type="VBoxContainer" parent="VBox/Content"]
@@ -46,19 +48,23 @@ layout_mode = 2
 text = "Players"
 theme_override_font_sizes/font_size = 14
 
-[node name="PlayersList" type="VBoxContainer" parent="VBox/Content/PlayersPane" unique_name_in_owner=true]
+[node name="PlayersList" type="VBoxContainer" parent="VBox/Content/PlayersPane"]
+unique_name_in_owner = true
 layout_mode = 2
 
 [node name="Footer" type="HBoxContainer" parent="VBox"]
 
-[node name="StatusLabel" type="Label" parent="VBox/Footer" unique_name_in_owner=true]
+[node name="StatusLabel" type="Label" parent="VBox/Footer"]
+unique_name_in_owner = true
 size_flags_horizontal = 3
 text = ""
 
-[node name="ReadyBtn" type="Button" parent="VBox/Footer" unique_name_in_owner=true]
+[node name="ReadyBtn" type="Button" parent="VBox/Footer"]
+unique_name_in_owner = true
 text = "Ready Up"
 
-[node name="StartBtn" type="Button" parent="VBox/Footer" unique_name_in_owner=true]
+[node name="StartBtn" type="Button" parent="VBox/Footer"]
+unique_name_in_owner = true
 text = "Start"
 visible = false
 

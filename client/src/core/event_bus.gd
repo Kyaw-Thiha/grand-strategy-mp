@@ -16,6 +16,7 @@ signal combat_resolved(province_id: String, outcome: Dictionary)
 signal player_changed(user_id: String)
 signal player_eliminated(user_id: String)
 signal phase_changed(phase: String)
+signal lobby_state_updated()
 
 # ── Diplomacy ────────────────────────────────────────────────────────────────
 signal relation_changed(from_id: String, to_id: String)

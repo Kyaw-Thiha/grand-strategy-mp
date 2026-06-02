@@ -24,7 +24,7 @@ func _ready() -> void:
 	_start_btn.visible = GameState.is_host()
 
 	EventBus.phase_changed.connect(_on_phase_changed)
-	NetManager.server_event_received.connect(_on_server_event)
+	EventBus.lobby_state_updated.connect(_refresh_ui)
 
 	# Populate initial state if already received
 	_refresh_ui()
@@ -48,17 +48,17 @@ func _on_nation_btn_pressed(nation_id: String) -> void:
 		LobbySystem.select_nation(nation_id)
 
 
-func _on_server_event(type: String, _data: Dictionary) -> void:
-	if type == "LOBBY_STATE_UPDATE":
-		_refresh_ui()
-
-
 func _on_phase_changed(phase: String) -> void:
 	if phase == "running":
 		_status_label.text = "Starting game..."
 
 
 func _refresh_ui() -> void:
+	var has_nation := GameState.get_my_nation_id() != ""
+	if not has_nation and _is_ready:
+		_is_ready = false
+		_ready_btn.text = "Ready Up"
+	_ready_btn.disabled = not has_nation
 	_rebuild_nations()
 	_rebuild_players()
 	_start_btn.visible = GameState.is_host()

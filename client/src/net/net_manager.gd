@@ -118,20 +118,40 @@ func _matchmake(endpoint: String) -> Dictionary:
 ## Returns the room_id once confirmed, or "" on failure.
 func _open_websocket(matchmake_response: Dictionary) -> String:
 	session_id = matchmake_response.get("sessionId", "")
-	room_id = matchmake_response.get("roomId", "")
+	room_id    = matchmake_response.get("roomId", "")
+	var process_id: String = matchmake_response.get("processId", "")
 
 	if session_id == "" or room_id == "":
 		room_error.emit("Matchmaking response missing sessionId/roomId")
 		return ""
 
-	var ws_url: String = Config.COLYSEUS_URL + "/" + room_id + "?sessionId=" + session_id
+	# Colyseus 0.17: URL must include processId between host and roomId
+	var path: String = (process_id + "/" if process_id != "" else "") + room_id
+	var ws_url: String = Config.COLYSEUS_URL + "/" + path + "?sessionId=" + session_id
 	_socket.connect_to_url(ws_url)
 	_connected = true
 	set_process(true)
 
-	# Wait for Colyseus to send JOIN_ROOM (byte 10) — _handle_packet emits room_joined
-	await room_joined
+	var event: String = await _wait_for_join_or_fail()
+	if event != "joined":
+		return ""
 	return room_id
+
+
+func _wait_for_join_or_fail() -> String:
+	var state := {"done": false, "result": ""}
+	var on_joined  := func(_s: String, _r: String) -> void:
+		state["done"] = true; state["result"] = "joined"
+	var on_disconn := func() -> void:
+		state["done"] = true; state["result"] = "disconnected"
+	var on_error   := func(_m: String) -> void:
+		state["done"] = true; state["result"] = "error"
+	room_joined.connect(on_joined, CONNECT_ONE_SHOT)
+	disconnected.connect(on_disconn, CONNECT_ONE_SHOT)
+	room_error.connect(on_error, CONNECT_ONE_SHOT)
+	while not state["done"]:
+		await get_tree().process_frame
+	return state["result"]
 
 
 func _process(_delta: float) -> void:
@@ -157,7 +177,8 @@ func _handle_packet(packet: PackedByteArray) -> void:
 
 	match code:
 		PROTO_JOIN_ROOM:
-			# Connection confirmed — room_joined unblocks _open_websocket
+			# Colyseus 0.17: ACK with [10] before server considers client joined
+			_socket.send(PackedByteArray([PROTO_JOIN_ROOM]))
 			room_joined.emit(session_id, room_id)
 
 		PROTO_ERROR:

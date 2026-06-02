@@ -16,7 +16,10 @@ func _ready() -> void:
 	LobbySystem.lobby_joined.connect(_on_lobby_joined)
 	LobbySystem.lobby_join_failed.connect(_on_lobby_join_failed)
 
-	# If already logged in (e.g. token persisted), show post-login immediately
+	if OS.is_debug_build():
+		_email_field.text = "e2e-bot-a@example.com"
+		_pass_field.text = "password123"
+
 	if AuthManager.is_logged_in():
 		_show_post_login()
 
