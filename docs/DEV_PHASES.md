@@ -1,7 +1,7 @@
 # Grand Strategy Multiplayer — Development Phases
 
 > Development roadmap and sequencing reference.
-> Last updated: May 2026.
+> Last updated: June 2026.
 
 ---
 
@@ -58,28 +58,30 @@ Write one bot script per scenario. They become your regression suite — run the
 **Why first:** Auth is a dependency of everything else. JWT shape must be correct before any downstream work begins. The Hono↔Colyseus seam is the trickiest integration point — find problems here, not later.
 
 ### Hono
-- [ ] `/auth/email` — register + login with email/password (Steam replacement for dev)
-- [ ] `/auth/refresh` — token refresh
-- [ ] `/profile` GET + PUT
-- [ ] JWT signed with `{ sub: user_id, steam_id: "dev_steamid", has_host_pass: false, exp: 24h }`
+- [x] `/auth/email` — register + login with email/password (Steam replacement for dev)
+- [ ] `/auth/refresh` — token refresh *(deferred to Phase 7 — Steam auth swap)*
+- [ ] `/profile` GET + PUT *(deferred to Phase 6 — player persistence)*
+- [x] JWT signed with `{ sub: user_id, has_host_pass: bool, exp: 24h }`
 
 ### Supabase
-- [ ] `players` table + RLS policy
-- [ ] `division_templates` table + RLS policy
-- [ ] `game_sessions` table
+- [x] `players` table + RLS policy
+- [ ] `division_templates` table + RLS policy *(deferred to Phase 6)*
+- [x] `game_sessions` table
 
 ### Colyseus
-- [ ] Bare `GameRoom` with `onAuth()` verifying JWT signature
-- [ ] `GameRoomState` schema skeleton (players map only for now)
+- [x] Bare `GameRoom` with `onAuth()` verifying JWT signature
+- [x] `GameRoomState` schema skeleton (players map only for now)
 - [x] `/internal/verify-host-pass` route on Hono (Hono side done; Colyseus call deferred to Phase 3 — lobby system)
 
 ### Godot
-- [ ] `AuthManager` — email login flow (no Steam yet), stores JWT in memory
-- [ ] `APIClient` — HTTP calls to Hono with JWT header
-- [ ] `NetManager` — WebSocket connect to Colyseus with JWT in handshake
+- [x] `AuthManager` — email login flow (no Steam yet), stores JWT in memory; parses `has_host_pass` claim
+- [x] `APIClient` — HTTP calls to Hono with JWT header
+- [x] `NetManager` — WebSocket connect to Colyseus with JWT in handshake
 
 ### Verification gate
 Godot logs in → receives JWT → connects to Colyseus room → Colyseus logs the verified user_id. Nothing more. If this works cleanly, Phase 1 is done.
+
+> **Phase 1 completed 2026-05.** Email auth + JWT → Colyseus handshake verified end-to-end via `scripts/e2e-auth-handshake.sh`. Steam auth deferred to Phase 7.
 
 ---
 
@@ -115,26 +117,41 @@ Launch Godot → map renders → can click provinces → camera pans and zooms s
 **Testing:** Bot client for second player.
 
 ### Colyseus
-- [ ] Full `GameRoomState` schema (all maps: players, provinces, units, relations, proposals)
-- [ ] Lobby phase: nation selection, ready state, all-ready → transition to running
-- [ ] Game speed voting, pause/resume
-- [ ] `GAME_STARTED`, `GAME_ENDED` events broadcast
+- [x] Full `GameRoomState` schema (nations, provinces, units, relations, proposals maps)
+- [x] Lobby phase: nation selection, ready state, host-starts (≥2 ready) or all-6-filled auto-start
+- [x] Game speed voting (`VOTE_SPEED` majority vote); pause/resume deferred to Phase 8
+- [x] `GAME_STARTED`, `GAME_ENDED` events broadcast
+- [x] `game-server/src/data/maps/western_europe_6/nations.ts` + `map_loader.ts` — map-scoped nation definitions
 
 ### Hono
-- [ ] `/lobby/create` — requires host pass flag
-- [ ] `/lobby/public` — list open games
-- [ ] `/internal/game-end` — receives results, writes to `game_sessions`
+- [x] `/lobby/create` — requires `has_host_pass`; generates 6-char join code; in-memory lobby store
+- [x] `/lobby/activate` — links Colyseus `room_id` to join code after host WebSocket connects
+- [x] `/lobby/resolve/:code` — resolves join code to `room_id` for joiners
+- [x] `/lobby/public` — list open (activated) lobbies
+- [x] `/internal/game-end` — receives results, writes to `game_sessions`, cleans up lobby entry
+- [x] `DEV_MODE=true` env var grants `has_host_pass: true` to all registered accounts
 
 ### Godot
-- [ ] `LobbySystem` — create/join rooms, nation picking, ready state
-- [ ] `SessionManager` — lifecycle phases, scene transitions
-- [ ] `SceneManager` — main menu → lobby → game → postgame
-- [ ] `GameState` — receives and mirrors server state deltas
-- [ ] `EventBus` — wired up, all core signals defined
-- [ ] `CommandQueue` — single conduit for all server commands
+- [x] `LobbySystem` — create/join/activate, nation pick, deselect, ready, start, vote speed
+- [x] `SessionManager` — `GAME_STARTED`/`GAME_ENDED` → scene transitions
+- [x] `SceneManager` — main menu → lobby → game → postgame
+- [x] `GameState` — mirrors server state from `LOBBY_STATE_UPDATE` deltas; emits `EventBus` signals on change
+- [x] `EventBus` — all core signals defined; `lobby_state_updated` drives lobby UI refresh
+- [x] `CommandQueue` — single conduit for all outgoing server commands; validates auth + connection
+- [x] `MsgPack` autoload — msgpack encode/decode for Colyseus binary protocol (Colyseus 0.17)
+- [x] Main menu scene (`scenes/main_menu/`) — login form, create/join/browse lobby buttons
+- [x] Lobby scene (`scenes/lobby/`) — nation list, player list, ready/start; debug autofill credentials
+- [x] Postgame scene stub (`scenes/postgame/`)
+- [x] `client/assets/data/western_europe_6/nations.json` — 6 playable nation definitions
+
+### Testing
+- [x] `scripts/e2e-session-loop.sh` + `game-server/test/session-loop.e2e.ts` — 11-step bot E2E test
+- [x] `docs/LOCAL_TESTING.md` — two-instance Godot testing guide with debugging gotchas
 
 ### Verification gate
 Player A creates lobby → bot joins → both pick nations → start → bot sends a VOTE_SPEED → game ends cleanly → results posted to Hono.
+
+> **Phase 3 completed 2026-06-02.** E2E bot test passes all 11 steps (`bash scripts/e2e-session-loop.sh`). Two Godot instances verified in local play: login → create lobby → join by code → select nations → ready up → start → both transition to game scene. See `docs/LOCAL_TESTING.md` for setup instructions and a record of debugging gotchas (Colyseus 0.17 protocol, GDScript lambda closures, `.tscn` unique_name_in_owner syntax).
 
 ---
 
