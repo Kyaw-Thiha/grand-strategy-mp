@@ -70,6 +70,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
 
     console.log(`[GameRoom] ${auth.sub} joined (${client.sessionId}), host=${this.hostSessionId === client.sessionId}`);
+    this.broadcastLobbyState();
   }
 
   onLeave(client: Client, _code: CloseCode) {
@@ -96,6 +97,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
 
     console.log(`[GameRoom] ${client.sessionId} left (${this.state.players.size} remaining)`);
+    this.broadcastLobbyState();
   }
 
   onDispose() {
@@ -128,6 +130,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     slot.player_id = player.userId;
     slot.is_ready = false;
 
+    this.broadcastLobbyState();
     this.checkAutoStart();
   }
 
@@ -136,6 +139,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
     this.clearNationForPlayer(player.userId);
+    this.broadcastLobbyState();
   }
 
   private handleSetReady(client: Client, msg: { ready?: boolean }) {
@@ -151,6 +155,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
 
     nation.is_ready = msg.ready ?? true;
+    this.broadcastLobbyState();
     this.checkAutoStart();
   }
 
@@ -260,6 +265,31 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     );
 
     console.log(`[GameRoom] ${this.roomId} game ended`);
+  }
+
+  /**
+   * Broadcasts the full lobby state as a plain JSON object so clients can update
+   * their GameState without decoding binary schema patches.
+   * Called after every state-changing message handler.
+   */
+  private broadcastLobbyState(): void {
+    const nations: Record<string, { player_id: string; is_ready: boolean }> = {};
+    for (const [id, nation] of Array.from(this.state.nations.entries())) {
+      nations[id] = { player_id: nation.player_id, is_ready: nation.is_ready };
+    }
+
+    const players: Record<string, { user_id: string }> = {};
+    for (const [sessionId, player] of Array.from(this.state.players.entries())) {
+      players[sessionId] = { user_id: player.userId };
+    }
+
+    this.broadcast("LOBBY_STATE_UPDATE", {
+      phase: this.state.phase,
+      host_session_id: this.hostSessionId,
+      nations,
+      players,
+      game_speed: this.state.game_speed,
+    });
   }
 
   private async notifyGameEnd(winnerId: string) {
