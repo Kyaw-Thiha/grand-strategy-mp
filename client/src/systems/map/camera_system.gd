@@ -24,6 +24,8 @@ var _target_zoom: float = 1.0
 var _edge_scroll_enabled: bool = true
 var _map_loader: Node = null
 var _label_region_active := false  # true when zoom < threshold
+var _map_bounds: Rect2 = Rect2()
+var _bounds_ready: bool = false
 
 
 func setup(camera: Camera2D, map_loader: Node) -> void:
@@ -35,8 +37,14 @@ func setup(camera: Camera2D, map_loader: Node) -> void:
 func _process(delta: float) -> void:
 	if _camera == null:
 		return
+	if not _bounds_ready and _map_loader != null:
+		var b: Rect2 = _map_loader.get_map_bounds()
+		if b.size != Vector2.ZERO:
+			_map_bounds = b
+			_bounds_ready = true
 	_handle_movement(delta)
 	_camera.zoom = _camera.zoom.lerp(Vector2(_target_zoom, _target_zoom), ZOOM_SPEED * delta)
+	_clamp_position()
 	var now_in_label_region := _camera.zoom.x < NATION_LABEL_ZOOM_THRESHOLD
 	if now_in_label_region != _label_region_active:
 		_label_region_active = now_in_label_region
@@ -74,6 +82,7 @@ func pan_to_province(province_id: String) -> void:
 func pan_to_position(pos: Vector2) -> void:
 	if _camera:
 		_camera.position = pos
+		_clamp_position()
 
 
 func set_zoom(level: float) -> void:
@@ -100,8 +109,11 @@ func _handle_movement(delta: float) -> void:
 	var wasd_active := wasd_dir != Vector2.ZERO
 
 	if wasd_active:
+		if _move_speed == 0.0:
+			_move_speed = BASE_SPEED
 		_move_speed = move_toward(_move_speed, MAX_SPEED, ACCELERATION * delta)
-		_camera.position += wasd_dir.normalized() * _move_speed * delta
+		_camera.position += wasd_dir.normalized() * _move_speed * delta / _camera.zoom.x
+		_clamp_position()
 		return
 
 	_move_speed = 0.0
@@ -121,4 +133,13 @@ func _handle_movement(delta: float) -> void:
 			edge_dir.y = 1.0
 
 		if edge_dir != Vector2.ZERO:
-			_camera.position += edge_dir.normalized() * EDGE_SPEED * delta
+			_camera.position += edge_dir.normalized() * EDGE_SPEED * delta / _camera.zoom.x
+			_clamp_position()
+
+
+func _clamp_position() -> void:
+	if not _bounds_ready:
+		return
+	var b := _map_bounds
+	_camera.position.x = clampf(_camera.position.x, b.position.x, b.end.x)
+	_camera.position.y = clampf(_camera.position.y, b.position.y, b.end.y)
