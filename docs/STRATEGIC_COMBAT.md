@@ -259,6 +259,154 @@ eliminates it permanently — which in a 1–4 hour session is a session-definin
 
 ---
 
+
+## Dynamic Frontline System
+
+### Overview
+
+The dynamic frontline is a continuous visual representation of territorial influence that
+shifts in real time as divisions move, advance, and retreat. It is distinct from province
+ownership — provinces change hands only when their city is captured. Between city captures,
+the frontline colour wash communicates who is dominating each part of the map at a glance.
+
+This serves two purposes: aesthetic (the map reads like a living battlefield) and
+intelligence (experienced players read colour intensity to identify weakening fronts before
+divisions have physically retreated).
+
+### Influence Computation (Server-Side, Per Tick)
+
+Each province has an **influence value per nation** — a scalar computed each server tick
+from the divisions whose engagement areas overlap that province:
+
+```
+province_influence[nation] = sum(
+  division_aggregate_hp_fraction × influence_weight × distance_falloff
+  for each division of that nation whose engagement area overlaps this province
+)
+```
+
+- **division_aggregate_hp_fraction:** sum of all living unit HPs in the division's grid,
+  normalised by the maximum possible HP for a full 25-unit grid. A full fresh division
+  projects maximum influence. A battered near-destroyed division projects near zero.
+  This makes the frontline a genuine intelligence signal — a fading colour region reveals
+  a weakening front before the division has physically retreated.
+- **distance_falloff:** divisions whose engagement area centre is closer to the province
+  contribute more than divisions whose area only clips the province edge.
+- **Recon units do not contribute to influence.** Their presence within a province does
+  not shift the frontline. Historically accurate — recon observes, it does not control.
+  Also prevents cheap recon-cap exploits where players paint territory without committing
+  real forces.
+
+The winning nation's influence is expressed as a percentage of total influence across all
+nations in that province. At 50%+ dominance, the frontline line passes through that region
+toward the dominating nation. At full dominance, the province interior is fully washed with
+that nation's predefined map colour.
+
+### Province Colour Rendering (Client-Side Shader)
+
+**Province interiors** are rendered with a colour wash shader driven by influence values:
+- Base colour: the province's current **owner's predefined nation colour** (e.g. France
+  blue, Germany grey, Britain khaki). This is the default when no foreign influence
+  is present.
+- As a foreign nation's influence increases, their predefined nation colour bleeds into
+  the province interior, proportional to their influence advantage.
+- At full foreign dominance, the interior is fully that nation's colour.
+- Multiple nations can partially influence the same province — their colours blend
+  proportionally.
+
+**Province borders** never change. The geographic province boundary is always visible
+and static — it is the political map, not the military map.
+
+**The frontline line** — the visual boundary between influence zones within a province —
+is rendered client-side as the isoline at the 50% influence threshold. It is smoothed
+with a curve fit to appear organic rather than pixelated. It has no mechanical role —
+it is purely cosmetic.
+
+**Nation colours are predefined per nation** and never change during a session. France is
+always France's colour. A province being dominated by Germany simply has Germany's colour
+washing into it — the province border still shows France's political ownership until the
+city is captured.
+
+### City Capture and Ownership Transfer
+
+**City capture** is the only event that transfers province ownership:
+- A division physically occupies the city node (the province's capital city position)
+- Province ownership transfers to the capturing nation
+- The province's **baseline colour** switches to the new owner's predefined nation colour
+- The frontline effect reverses — the previous owner must now push influence back in
+  to reclaim the province
+
+Between city captures, the frontline colour wash can shift back and forth freely as
+military forces advance and retreat. A province can be fully dominated by enemy influence
+colours for an extended period without changing ownership — ownership only snaps on city
+capture.
+
+**Visual reading of encirclements:** A province surrounded by enemy-influenced territory
+that still shows the original owner's city (and thus their baseline colour) is visually
+readable as a pocket — the original colour bleeds through despite surrounding pressure.
+This makes encirclements legible on the map without any special UI overlay.
+
+### Supply Connectivity via Frontline
+
+Supply connectivity is a separate check from the road-graph supply flow system. It uses
+the influence map to determine whether a division's supply route is secured:
+
+**Connectivity rule:** Starting from the division's position, trace backward through the
+waypoint graph toward the nearest supply hub. If every waypoint along the path is in
+friendly-influenced territory (influence value > 50% for the owning nation), the division
+is supply-connected. If any waypoint is neutral or enemy-influenced with no friendly unit
+securing it, the connection is broken.
+
+**What this means in practice:**
+- Division advancing along a road with friendly territory behind it → supply connected
+- Division going off-road with other friendly units behind it forming a continuous
+  influenced chain → supply connected as long as the chain is unbroken
+- Division going off-road with no friendly units behind it, ground becoming neutral →
+  supply severed; player receives notification; out-of-supply attrition begins
+- Enemy advance that cuts through the influence chain without physically touching the road
+  → supply severed; models historical "deep penetration cuts supply" without requiring the
+  attacker to physically block the road
+
+This makes influence map penetration mechanically meaningful — a fast armoured advance
+that creates a bulge in the enemy's territory can sever supply to divisions behind the
+front line even before physically encircling them.
+
+**Supply chain notification:** When a division's influence-connectivity check fails, the
+player receives: "Supply route severed — [division name] — [province name]". The supply
+status indicator on the division icon shifts to show out-of-supply state.
+
+### Frontline Visibility by Player Type
+
+**Belligerent nations (at war):** See full frontline colour wash and their own division
+positions/compositions. Enemy division positions visible within observation radius only;
+enemy composition shows as "?" unless observation value is high enough or alliance
+intelligence sharing is active.
+
+**Neutral nations:** See the frontline colour wash at province level (the macro picture —
+which provinces are being pressured, which fronts are moving) but do not see individual
+division dots or compositions beyond what their own observation areas would reveal. This
+gives neutral players newspaper-level information about the war:
+- "France is losing ground in Alsace" — visible from colour shift
+- "Germany has 4 armoured divisions on the border" — not visible without alliance or recon
+
+**Why neutral players see the frontline wash:**
+Diplomatic decisions require macro-level information. A neutral nation deciding whether to
+intervene needs to see who is winning, not fight blind. Broadcasting province-level
+influence scalars to all players is cheap server-side — it is a small payload of numbers
+per province, not complex unit data.
+
+**Why neutral players do not see division details:**
+Intelligence has value. A neutral player who can see all division compositions has no
+incentive to invest in alliances that grant intelligence sharing, and the fog-of-war
+system loses meaning. Province-level colour is enough for informed diplomacy.
+
+**Server mechanics:** Influence values are computed once per tick and broadcast to all
+connected players. Division position and composition data is filtered per-player by the
+existing observation radius system. No additional server complexity is required — the
+frontline system uses data already being computed.
+
+---
+
 ## Division Representation (Visual)
 
 ### NATO Military Symbols (Rectangle Icons)
@@ -444,6 +592,13 @@ number — it is the difference between losing one division and losing the front
   — balance between path quality and graph size)
 - Movement profile recomputation trigger debounce (avoid recomputing on every keystroke
   during template editing — trigger on save/confirm)
+- Frontline influence tick rate (target: same as supply tick, every 5–10 seconds; faster
+  feels reactive but increases broadcast frequency)
+- Distance falloff function for influence projection (linear vs quadratic decay from
+  division centre to province edge — affects how "sharp" the frontline looks)
+- Influence connectivity threshold for supply severance (currently 50% — may need tuning
+  to avoid supply lines blinking in/out on lightly contested ground)
+- Frontline line smoothing curve parameters (how organic vs angular the isoline appears)
 
 ---
 

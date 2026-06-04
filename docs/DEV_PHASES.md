@@ -242,10 +242,25 @@ Unit tests for movement profile computation and A* path validity.
       - [ ] Armoured units: damage output decays per tick; reaches 0 after N ticks
       - [ ] Infantry units: slower degradation than armour
 - [ ] Province capture — ownership transfers when defending division/stack is destroyed or
-      retreated
+      retreated; city node must be physically occupied by capturing division
 - [ ] Flanking bonus — second enemy division engaging already-engaged target gets bonus damage
+- [ ] Dynamic frontline influence computation per province per tick:
+      - [ ] influence[nation][province] = sum(division_hp_fraction × distance_falloff)
+            for all divisions of that nation whose engagement area overlaps the province
+      - [ ] Recon units excluded from influence calculation
+      - [ ] HP fraction = aggregate living HP / max possible HP for full 25-unit grid
+      - [ ] Broadcast province influence values to all connected players each tick
+            (belligerents receive full data; neutrals receive province-level scalars only,
+            not division positions or compositions)
+- [ ] Frontline supply connectivity check (separate from road graph supply):
+      - [ ] Trace backward from division position through waypoint graph to nearest supply hub
+      - [ ] Check each waypoint: if influence < 50% friendly, connection broken
+      - [ ] Division with broken connectivity enters out-of-supply state
+      - [ ] `SUPPLY_SEVERED_FRONTLINE` event when connectivity breaks
+      - [ ] `SUPPLY_RESTORED_FRONTLINE` event when connectivity resumes
 - [ ] `COMBAT_STARTED`, `COMBAT_RESULT`, `MEETING_BATTLE_STARTED`, `PROVINCE_CAPTURED`,
-      `UNIT_DESTROYED`, `STACK_ROTATION`, `DIVISION_ENCIRCLED` events
+      `UNIT_DESTROYED`, `STACK_ROTATION`, `DIVISION_ENCIRCLED`, `SUPPLY_SEVERED_FRONTLINE`,
+      `SUPPLY_RESTORED_FRONTLINE`, `FRONTLINE_UPDATED` events
 - [ ] Basic supply — divisions out of supply take increased attrition (simplified supply
       model; full graph-based supply is Phase 6)
 
@@ -260,9 +275,24 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
-- [ ] `MapRenderer` update — recolour provinces on `PROVINCE_CAPTURED`
+- [ ] `FrontlineRenderer` — province interior colour wash shader driven by per-province
+      influence values received from server:
+      - [ ] Each province interior shaded by blending owner's predefined nation colour
+            (baseline) with dominating nation's predefined nation colour proportional to
+            their influence advantage
+      - [ ] Frontline isoline rendered at 50% influence threshold, smoothed with curve
+            fit for organic appearance; purely cosmetic, no mechanical role
+      - [ ] Province borders remain static (political map, never changes)
+      - [ ] City node marker on each province; changes to capturing nation's icon on
+            `PROVINCE_CAPTURED`; province baseline colour updates to new owner
+      - [ ] Neutral player receives same province influence scalars; sees colour wash;
+            does not see enemy division dots outside their own observation radius
+      - [ ] Intensity of colour wash proportional to division HP fraction — fading colour
+            regions indicate weakening fronts readable without opening any panel
+- [ ] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`; shader
+      continues to apply influence wash on top of new baseline colour
 - [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,
-      stack rotation, encirclement, division destroyed toasts
+      stack rotation, encirclement, division destroyed, supply severed via frontline toasts
 
 ### Verification gate
 Move division → pathfinding finds road route automatically → manually draw off-road route
@@ -274,6 +304,14 @@ bonus applies. Stack two friendly divisions → first engages → hits suppressi
 second steps up → combat continues without physical retreat. Last stack division suppressed
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
 decays over ticks → eventually deals zero damage.
+Frontline: advance division into contested province → province interior colour begins
+washing toward advancing nation's predefined colour → recon unit advance does not shift
+colour. Division takes HP damage → colour intensity fades proportionally. Enemy advance
+cuts through province influence chain between division and supply hub → supply severed
+notification fires → out-of-supply attrition begins even though road is still physically
+open. Division captures city node → province baseline snaps to capturing nation's colour →
+province border unchanged. Neutral observer sees colour wash shifting but cannot see
+enemy division dots outside their own observation radius.
 
 ---
 
