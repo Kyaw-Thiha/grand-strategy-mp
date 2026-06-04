@@ -143,6 +143,22 @@ Load at startup. **Do not hardcode** this mapping in Godot — read from the JSO
 
 Note: `town` maps to `urban` combat group. Both use the same mechanics.
 
+**Tactical combat unit-type constraints by cover_combat (summary — full detail in
+TACTICAL_COMBAT.md):**
+
+| cover_combat | Armour off-road | Armour column flanking | Notes |
+|---|---|---|---|
+| `plains` / `steppe` | Passable | Bonus | Armour and artillery gain tactical bonuses |
+| `shrubland` | Passable | Normal | No unit-type restrictions |
+| `light_forest` | Passable | Penalised | AT and infantry gain stealth/ambush bonuses |
+| `dense_forest` | **Impassable** | **Disabled** | Armour cannot enter; flanking blocked for all |
+| `jungle` | **Impassable** (incl. on road for tactical) | — | Armour cannot participate in jungle engagements |
+| `desert` | Passable | Bonus | Armour mobility bonus; infantry lose cover |
+| `swamp` | **Impassable** off-road | — | Road-only for armour |
+| `tundra` | Passable (degraded) | Normal | Standard penalties apply |
+| `glacier` | **Impassable** off-road | — | Road-only for all heavy units |
+| `urban` | Passable | **Disabled** | Streets prevent column shift flanking |
+
 ---
 
 ### terrain_lookup.json
@@ -167,8 +183,35 @@ attack_penalty = elevation_atk[province.terrain_elevation]         + cover_atk[c
 defense_bonus  = elevation_def[province.terrain_elevation]         + cover_def[cover_combat]
 ```
 
-`cover_combat` is derived from `province.terrain_cover` via `terrain_lookup.json["cover_combat"]` at load time.
-Province-level fields (`terrain_elevation`, `terrain_cover`) are used for all mechanics — cell layers are rendering only.
+`cover_combat` is derived from `province.terrain_cover` via `terrain_lookup.json["cover_combat"]`
+at load time. Province-level fields (`terrain_elevation`, `terrain_cover`) are used for all
+mechanics — cell layers are rendering only.
+
+**Tactical combat terrain query:**
+When tactical combat initiates, the server samples the **defender's province** for terrain
+modifiers using the O(1) province-level fields. No per-pixel sampling occurs at runtime.
+
+```
+defender_terrain = provinces[defender_province_id].terrain_elevation
+                 + provinces[defender_province_id].terrain_cover  →  cover_combat group
+
+attacker_penalty = attack_penalty(defender_terrain)   // attacker attacks into defender's ground
+defender_bonus   = defense_bonus(defender_terrain)    // defender holds their own ground
+```
+
+**Transition modifier** (applied to attacker_penalty):
+The attacker's own terrain is also checked to apply a secondary modifier:
+
+| Attacker terrain vs defender terrain | Modifier to attacker_penalty |
+|---|---|
+| Attacker terrain tier **worse** than defender | Full penalty (1.0×) |
+| Attacker terrain tier **same** as defender | Reduced penalty (~0.5× — attacker not at disadvantage) |
+| Attacker terrain tier **better** (elevation advantage) | Further reduced penalty (~0.25×) |
+
+Tier ordering: `flat < hills < mountains` for elevation;
+`plains/steppe < shrubland < light_forest/urban < dense_forest < jungle/swamp` for cover.
+
+This is a 3-value lookup computed at combat initiation, not a full combinatorial matrix.
 
 ---
 
@@ -204,8 +247,27 @@ Major rivers impose a crossing penalty on any adjacency edge they intersect.
 The pipeline detects river intersections with province borders automatically and sets
 `border_type: "river"` on the relevant adjacency edges.
 
-Rivers are used by Godot for visual rendering only. The server never reads `rivers.geojson` —
-the river crossing information is already encoded in adjacency edge `border_type` values.
+Rivers are used by Godot for visual rendering only. The server never reads `rivers.geojson`
+for supply or movement — the river crossing information is already encoded in adjacency edge
+`border_type` values.
+
+**Tactical combat river crossing penalty:**
+The tactical combat system reads `rivers.geojson` directly at combat initiation to check
+whether the line segment between the two division centres intersects a river LineString.
+If it does, a crossing penalty applies to the **attacker only** for the opening rounds:
+
+| river_size | Suppression resistance penalty | HP damage penalty | Duration |
+|---|---|---|---|
+| `minor` | −15% suppression resistance | −10% HP damage dealt | Rounds 1–2 only |
+| `major` | −30% suppression resistance | −25% HP damage dealt | Rounds 1–3 |
+
+The check is performed once at combat initiation, not every round. The penalty fades
+automatically after the specified number of rounds regardless of combat state — troops have
+completed the crossing and reformed on the far bank. This models the historical reality
+that the crossing itself is the dangerous moment, not the fighting once troops are across.
+
+This is the only case where the server reads river geometry directly. All other river
+mechanics (movement cost, supply) use the adjacency `border_type` values.
 
 **Sources:** OSM waterways via Geofabrik. Filter to `waterway=river` and `waterway=canal`.
 Cross-reference against 1938/1939 historical maps — most major rivers are unchanged.
@@ -582,33 +644,127 @@ render resolution (256×256 per province is a reasonable starting point for a Eu
 
 ---
 
+## Waypoints Graph — waypoints.json
+
+**Purpose:** Pre-baked off-road navigation graph used by the client for A* pathfinding.
+Generated by the pipeline from terrain rasters. Never hand-edited.
+
+**Format:** `waypoints.json`
+
+```json
+{
+  "nodes": [
+    {
+      "id": "wp_0042",
+      "lng": 6.12,
+      "lat": 50.77,
+      "cover_combat": "light_forest",
+      "elevation": "hills"
+    }
+  ],
+  "edges": [
+    {
+      "from": "wp_0042",
+      "to": "wp_0043",
+      "base_cost": 1.31,
+      "river_size": null
+    },
+    {
+      "from": "wp_0099",
+      "to": "wp_0100",
+      "base_cost": 2.4,
+      "river_size": "major"
+    }
+  ],
+  "road_connections": [
+    {
+      "road_node_id": "road_junction_A1_NL",
+      "waypoint_id": "wp_0042"
+    }
+  ]
+}
+```
+
+**base_cost** is the raw composable terrain cost: `cover_move × elevation_move` from the
+MAP_DATA_CONTRACT composable modifiers table. It is unit-type agnostic — the division's
+movement profile multiplier is applied at pathfinding time, not baked into the graph.
+
+**river_size** is non-null only on edges that cross a river LineString. The edge receives
+a crossing penalty multiplier at pathfinding time proportional to river_size (minor/major).
+
+**road_connections** links road graph endpoints (from roads.geojson) to their nearest
+waypoint node, enabling seamless transition between on-road and off-road pathfinding in
+a single unified A* search.
+
+**Pipeline generation:**
+```python
+# Pseudocode for waypoint generation step
+interval_m = 750  # sample every ~750 metres
+for lng, lat in grid_sample(map_bounds, interval_m):
+    cover = sample_raster(cover_raster, lng, lat)
+    elev  = sample_raster(elevation_raster, lng, lat)
+    if not is_water(lng, lat):
+        nodes.append(WaypointNode(lng, lat, cover_combat[cover], elev))
+
+for node_a, node_b in neighbour_pairs(nodes, max_distance=interval_m * 1.5):
+    base_cost = cover_move[node_a.cover] * elevation_move[node_a.elevation]
+    river = check_river_crossing(node_a, node_b, rivers_geojson)
+    edges.append(WaypointEdge(node_a, node_b, base_cost, river))
+
+for road_endpoint in road_graph.endpoints():
+    nearest_wp = nearest_node(nodes, road_endpoint.position)
+    road_connections.append((road_endpoint.id, nearest_wp.id))
+```
+
+The graph is rebuilt from scratch any time the terrain or road layers are re-exported.
+It is never edited by hand. The `godot/assets/data/` folder is always derived output.
+
+---
+
 ## Pathfinding Architecture
 
 Pathfinding is **client-side**. The server validates, not computes.
 
+**Two-level unified graph:**
+
 ```
 Player draws advance axis (macro) or selects move target (micro)
         ↓
-Client runs A* over adjacency graph using edge costs
-  - on_road edges: cost = 1.0 (road_level governs animation speed only)
-  - off_road edges: cost = border_type_penalty × infra_modifier × terrain_multiplier
+Client runs A* over the unified road + waypoint graph:
+  - Road edges (from roads.geojson graph):
+      cost = road_base_cost (very low; road_level governs animation speed)
+  - Waypoint edges (from waypoints.json):
+      cost = edge.base_cost × division.movement_profile[edge.cover_combat][edge.elevation]
+      if movement_profile value == infinity: edge excluded (impassable terrain)
+  - River-crossing waypoint edges:
+      cost += river_crossing_penalty[edge.river_size]
         ↓
-Client sends ordered list of province_ids to server via MOVE_UNIT command
+Road edges naturally win A* competition due to dramatically lower cost.
+Off-road routes only win when no road path exists or player draws through off-road terrain.
+        ↓
+Client sends ordered list of waypoint/road node IDs to server via MOVE_UNIT command
         ↓
 Server validates:
-  1. Each consecutive pair is a valid adjacency edge
-  2. Unit type is in passable_by for every off-road edge in the path
-  3. No enemy unit blocks a province in the path (unless attack order)
+  1. Each consecutive pair is a valid graph edge
+  2. Division movement profile permits traversal of each edge terrain
+  3. No enemy unit blocks the path (unless attack order)
         ↓
 Server executes movement, broadcasts state delta to all clients
 ```
 
-The adjacency graph is loaded by the client at game start as part of `map_data.json`.
-It is a fixed-size graph — no dynamic edges — so A* runs in milliseconds even for large maps.
+**Division movement profile** is pre-computed from the template at save time and cached.
+The profile maps each terrain combination to a cost multiplier derived from the slowest
+unit in the template for that terrain. See STRATEGIC_COMBAT.md for full specification.
 
-Off-road flanking paths naturally cost more and are slower, making road corridors the
-preferred route without hardcoding it. Players choose off-road when speed is less important
-than surprise or when roads are blocked.
+**Graph sizes (approximate for western Europe map):**
+- Road graph: ~200–400 nodes (road junctions and endpoints)
+- Waypoint graph: ~2,000–5,000 nodes at 750m sampling interval
+- Combined graph: tractable for A* — queries run in milliseconds on the client
+
+Both graphs are loaded at game start from `map_data.json` (road graph, embedded in
+adjacency data) and `waypoints.json` (waypoint graph). Both are fixed at pipeline time —
+no dynamic edges — so A* graph structure never changes during a session. Only edge costs
+change at pathfinding time via the division movement profile multiplier.
 
 ---
 
@@ -704,6 +860,7 @@ Example Claude Code prompt for map authoring:
 
 **Outputs (written to `godot/assets/data/<map_id>/`):**
 - `map_data.json` — provinces + adjacency merged, Godot-native format
+- `waypoints.json` — pre-baked off-road navigation graph for pathfinding (see below)
 - `terrain.geojson` — passed through (for Godot visual layer)
 - `rivers.geojson` — passed through (for Godot visual layer)
 - `roads.geojson` — passed through (for Godot visual layer)
@@ -712,16 +869,20 @@ Example Claude Code prompt for map authoring:
 **Pipeline steps:**
 
 ```
-1. Validate schema — fail loudly on any missing required field
-2. Simplify province polygon geometry — reduce vertex count for Godot performance
-3. Detect province adjacency — Shapely shared-edge intersection
-4. Classify adjacency edges — river/coast/open from river and water layers
-5. Assign road_level to edges — from road layer intersection
-6. Assign passable_by defaults — from terrain layer at border midpoint
-7. Reconstruct nested JSON — flatten QGIS fields back to nested buildings/resources objects
-8. Write map_data.json
-9. Copy through terrain, rivers, roads, heightmap
-10. Print summary: province count, adjacency edge count, validation warnings
+1.  Validate schema — fail loudly on any missing required field
+2.  Simplify province polygon geometry — reduce vertex count for Godot performance
+3.  Detect province adjacency — Shapely shared-edge intersection
+4.  Classify adjacency edges — river/coast/open from river and water layers
+5.  Assign road_level to edges — from road layer intersection
+6.  Assign passable_by defaults — from terrain layer at border midpoint
+7.  Reconstruct nested JSON — flatten QGIS fields back to nested buildings/resources objects
+8.  Write map_data.json
+9.  Generate waypoint graph — sample terrain rasters at regular intervals (~500m–1km),
+    assign cover_combat + elevation to each node, compute raw edge costs from composable
+    modifiers (cover_move × elevation_move), flag river-crossing edges with river_size,
+    connect road graph endpoints to nearest waypoint nodes. Write waypoints.json.
+10. Copy through terrain, rivers, roads, heightmap
+11. Print summary: province count, adjacency edge count, waypoint node count, validation warnings
 ```
 
 Run: `python tools/map_pipeline/pipeline.py --map europe_1939`
@@ -804,6 +965,7 @@ map/
 
 godot/assets/data/europe_1939/   ← pipeline output, NOT hand-edited
 ├── map_data.json
+├── waypoints.json
 ├── cover.geojson
 ├── elevation.geojson
 ├── terrain_lookup.json

@@ -182,7 +182,8 @@ game ends cleanly → results posted to Hono.
 ## Phase 4 — Strategic Military Core
 
 **Goal:** Divisions exist on the map, move, and engage. Combat resolves at the strategic layer
-only (no tactical grid yet). Province capture works. The RTS feel is playable.
+only (no tactical grid yet). Province capture works. The RTS feel is playable. Pathfinding
+uses the two-level road + waypoint graph. Stacking mechanics and encirclement debuffs work.
 
 **Why before tactical grid:** The strategic movement and engagement area system is the
 foundation the tactical grid sits on. Getting division dots moving, engagement areas
@@ -190,41 +191,89 @@ colliding, and basic combat states (Engaged → Suppressed → Retreat → Destr
 end-to-end first means the tactical grid can be layered on top cleanly in Phase 5.
 
 **Testing:** Bot client sending opposing move orders and engaging your Godot client.
+Unit tests for movement profile computation and A* path validity.
+
+### Pipeline (prerequisite — before Phase 4 Godot work)
+- [ ] Waypoint graph generation step added to `pipeline.py` — sample terrain rasters at
+      ~750m intervals, assign cover_combat + elevation to each node, compute base_cost per
+      edge (cover_move × elevation_move), flag river-crossing edges with river_size, connect
+      road graph endpoints to nearest waypoint nodes
+- [ ] Output: `waypoints.json` written to `godot/assets/data/<map_id>/`
+- [ ] Pipeline summary updated to print waypoint node count alongside province count
 
 ### Colyseus (server-side simulation)
 - [ ] Division spawning at game start (from starting positions config per nation)
-- [ ] Division movement tick — divisions advance toward player-set targets each server tick
-- [ ] Engagement area collision detection — when two enemy engagement areas fully overlap,
-      `COMBAT_STARTED` fires and both divisions enter Engaged state
+- [ ] Division type classification — compute from template cell counts at spawn:
+      armoured (>=40% armoured cells), motorised (15-39%), defensive (>30% support), infantry
+- [ ] Division movement profile — computed from template at spawn and on template change;
+      33-value table (11 cover_combat × 3 elevation) using max(unit terrain costs); cached
+      server-side for path validation
+- [ ] Division movement tick — advance toward player-set target waypoints each server tick;
+      speed = road_level speed on roads; slowest-unit speed off-road from movement profile
+- [ ] Engagement area collision detection — circular areas, radius by division type;
+      full overlap triggers COMBAT_STARTED
+- [ ] Attacker/defender determination at combat initiation:
+      Tier 1: explicit ADVANCE vs HOLD orders; Tier 2: movement vector angle vs intercept
+      line (<45° = attacker); Tier 3: both advancing = meeting battle (neither gets terrain
+      bonus); Tier 4: fewer province holdings = defender
+- [ ] Terrain modifiers applied at combat initiation — sample midpoint pixel for cover and
+      elevation; apply defender bonus + attacker penalty from composable modifiers;
+      apply transition modifier (attacker terrain tier vs midpoint tier)
+- [ ] River crossing check at combat initiation — line segment between division centres
+      intersects rivers.geojson → penalty applied to attacker for rounds 1-2 (minor) or
+      1-3 (major)
 - [ ] Observation area — divisions within observation radius appear as dots; composition
       reveals progressively with observation value
 - [ ] Strategic combat resolution (simplified) — HP and suppression tracked at division
-      level (no 5×5 grid yet); combat ticks apply attrition directly to division HP and
-      suppression values each round
+      level (no 5×5 grid yet); combat ticks apply attrition per round
 - [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
 - [ ] Auto-retreat for defenders when suppressed + road open
-- [ ] Manual retreat command for attackers
-- [ ] Province capture — ownership transfers when defending division is destroyed or retreated
-- [ ] Flanking bonus — second division engaging an already-engaged target gets bonus damage
-- [ ] Encirclement destruction — division with no retreat route destroyed when suppressed
-- [ ] `COMBAT_STARTED`, `COMBAT_RESULT`, `PROVINCE_CAPTURED`, `UNIT_DESTROYED` events
+- [ ] Manual retreat command for attackers (no auto-retreat)
+- [ ] Meeting battle icon state — distinct from standard Engaged
+- [ ] Positional stack mechanics:
+      - [ ] Allied divisions at same position form ordered stack; player can reorder
+      - [ ] Only first division engages enemy; on suppression threshold → rotates to back
+            of stack, second steps forward (no physical retreat until last division suppressed)
+      - [ ] Supply priority: first division gets supply first; remainder get overflow
+      - [ ] Encirclement applies to whole stack — rotation does not help if surrounded
+- [ ] Encirclement debuffs (stacking per tick when no escape route):
+      - [ ] All units: HP recovery rate → 0
+      - [ ] All units: suppression threshold reduced per tick
+      - [ ] Armoured units: damage output decays per tick; reaches 0 after N ticks
+      - [ ] Infantry units: slower degradation than armour
+- [ ] Province capture — ownership transfers when defending division/stack is destroyed or
+      retreated
+- [ ] Flanking bonus — second enemy division engaging already-engaged target gets bonus damage
+- [ ] `COMBAT_STARTED`, `COMBAT_RESULT`, `MEETING_BATTLE_STARTED`, `PROVINCE_CAPTURED`,
+      `UNIT_DESTROYED`, `STACK_ROTATION`, `DIVISION_ENCIRCLED` events
 - [ ] Basic supply — divisions out of supply take increased attrition (simplified supply
       model; full graph-based supply is Phase 6)
 
 ### Godot
-- [ ] `MilitarySystem` — division dot rendering, engagement area circle visualisation,
-      observation area rendering, selection, move orders
-- [ ] `CombatSystem` — combat icon rendering over active engagements, HP bar on icon,
-      suppression pulse indicator, round phase indicator
+- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified A*
+      graph; movement profile applied at query time per selected division
+- [ ] A* pathfinding — road edges win naturally via low cost; off-road waypoint edges use
+      division movement profile multiplier; infinity-cost edges excluded; river crossing
+      penalty on flagged edges
+- [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation,
+      observation area rendering, selection, move orders, stack badge display
+- [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
+- [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
+      HP bar, suppression pulse, round phase indicator
 - [ ] `MapRenderer` update — recolour provinces on `PROVINCE_CAPTURED`
-- [ ] `NotificationSystem` — combat started, suppression threshold, breakthrough, division
-      destroyed toasts
+- [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,
+      stack rotation, encirclement, division destroyed toasts
 
 ### Verification gate
-Move division → engagement area overlaps enemy bot division → combat initiates → strategic
-attrition resolves → one division retreats or is destroyed → province changes colour →
-notification fires. Flanking: commit a second division → it gets bonus damage → enemy
-retreats faster.
+Move division → pathfinding finds road route automatically → manually draw off-road route
+through forest → armoured division cannot enter dense_forest → infantry division can.
+Bot division advances toward player → attacker/defender determined by movement vectors →
+terrain bonus applies to defender. Both advancing head-on → meeting battle icon appears,
+neither gets terrain bonus. Commit second division to already-engaged enemy → flanking
+bonus applies. Stack two friendly divisions → first engages → hits suppression → rotates →
+second steps up → combat continues without physical retreat. Last stack division suppressed
+with no escape route → entire stack destroyed. Encircled armoured division → damage output
+decays over ticks → eventually deals zero damage.
 
 ---
 
@@ -241,53 +290,96 @@ Phase 4 strategic plumbing intact.
 for all attack pattern logic before any Godot work.
 
 ### Colyseus (server-side simulation)
-- [ ] 5×5 grid state per division — each cell tracks unit type, HP, suppression value
+- [ ] 5×5 grid state per division — each cell tracks unit type, HP, suppression value,
+      experience tier (Green/Seasoned/Veteran/Elite)
 - [ ] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
       5-phase lethality escalation (Contact → Firefight → Intense → Decisive → Annihilation)
 - [ ] All unit attack patterns server-side:
-  - [ ] Infantry / MG — horizontal front-row attack
-  - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift
-  - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift
+  - [ ] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
+        targets first row with at least one living unit; damage distributed only among
+        living units in that row)
+  - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
+        column shift disabled in dense_forest and urban terrain
+  - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift;
+        picks one direction only (not both adjacent columns)
   - [ ] AA gun — passive defence vs air (no ground attack role)
-  - [ ] Sniper — selective targeting across full grid with priority list
-  - [ ] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit position
+  - [ ] Sniper — selective targeting across full grid with priority list (fallback to
+        standard infantry when no priority targets present)
+  - [ ] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
+        position (1 row ahead of own position, not anchored to enemy contact row)
   - [ ] Artillery — recon-proportional weighted random cell targeting
+- [ ] Row positional perks applied per round:
+      R5 Vanguard: +% suppression dealt; R4 Assault: +% HP damage dealt;
+      R3 Support: +% suppression resistance; R2 Reserve: faster suppression decay;
+      R1: no bonus
+- [ ] Formation bonus detection — check adjacency of unit pairs each round; apply bonuses
+      for confirmed pairs (AT+MG, Sniper+Recon inf, FLM+Assault inf, MG+MG same row,
+      Artillery+Recon inf)
+- [ ] Unit experience system:
+      - [ ] Experience accumulates per unit per combat round survived + win bonus
+      - [ ] Four tiers: Green → Seasoned → Veteran → Elite (diminishing returns curve)
+      - [ ] Tier stat bonuses: HP%, suppression resistance%, recon contribution%
+      - [ ] Experience is per cell slot — lost permanently if unit destroyed
+      - [ ] Stealthed units that survive to reserve retain their experience tier
+      - [ ] Barracks building grants training experience during non-combat downtime
+            (up to tier unlocked by research; not above)
 - [ ] Dual-bar system — HP (permanent) and suppression (decaying) tracked per cell
-- [ ] Suppression decay per round (base rate); 2–3× faster during retreat
-- [ ] Division-level suppression threshold → feeds Suppressed state in strategic layer
+- [ ] Suppression decay per round (base rate); 2–3× faster during retreat; no instant reset
+- [ ] Division-level suppression threshold (base 60%) → feeds Suppressed state in strategic
+      layer; stealthed units excluded from threshold calculation
 - [ ] Armour penetration scale (60/70/80/90/100% thresholds → 0/20/30/40/70/100% damage)
 - [ ] Stealth system — stealthed units deal damage, cannot be targeted, excluded from retreat
-      threshold; destroyed division puts stealthed units into reserve
-- [ ] Recon value accumulation per round per unit type; artillery targeting weight shifts
-      with recon
+      threshold; destroyed division puts stealthed units into reserve with experience retained
+- [ ] Recon value accumulation per round per unit type; formation bonus (Artillery+Recon inf)
+      increases recon rate; artillery targeting weight shifts with recon
 - [ ] Force recon units bypass lethality ramp — deal full damage from Round 1
+- [ ] Terrain modifiers feeding into grid combat (from Phase 4 terrain detection):
+      unit-type specific bonuses by cover_combat (infantry suppression resistance in forests,
+      armour flanking bonus in plains, AT ambush bonus in forest, etc.)
 - [ ] Grid locked during combat — no template switching while engaged
-- [ ] `ROUND_RESOLVED` event broadcast each round with grid delta
+- [ ] Movement profile recomputed whenever template is saved or unit research changes
+- [ ] `ROUND_RESOLVED` event broadcast each round with full grid delta including experience
+      changes and formation bonuses active
 - [ ] `TACTICAL_BREAKTHROUGH` event when front row cleared with no reserves
+- [ ] `UNIT_EXPERIENCE_GAINED`, `UNIT_ELITE_REACHED` events
 
 ### Hono
-- [ ] `/divisions` CRUD routes — basic template persistence (minimal; full persistence in
-      Phase 7)
+- [ ] `/divisions` CRUD routes — basic template persistence including movement profile
+      cached alongside template; invalidated on research upgrade (minimal; full persistence
+      in Phase 7)
 - [ ] Nation preset templates served from `game-server/src/data/templates/<nation_id>/`
-- [ ] `/internal/player/:user_id/templates` — loads player templates into Colyseus at
-      game start
+- [ ] `/internal/player/:user_id/templates` — loads player templates + movement profiles
+      into Colyseus at game start
 
 ### Godot
 - [ ] `TacticalGridUI` — the 5×5 grid panel, opened via combat button on combat icon;
-      shows both grids, HP/suppression bars per cell, attack pattern overlay, recon indicator,
-      round timer
-- [ ] Combat icon enhancements — aggregate HP bar, suppression pulse, round phase dots
+      shows both grids, HP/suppression bars per cell, experience tier badge per cell,
+      formation bonus indicators (glow on active adjacency pairs), row perk labels,
+      attack pattern overlay, recon indicator, terrain modifier display, river crossing
+      penalty indicator and remaining rounds, round timer
+- [ ] Combat icon enhancements — aggregate HP bar, suppression pulse, round phase dots,
+      meeting battle vs standard Engaged icon (from Phase 4)
 - [ ] Combat button — appears over active combat icons, opens `TacticalGridUI`
 - [ ] `DivisionBuilder` (MVP) — template builder UI in main menu; create/edit/save custom
-      templates; select from nation presets in lobby
+      templates; shows movement profile summary (which terrains are impassable, slowest
+      terrain); formation bonus preview (highlight when placing adjacent synergy units);
+      select from nation presets in lobby
 - [ ] Template redeployment — switch template when out of combat; 1-minute flat cooldown;
-      division redeploys at nearest friendly city
+      division redeploys at nearest friendly city; experience on existing units lost on redeploy
+- [ ] Movement profile displayed on division selection — player can see what terrain their
+      selected division can/cannot traverse before issuing a move order
 
 ### Verification gate
 Two opposing preset templates fight — grid resolves rounds, suppression builds, one division
-hits threshold and retreats at strategic layer. Open combat panel — see grid updating live.
-Force recon unit in one template deals full damage in Round 1. Artillery misses more at zero
-recon, improves over rounds. Flamethrower AOE hits correct cells based on its row position.
+hits threshold and retreats at strategic layer. Open combat panel — see grid updating live
+with HP bars, suppression, experience tier badges. Force recon unit deals full damage in
+Round 1. Artillery misses more at zero recon, improves over rounds. Flamethrower in R4
+reaches enemy R3 (not R4-R5 only). Infantry attacks frontmost occupied row — if enemy R5
+is empty, hits R4 and concentrates damage on occupied cells only. Place AT adjacent to MG —
+formation bonus indicator appears. Armoured division in dense_forest — column shift flanking
+disabled. Division survives multiple combats — unit tiers advance to Seasoned → Veteran.
+Research upgrade applied → movement profile recomputed → player can now enter terrain
+previously impassable for that unit type.
 
 ---
 

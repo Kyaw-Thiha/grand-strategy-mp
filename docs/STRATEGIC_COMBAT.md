@@ -15,21 +15,99 @@
 Units move freely across the map but road network is the dominant factor in all movement,
 supply, and strategic planning.
 
-**Off-road movement:**
-- All divisions can move off-road
-- Off-road speed is significantly reduced, scaled by terrain type
-- Dense forest: slow. Open plains: moderate. Mountains and jungle: impassable for most
-  unit types (armor, motorized, artillery)
-- Light infantry can traverse most terrain types off-road
-
 **On-road movement:**
 - Road level dictates exact movement speed (dirt track → paved road → highway)
 - Fastest possible movement is always on roads
 - Roads are the only viable route for supply (see Supply System)
+- On-road movement uses the road graph directly — all division types move at road speed;
+  individual unit speed differences only matter off-road
+
+**Off-road movement:**
+- Off-road speed is determined by the **slowest unit in the division's template**
+- This is historically accurate — a column moves at its slowest element's pace
+- Off-road costs are computed from the division's pre-computed movement profile
+  (see Division Movement Profile below)
+- Dense forest, jungle, swamp, glacier: impassable off-road for armoured and heavy units
+- Mountains: impassable off-road for all non-infantry division types (road only)
+- All divisions are slower off-road than on-road in any terrain
 
 **Strategic implication:** Roads are primary objectives. Key junctions, mountain passes, and
 bridges are naturally high-value targets — capturing or destroying them has cascading
-logistical consequences.
+logistical consequences. Off-road flanks are always slower and always carry the terrain cost
+of the slowest unit.
+
+### Division Movement Profile
+
+Each division template has a pre-computed **movement profile** — a lookup table of 33 values
+(11 cover_combat groups × 3 elevation bands) representing the movement cost per terrain
+combination for that specific template.
+
+**How it is computed:**
+```
+for each terrain_combination in (cover_combat × elevation):
+    cost = max(unit.terrain_cost[terrain_combination] for unit in template.filled_cells)
+    profile[terrain_combination] = cost
+```
+
+The profile uses `max()` (slowest unit) because the division can only move as fast as its
+slowest element. If any unit has infinity cost (impassable) for a terrain, the whole
+division's profile entry is infinity for that terrain.
+
+**When it is computed:**
+- When a template is first saved or edited in the division builder
+- When a research upgrade changes any unit type's terrain cost profile
+- Once computed, it is cached — pathfinding uses the cached profile with O(1) lookup per
+  waypoint graph edge
+
+**Why this approach:**
+- Division type taxonomies (armoured/infantry/motorised/defensive) are UI labels only,
+  determining engagement radius and icon symbol. They do not govern movement costs.
+- Movement costs come entirely from the composition of the template. A division with 6
+  light tanks + 12 infantry has a different profile from one with 6 heavy tanks + 12
+  infantry, even if both are classified as "armoured."
+- Research upgrades that improve a specific unit's terrain costs automatically propagate
+  to the movement profile on next recomputation. No new division types needed.
+
+**Division type classification (engagement radius only):**
+The division type is determined by the dominant unit category by cell count in the filled
+cells:
+- Armoured cells (light/medium/heavy tank, armoured car) >= 40% of filled cells:
+  Armoured division (largest engagement radius)
+- Armoured cells 15-39%: Motorised/mixed division (medium-large radius)
+- Armoured cells < 15%, support cells (AT gun, AA gun, artillery) > 30%: Defensive
+  division (smallest radius)
+- Otherwise: Infantry division (medium radius)
+
+These thresholds are tunable. Nation preset templates are already classified correctly.
+
+### Pathfinding Architecture
+
+Client-side A* over a two-level unified graph. Server validates the submitted path.
+
+**Level 1 — Road graph:** The existing road network from roads.geojson. On-road edges
+have low uniform cost; road_level governs animation speed, not pathfinding cost. All
+division types use the road graph identically.
+
+**Level 2 — Waypoint graph:** A sparse grid pre-baked by the pipeline at regular intervals
+across the map, stored in waypoints.json. Each waypoint node stores its sampled
+cover_combat group and elevation band. Each edge stores the raw composable terrain cost
+(cover_move x elevation_move from MAP_DATA_CONTRACT).
+
+**At pathfinding time:**
+The client computes edge_cost = waypoint_graph raw_cost × division movement_profile for
+that edge terrain. If movement_profile for a terrain is infinity, that edge is excluded
+from the search — A* will not route through impassable terrain.
+
+**Road snapping:** Road edges have dramatically lower cost than off-road waypoint edges,
+so A* naturally finds road-hugging paths without any explicit snapping logic.
+
+**River crossing:** Waypoint edges that cross a river LineString are flagged with the
+river's river_size at pipeline time. The edge cost gets a crossing penalty multiplier.
+Road crossings (bridges) on the road graph have no river penalty.
+
+**Server validation:** The client submits the ordered waypoint list. The server validates
+each step against the division's server-side movement profile and the authoritative graph.
+Invalid paths are rejected and the client receives a correction.
 
 ---
 
@@ -145,15 +223,39 @@ supply path), the division is out of supply. It can still retreat — but must m
 land it still controls rather than using roads, so retreat speed is reduced significantly.
 
 **Full encirclement:**
-When a division is surrounded on all sides by enemy-controlled territory with no land escape
-route (even off-road), it cannot retreat regardless of suppression state. In this condition:
-- The division is destroyed even if it has significant remaining HP
-- Supply starvation accelerates HP decay until the division is eliminated
-- This is the primary decisive outcome of a successful encirclement manoeuvre — destroying
-  an enemy division through positional failure rather than attrition
+When a division (or positional stack) is surrounded on all sides by enemy-controlled
+territory with no land escape route (even off-road), it cannot retreat regardless of
+suppression state.
 
-This rule is the key incentive to cut roads and encircle rather than push frontally.
-Frontal pushes force retreats. Encirclements destroy.
+Encirclement applies progressive debuffs that stack each tick:
+
+- **All units:** HP recovery rate reduced to zero (supply gone; wounds do not heal)
+- **All units:** Suppression threshold lowered (morale degrades faster under encirclement)
+- **Armoured units specifically:** Damage output decays per tick (fuel starvation —
+  tanks without fuel become stationary pillboxes). After sufficient ticks fully encircled,
+  armoured units deal zero damage entirely
+- **Infantry units:** Slower degradation than armour — infantry can dig in and resist
+  longer without supply (historically: Demyansk, Korsun). Still substantial debuffs,
+  just slower onset
+
+**Destruction trigger:**
+When the last division in an encircled stack hits suppression threshold, it is destroyed —
+not retreated. No road to retreat along means elimination, not pushback. Experience,
+template, and equipment are lost.
+
+**Consequence for large divisions:**
+A fully-filled, expensive division that gets encircled is catastrophically costly to lose —
+both the investment and the earned unit experience are gone. This creates a strong incentive
+to maintain escape routes and not overcommit large forces to positions that could be cut off.
+The encirclement mechanic is the primary reason a player with an inferior force can
+meaningfully defeat a superior encircled force — even high-HP, high-experience divisions
+collapse under encirclement debuffs.
+
+**Design intent:**
+Encirclement is the most decisive outcome in the game. Frontal pushes force retreats;
+encirclements destroy. This is the key incentive to execute flanking manoeuvres rather
+than attritional frontal assaults. A player who successfully pockets an enemy stack
+eliminates it permanently — which in a 1–4 hour session is a session-defining event.
 
 ---
 
@@ -207,6 +309,56 @@ Divisions are represented as NATO standard rectangle unit symbols on the strateg
 **Note on retreat visual:** When a front division retreats backward through the column, the
 current confirmed representation is a vertical stack at macro zoom. Two-lane road rendering
 (retreat lane / advance lane) is a candidate approach for a later visual polish pass.
+
+### Positional Stacking (Same Location)
+
+When allied divisions overlap on the same map position (not in a road column, but literally
+co-located — e.g. multiple divisions defending a mountain pass), they form a **positional
+stack** with an ordered position list.
+
+**Stack structure:**
+- Divisions in a positional stack have a numbered order (first, second, third...)
+- Players can manually reorder the stack at any time when not in combat
+- The stack appears as a single dot with a badge count on the strategic map
+
+**Combat rotation:**
+- Only the **first division** in the stack engages the enemy at any time
+- When the first division's suppression reaches the retreat threshold, it does not
+  physically retreat off the map — instead it **rotates to the back of the stack** and
+  the second division steps forward as the new front
+- This is true for both defenders and attackers
+- Rotation is invisible to the enemy at the strategic level — the combat icon continues
+  without indicating a rotation. A sweaty player who opens the combat panel will see
+  different units in the front grid and can react accordingly
+- Actual retreat only occurs when the **last division in the stack** hits suppression
+  threshold — that division retreats along the supply road as normal
+
+**Supply priority for stacked divisions:**
+- Supply flows to the **first division in the stack first** (front of queue gets priority)
+- Excess flows to second, third, etc.
+- If supply is constrained, the front division remains supplied while rear stack divisions
+  begin degrading — historically accurate and creates meaningful pressure to maintain
+  strong supply before committing deep stacks
+
+**Design intent — stacking is a tool, not a default:**
+Stacking is primarily useful at chokepoints (mountain passes, river crossings, city
+defences) where width is limited and depth buys time. Players are not expected to maintain
+large stacks everywhere. The economic cost of concentrating multiple divisions in one
+location means other fronts are weakened. An attacker who identifies a stack and bypasses
+it via a flanking route forces the defender to abandon the position or split their forces.
+
+**Encirclement of a stack:**
+Encirclement applies to the whole stack. If surrounded, rotation within the stack does not
+help — the rotated division also has no retreat path. The entire stack is destroyed when
+the last division hits suppression threshold with no escape route.
+
+**5×5 grid and template fill:**
+Just as stacks are a tool rather than a default, fully filling the 5×5 division grid is
+not expected or required. Most divisions in play will have partially filled grids. A player
+concentrating resources into one large fully-filled division makes a different tradeoff from
+one spreading the same resources into several smaller divisions — the large division hits
+harder in a single engagement but cannot be in two places at once and is vulnerable to
+encirclement. Economy governs these choices; there is no mechanical cap enforcing either.
 
 ---
 
@@ -280,10 +432,18 @@ number — it is the difference between losing one division and losing the front
 - Threshold distance for macro zoom stack collapse
 - Road throughput capacity values per road level
 - Supply generation rate for supply hub building
-- Off-road speed penalties per terrain type (exact values)
 - HP attrition rate for out-of-supply divisions (must feel urgent but not instant)
-- HP attrition rate for encircled divisions (faster than out-of-supply to create urgency
-  to attempt breakout or accept loss)
+- HP attrition rate for encircled divisions (faster than out-of-supply)
+- Encirclement armour damage decay rate per tick (target: meaningful degradation within
+  3–5 ticks; zero output after ~8–10 ticks fully encircled)
+- Encirclement suppression threshold reduction rate (how fast does morale break under
+  encirclement pressure)
+- Division type classification thresholds (confirmed: armoured >= 40%, motorised 15–39%,
+  defensive > 30% support cells; exact values from playtesting)
+- Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
+  — balance between path quality and graph size)
+- Movement profile recomputation trigger debounce (avoid recomputing on every keystroke
+  during template editing — trigger on save/confirm)
 
 ---
 
