@@ -11,17 +11,24 @@ config_version=5
 [application]
 
 config/name="Grand Strategy Game"
-run/main_scene="res://scenes/debug/map_debug.tscn"
+run/main_scene="res://scenes/main_menu/main_menu.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
 Config="*res://src/core/config.gd"
+MsgPack="*res://src/core/msgpack.gd"
 APIClient="*res://src/net/api_client.gd"
 AuthManager="*res://src/auth/auth_manager.gd"
 NetManager="*res://src/net/net_manager.gd"
 Supabase="*uid://b5b8jokg2ngr3"
+EventBus="*res://src/core/event_bus.gd"
+GameState="*res://src/core/game_state.gd"
+CommandQueue="*res://src/core/command_queue.gd"
+SessionManager="*res://src/systems/session/session_manager.gd"
+LobbySystem="*res://src/systems/session/lobby_system.gd"
+SceneManager="*res://src/core/scene_manager.gd"
 
 [editor_plugins]
 

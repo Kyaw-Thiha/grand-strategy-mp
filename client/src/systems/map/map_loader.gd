@@ -88,6 +88,14 @@ func get_terrain_lookup() -> Dictionary:
 	return _terrain_lookup
 
 
+func get_map_bounds() -> Rect2:
+	if _bounds.is_empty():
+		return Rect2()
+	var tl := _project(_bounds.get("min_lng", 0.0), _bounds.get("max_lat", 0.0))
+	var br := _project(_bounds.get("max_lng", 0.0), _bounds.get("min_lat", 0.0))
+	return Rect2(tl, br - tl)
+
+
 # ── projection ────────────────────────────────────────────────────────────────
 
 func _setup_projection() -> void:

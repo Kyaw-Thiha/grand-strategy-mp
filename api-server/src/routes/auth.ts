@@ -30,7 +30,9 @@ auth.post('/email', async (c) => {
 
   if (!existing) {
     const passwordHash = await Bun.password.hash(password)
-    const [created] = await db.insert(players).values({ email, passwordHash }).returning()
+    // In DEV_MODE all new accounts get host pass so local testing doesn't need manual DB edits
+    const hasHostPass = process.env.DEV_MODE === 'true'
+    const [created] = await db.insert(players).values({ email, passwordHash, hasHostPass }).returning()
     player = created
   } else {
     const valid = await Bun.password.verify(password, existing.passwordHash)
