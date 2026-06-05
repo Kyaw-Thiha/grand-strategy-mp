@@ -23,18 +23,21 @@ supply, and strategic planning.
   individual unit speed differences only matter off-road
 
 **Off-road movement:**
-- Off-road speed is determined by the **slowest unit in the division's template**
-- This is historically accurate — a column moves at its slowest element's pace
-- Off-road costs are computed from the division's pre-computed movement profile
-  (see Division Movement Profile below)
+- Off-road speed uses a weighted formula: `speed = (min_unit_speed × 0.4) + (mean_unit_speed × 0.6)`
+- The slowest unit pulls the division down but does not cap it entirely — adding one slow
+  unit meaningfully reduces speed without making the division as slow as that unit alone
+- This is per terrain combination: the formula is applied using each unit's cost for that
+  specific terrain, stored in the pre-computed movement profile (see Division Movement Profile)
+- Impassability remains a hard binary: if any unit has impassable cost (∞) for a terrain,
+  the whole division's profile entry for that terrain is ∞ — the weighted formula does not apply
 - Dense forest, jungle, swamp, glacier: impassable off-road for armoured and heavy units
 - Mountains: impassable off-road for all non-infantry division types (road only)
 - All divisions are slower off-road than on-road in any terrain
 
 **Strategic implication:** Roads are primary objectives. Key junctions, mountain passes, and
 bridges are naturally high-value targets — capturing or destroying them has cascading
-logistical consequences. Off-road flanks are always slower and always carry the terrain cost
-of the slowest unit.
+logistical consequences. Adding slow support units (artillery, heavy AT) costs operational
+speed — a deliberate combined-arms tradeoff, not a binary penalty.
 
 ### Division Movement Profile
 
@@ -45,13 +48,19 @@ combination for that specific template.
 **How it is computed:**
 ```
 for each terrain_combination in (cover_combat × elevation):
-    cost = max(unit.terrain_cost[terrain_combination] for unit in template.filled_cells)
-    profile[terrain_combination] = cost
+    costs = [unit.terrain_cost[terrain_combination] for unit in template.filled_cells]
+    if any(c == infinity for c in costs):
+        profile[terrain_combination] = infinity          # hard impassable — any unit blocks
+    else:
+        min_cost  = min(costs)
+        mean_cost = sum(costs) / len(costs)
+        profile[terrain_combination] = (min_cost * 0.4) + (mean_cost * 0.6)
 ```
 
-The profile uses `max()` (slowest unit) because the division can only move as fast as its
-slowest element. If any unit has infinity cost (impassable) for a terrain, the whole
-division's profile entry is infinity for that terrain.
+The weighted formula `(min × 0.4) + (mean × 0.6)` is intuitive: a player can mentally
+estimate their speed as "pulled toward the slowest unit but not fully capped by it."
+Impassability remains a hard binary — if any single unit cannot enter a terrain, the whole
+division cannot enter it off-road. The weighted formula only applies to passable terrain.
 
 **When it is computed:**
 - When a template is first saved or edited in the division builder
@@ -146,12 +155,34 @@ lock the player into either mode — friction teaches strategy.
 Each division is represented as a dot on the strategic map with two concentric areas:
 
 **Observation area (large radius):**
+- Always larger than the engagement area — a player sees an enemy division dot well
+  before engagement areas touch, giving meaningful warning before combat initiates
 - Reveals enemy division positions within range as dots on the player's map
 - At low observation value, enemy composition shows as "?" — unit types unknown
 - As observation value increases (via recon units in the division template, or sustained
   proximity), enemy composition begins to reveal progressively
 - Enemy divisions with high stealth composition reduce how much is revealed even at high
   observation values
+
+**Observation radius determination:**
+- The division's observation radius equals the **maximum** observation range among
+  all recon units present in the template — not the sum or average
+- Multiple recon units add redundancy (if the best is killed mid-combat, the next
+  best takes over) but do not geometrically stack range
+- Units contributing to observation radius: recon infantry (base range), recon light
+  tank variants (medium range), armoured car with recon specialisation (high range),
+  cavalry (medium range — fast-moving scouts)
+- Research upgrades improve specific unit types' observation range; the division's
+  effective radius updates on next movement profile recomputation
+- A division with no recon units has a short baseline observation radius representing
+  basic visual contact from forward scouts
+
+**Enemy movement path visibility:**
+- Enemy division movement paths (dotted waypoint trail) are only visible when the
+  enemy division dot is within the player's observation radius — same visibility gate
+- Ally and map-sharing nations: all paths visible regardless of observation radius
+- Neutral nations: see province-level frontline colour wash but not division dots
+  or paths outside their own observation areas
 
 **Engagement area (smaller radius):**
 - Set per division **type** — not per template composition. Division type is the dot's
@@ -259,6 +290,78 @@ eliminates it permanently — which in a 1–4 hour session is a session-definin
 
 ---
 
+
+## Movement UX and Hotkeys
+
+### Move Order Flow
+
+1. **Click division dot** to select it — shows engagement area (solid circle) and
+   observation area (faded circle)
+2. **Press move hotkey `M`** (or click Move button in bottom UI panel) — cursor changes
+   to move mode; division remains selected and highlighted
+3. **Single click on map:** division pathfinds to destination, waypoint created, division
+   deselected, move mode exits
+4. **Shift + click on map:** waypoint created at that position; division stays selected;
+   move mode stays active; player can continue shift-clicking to chain multiple waypoints
+5. **Final click without shift:** last destination set, move mode exits, division deselected
+6. **Escape:** cancel move mode, clear all pending waypoints, division deselected
+7. **Right-click any waypoint** in an existing chain: deletes that waypoint; subsequent
+   waypoints reorder automatically; division continues on updated path
+
+### Waypoint Visualisation
+
+- Dotted line connecting current position → each waypoint in sequence
+- At each waypoint and at the final destination: a **ghost dot** (faded, transparent)
+  showing the predicted division position with its engagement area circle drawn faintly
+- Observation radius **not** shown on ghost dots by default — only shown on hover of a
+  ghost dot (avoids map clutter)
+- On hover of ghost dot: predicted observation radius appears + tooltip showing estimated
+  time to reach that waypoint at current division speed
+- Ghost dots and paths are visible to the owning player and to allied / map-sharing nations
+- Enemy / neutral nations: ghost dots are visible only if they fall within that player's
+  own observation radius (same visibility gate as division dots)
+
+### Clicking a Moving Division
+
+Clicking a division that is already moving along a waypoint chain shows the **remaining
+waypoints** highlighted with ghost dots. The player can:
+- Right-click any remaining waypoint to delete it
+- Shift-click new positions to append to the chain
+- The division continues moving along the existing path until the player confirms changes
+
+### Default Hotkey Layout
+
+All bindings are remappable in settings. Stored in a local config file. Shown in
+tooltips on all UI buttons ("Move [M]", "Hold [H]").
+
+**Map navigation (unchanged):**
+- `W A S D` — map pan
+
+**Panel hotkeys (left hand):**
+- `Q` — Military panel
+- `E` — Economy / Trade panel
+- `R` — Diplomacy panel
+- `F` — Politics panel
+- `Tab` — toggle between last two open panels
+- `Escape` — close open panel / cancel current action
+
+**Unit order hotkeys (active when a division is selected):**
+- `M` — Move mode
+- `H` — Hold position
+- `G` — Retreat (fall back)
+- `X` — Cancel orders
+
+**Modifier:**
+- `Shift + click` — add waypoint to chain (in move mode)
+
+**Why M for move:** Q and E are panels; M is reachable left-hand without conflict and the
+mnemonic is obvious. Move is the most common unit order — it warrants a dedicated, easily
+memorable key.
+
+**Implementation note:** All bindings defined in Godot's `InputMap` and remappable at
+runtime via the settings UI. GDScript handles keyboard input cleanly through `InputMap`.
+
+---
 
 ## Dynamic Frontline System
 
@@ -510,6 +613,33 @@ encirclement. Economy governs these choices; there is no mechanical cap enforcin
 
 ---
 
+## River Crossing Unit Exceptions
+
+Certain unit types negate or modify the river crossing penalty applied to attackers.
+This follows the same design pattern as the force recon lethality exception — specialist
+units bypass disadvantages that generic units face.
+
+**Units that fully negate river crossing penalty:**
+- **Commandos:** Trained specifically for river crossings. Negate penalty entirely. Also
+  gain a small stealth bonus in rounds 1–2 of the engagement — they cross quietly and
+  hit before the defender realises they are across
+- **Marines / amphibious assault infantry:** Negate crossing penalty. No additional
+  offensive bonus — amphibious capability is their primary trait
+- **Amphibious tank variants:** A specific upgrade path within the armour research tree.
+  Standard tanks take the full crossing penalty; the amphibious variant negates it
+
+**Units that reduce river crossing penalty:**
+- **Engineers (future unit):** When present in the division template, reduce the crossing
+  penalty by 50% for all other units in the division — they build improvised crossings
+  under fire. Not a full negate but meaningful on river-heavy maps
+
+**Design pattern note:** These exceptions establish the extensibility point for riverine
+warfare specialisation in later modules. New unit types or research upgrades can negate
+or modify crossing penalties by following this same pattern. Not all exceptions are
+implemented in the base game — the mechanism is confirmed.
+
+---
+
 ## Combat States
 
 Every division cycles through the following states. All simulation is server-side (Colyseus).
@@ -529,10 +659,13 @@ Strategic Layer Link section). The tactical grid feeds upward; the strategic lay
   threshold (base 60% — modifiable by future doctrine and general systems)
 - Cannot initiate new attacks on other divisions
 - Takes increased HP attrition each strategic tick
-- **Defenders:** auto-retreat when suppressed and a road is open (see Retreat)
-- **Attackers:** must manually order retreat — no auto-retreat. Player must decide whether
-  to hold the suppressed position or pull back. This asymmetry rewards aggressive play and
-  creates meaningful attacker decisions under pressure
+- **Defenders:** auto-retreat when suppressed and a road is open (see Retreat).
+  Suppression threshold: base 60%
+- **Attackers:** auto-retreat at a **higher suppression threshold (base 80%)**. Attackers
+  have committed voluntarily and hold longer before breaking — only when the attack is truly
+  failing does the system pull them back. Manual retreat is always available at any
+  suppression level for a player who wants to cut losses early. If encircled, auto-retreat
+  never fires regardless of suppression — encirclement destruction takes precedence
 
 ### Retreat
 - Division moves back along its supply road toward the nearest friendly node
@@ -599,6 +732,36 @@ number — it is the difference between losing one division and losing the front
 - Influence connectivity threshold for supply severance (currently 50% — may need tuning
   to avoid supply lines blinking in/out on lightly contested ground)
 - Frontline line smoothing curve parameters (how organic vs angular the isoline appears)
+
+---
+
+## Nation Configuration and Extensibility
+
+Each nation in a map is defined by a `nation_config` object loaded at game start.
+The current western Europe map uses a balanced `nation_config` for all nations — all
+nations have identical unit availability, research starting points, and no unique modifiers.
+
+**`nation_config` fields (extensible per map):**
+- `available_units` — which unit types appear in the division builder for this nation
+- `unit_stat_modifiers` — flat or percentage modifiers on specific unit type stats
+  (e.g. German panzer +10% armour, Soviet infantry +15% suppression resistance in winter)
+- `unique_unit_unlocks` — nation-exclusive units not available to others
+- `research_starting_unlocks` — research nodes already unlocked at game start
+- `starting_templates` — historically appropriate preset templates
+- `cavalry_available` — boolean; true for all nations on current map
+
+**Game Master support:** A game master role can override `nation_config` values mid-session
+or define scenario-specific rules (e.g. historical scenario with Germany starting with
+Blitzkrieg doctrine already researched). This is a configuration layer above the engine —
+no engine code changes required for new scenarios.
+
+**Current map:** Cavalry available to all nations. No unique modifiers. All nations start
+at the same research position. Nation differentiation comes through player decisions and
+map starting positions, not built-in advantages.
+
+**Future maps:** Can define any combination of `nation_config` values without touching
+engine code. The engine reads `nation_config` at game start and applies it — it never
+hardcodes assumptions about nation identity.
 
 ---
 

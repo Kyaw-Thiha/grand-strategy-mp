@@ -203,11 +203,15 @@ Unit tests for movement profile computation and A* path validity.
 
 ### Colyseus (server-side simulation)
 - [ ] Division spawning at game start (from starting positions config per nation)
+- [ ] Nation config loaded at game start from `nation_config` per nation per map;
+      current map uses balanced config (cavalry available to all, no unique modifiers,
+      same research starting points); engine reads config and never hardcodes nation identity
 - [ ] Division type classification — compute from template cell counts at spawn:
       armoured (>=40% armoured cells), motorised (15-39%), defensive (>30% support), infantry
 - [ ] Division movement profile — computed from template at spawn and on template change;
-      33-value table (11 cover_combat × 3 elevation) using max(unit terrain costs); cached
-      server-side for path validation
+      33-value table (11 cover_combat × 3 elevation) using weighted formula:
+      (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
+      cached server-side for path validation
 - [ ] Division movement tick — advance toward player-set target waypoints each server tick;
       speed = road_level speed on roads; slowest-unit speed off-road from movement profile
 - [ ] Engagement area collision detection — circular areas, radius by division type;
@@ -227,8 +231,10 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Strategic combat resolution (simplified) — HP and suppression tracked at division
       level (no 5×5 grid yet); combat ticks apply attrition per round
 - [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
-- [ ] Auto-retreat for defenders when suppressed + road open
-- [ ] Manual retreat command for attackers (no auto-retreat)
+- [ ] Auto-retreat for defenders when suppressed (base 60% threshold) + road open
+- [ ] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
+      before breaking; manual retreat always available at any suppression level;
+      encirclement takes precedence (auto-retreat disabled when no escape route)
 - [ ] Meeting battle icon state — distinct from standard Engaged
 - [ ] Positional stack mechanics:
       - [ ] Allied divisions at same position form ordered stack; player can reorder
@@ -270,8 +276,24 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] A* pathfinding — road edges win naturally via low cost; off-road waypoint edges use
       division movement profile multiplier; infinity-cost edges excluded; river crossing
       penalty on flagged edges
-- [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation,
-      observation area rendering, selection, move orders, stack badge display
+- [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation
+      (smaller, solid), observation area rendering (larger, faded; always larger than
+      engagement area), selection, move orders, stack badge display
+- [ ] Observation radius computed as max recon unit range in template; baseline radius
+      for divisions with no recon units; updates when movement profile recomputes
+- [ ] Move order UX:
+      - [ ] Select division → press M (or Move button) → cursor enters move mode
+      - [ ] Single click: pathfind to destination, one waypoint, division deselected
+      - [ ] Shift+click: add waypoint to chain, division stays selected and in move mode
+      - [ ] Escape: cancel move mode, clear pending waypoints
+      - [ ] Right-click existing waypoint: delete it from chain
+      - [ ] Click moving division: show remaining waypoints; allow chain editing
+      - [ ] Ghost dot at each waypoint: faded division icon + faded engagement circle;
+            observation radius shown on hover only; estimated arrival time tooltip
+      - [ ] Ghost dots and paths: visible to owner and allies; visible to enemy/neutral
+            only if ghost dot falls within their observation radius
+- [ ] Hotkey system: Q=Military, E=Economy, R=Diplomacy, F=Politics, Tab=toggle panels,
+      M=Move, H=Hold, G=Retreat, X=Cancel, all remappable via InputMap
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
@@ -336,6 +358,10 @@ for all attack pattern logic before any Godot work.
   - [ ] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
         targets first row with at least one living unit; damage distributed only among
         living units in that row)
+  - [ ] Cavalry — horizontal attack like infantry; charge bonus (higher HP damage and
+        suppression) in Round 1 only; standard infantry values from Round 2+; very high
+        MG suppression vulnerability; moderate-high observation radius contribution;
+        moderate stealth in forest/hills; fastest off-road unit type in movement profile
   - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
         column shift disabled in dense_forest and urban terrain
   - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift;
@@ -401,7 +427,9 @@ for all attack pattern logic before any Godot work.
 - [ ] `DivisionBuilder` (MVP) — template builder UI in main menu; create/edit/save custom
       templates; shows movement profile summary (which terrains are impassable, slowest
       terrain); formation bonus preview (highlight when placing adjacent synergy units);
-      select from nation presets in lobby
+      select from nation presets in lobby; cavalry unit available to all nations per
+      nation_config; motorised toggle available after motorisation research (Phase 8);
+      mechanised infantry unit available after armour research branch unlocks it (Phase 8+)
 - [ ] Template redeployment — switch template when out of combat; 1-minute flat cooldown;
       division redeploys at nearest friendly city; experience on existing units lost on redeploy
 - [ ] Movement profile displayed on division selection — player can see what terrain their
@@ -498,26 +526,34 @@ Create custom template in main menu → start game → redeploy a division to th
 
 ---
 
-## Phase 8 — Economy + Diplomacy
+## Phase 8 — Economy + Diplomacy + General Technology
 
 **Goal:** Resources accumulate, buildings can be constructed, players can form alliances
-and declare war.
+and declare war. General Technology research (motorisation) is available.
 
 **Testing:** Bot client for diplomacy (needs two-player proposals/responses).
 
 ### Colyseus
 - [ ] Economy tick — resource generation per province per tick, stored in player state
 - [ ] `BUILD` handler — construct buildings in provinces (costs resources); supply hub,
-      fort, port, airbase, factory
+      fort, port, airbase, factory, barracks
+- [ ] General Technology research panel — motorisation node (mid-tier); once researched,
+      applicable infantry units can be toggled to motorised versions in template builder;
+      movement profile recomputed on toggle; zero grid combat stat change
 - [ ] `PROPOSE_DIPLO`, `RESPOND_DIPLO`, `BREAK_DIPLO` handlers
 - [ ] Relation state updates, `DIPLO_PROPOSAL`, `DIPLO_ACCEPTED`, `DIPLO_REJECTED` events
 - [ ] Alliance combat rules — allied units do not engage each other
+- [ ] Map-sharing agreement — allied nations can see all division dots, paths, and
+      composition of each other regardless of observation radius
 
 ### Godot
 - [ ] `EconomySystem` — resource bars, production display from GameState
 - [ ] `DiplomacySystem` — proposal cache, propose/respond methods
-- [ ] `DiplomacyUI` panel — propose alliance, accept/reject incoming proposals, treaty list
+- [ ] `DiplomacyUI` panel — propose alliance, accept/reject incoming proposals, treaty list,
+      map-sharing agreement option
 - [ ] `EconomyUI` panel — resource overview, province production detail, build queue
+- [ ] `ResearchUI` panel — General Technology tree; motorisation node; research progress;
+      motorised toggle per unit type in DivisionBuilder unlocks after research completes
 
 ### Verification gate
 Resources tick up → build a supply hub → propose alliance to bot → bot accepts → bot's units

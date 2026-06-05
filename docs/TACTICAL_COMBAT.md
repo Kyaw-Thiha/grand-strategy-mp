@@ -434,6 +434,114 @@ tier. This makes elite commando and stealth AT units extremely valuable across a
 
 ---
 
+### Cavalry — off-road exploitation and reconnaissance
+
+**Units:** Mounted cavalry, horse-drawn scouts.
+
+**Availability:** Available to all nations from game start on the current western Europe
+map. Nation-specific availability and bonuses are configurable via `nation_config` per
+map for future historical scenarios.
+
+**Grid combat role:** Horizontal attack like infantry. Gains a **charge bonus in Round 1
+only** — increased HP damage and suppression in the opening round before the enemy can
+react to mounted assault. After Round 1, combat values drop to standard infantry levels.
+Cavalry cannot sustain a prolonged firefight effectively — it is a shock unit, not a
+grinding unit.
+
+**Damage profile:**
+- Round 1: charge bonus — high HP damage and suppression vs infantry targets
+- Round 2+: standard infantry values
+- Highly vulnerable to MG fire — MG units are the primary hard counter to cavalry.
+  Artillery suppression affects cavalry less than infantry (horses scatter and reform
+  faster than stationary troops under bombardment)
+
+**Strategic movement profile:**
+- **Fastest off-road unit in the game** across most terrain types
+- Particularly strong in forest, hills, and rough steppe — terrain that slows vehicles
+  but not horses
+- Slower than motorised units on paved roads (horses vs trucks on highways)
+- Impassable in: swamp, glacier (same as all units)
+- Future module: winter conditions penalty-free for cavalry while mechanised divisions
+  are severely slowed — models historical utility of cavalry in Russian winters
+
+**Observation contribution:** Medium-high — cavalry units contribute meaningfully to the
+division's observation radius, second only to dedicated recon armoured cars. Fast-moving
+horse scouts cover ground quickly and report enemy positions.
+
+**Stealth:** Moderate in forest and hills; low in plains; zero in desert. A cavalry force
+moving through forest is harder to detect than a motorised column.
+
+**Design intent:** Cavalry is an early-game and terrain-specific tool. It provides fast
+off-road force projection before motorisation research is available, and retains a niche
+advantage on forest-heavy maps and in rough terrain throughout the game. It becomes less
+central as mechanisation progresses but is never useless in the right context.
+
+---
+
+### Motorisation and Mechanisation
+
+**Motorisation — single global research:**
+Motorisation is a standalone research node in the General Technology panel (not part of
+any unit specialisation tree). It represents the nation building sufficient truck
+production capacity to transport infantry by vehicle.
+
+- Once researched, most infantry unit types can be toggled to their motorised version
+  in the division template builder
+- **Effect:** purely strategic map speed upgrade — on-road and off-road movement costs
+  improve to motorised profile values. Zero change to 5×5 grid combat stats
+- **Units that can be motorised:** standard infantry, assault infantry, MG teams, AT
+  infantry, recon infantry, flamethrower teams — any unit that would realistically
+  ride in a truck
+- **Units that cannot be motorised:** snipers (stealth role requires independent movement),
+  commandos (same — unconventional movement is their core trait), towed AT guns and
+  artillery (these already have towed-motorised movement costs baked into their base
+  profile; the gun itself doesn't change, only the towing vehicle)
+- Sits at mid-tier in the General Technology panel — available after meaningful economic
+  investment but not a late-game unlock. Historically major powers had motorised
+  divisions from 1939
+
+**Mechanisation — armour research branch:**
+Mechanisation is a distinct unit type (mechanised infantry) unlocked via the armour
+research branch, not the infantry branch. Historically, mechanised infantry emerged from
+panzer division doctrine — the Panzergrenadier concept grew from combined-arms armour
+doctrine, not from infantry development.
+
+- Requires medium tank research tier to be reached first before the mechanised infantry
+  branch unlocks — representing that APCs only make sense in the context of a tank force
+  to integrate with
+- Mechanised infantry is a **different unit type in the 5×5 grid**, not a toggled version
+  of standard infantry:
+  - Partial armour value (vulnerable to AT weapons but resistant to small arms suppression)
+  - Cannot be fully suppressed by MG fire alone
+  - Higher off-road movement capability than motorised infantry (tracked or heavy
+    all-wheel drive vehicles)
+  - Higher cost per unit to build and maintain
+- Specialisation path within the branch: basic APC (half-track) → improved APC (full
+  tracked) → infantry fighting vehicle (IFV, provides fire support from the vehicle)
+- Each upgrade improves the unit's armour value and suppression resistance in the grid
+
+**Research tree structure summary:**
+```
+General Technology panel:
+└── Motorisation ─── enables motorised toggle for applicable infantry
+
+Armour research branch:
+├── Light tank
+├── Medium tank
+│   └── Mechanised infantry (APC half-track)
+│       └── Improved APC (full tracked)
+│           └── IFV
+└── Heavy tank
+```
+
+**Horse-drawn logistics (implicit, no separate mechanic):**
+Artillery and heavy weapons before motorisation research are implicitly horse-drawn —
+their base movement profile represents draught horse speed (faster than foot infantry
+on roads, slower than trucks). When motorisation is researched and toggled, those units
+switch to truck-towed movement costs. No separate horse logistics unit is required.
+
+---
+
 ## Armour Penetration System
 
 Armoured units have two armour values:
