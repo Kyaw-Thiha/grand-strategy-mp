@@ -403,14 +403,26 @@ Higher levels generate more passive income and can sustain higher-volume resourc
 Multiple ports in the same province each have their own port level — a province with two
 ports can have one developed into a major trading hub while the other remains basic.
 
-**Naval base level** — governs ship refit speed, refit capacity (how many ships can refit
-simultaneously), and ship repair rate. Higher levels mean faster refit queues and more
-flotillas that can use the port concurrently.
-Additionally: **higher naval base level provides HP damage reduction to ships docked at
-that port** — proportional to base level. At level 1, minimal protection (~10–15% reduction).
-At maximum level, substantial protection (~40–50% reduction). This models hardened dry
-docks, shore-based AA batteries, and port infrastructure. Ships must be stationary at port
-to receive this protection — ships underway get none.
+**Naval base level** — governs ship refit speed, repair speed, repair capacity, and
+new ship construction throughput. The three functions share the same base capacity pool:
+
+- **Repair rate:** damaged ships recover HP at a rate proportional to naval base level.
+  A level 1 base repairs slowly; a max-level base repairs quickly
+- **Repair capacity:** the number of ships that can be repaired simultaneously equals
+  the naval base level. A level 3 base can repair 3 ships at once; additional damaged
+  ships queue and wait
+- **Construction interaction:** repair and new ship construction share the same base
+  capacity. When repair slots are occupied, new ship construction slows proportionally
+  or stops temporarily if all slots are full. A player who takes heavy fleet damage must
+  choose: accept slow reconstruction while repairing, or queue construction and repair
+  only after new ships are built. This creates meaningful strategic tension between fleet
+  recovery and fleet expansion after a major engagement
+- **Refit capacity:** ship refitting also competes for the same slots as repair.
+  Repair takes priority over refit when a ship arrives damaged at port
+- **HP damage reduction for docked ships:** higher naval base level provides damage
+  reduction to ships docked at that port during enemy port strikes. At level 1: ~10–15%
+  reduction. At maximum level: ~40–50% reduction. Hardened dry docks and shore AA
+  batteries model this. Ships underway receive no port protection
 
 **Supply base level** — acts as a supply hub for nearby land units, identical in function
 to the inland supply hub building. Generates supply flow into the road network from the port
@@ -572,6 +584,110 @@ harder to attribute.
 
 ---
 
+## Naval Zone Lethality and Damage-Repair System
+
+### Design principle
+
+Naval combat is about cumulative damage leading to forced withdrawal and repair, not
+instant destruction per engagement. Ships are individually significant — a destroyer that
+survives a torpedoing and limps back to port is a meaningful outcome, not a game failure.
+Only the Strike zone produces the sustained lethal combat where ships fight to destruction.
+
+### Screen zone lethality
+
+Skirmishing at extreme range. The majority of fire is inconclusive.
+
+**Submarines:**
+- If Active mode and **undetected**: fires freely at convoy targets or capital ships;
+  takes minimal return fire (depth charges are probabilistic, rarely fatal on first pass);
+  chip damage only to the submarine
+- If Active mode and **detected + pinned by ASW destroyer**: forced toward the surface;
+  exposed to destroyer gunfire; **high lethality** — a pinned submarine can be destroyed
+  in the Screen zone. This is the primary submarine destruction mechanic
+- If Silent mode: takes no damage regardless of proximity — enemy cannot engage what they
+  cannot find
+
+**Destroyers and light surface ships:**
+- Low lethality vs each other at Screen range — long-range gunnery and torpedo shots are
+  mostly inconclusive in random 30–50% participation rounds
+- Primary risk: torpedo hit from a submarine that gets a shot off before being detected.
+  A torpedo hit in Screen zone forces the destroyer to withdraw to port for repair
+
+**Larger surface ships (cruisers and above):**
+- Not typically engaged at Screen range — they do not participate in Screen zone firing
+  unless the engagement deepens. Screen range damage to capital ships is near-zero
+
+**Outcome:** Most Screen zone engagements result in damaged ships withdrawing to port for
+automatic repair. Destruction is rare except for submarines that are detected and pinned.
+
+### Engagement zone lethality
+
+Moderate lethality — damage accumulates meaningfully over rounds.
+
+**Cruisers vs cruisers:** Accurate medium-range gunnery causes real structural damage each
+round. Over several rounds, the losing side accumulates enough damage to trigger withdrawal.
+Rarely destroyed in a single engagement unless hopelessly outmatched.
+
+**Destroyers:** Higher risk here than in Screen zone — now exposed to accurate cruiser fire.
+A destroyer that fires its torpedoes and misses is briefly defenceless against cruiser
+return fire. Destroyers can be destroyed in the Engagement zone, but usually withdraw
+when HP drops to a threshold before that point.
+
+**Submarines:** Increasingly exposed at Engagement range. Higher ASW detection from
+destroyers, and now also within range of cruiser weapons if surfaced. A submarine forced
+to the surface in the Engagement zone is in significant danger.
+
+**Battleships (long-range artillery role):** Deal 20–30% of their Strike-range output.
+Can cause meaningful damage to enemy cruisers over many rounds but rarely decisive alone.
+
+**Outcome:** Damaged ships withdraw to port for automatic repair. Destruction more likely
+than in Screen zone, especially for destroyers and submarines.
+
+### Strike zone lethality
+
+Decisive action. All ships fight to the end.
+
+**No withdrawal from Strike zone during combat.** Once in Strike range, damaged ships
+fight on with debuffs rather than withdrawing:
+- Reduced accuracy (damaged fire control systems)
+- Reduced torpedo capacity (damaged launchers)
+- Reduced movement speed within the zone (damaged engines — relevant for zone transition
+  if the player attempts to disengage)
+
+Ships are destroyed only when HP reaches zero. This is the zone where fleet actions are
+decided. The commitment cost is high — entering Strike range means accepting casualties,
+not just damage.
+
+**Battleships at full effectiveness:** Devastating against any target. High HP, high armour —
+only other battleships, torpedoes, and aircraft cause meaningful damage. A battleship in
+Strike range of a cruiser force without its own capital ship escorts will destroy the
+cruisers but the cruisers' torpedoes may still inflict serious damage in return.
+
+**Carriers exposed:** The carrier hull becomes a target for enemy surface fire. Aircraft
+still operate but the carrier itself accumulates HP damage. A destroyed carrier loses its
+aircraft complement — the most costly single loss possible in a fleet engagement.
+
+### Automatic repair
+
+When a ship withdraws from combat (Screen or Engagement zone) or when an engagement ends
+with the ship still afloat, it automatically begins repair when it returns to a friendly
+port:
+
+- **Repair rate:** proportional to naval base level at the port
+- **Repair capacity:** number of ships repaired simultaneously = naval base level
+  (additional ships queue)
+- **Construction competition:** repair slots are shared with new ship construction.
+  Ships queue for repair before construction resumes. A player who takes heavy fleet damage
+  must choose between fleet recovery (repair) and fleet expansion (construction)
+- **Refit competition:** repair takes priority over refit. A damaged ship arriving at
+  port jumps the refit queue
+- **Automatic return to fleet:** once repaired to full HP, the ship automatically rejoins
+  its assigned flotilla. No player action required
+
+**Notification:** "Ship repaired — [name] — rejoining [flotilla name]"
+
+---
+
 ## Research and Refit System
 
 ### Philosophy
@@ -675,6 +791,14 @@ submarines detectable. Silent submarines have reduced but non-zero detection sig
 - Battleship and heavy cruiser long-range artillery damage fraction in Engagement zone
   (target: 20–30% of Strike-range output)
 - Torpedo reload duration (number of rounds between volleys per ship)
+- HP withdrawal threshold in Engagement zone before ship auto-retreats to port
+  (distinct from Strike zone where ships fight to zero HP)
+- Repair rate per naval base level (target: level 1 repairs slowly over ~5-10min
+  of game time; max level repairs in ~1-2min)
+- Construction slowdown formula when repair slots occupied (proportional reduction
+  vs full stop — proportional is more nuanced; full stop is simpler)
+- Strike zone combat debuff values for damaged ships (accuracy reduction,
+  torpedo capacity reduction, speed reduction)
 - Maximum flotilla size (target: 15–20 ships)
 - Refit duration per ship at port (target: 1–2 minutes)
 - Coastal submarine stealth bonus magnitude vs ocean-going

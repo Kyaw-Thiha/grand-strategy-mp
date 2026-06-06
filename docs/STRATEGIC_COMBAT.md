@@ -184,6 +184,29 @@ Each division is represented as a dot on the strategic map with two concentric a
 - Neutral nations: see province-level frontline colour wash but not division dots
   or paths outside their own observation areas
 
+**Scouting range (shorter inner circle, inside observation range):**
+- A second, shorter-radius circle within which partial-to-full enemy composition
+  becomes visible — rather than just seeing the dot and its movement
+- At base scouting range (standard recon infantry): unit category counts visible
+  (e.g. "3 armoured, 8 infantry, 2 support") but not specific types
+- At upgraded scouting (research-improved recon unit): specific unit types visible
+  (e.g. "medium tanks, MG teams, AT guns")
+- At maximum scouting (elite recon armoured car, highest research tier): full grid
+  composition visible — exactly what units are in the enemy 5×5 grid
+- **Scouting radius determination:** max of recon units in the template (same rule
+  as observation radius — not cumulative). Research upgrades two separate axes per
+  recon unit: (1) scouting radius and (2) composition detail quality. Both increase
+  independently on the recon unit research tree
+- Scouting range is not shown by default on the map — only shown when the player
+  hovers over an enemy division dot that is within scouting range. A partial or full
+  composition panel appears on hover
+- **Historical grounding:** US military doctrine explicitly classified recon as
+  close/short-range (composition detail) and distant/long-range (position and
+  movement only). The two-range system directly reflects this doctrine
+- Stealth units in the enemy division are not revealed by scouting unless the
+  scouting unit has sufficient anti-stealth level (same anti-stealth rules as
+  tactical grid)
+
 **Engagement area (smaller radius):**
 - Set per division **type** — not per template composition. Division type is the dot's
   strategic identity on the map:
@@ -290,6 +313,26 @@ eliminates it permanently — which in a 1–4 hour session is a session-definin
 
 ---
 
+
+## Move Order Persistence Through Combat
+
+**Move orders survive engagement initiation.** A division with an active move order that
+gets pulled into combat does not lose its order. After the combat resolves (if the division
+did not retreat or get destroyed), it automatically resumes following the move order from
+its current position.
+
+**Move orders can be issued during combat.** While a division is actively engaged, the
+player can issue a move order for it to execute after the combat concludes. The division
+queues the order and acts on it once the engagement ends.
+
+**Defender status is locked at combat initiation.** Issuing a move order to a defending
+division during combat does not reclassify it as an attacker. The attacker/defender
+determination (see four-tier system above) is fixed at the moment combat begins and does
+not change based on orders issued afterward. A defending division given a move order
+mid-combat is still a defender for all terrain bonus and suppression threshold purposes —
+it simply has a queued destination it will head to after the fight.
+
+---
 
 ## Movement UX and Hotkeys
 

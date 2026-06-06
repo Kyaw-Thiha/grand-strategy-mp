@@ -226,8 +226,23 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] River crossing check at combat initiation — line segment between division centres
       intersects rivers.geojson → penalty applied to attacker for rounds 1-2 (minor) or
       1-3 (major)
-- [ ] Observation area — divisions within observation radius appear as dots; composition
-      reveals progressively with observation value
+- [ ] Observation area — divisions within observation radius appear as dots;
+      movement path visible if within observation range
+- [ ] Scouting range (shorter inner circle within observation area):
+      - [ ] At base scouting range: unit category counts visible to enemy player
+            (e.g. '3 armoured, 8 infantry') but not specific unit types
+      - [ ] At upgraded scouting (research): specific unit types visible
+      - [ ] At max scouting tier: full 5×5 grid composition visible
+      - [ ] Scouting radius = max recon unit scouting range in template
+      - [ ] Research upgrades two axes per recon unit: radius and detail quality
+      - [ ] Scouting range circle shown only on hover of enemy dot within range;
+            composition panel appears on hover
+      - [ ] Stealth units not revealed by scouting unless anti-stealth level met
+- [ ] Move order persistence:
+      - [ ] Divisions with active move orders resume them after combat if not retreated
+      - [ ] Move orders can be issued during combat; queued for post-combat execution
+      - [ ] Defender status locked at combat initiation — move order given during
+            combat does not reclassify defending division as attacker
 - [ ] Strategic combat resolution (simplified) — HP and suppression tracked at division
       level (no 5×5 grid yet); combat ticks apply attrition per round
 - [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
@@ -391,6 +406,16 @@ for all attack pattern logic before any Godot work.
 - [ ] Suppression decay per round (base rate); 2–3× faster during retreat; no instant reset
 - [ ] Division-level suppression threshold (base 60%) → feeds Suppressed state in strategic
       layer; stealthed units excluded from threshold calculation
+- [ ] Unit incapacitated state:
+      - [ ] Infantry/cavalry/sniper/commando/flamethrower/MG/AT-inf/recon-inf: incapacitate
+            at ~20% HP — zero damage, zero suppression, not targeted, not counted toward
+            retreat threshold, HP stops decaying from combat
+      - [ ] Armoured units: incapacitate at ~30% HP (mobility kill threshold)
+      - [ ] Artillery, towed AT gun, AA gun: no incapacitation — fight until destroyed
+      - [ ] Incapacitated units recover HP via supply when division not engaged
+      - [ ] Experience on incapacitation: unit retains 60% of combat experience gained
+      - [ ] Incapacitated units destroyed if division is destroyed (even at HP > 0)
+      - [ ] `UNIT_INCAPACITATED`, `UNIT_RECOVERED` events
 - [ ] Armour penetration scale (60/70/80/90/100% thresholds → 0/20/30/40/70/100% damage)
 - [ ] Stealth system — stealthed units deal damage, cannot be targeted, excluded from retreat
       threshold; destroyed division puts stealthed units into reserve with experience retained
@@ -666,8 +691,11 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       level, supply base level — each built and levelled separately with resources
 - [ ] Multiple ports per province each have their own independent upgrade levels
 - [ ] Port level: passive income per tick scales with level; trade route throughput capacity
-- [ ] Naval base level: refit speed and capacity; ship HP damage reduction for docked ships
-      (target: ~10–15% at level 1, ~40–50% at max level); applies only to docked ships
+- [ ] Naval base level: governs repair rate, repair capacity (simultaneous ships = base
+      level), refit capacity, and new ship construction throughput — all share the same
+      slot pool; repair takes priority over refit; repair slots occupied → construction
+      slows proportionally or stops if all slots full; HP damage reduction for docked
+      ships (~10–15% at level 1, ~40–50% at max); applies only to docked ships
 - [ ] Supply base: acts as supply hub (same graph flow as Phase 6 inland supply hubs);
       deactivates when port sea zone is under full blockade (Engagement range or deeper)
 - [ ] Coastal battery building: fires at surface flotillas overlapping port sea zone at any
@@ -735,6 +763,25 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       in patrolled zones
 - [ ] Naval supply interdiction: Active submarine flow reduction on coastal supply paths
       (feeds Phase 6 supply graph)
+- [ ] Zone lethality system:
+      - [ ] Screen zone: ship withdrawal when HP drops to threshold (not zero);
+            submarines destroyed if detected+pinned, otherwise withdraw damaged;
+            Active-mode undetected submarine takes chip damage only
+      - [ ] Engagement zone: higher lethality than Screen; damaged ships withdraw
+            to port at HP threshold; destroyers and submarines can be destroyed here
+      - [ ] Strike zone: no withdrawal during combat; ships fight to HP zero;
+            damaged ships receive combat debuffs (accuracy, torpedo capacity, speed)
+            but remain in combat
+- [ ] Automatic repair system:
+      - [ ] Damaged ships auto-queue for repair on arriving at friendly port
+      - [ ] Repair rate proportional to naval base level
+      - [ ] Repair capacity = naval base level (additional ships queue)
+      - [ ] Repair slots shared with construction: occupied repair slots slow
+            new ship construction proportionally
+      - [ ] Refit queued behind repair for same ship (repair takes priority)
+      - [ ] Ship auto-rejoins assigned flotilla at full HP — no player action needed
+      - [ ] `SHIP_DAMAGED`, `SHIP_WITHDRAWN`, `SHIP_REPAIRING`, `SHIP_REPAIRED`,
+            `CONSTRUCTION_SLOWED` events
 - [ ] Port strike: naval base level reduces damage to docked ships
 - [ ] Naval strike handler
 - [ ] `NAVAL_CONTACT`, `NAVAL_ENGAGEMENT`, `NAVAL_STRIKE`, `FLOTILLA_DESTROYED`,
@@ -783,6 +830,17 @@ reduces battery HP loss → fort must be destroyed over multiple rounds before b
 offline. Naval base level 3 port → docked ships take ~35% reduced damage from port strike.
 
 ---
+Repair/construction: fleet takes damage in Engagement zone → ships withdraw to port
+automatically → repair queue fills to naval base level capacity → new construction
+slows → ships repaired in order → auto-rejoin flotilla → construction resumes.
+Zone lethality: ship in Strike zone takes damage → continues fighting with debuffs
+(reduced accuracy visible in damage output) → not destroyed until HP reaches zero.
+Screen zone submarine detection: ASW destroyer detects Active submarine → submarine
+takes significant damage → destroyed before it can disengage.
+Scouting: own recon armoured car division approaches enemy division → within scouting
+radius → hover enemy dot → partial composition panel appears → upgraded recon → full
+grid composition revealed. Move order: division with move order engages enemy → combat
+resolves → division automatically resumes move order from current position.
 
 ## Phase 11 — Steam Auth Swap + Polish
 

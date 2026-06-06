@@ -542,6 +542,59 @@ switch to truck-towed movement costs. No separate horse logistics unit is requir
 
 ---
 
+## Unit Incapacitated State
+
+When a unit's HP drops below a threshold, it enters **Incapacitated** state rather than
+being destroyed. This models the historical reality that most front-line units go to ground
+and stop contributing long before they are completely eliminated.
+
+### HP floor thresholds
+
+| Unit category | Incapacitation threshold | Rationale |
+|---|---|---|
+| Infantry, MG, AT infantry, cavalry, sniper, commando, flamethrower, recon infantry | 20% of max HP | Leg infantry can go to ground and survive |
+| Armoured units (light/medium/heavy tank, armoured car) | 30% of max HP | Mobility kills (broken track, wounded crew) happen before total destruction |
+| Artillery, towed AT gun, AA gun | **No incapacitation** | Crew-served weapons cannot easily be abandoned; crews fought until overrun |
+
+### Incapacitated state behaviour
+
+While incapacitated:
+- Deals zero damage and zero suppression — completely out of the fight
+- Not targeted by enemy attacks (below the threshold of "worth shooting at")
+- Not counted toward the division's retreat/destroy suppression threshold
+  (same exclusion rule as stealthed units)
+- HP does not decay further from combat damage — the unit is out of the fight,
+  not continuing to die
+- Recovers HP via supply at the standard rate once the division is no longer engaged
+
+### Experience on incapacitation
+
+A unit that went incapacitated during combat retains **60% of the experience** it would
+have gained that combat. The unit did not fight through to the end — partial credit only.
+
+If the **division is destroyed** while units are incapacitated, those units are also
+destroyed even though their HP is above zero. Experience is lost entirely in this case.
+The incapacitated state only preserves units if the division survives the engagement.
+
+### What this prevents
+
+Without this mechanic, a heavily damaged division that loses its front-line infantry would
+have those units permanently destroyed — losing both their combat contribution and their
+accumulated experience. With the floor, damaged front-line units drop out of the fight
+temporarily but survive to recover. Players are less catastrophically punished for
+sustaining damage, while the strategic cost of losing a battle (retreat, supply disruption,
+HP recovery time) is preserved.
+
+### Future extensibility
+
+Doctrines can modify this mechanic:
+- "Total war" doctrine: removes the incapacitation floor for a unit type — push through
+  to the last man (higher lethality, more experience loss)
+- "Manoeuvre doctrine": incapacitated units recover HP faster from supply
+Not implemented in the base game — the mechanic is designed to be extensible.
+
+---
+
 ## Armour Penetration System
 
 Armoured units have two armour values:
@@ -855,6 +908,9 @@ The panel can be closed at any time. Combat continues regardless.
 - Flank attack bonus percentage at strategic layer
 - Armour pen values per AT variant vs armour values per tank variant (coupled balance)
 - Exact suppression output values: MG vs flamethrower vs AT (AT must be very low)
+- Incapacitation HP floor values (confirmed qualitatively: infantry ~20%,
+  armour ~30%, artillery has no floor — exact values from playtesting)
+- Experience retention on incapacitation (confirmed: 60% of combat gain)
 - Column shift flanking and envelopment damage multiplier values
 - Row perk percentage bonuses (R5 suppression%, R4 HP damage%, R3 suppression resistance%,
   R2 decay rate multiplier) — all confirmed qualitatively, exact values from playtesting
