@@ -78,16 +78,41 @@ division cannot enter it off-road. The weighted formula only applies to passable
   to the movement profile on next recomputation. No new division types needed.
 
 **Division type classification (engagement radius only):**
-The division type is determined by the dominant unit category by cell count in the filled
-cells:
-- Armoured cells (light/medium/heavy tank, armoured car) >= 40% of filled cells:
-  Armoured division (largest engagement radius)
-- Armoured cells 15-39%: Motorised/mixed division (medium-large radius)
-- Armoured cells < 15%, support cells (AT gun, AA gun, artillery) > 30%: Defensive
-  division (smallest radius)
-- Otherwise: Infantry division (medium radius)
+Three types, derived from template composition. No "Defensive" type — division type
+is purely a derived label for engagement radius and map icon; it does not affect
+movement costs or combat stats.
 
-These thresholds are tunable. Nation preset templates are already classified correctly.
+- Armoured cells (light/medium/heavy tank, armoured car) >= 40% of filled cells:
+  **Armoured division** — smallest engagement radius (precision instrument; player
+  controls exactly when it commits; tight footprint avoids accidental engagements)
+- Armoured cells 15–39%: **Motorised/mixed division** — medium radius
+- Otherwise: **Infantry division** — largest engagement radius (holds wide front
+  line; forward scouts range far; makes contact earliest on broad front)
+
+**Why infantry has the largest radius:** Infantry spreads across terrain and
+maintains a wide screen. Armoured divisions concentrate combat power and choose
+when to commit — a small radius gives the player that deliberate control. A large
+armoured radius would cause accidental engagements mid-manoeuvre and make flanking
+moves harder (the flanking division clips the enemy's engagement area too early).
+
+**Engagement radius formula (composition-based, tunable):**
+```
+base_radius        = 50  # infantry floor (map units)
+armoured_fraction  = armoured_cells / total_filled_cells
+cavalry_fraction   = cavalry_cells  / total_filled_cells
+
+radius = base_radius
+       - (max(0, armoured_fraction - 0.15) / 0.10) * 5   # -5 per 10% armour above 15%
+       - (cavalry_fraction / 0.10) * 2                    # -2 per 10% cavalry
+radius = clamp(radius, 30, 50)                            # floor 30, ceiling 50
+```
+
+Approximate results:
+- Pure infantry template: ~50 map units
+- Motorised mix (25% armoured): ~42 map units
+- Heavy armoured (60% armoured): ~30 map units (floor)
+
+Recomputed whenever the template is saved — same trigger as the movement profile.
 
 ### Pathfinding Architecture
 
@@ -207,30 +232,54 @@ Each division is represented as a dot on the strategic map with two concentric a
   scouting unit has sufficient anti-stealth level (same anti-stealth rules as
   tactical grid)
 
-**Engagement area (smaller radius):**
-- Set per division **type** — not per template composition. Division type is the dot's
-  strategic identity on the map:
-  - Armoured division: largest engagement area (aggressive, fast-moving)
-  - Motorised division: medium-large
-  - Infantry division: medium
-  - Defensive / fortified division: smallest (holds ground, does not reach out)
+**Engagement area (composition-based radius, circular):**
+- Radius computed from template composition at save time (see Division Movement Profile
+  section for the formula). Infantry division: ~50 map units. Armoured division: ~30
+  map units. Smaller armoured radius gives the player precise control over when the
+  division commits — avoiding accidental engagements mid-flanking-manoeuvre
+- **Visible to both own and enemy players** — own engagement area shown as a solid
+  circle; enemy engagement areas shown as a faded/dashed circle. This is essential
+  for players to judge flanking angle and avoid accidental contact
 - When two engagement areas **fully overlap**, tactical combat initiates automatically
-- Partial overlap does not trigger combat — the observation area handles the pre-contact
-  warning window. There is no third intermediate state between observation contact and
-  full combat
+  using the attacker/defender determination system
+- Partial overlap does not trigger combat — observation area handles pre-contact
+  warning. No third intermediate state between observation contact and full combat
 - Combat initiation is a consequence of movement decisions, not a separate button
 
 ### Flanking at the strategic layer
 
-When a division is already engaged in tactical combat and a second enemy division's
-engagement area fully overlaps it simultaneously, the second division gains a **flank
-attack bonus** — a percentage bonus to all damage dealt in its tactical grid combat
-against the engaged target.
+When a second enemy division's engagement area overlaps a division already in tactical
+combat, flanking may apply — but only if the angle between the two attackers is
+sufficiently wide. Two units attacking from roughly the same direction is weight of
+numbers, not flanking.
 
-When the flanking division is itself engaged by a friendly ally unit committing to the
-fight, the flanking division stops attacking the original target and redirects to the new
-threat. This allows players to relieve a division under pressure by committing a supporting
-force — rescuing a failing engagement is a real strategic option.
+**Angle-based flanking determination:**
+The angle is measured at the defender's position, between the two lines connecting the
+defender to each attacker (dot product of the two vectors). Classification is set at
+the moment the second division's engagement area first overlaps — not continuously
+updated mid-combat, preventing unexpected bonus loss from minor positional drift.
+
+| Angle between attackers (at defender) | Classification | Tactical bonus |
+|---|---|---|
+| < 90° | Converging frontal assault | No flanking bonus — weight of numbers only |
+| 90°–135° | Flank attack | Standard flanking bonus (% damage increase) |
+| 135°–180° | Deep flank / rear attack | Enhanced flanking bonus (enemy facing away) |
+
+**Why 90° as the threshold:** A second attacker at exactly 90° to the primary
+attacker is perpendicular to the main axis of engagement — the true geometric flank.
+Anything less is still broadly frontal. The 135° threshold for rear attack reflects
+that the defender's formation is now facing away from one attacker entirely.
+
+**Engagement area visibility enables flanking play:** Because enemy engagement areas
+are visible as faded circles, a player can judge whether their manoeuvring division
+will reach the 90° threshold before committing. Without that visibility, flanking
+angle is guesswork. This is why engagement area visibility is confirmed for both
+own and enemy divisions.
+
+**Relief mechanic:** When the flanking division is itself engaged by a friendly ally
+unit, it redirects to the new threat and stops attacking the original target. This
+allows players to relieve a division under pressure — rescuing a failing engagement
+by committing a supporting force that pulls the flanker's attention away.
 
 ---
 
@@ -821,6 +870,50 @@ implemented in the base game — the mechanism is confirmed.
 
 ---
 
+## Division Status Visual Indicators
+
+All status indicators are visible on the strategic map without opening any panel.
+They stack cleanly — a division can show multiple simultaneous indicators.
+The encircled ring is always the most visually dominant; all others are secondary.
+
+### Division dot states
+
+| Status | Visual indicator | Notes |
+|---|---|---|
+| Normal | Standard NATO rectangle icon | No overlay |
+| Engaged | Combat icon appears over engagement point; division dot pulses subtly | Combat icon shows HP bars, round phase dots, suppression pulse |
+| Out of Supply (Tier 1) | Small amber supply icon below division dot | Warning — demands attention but not urgent |
+| Cut Off (Tier 2) | Supply icon turns red; broken chain symbol appears | More prominent — action required |
+| Encircled (Tier 3) | Red ring around the division dot (the Kessel symbol) | Most dominant indicator — unmistakable |
+| Flanked (standard, 90°–135°) | Small diagonal arrow on the flanking division dot | Communicates to both players: flanker knows bonus is active; defender knows they are flanked |
+| Rear attacked (deep flank, 135°–180°) | Double diagonal arrow on the flanking division dot | Enhanced bonus version |
+| Meeting battle | Distinct combat icon (two arrows meeting head-on) | Different from the standard crossed-swords engaged icon |
+| Retreating | Retreat arrow on dot pointing direction of movement | Distinct from normal move order arrow |
+| Redeploying | Dot greyed out with gear/refresh symbol | Template switch in progress; 1-minute cooldown |
+| Incapacitated units | Visible only inside the 5×5 grid panel (greyed-out cell slots) | Not shown on strategic map — grid-level detail only |
+
+### Tactical combat pop-up
+
+When two divisions are engaged, a **combat button** appears on the combat icon — a small
+crossed-swords symbol distinct from the icon itself. Clicking it opens the 5×5 vs 5×5
+tactical grid panel as an overlay. The panel shows:
+
+- Both 5×5 grids live with per-unit HP and suppression bars
+- Experience tier badge per unit cell (Green/Seasoned/Veteran/Elite)
+- Formation bonus indicators — glow on cells with active adjacency synergies
+- Active row perk labels per row
+- Attack pattern overlay for the current round
+- Recon value accumulation indicator
+- Terrain modifier display (e.g. "Dense forest — armour flanking disabled")
+- River crossing penalty indicator and remaining rounds if active
+- Round timer countdown (Contact / Firefight / Intense / Decisive / Annihilation)
+- Flanking angle indicator if a second attacker is present (showing the measured angle
+  and which bonus tier is active)
+
+The panel can be closed at any time. Combat continues regardless of whether it is open.
+
+---
+
 ## Combat States
 
 Every division cycles through the following states. All simulation is server-side (Colyseus).
@@ -910,8 +1003,13 @@ number — it is the difference between losing one division and losing the front
   3–5 ticks; zero output after ~8–10 ticks fully encircled)
 - Encirclement suppression threshold reduction rate (how fast does morale break under
   encirclement pressure)
-- Division type classification thresholds (confirmed: armoured >= 40%, motorised 15–39%,
-  defensive > 30% support cells; exact values from playtesting)
+- Division type classification thresholds (confirmed: armoured >= 40%, motorised
+  15–39%; no Defensive type; exact boundary values from playtesting)
+- Engagement radius formula constants (confirmed: base 50 infantry, -5 per 10%
+  armoured above 15%, -2 per 10% cavalry, clamp [30, 50]; exact values from
+  playtesting — particularly the floor of 30 and ceiling of 50)
+- Flanking angle bonus percentages (standard flank bonus % and enhanced rear
+  attack bonus % — qualitatively confirmed, exact values from playtesting)
 - Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
   — balance between path quality and graph size)
 - Movement profile recomputation trigger debounce (avoid recomputing on every keystroke

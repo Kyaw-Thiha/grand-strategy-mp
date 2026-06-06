@@ -206,8 +206,12 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Nation config loaded at game start from `nation_config` per nation per map;
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
-- [ ] Division type classification — compute from template cell counts at spawn:
-      armoured (>=40% armoured cells), motorised (15-39%), defensive (>30% support), infantry
+- [ ] Division type classification — three types only (no Defensive type):
+      armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
+- [ ] Engagement radius computed from template composition at spawn and on template change:
+      base 50 (infantry floor); subtract 5 per 10% armoured fraction above 15%;
+      subtract 2 per 10% cavalry fraction; clamp to [30, 50] map units;
+      recomputed same trigger as movement profile (template save / research upgrade)
 - [ ] Division movement profile — computed from template at spawn and on template change;
       33-value table (11 cover_combat × 3 elevation) using weighted formula:
       (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
@@ -278,7 +282,16 @@ Unit tests for movement profile computation and A* path validity.
             → destroyed (not retreated); experience and template lost permanently
 - [ ] Province capture — ownership transfers when defending division/stack is destroyed or
       retreated; city node must be physically occupied by capturing division
-- [ ] Flanking bonus — second enemy division engaging already-engaged target gets bonus damage
+- [ ] Angle-based flanking system:
+      - [ ] When second enemy division's engagement area overlaps an already-engaged
+            division, compute angle at defender between line-to-attacker-1 and
+            line-to-attacker-2 (dot product of the two vectors)
+      - [ ] < 90°: no flanking bonus — converging frontal assault only
+      - [ ] 90°–135°: standard flank attack bonus (% damage increase to second attacker)
+      - [ ] 135°–180°: enhanced rear attack bonus (higher % damage increase)
+      - [ ] Angle classification locked at moment of second contact initiation;
+            not recalculated mid-combat (prevents bonus loss from minor drift)
+      - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification
 - [ ] Dynamic frontline influence computation per province per tick:
       - [ ] Both sides' units contribute influence simultaneously — frontline is net
             result of all nations competing, not a binary ownership flag
@@ -316,9 +329,29 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] A* pathfinding — road edges win naturally via low cost; off-road waypoint edges use
       division movement profile multiplier; infinity-cost edges excluded; river crossing
       penalty on flagged edges
-- [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation
-      (smaller, solid), observation area rendering (larger, faded; always larger than
-      engagement area), selection, move orders, stack badge display
+- [ ] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display
+- [ ] Engagement area rendering:
+      - [ ] Own engagement area: solid circle, radius from composition-based formula
+      - [ ] Enemy engagement areas: faded/dashed circle — visible to all players;
+            essential for players to judge flanking angle before committing
+      - [ ] Observation area: larger faded circle (always larger than engagement area)
+      - [ ] Scouting range: innermost circle, shown only on hover of enemy dot
+            within scouting range
+- [ ] Division status visual indicators (all stackable, no conflicts):
+      - [ ] Engaged: subtle pulse on division dot; combat icon over engagement point
+      - [ ] Out of Supply (Tier 1): amber supply icon below dot
+      - [ ] Cut Off (Tier 2): red supply icon + broken chain symbol
+      - [ ] Encircled (Tier 3): red ring around division dot (most dominant indicator)
+      - [ ] Flank attack (90°–135°): diagonal arrow on flanking division dot
+      - [ ] Rear attack (135°–180°): double diagonal arrow on flanking division dot
+      - [ ] Meeting battle: distinct head-on combat icon (not standard crossed swords)
+      - [ ] Retreating: retreat arrow on dot pointing direction of withdrawal
+      - [ ] Redeploying: dot greyed out with gear/refresh symbol
+- [ ] Tactical combat pop-up button on combat icon (crossed-swords symbol):
+      opens 5×5 vs 5×5 grid panel with HP/suppression bars, experience badges,
+      formation bonus glows, row perk labels, attack pattern overlay, recon indicator,
+      terrain modifier display, river crossing penalty indicator, round timer,
+      flanking angle indicator showing measured angle and active bonus tier
 - [ ] Client rendering uses **LERP smoothing only** — no client-side prediction.
       On state update: cache server position. In `_process(delta)`: lerp visual
       position toward server position at ~10× speed. Snap directly if distance
@@ -372,6 +405,13 @@ bonus applies. Stack two friendly divisions → first engages → hits suppressi
 second steps up → combat continues without physical retreat. Last stack division suppressed
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
 decays over ticks → eventually deals zero damage.
+Engagement radii: pure infantry template has radius ~50; pure armoured has radius ~30;
+verify formula clamps correctly at both extremes. Enemy engagement area visible as
+faded circle — own unit moving toward enemy can see enemy's engagement area before
+entering it. Flanking angle: two units attack defender from 85° → no bonus; reposition
+second unit to 95° → FLANK_ATTACK fires → standard bonus applied; reposition to 140°
+→ REAR_ATTACK fires → enhanced bonus. Angle classification locked at first contact —
+minor drift during combat does not change the bonus tier.
 Frontline: advance division into contested province → province interior colour begins
 washing toward advancing nation’s predefined colour → recon unit advance does not shift
 colour. Both attacking and defending units contribute influence simultaneously → frontline
