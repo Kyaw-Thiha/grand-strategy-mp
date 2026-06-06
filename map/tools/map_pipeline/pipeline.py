@@ -21,7 +21,7 @@ import rasterio
 from rasterio.merge import merge as rasterio_merge
 from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.warp import reproject, Resampling, transform_bounds
-from shapely.geometry import shape
+from shapely.geometry import Point, LineString as ShapelyLS, shape
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
@@ -484,6 +484,166 @@ def write_map_data(output_dir: Path, map_config: dict,
     print(f"  map_data.json written ({out_path.stat().st_size / 1024:.0f} KB)")
 
 
+def generate_waypoints(sources: dict, output_dir: Path) -> None:
+    """
+    Sample road geometry at ~750m intervals to build the waypoint graph.
+
+    Each node records lng/lat, cover_combat, and elevation at that point.
+    Edges connect consecutive sampled points on the same road segment.
+    River crossings are flagged per edge for penalty calculation in 4B+.
+
+    Output: waypoints.json with { nodes, edges, road_connections }.
+    """
+    SAMPLE_DEG = 0.007  # ~750m at 50°N latitude
+
+    # Movement cost tables for base_cost computation (cover × elevation).
+    COVER_MOVE: dict[str, float] = {
+        "plains": 1.0, "steppe": 1.1, "shrubland": 1.2, "light_forest": 1.3,
+        "dense_forest": 1.8, "jungle": 2.5, "desert": 1.4, "swamp": 2.0,
+        "tundra": 1.5, "glacier": 9999.0, "urban": 0.9,
+    }
+    ELEV_MOVE: dict[str, float] = {"flat": 1.0, "hills": 1.4, "mountains": 2.2}
+
+    # Build spatial indices over cover and elevation polygons.
+    cover_feats = sources.get("cover", [])
+    elev_feats = sources.get("elevation", [])
+    river_feats = sources.get("rivers", [])
+
+    cover_geoms = [shape(f["geometry"]) for f in cover_feats]
+    elev_geoms = [shape(f["geometry"]) for f in elev_feats]
+    river_geoms = [shape(f["geometry"]) for f in river_feats]
+    river_sizes = [f["properties"].get("river_size", "stream") for f in river_feats]
+
+    cover_tree = STRtree(cover_geoms) if cover_geoms else None
+    elev_tree = STRtree(elev_geoms) if elev_geoms else None
+    river_tree = STRtree(river_geoms) if river_geoms else None
+
+    def _tag(lng: float, lat: float) -> tuple[str, str]:
+        """Return (cover_combat, elevation) for a point."""
+        pt = Point(lng, lat)
+        cover_combat = "plains"
+        elevation = "flat"
+        if cover_tree is not None:
+            for idx in cover_tree.query(pt, predicate="intersects"):
+                if cover_geoms[idx].contains(pt):
+                    cover_combat = cover_feats[idx]["properties"].get("cover_combat", "plains")
+                    break
+        if elev_tree is not None:
+            for idx in elev_tree.query(pt, predicate="intersects"):
+                if elev_geoms[idx].contains(pt):
+                    elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
+                    break
+        return cover_combat, elevation
+
+    def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
+        seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
+        if river_tree is not None:
+            for idx in river_tree.query(seg, predicate="intersects"):
+                if seg.intersects(river_geoms[idx]):
+                    return river_sizes[idx]
+        return None
+
+    def _interpolate(coords: list, interval: float) -> list[tuple[float, float]]:
+        """Yield (lng, lat) pairs along a coordinate list at roughly interval spacing."""
+        result: list[tuple[float, float]] = [(coords[0][0], coords[0][1])]
+        for i in range(len(coords) - 1):
+            lng0, lat0 = coords[i][0], coords[i][1]
+            lng1, lat1 = coords[i + 1][0], coords[i + 1][1]
+            dx, dy = lng1 - lng0, lat1 - lat0
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist > interval * 1.5:
+                steps = max(1, round(dist / interval))
+                for s in range(1, steps):
+                    t = s / steps
+                    result.append((lng0 + dx * t, lat0 + dy * t))
+            result.append((lng1, lat1))
+        return result
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    road_connections: list[dict] = []
+
+    # Deduplicate nodes by rounded coordinate to merge nearby road intersections.
+    node_by_key: dict[tuple[int, int], str] = {}
+    wp_counter = 0
+
+    def _get_or_create(lng: float, lat: float) -> str:
+        nonlocal wp_counter
+        key = (round(lng * 100000), round(lat * 100000))  # ~1m grid
+        if key in node_by_key:
+            return node_by_key[key]
+        wp_counter += 1
+        wid = f"wp_{wp_counter:06d}"
+        cover, elev = _tag(lng, lat)
+        nodes.append({
+            "id": wid,
+            "lng": round(lng, 6),
+            "lat": round(lat, 6),
+            "cover_combat": cover,
+            "elevation": elev,
+        })
+        node_by_key[key] = wid
+        return wid
+
+    node_pos: dict[str, tuple[float, float]] = {}  # id → (lng, lat) for edge cost lookup
+
+    seen_edges: set[tuple[str, str]] = set()
+
+    for feat in sources.get("roads", []):
+        road_id = feat["properties"].get("road_id", "")
+        geom = shape(feat["geometry"])
+        lines = []
+        if geom.geom_type == "LineString":
+            lines = [list(geom.coords)]
+        elif geom.geom_type == "MultiLineString":
+            lines = [list(g.coords) for g in geom.geoms]
+
+        for raw_coords in lines:
+            pts = _interpolate(raw_coords, SAMPLE_DEG)
+            wp_ids: list[str] = []
+
+            for lng, lat in pts:
+                wid = _get_or_create(lng, lat)
+                node_pos[wid] = (lng, lat)
+                if not wp_ids or wp_ids[-1] != wid:
+                    wp_ids.append(wid)
+
+            # Register road_connections (deduped by road_id + waypoint_id)
+            seen_rc: set[str] = set()
+            for wid in wp_ids:
+                key_rc = f"{road_id}:{wid}"
+                if key_rc not in seen_rc:
+                    seen_rc.add(key_rc)
+                    road_connections.append({"road_id": road_id, "waypoint_id": wid})
+
+            # Create edges between consecutive waypoints
+            node_data: dict[str, dict] = {n["id"]: n for n in nodes}
+            for k in range(len(wp_ids) - 1):
+                a_id, b_id = wp_ids[k], wp_ids[k + 1]
+                edge_key = (min(a_id, b_id), max(a_id, b_id))
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+
+                a = node_data[a_id]
+                river = _river_crossing(a["lng"], a["lat"],
+                                        node_data[b_id]["lng"], node_data[b_id]["lat"])
+                cover_cost = COVER_MOVE.get(a["cover_combat"], 1.0)
+                elev_cost = ELEV_MOVE.get(a["elevation"], 1.0)
+                edges.append({
+                    "from": a_id,
+                    "to": b_id,
+                    "base_cost": round(cover_cost * elev_cost, 3),
+                    "river_size": river,
+                })
+
+    out_path = output_dir / "waypoints.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"nodes": nodes, "edges": edges, "road_connections": road_connections},
+                  f, ensure_ascii=False, separators=(",", ":"))
+    print(f"  waypoints.json: {len(nodes)} nodes, {len(edges)} edges")
+
+
 def copy_passthrough_files(map_dir: Path, output_dir: Path) -> None:
     """
     Copy visual-layer files unchanged from map_dir to output_dir.
@@ -550,6 +710,9 @@ def main() -> None:
     write_map_data(output_dir, map_config, provinces, adjacency)
     copy_passthrough_files(map_dir, output_dir)
 
+    print("Building waypoint graph...")
+    generate_waypoints(sources, output_dir)
+
     if args.skip_dem:
         print("  Skipping heightmap (--skip-dem)")
     else:
@@ -563,6 +726,13 @@ def main() -> None:
 
     road_edges = sum(1 for e in adjacency if e["road_level"] is not None)
 
+    waypoints_path = output_dir / "waypoints.json"
+    wp_count = 0
+    if waypoints_path.exists():
+        with open(waypoints_path) as f:
+            wp_data = json.load(f)
+        wp_count = len(wp_data.get("nodes", []))
+
     print()
     print("── Summary ──────────────────────────────────")
     print(f"  Provinces:      {len(provinces)}")
@@ -570,6 +740,7 @@ def main() -> None:
     for btype, count in sorted(border_counts.items()):
         print(f"    {btype:<14} {count}")
     print(f"  Road crossings: {road_edges}")
+    print(f"  Waypoint nodes: {wp_count}")
     print("─────────────────────────────────────────────")
     print("Done.")
 
