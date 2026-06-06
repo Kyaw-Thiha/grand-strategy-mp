@@ -4,3 +4,4 @@ build
 .devmode.json
 .env.development
 .env.production
+.env
