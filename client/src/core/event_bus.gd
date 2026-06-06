@@ -12,6 +12,13 @@ signal unit_changed(unit_id: String)
 signal combat_started(province_id: String)
 signal combat_resolved(province_id: String, outcome: Dictionary)
 
+# ── Divisions (Phase 4) ───────────────────────────────────────────────────────
+signal division_added(division_id: String)
+signal division_updated(division_id: String)
+signal division_removed(division_id: String)
+signal division_selected(division_id: String)
+signal division_deselected()
+
 # ── Players / session ────────────────────────────────────────────────────────
 signal player_changed(user_id: String)
 signal player_eliminated(user_id: String)

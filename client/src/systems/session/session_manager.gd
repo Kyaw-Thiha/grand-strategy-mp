@@ -28,3 +28,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"SPEED_CHANGED":
 			var new_speed: int = data.get("game_speed", 1)
 			speed_changed.emit(new_speed)
+
+		"DIVISIONS_SPAWNED":
+			GameState._apply_divisions_spawned(data)
+
+		"DIVISION_UPDATES":
+			GameState._apply_division_updates(data)
