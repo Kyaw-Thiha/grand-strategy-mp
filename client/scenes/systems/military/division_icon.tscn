@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://division_icon"]
+
+[ext_resource type="Script" path="res://src/systems/military/division_icon.gd" id="1_divicon"]
+
+[node name="DivisionIcon" type="Node2D"]
+script = ExtResource("1_divicon")
