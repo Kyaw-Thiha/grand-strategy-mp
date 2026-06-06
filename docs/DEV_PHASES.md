@@ -257,19 +257,44 @@ Unit tests for movement profile computation and A* path validity.
             of stack, second steps forward (no physical retreat until last division suppressed)
       - [ ] Supply priority: first division gets supply first; remainder get overflow
       - [ ] Encirclement applies to whole stack — rotation does not help if surrounded
-- [ ] Encirclement debuffs (stacking per tick when no escape route):
-      - [ ] All units: HP recovery rate → 0
-      - [ ] All units: suppression threshold reduced per tick
-      - [ ] Armoured units: damage output decays per tick; reaches 0 after N ticks
-      - [ ] Infantry units: slower degradation than armour
+- [ ] Three-tier supply/encirclement status system (checked each supply tick):
+      - [ ] Tier 1 — Out of Supply: supply connectivity check fails (<50% friendly
+            influence on waypoint path to any supply hub); debuffs: no HP recovery,
+            slow suppression threshold decay, reduced movement speed; clean retreat
+            still available; `OUT_OF_SUPPLY` event fires
+      - [ ] Tier 2 — Cut Off: no retreat path through ≥50% friendly-influenced
+            waypoints in any direction; all Tier 1 debuffs plus fighting withdrawal
+            on retreat (division takes HP damage proportional to enemy influence
+            density along escape path); `CUT_OFF` event fires
+      - [ ] Tier 3 — Encircled: 8-direction check from division centre — all 8
+            directions blocked by enemy division engagement area overlap OR ≥70%
+            enemy influence; retreat command disabled; all Tier 2 debuffs plus:
+            - Armoured units: damage output decays per tick → 0 after N ticks
+            - Infantry units: slower degradation than armour
+            - All units: suppression threshold lowered further per tick
+            `ENCIRCLED` event fires
+      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
+      - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
+            → destroyed (not retreated); experience and template lost permanently
 - [ ] Province capture — ownership transfers when defending division/stack is destroyed or
       retreated; city node must be physically occupied by capturing division
 - [ ] Flanking bonus — second enemy division engaging already-engaged target gets bonus damage
 - [ ] Dynamic frontline influence computation per province per tick:
-      - [ ] influence[nation][province] = sum(division_hp_fraction × distance_falloff)
+      - [ ] Both sides' units contribute influence simultaneously — frontline is net
+            result of all nations competing, not a binary ownership flag
+      - [ ] unit_influence[nation][province] = sum(hp_fraction × distance_falloff)
             for all divisions of that nation whose engagement area overlaps the province
       - [ ] Recon units excluded from influence calculation
       - [ ] HP fraction = aggregate living HP / max possible HP for full 25-unit grid
+      - [ ] Ownership bonus: province owner gets passive influence bonus from ownership
+            (administrative control, infrastructure, road network); added to unit influence
+      - [ ] total_influence[province] = sum across all nations;
+            nation_share = nation_influence / total_influence
+      - [ ] City capture: ownership bonus flips to new owner immediately; previous owner
+            loses bonus and projects influence only from unit positions + roads they
+            physically control (same rules as attacker before capture)
+      - [ ] Frontline does not snap to fully new-owner-coloured on capture — previous
+            owner's unit-based influence persists wherever their units remain
       - [ ] Broadcast province influence values to all connected players each tick
             (belligerents receive full data; neutrals receive province-level scalars only,
             not division positions or compositions)
@@ -294,6 +319,12 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation
       (smaller, solid), observation area rendering (larger, faded; always larger than
       engagement area), selection, move orders, stack badge display
+- [ ] Client rendering uses **LERP smoothing only** — no client-side prediction.
+      On state update: cache server position. In `_process(delta)`: lerp visual
+      position toward server position at ~10× speed. Snap directly if distance
+      exceeds threshold (e.g. redeployment teleport). HP bars, suppression bars,
+      and frontline colour values all lerp the same way between server updates.
+      Server is always authoritative — client never simulates movement itself
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
 - [ ] Move order UX:
@@ -342,13 +373,18 @@ second steps up → combat continues without physical retreat. Last stack divisi
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
 decays over ticks → eventually deals zero damage.
 Frontline: advance division into contested province → province interior colour begins
-washing toward advancing nation's predefined colour → recon unit advance does not shift
-colour. Division takes HP damage → colour intensity fades proportionally. Enemy advance
-cuts through province influence chain between division and supply hub → supply severed
-notification fires → out-of-supply attrition begins even though road is still physically
-open. Division captures city node → province baseline snaps to capturing nation's colour →
-province border unchanged. Neutral observer sees colour wash shifting but cannot see
-enemy division dots outside their own observation radius.
+washing toward advancing nation’s predefined colour → recon unit advance does not shift
+colour. Both attacking and defending units contribute influence simultaneously → frontline
+sits where forces balance. Division takes HP damage → colour intensity fades. Enemy advance
+cuts through province influence chain → OUT_OF_SUPPLY fires → attrition begins; player
+pushes relief force → supply restored. No relief comes → CUT_OFF fires → retreat triggers
+fighting withdrawal (division takes damage while moving). Enemy divisions close all 8
+directions → ENCIRCLED fires → retreat disabled → armour damage decays per tick →
+division suppressed → destroyed (not retreated). Division captures city node → ownership
+bonus flips to new owner immediately → previous owner’s unit influence persists where
+their units are → frontline shifts but does not snap fully → province border unchanged.
+Friendly colour persists along roads still defended by retreating forces. Neutral observer
+sees colour wash shifting but not enemy division dots outside their observation radius.
 
 ---
 

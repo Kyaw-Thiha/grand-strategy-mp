@@ -269,47 +269,128 @@ This keeps server simulation load manageable while preserving full strategic mea
 - High-altitude logistics strike: damage proportional to recon value
 - Divisions undersupplied: take increased attrition, strength degrades over time
 
-### Supply and encirclement
+### Supply and encirclement — three-tier status system
 
-**Cut off from supply via land:**
-When a division's road connection to a supply hub is cut (enemy captures a node on the only
-supply path), the division is out of supply. It can still retreat — but must move across
-land it still controls rather than using roads, so retreat speed is reduced significantly.
+Supply cutoff and true encirclement are distinct historical and gameplay states. A
+division typically progresses through all three tiers as a pocket closes — each tier
+gives the player a window to respond before the situation becomes fatal.
 
-**Full encirclement:**
-When a division (or positional stack) is surrounded on all sides by enemy-controlled
-territory with no land escape route (even off-road), it cannot retreat regardless of
-suppression state.
+**Design intent:** The three-tier system avoids the wargame failure mode where supply
+cutoff instantly creates an unbreakable "death pocket." Historical pockets (Demyansk,
+Korsun, Ruhr) were often contested for weeks or months. In a 1–4 hour session, the
+transitions happen over minutes, but the same logic applies — a player who responds to
+the Out of Supply notification quickly can restore the supply chain. Only if they ignore
+both early warnings does the true Kessel close.
 
-Encirclement applies progressive debuffs that stack each tick:
+---
 
-- **All units:** HP recovery rate reduced to zero (supply gone; wounds do not heal)
-- **All units:** Suppression threshold lowered (morale degrades faster under encirclement)
-- **Armoured units specifically:** Damage output decays per tick (fuel starvation —
-  tanks without fuel become stationary pillboxes). After sufficient ticks fully encircled,
-  armoured units deal zero damage entirely
-- **Infantry units:** Slower degradation than armour — infantry can dig in and resist
-  longer without supply (historically: Demyansk, Korsun). Still substantial debuffs,
-  just slower onset
+**Tier 1 — Out of Supply**
 
-**Destruction trigger:**
-When the last division in an encircled stack hits suppression threshold, it is destroyed —
-not retreated. No road to retreat along means elimination, not pushback. Experience,
-template, and equipment are lost.
+*Trigger:* Supply connectivity check fails — no path of ≥50% friendly-influenced
+waypoints exists between the division and any friendly supply hub (see Dynamic Frontline
+System for influence computation). The division can still move and retreat freely.
 
-**Consequence for large divisions:**
-A fully-filled, expensive division that gets encircled is catastrophically costly to lose —
-both the investment and the earned unit experience are gone. This creates a strong incentive
-to maintain escape routes and not overcommit large forces to positions that could be cut off.
-The encirclement mechanic is the primary reason a player with an inferior force can
-meaningfully defeat a superior encircled force — even high-HP, high-experience divisions
-collapse under encirclement debuffs.
+*Debuffs:*
+- HP recovery rate → 0 (no supply reaching the division; wounds do not heal)
+- Suppression threshold degrades slowly each tick (morale erodes under supply stress)
+- Movement speed reduced (fuel and rations running low)
 
-**Design intent:**
-Encirclement is the most decisive outcome in the game. Frontal pushes force retreats;
-encirclements destroy. This is the key incentive to execute flanking manoeuvres rather
-than attritional frontal assaults. A player who successfully pockets an enemy stack
-eliminates it permanently — which in a 1–4 hour session is a session-defining event.
+*Can retreat:* Yes — clean retreat on open friendly-influenced ground is still possible.
+
+*Player window:* Push a relief force to restore the influence chain, or order a retreat
+before the situation worsens. The notification "Supply route severed — [division]" fires
+immediately when this status is triggered.
+
+---
+
+**Tier 2 — Cut Off**
+
+*Trigger:* No retreat path exists through friendly-influenced ground (≥50% friendly) in
+any direction — not even off-road. The division is administratively isolated. However,
+enemy divisions are not yet physically present in all directions — a costly fighting
+breakout may still be possible.
+
+*Debuffs:* All Tier 1 debuffs, plus:
+- Retreat command now triggers a **fighting withdrawal** through enemy-influenced ground
+  — the retreating division takes HP damage proportional to enemy influence density along
+  the escape path, and moves at reduced speed
+
+*Can retreat:* Yes — but costly. The division fights its way out rather than retreating
+cleanly. A weakened division attempting a fighting withdrawal risks being destroyed before
+reaching friendly ground.
+
+*Player window:* Attempt the breakout now before physical forces close the pocket, or
+mount a relief attack from outside to restore a friendly-influenced corridor.
+
+---
+
+**Tier 3 — Encircled (true Kessel)**
+
+*Trigger:* 8-direction check (N, NE, E, SE, S, SW, W, NW sampled from division centre)
+shows that every direction has either:
+- An enemy division's engagement area overlapping within that radius, OR
+- ≥70% enemy influence on the waypoint graph in that direction
+
+The higher threshold (70% vs 50%) for true encirclement prevents influence-wash exploits
+where an attacking player who rapidly advances their frontline gets full encirclement
+status without actually committing covering forces to close the pocket.
+
+*Debuffs:* All Tier 1 and Tier 2 debuffs, plus:
+- **All units:** suppression threshold lowered further — morale degrades faster
+- **Armoured units:** damage output decays per tick (fuel starvation — tanks become
+  stationary pillboxes). After sufficient ticks fully encircled, armoured units deal
+  zero damage entirely
+- **Infantry units:** slower degradation than armour — infantry can dig in and resist
+  longer without supply (historically: Demyansk, Korsun). Still substantial, just slower
+- Debuffs stack each tick — the longer the encirclement holds, the faster the division
+  collapses
+
+*Can retreat:* No — retreat command disabled. No escape route exists.
+
+*Destruction trigger:* When the last division in the encircled stack hits its suppression
+threshold, it is destroyed — not retreated. Experience, template, and equipment are all
+lost permanently. This is the most decisive outcome in the game.
+
+*Consequence for large divisions:* A fully-filled expensive division that reaches Tier 3
+is catastrophically costly to lose. This creates strong incentive to maintain escape
+routes and not overcommit large forces to exposed positions. The encirclement mechanic
+is why an inferior player can meaningfully defeat a superior but encircled force — even
+high-HP, high-experience divisions collapse under stacking Tier 3 debuffs.
+
+---
+
+**Detection algorithms:**
+
+```
+OUT_OF_SUPPLY:
+  path_exists = waypoint_graph_search(
+      start = division.position,
+      goal  = any friendly supply hub,
+      valid_edge = lambda e: friendly_influence(e) >= 0.50
+  )
+  if not path_exists: status = OUT_OF_SUPPLY
+
+CUT_OFF (checked only if OUT_OF_SUPPLY):
+  escape_exists = waypoint_graph_search(
+      start = division.position,
+      goal  = any friendly-influenced territory boundary,
+      valid_edge = lambda e: True   # any edge passable — cost proportional to enemy influence
+  )
+  if not escape_exists: status = CUT_OFF
+
+ENCIRCLED (checked only if CUT_OFF):
+  directions = [N, NE, E, SE, S, SW, W, NW]
+  blocked = 0
+  for direction in directions:
+      sample_point = division.position + direction * engagement_radius
+      if enemy_division_overlaps(sample_point) or enemy_influence(sample_point) >= 0.70:
+          blocked += 1
+  if blocked == 8: status = ENCIRCLED
+```
+
+All three checks run server-side each supply tick. Status degrades one tier at a time —
+a division cannot jump directly from normal to Encircled without passing through the
+intermediate states.
 
 ---
 
@@ -421,32 +502,79 @@ divisions have physically retreated).
 
 ### Influence Computation (Server-Side, Per Tick)
 
-Each province has an **influence value per nation** — a scalar computed each server tick
-from the divisions whose engagement areas overlap that province:
+Both sides' units contribute influence simultaneously. The frontline colour is the net
+result of all nations' influence values competing in each province — not a binary
+ownership flag. A province with equal forces from both sides shows a centred frontline.
+A province with heavy attacking force vs light defending force shows the frontline pushed
+deep into the defender's territory even before the city falls.
+
+**Unit-based influence (all nations):**
 
 ```
-province_influence[nation] = sum(
-  division_aggregate_hp_fraction × influence_weight × distance_falloff
+unit_influence[nation][province] = sum(
+  division_aggregate_hp_fraction × distance_falloff
   for each division of that nation whose engagement area overlaps this province
 )
 ```
 
-- **division_aggregate_hp_fraction:** sum of all living unit HPs in the division's grid,
+- **division_aggregate_hp_fraction:** sum of all living unit HPs in the division's grid
   normalised by the maximum possible HP for a full 25-unit grid. A full fresh division
   projects maximum influence. A battered near-destroyed division projects near zero.
   This makes the frontline a genuine intelligence signal — a fading colour region reveals
-  a weakening front before the division has physically retreated.
+  a weakening front before the division has physically retreated
 - **distance_falloff:** divisions whose engagement area centre is closer to the province
-  contribute more than divisions whose area only clips the province edge.
-- **Recon units do not contribute to influence.** Their presence within a province does
-  not shift the frontline. Historically accurate — recon observes, it does not control.
-  Also prevents cheap recon-cap exploits where players paint territory without committing
-  real forces.
+  contribute more than divisions whose area only clips the province edge
+- **Recon units do not contribute to influence.** Recon observes, it does not control.
+  Prevents cheap recon-cap exploits where players paint territory without committing
+  real forces
 
-The winning nation's influence is expressed as a percentage of total influence across all
-nations in that province. At 50%+ dominance, the frontline line passes through that region
-toward the dominating nation. At full dominance, the province interior is fully washed with
-that nation's predefined map colour.
+**Ownership bonus (province owner only):**
+
+The nation that owns a province gets a passive influence bonus from that ownership —
+representing administrative control, population, infrastructure, and road network:
+
+```
+province_influence[nation] = unit_influence[nation][province]
+                            + (ownership_bonus if province.owner == nation else 0)
+```
+
+The ownership bonus is a fixed scalar (exact value set by playtesting — large enough
+that ownership matters, small enough that a strong attacking force can overcome it).
+
+**Total influence and frontline rendering:**
+
+```
+total_influence[province] = sum(province_influence[nation] for all nations)
+nation_share[nation]      = province_influence[nation] / total_influence[province]
+```
+
+At 50%+ share for one nation, the frontline isoline passes through toward that nation.
+At full dominance (100% share), the province interior is fully that nation's colour.
+
+**City capture — the ownership flip and influence inversion:**
+
+When a division captures a city node, two things happen simultaneously:
+
+1. Province ownership transfers to the capturing nation. Income, supply, and the
+   ownership bonus immediately flip to the new owner
+2. **Influence roles invert:** The previous defender loses the ownership bonus and
+   now projects influence only from where their actual units are plus roads they still
+   physically control. They are now in the same position the attacker was in before
+   the capture — projecting influence outward from unit positions only
+
+The frontline does not instantly snap to fully new-owner-coloured. If the previous owner
+still has units nearby, their unit-based influence persists — the colour shifts from the
+ownership bonus flip but the frontline line stays near the actual force positions. Both
+sides push against each other from their new relative positions.
+
+**Roads and retreat influence:**
+
+A division retreating from a captured province continues to project influence along roads
+it still physically controls (i.e. roads not yet dominated by enemy influence). The
+frontline colour along friendly-controlled road corridors remains friendly even as the
+province interior shifts. This makes the post-capture situation legible at a glance:
+friendly colour along a road means it is still defended; enemy colour washing over it
+means it has been abandoned.
 
 ### Province Colour Rendering (Client-Side Shader)
 
@@ -477,10 +605,14 @@ city is captured.
 
 **City capture** is the only event that transfers province ownership:
 - A division physically occupies the city node (the province's capital city position)
-- Province ownership transfers to the capturing nation
+- Province ownership transfers to the capturing nation immediately
 - The province's **baseline colour** switches to the new owner's predefined nation colour
-- The frontline effect reverses — the previous owner must now push influence back in
-  to reclaim the province
+- The ownership bonus in the influence computation flips to the new owner — the previous
+  owner loses it instantly and now projects influence only from unit positions and
+  roads they still physically control (same rules as an attacker before capture)
+- The previous owner's influence does not disappear — their units still project
+  unit-based influence from wherever those units are. The frontline moves but does not
+  instantly jump to fully new-owner-coloured if defending units are still nearby
 
 Between city captures, the frontline colour wash can shift back and forth freely as
 military forces advance and retreat. A province can be fully dominated by enemy influence
@@ -489,8 +621,14 @@ capture.
 
 **Visual reading of encirclements:** A province surrounded by enemy-influenced territory
 that still shows the original owner's city (and thus their baseline colour) is visually
-readable as a pocket — the original colour bleeds through despite surrounding pressure.
-This makes encirclements legible on the map without any special UI overlay.
+readable as a pocket — the original colour partially holds due to unit influence even as
+enemy colour dominates the surrounding territory. Makes encirclements legible without
+any special UI overlay.
+
+**Visual reading of post-capture retreats:** After a city falls, friendly colour
+persisting along road corridors behind the new front signals those roads are still
+defended by retreating forces. Enemy colour washing over roads signals abandonment.
+Players can read the strategic situation from the colour map alone.
 
 ### Supply Connectivity via Frontline
 
@@ -736,11 +874,21 @@ nor pure Call of War (destruction only → arbitrary outcomes).
 
 | Outcome | Trigger | Result |
 |---|---|---|
-| Retreat | Suppressed + road open | Division falls back, position lost, division survives |
-| Destruction (encirclement) | Suppressed + no retreat route | Division eliminated — the decisive result |
+| Retreat (defender) | Suppressed (≥60%) + road open | Division falls back, position lost, division survives |
+| Retreat (attacker) | Suppressed (≥80%) + escape route exists | Division falls back; manual retreat available at any level |
+| Fighting withdrawal | Cut Off (Tier 2) + suppressed | Division retreats but takes damage during movement |
+| Destruction (Kessel) | Encircled (Tier 3) + suppressed | Division eliminated — the decisive result |
 | Destruction (attrition) | All grid units destroyed via HP damage | Division eliminated |
 | Hold | Defender holds suppression below threshold | Attacker attrition continues, no position change |
 | Breakthrough | Attacker clears enemy front row with no reserve behind it | Road axis opens, exploitation movement possible |
+
+**Supply/encirclement status effects:**
+
+| Status | Trigger | Debuffs | Can retreat? |
+|---|---|---|---|
+| Out of Supply (Tier 1) | Supply connectivity < 50% friendly influence on path to hub | No HP recovery, slow suppression threshold decay, reduced speed | Yes — clean retreat |
+| Cut Off (Tier 2) | No friendly-influenced retreat path in any direction | All Tier 1 + fighting withdrawal on retreat (takes damage moving) | Yes — costly |
+| Encircled (Tier 3) | All 8 directions blocked: enemy presence or ≥70% enemy influence | All Tier 2 + armour fuel decay, escalating debuffs per tick | No — disabled |
 
 **Design intent:** Sessions must resolve. Stale fronts are avoided by ensuring that suppressed
 divisions without column depth behind them are destroyed rather than indefinitely pushed back.
