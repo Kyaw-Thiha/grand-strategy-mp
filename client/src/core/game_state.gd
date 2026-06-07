@@ -73,6 +73,31 @@ func _apply_division_updates(data: Dictionary) -> void:
 		EventBus.division_updated.emit(div_id)
 
 
+## Called by SessionManager when server sends UNIT_DESTROYED.
+func _apply_unit_destroyed(data: Dictionary) -> void:
+	var div_id: String = data.get("division_id", "")
+	var nation_id: String = data.get("nation_id", "")
+	if div_id.is_empty():
+		return
+	if divisions.has(div_id):
+		divisions[div_id]["combat_state"] = "destroyed"
+	EventBus.unit_destroyed.emit(div_id, nation_id)
+	EventBus.division_updated.emit(div_id)
+
+
+## Called by SessionManager when server sends PROVINCE_CAPTURED.
+func _apply_province_captured(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var new_owner: String   = data.get("new_owner_id", "")
+	if province_id.is_empty():
+		return
+	if not provinces.has(province_id):
+		provinces[province_id] = {}
+	provinces[province_id]["owner_id"]  = new_owner
+	provinces[province_id]["nation_id"] = new_owner
+	EventBus.province_captured.emit(province_id, new_owner)
+
+
 # ── Getters ──────────────────────────────────────────────────────────────────
 
 func get_phase() -> String:

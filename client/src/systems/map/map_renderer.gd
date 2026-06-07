@@ -173,6 +173,11 @@ func refresh_province(province_id: String) -> void:
 	_highlighted.erase(province_id)
 
 
+## Call after GameState.provinces has been updated with the new owner.
+func update_province_owner(province_id: String, _new_owner_id: String) -> void:
+	refresh_province(province_id)
+
+
 # ── internal ──────────────────────────────────────────────────────────────────
 
 func _refresh_all() -> void:

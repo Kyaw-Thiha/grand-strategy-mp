@@ -34,3 +34,22 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"DIVISION_UPDATES":
 			GameState._apply_division_updates(data)
+
+		"COMBAT_STARTED":
+			EventBus.combat_started.emit(
+				data.get("division_a", ""),
+				data.get("division_b", ""),
+				data.get("is_meeting_battle", false)
+			)
+
+		"UNIT_DESTROYED":
+			GameState._apply_unit_destroyed(data)
+
+		"PROVINCE_CAPTURED":
+			GameState._apply_province_captured(data)
+
+		"FLANK_ATTACK":
+			EventBus.flank_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+
+		"REAR_ATTACK":
+			EventBus.rear_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))

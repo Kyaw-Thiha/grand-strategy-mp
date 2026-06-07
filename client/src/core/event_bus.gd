@@ -9,8 +9,11 @@ signal province_captured(province_id: String, new_owner_id: String)
 
 # ── Military ─────────────────────────────────────────────────────────────────
 signal unit_changed(unit_id: String)
-signal combat_started(province_id: String)
+signal combat_started(division_a: String, division_b: String, is_meeting_battle: bool)
 signal combat_resolved(province_id: String, outcome: Dictionary)
+signal unit_destroyed(division_id: String, nation_id: String)
+signal flank_attack(flanker_id: String, defender_id: String)
+signal rear_attack(flanker_id: String, defender_id: String)
 
 # ── Divisions (Phase 4) ───────────────────────────────────────────────────────
 signal division_added(division_id: String)

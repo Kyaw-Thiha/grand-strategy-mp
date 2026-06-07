@@ -17,7 +17,7 @@ const PLAYABLE_POSITIONS: DivisionSpawnConfig[] = [
   { division_id: "germany_div_02", nation_id: "germany", lng: 17.033000, lat: 51.100000, is_neutral: false },
   { division_id: "germany_div_03", nation_id: "germany", lng: 8.804892, lat: 53.052868, is_neutral: false },
   { division_id: "germany_div_04", nation_id: "germany", lng: 7.020536, lat: 51.437758, is_neutral: false },
-  { division_id: "germany_div_05", nation_id: "germany", lng: 9.199996, lat: 48.779980, is_neutral: false },
+  { division_id: "germany_div_05", nation_id: "germany", lng: 6.995000, lat: 49.237000, is_neutral: false }, // Saarbrücken — Franco-German border front
   { division_id: "germany_div_06", nation_id: "germany", lng: 13.385771, lat: 52.483566, is_neutral: false },
   { division_id: "germany_div_07", nation_id: "germany", lng: 14.553000, lat: 53.432000, is_neutral: false },
   { division_id: "germany_div_08", nation_id: "germany", lng: 10.056123, lat: 53.529503, is_neutral: false },
@@ -27,7 +27,7 @@ const PLAYABLE_POSITIONS: DivisionSpawnConfig[] = [
   { division_id: "france_div_02", nation_id: "france", lng: 1.413266, lat: 43.575362, is_neutral: false },
   { division_id: "france_div_03", nation_id: "france", lng: 2.335453, lat: 48.896725, is_neutral: false },
   { division_id: "france_div_04", nation_id: "france", lng: 3.869983, lat: 43.609767, is_neutral: false },
-  { division_id: "france_div_05", nation_id: "france", lng: 6.184000, lat: 48.692000, is_neutral: false },
+  { division_id: "france_div_05", nation_id: "france", lng: 6.175000, lat: 49.123000, is_neutral: false }, // Metz — Lorraine/Maginot front
   { division_id: "france_div_06", nation_id: "france", lng: 4.828632, lat: 45.772470, is_neutral: false },
   { division_id: "france_div_07", nation_id: "france", lng: -1.666723, lat: 48.085267, is_neutral: false },
   { division_id: "france_div_08", nation_id: "france", lng: -0.577601, lat: 44.892560, is_neutral: false },

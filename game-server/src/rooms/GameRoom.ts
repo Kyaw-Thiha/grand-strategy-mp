@@ -1,8 +1,12 @@
 import { Room, Client, CloseCode } from "colyseus";
 import { jwtVerify } from "jose";
-import { GameRoomState, PlayerState, NationState, DivisionState } from "./schema/GameRoomState.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState } from "./schema/GameRoomState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
+import { CombatSystem } from "../systems/combat_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
@@ -24,6 +28,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private nationIds: string[] = [];
   private tickCount = 0;
   private movementSystem = new MovementSystem();
+  private combatSystem = new CombatSystem(this.movementSystem);
 
   async onAuth(_client: Client, options: { token?: string }) {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -53,6 +58,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("END_GAME",         (client, _msg) => this.handleEndGame(client));
     this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
     this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
+    this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
 
     console.log(`[GameRoom] ${this.roomId} created`);
   }
@@ -231,14 +237,35 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     division.move_order.splice(0, division.move_order.length);
   }
 
+  private handleRetreat(client: Client, msg: { division_id?: string }) {
+    if (this.state.phase !== "running") return;
+    const divisionId = msg.division_id ?? "";
+    const division = this.state.divisions.get(divisionId);
+    if (!division) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation || nation.nation_id !== division.nation_id) return;
+
+    const enemies: DivisionState[] = [];
+    for (const eid of division.engaged_with) {
+      const e = this.state.divisions.get(eid);
+      if (e) enemies.push(e);
+    }
+    this.combatSystem.initiateRetreat(division, enemies);
+  }
+
   // ── Game lifecycle ──────────────────────────────────────────────────────────
 
   private startGame() {
     this.state.phase = "running";
     this.gameStartedAt = new Date();
 
-    // Load waypoints for movement
+    // Load waypoints for movement and map data for combat
     this.movementSystem.loadWaypoints(this.state.map_id);
+    this.combatSystem.loadMapData(this.state.map_id);
+    this._initProvinces(this.state.map_id);
 
     // Spawn all divisions
     this.spawnDivisions();
@@ -293,17 +320,19 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (this.state.phase !== "running") return;
     this.tickCount++;
 
-    // Capture which divisions are active before movement (move_order may clear this tick)
+    // Capture active divisions before movement tick
     const activeBefore = new Set<string>();
     for (const [id, div] of this.state.divisions) {
       if (div.move_order.length > 0 || div.combat_state !== "idle") activeBefore.add(id);
     }
 
     this.movementSystem.tick(this.state);
+    const combatChanged = this.combatSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
 
-    // Broadcast positions for all divisions that were active this tick (including those that just arrived)
+    // Broadcast all divisions that were active or changed state this tick
+    const toUpdate = new Set([...activeBefore, ...combatChanged]);
     const updates = [];
-    for (const id of activeBefore) {
+    for (const id of toUpdate) {
       const div = this.state.divisions.get(id);
       if (div) updates.push(this.serializeDivision(div));
     }
@@ -401,6 +430,27 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       players,
       game_speed: this.state.game_speed,
     });
+  }
+
+  /** Populate state.provinces from map_data.json initial nation owners. */
+  private _initProvinces(mapId: string): void {
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const dataPath = join(__dir, "../..", "..", "client", "assets", "data", mapId, "map_data.json");
+    try {
+      const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
+        provinces: Array<{ province_id: string; nation_id: string }>;
+      };
+      for (const p of raw.provinces ?? []) {
+        if (!p.province_id) continue;
+        const slot = new ProvinceState();
+        slot.province_id = p.province_id;
+        slot.owner_id    = p.nation_id ?? "";
+        this.state.provinces.set(p.province_id, slot);
+      }
+      console.log(`[GameRoom] initialized ${this.state.provinces.size} provinces`);
+    } catch {
+      console.warn(`[GameRoom] could not load map_data.json for province init`);
+    }
   }
 
   private async notifyGameEnd(winnerId: string) {
