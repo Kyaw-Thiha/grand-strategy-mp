@@ -7,6 +7,7 @@ import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState }
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem } from "../systems/combat_system.js";
+import { SupplySystem } from "../systems/supply_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
@@ -28,7 +29,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private nationIds: string[] = [];
   private tickCount = 0;
   private movementSystem = new MovementSystem();
-  private combatSystem = new CombatSystem(this.movementSystem);
+  private combatSystem   = new CombatSystem(this.movementSystem);
+  private supplySystem   = new SupplySystem();
 
   async onAuth(_client: Client, options: { token?: string }) {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -59,6 +61,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
     this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
+    this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
+    if (process.env.DEV_MODE === "true") {
+      this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
+      this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
+    }
 
     console.log(`[GameRoom] ${this.roomId} created`);
   }
@@ -256,15 +263,60 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.combatSystem.initiateRetreat(division, enemies);
   }
 
+  private handleReorderStack(client: Client, msg: { stack_id?: string; new_order?: string[] }) {
+    if (this.state.phase !== "running") return;
+    const stackId  = msg.stack_id  ?? "";
+    const newOrder = msg.new_order ?? [];
+    if (!stackId || newOrder.length === 0) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation) return;
+
+    // Verify all divisions in the order belong to this player's nation
+    for (const divId of newOrder) {
+      const div = this.state.divisions.get(divId);
+      if (!div || div.nation_id !== nation.nation_id) {
+        client.send("ERROR", { message: "Stack contains divisions from another nation" });
+        return;
+      }
+    }
+
+    const ok = this.combatSystem.reorderStack(stackId, newOrder, this.state, (type, msg) => this.broadcast(type, msg));
+    if (!ok) client.send("ERROR", { message: "Cannot reorder stack (invalid or engaged)" });
+  }
+
+  /** DEV_MODE only — instantly teleport any division to given coordinates. */
+  private handleDevTeleport(msg: { division_id?: string; lng?: number; lat?: number }) {
+    const div = this.state.divisions.get(msg.division_id ?? "");
+    if (!div) return;
+    if (msg.lng !== undefined) div.position_lng = msg.lng;
+    if (msg.lat !== undefined) div.position_lat = msg.lat;
+    div.move_order.splice(0, div.move_order.length);
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
+  }
+
+  /** DEV_MODE only — force a division's supply_status for testing. */
+  private handleDevSetSupply(msg: { division_id?: string; supply_status?: string }) {
+    const div = this.state.divisions.get(msg.division_id ?? "");
+    if (!div) return;
+    const valid = ["normal", "out_of_supply", "cut_off", "encircled"];
+    if (!valid.includes(msg.supply_status ?? "")) return;
+    div.supply_status = msg.supply_status!;
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
+  }
+
   // ── Game lifecycle ──────────────────────────────────────────────────────────
 
   private startGame() {
     this.state.phase = "running";
     this.gameStartedAt = new Date();
 
-    // Load waypoints for movement and map data for combat
+    // Load waypoints for movement and map data for combat + supply
     this.movementSystem.loadWaypoints(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
+    this.supplySystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
 
     // Spawn all divisions
@@ -320,24 +372,27 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (this.state.phase !== "running") return;
     this.tickCount++;
 
-    // Capture active divisions before movement tick
     const activeBefore = new Set<string>();
     for (const [id, div] of this.state.divisions) {
       if (div.move_order.length > 0 || div.combat_state !== "idle") activeBefore.add(id);
     }
 
-    this.movementSystem.tick(this.state);
-    const combatChanged = this.combatSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
+    try {
+      this.movementSystem.tick(this.state);
+      const combatChanged = this.combatSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
+      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
 
-    // Broadcast all divisions that were active or changed state this tick
-    const toUpdate = new Set([...activeBefore, ...combatChanged]);
-    const updates = [];
-    for (const id of toUpdate) {
-      const div = this.state.divisions.get(id);
-      if (div) updates.push(this.serializeDivision(div));
-    }
-    if (updates.length > 0) {
-      this.broadcast("DIVISION_UPDATES", { divisions: updates });
+      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
+      const updates = [];
+      for (const id of toUpdate) {
+        const div = this.state.divisions.get(id);
+        if (div) updates.push(this.serializeDivision(div));
+      }
+      if (updates.length > 0) {
+        this.broadcast("DIVISION_UPDATES", { divisions: updates });
+      }
+    } catch (err) {
+      console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
     }
   }
 

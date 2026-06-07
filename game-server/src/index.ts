@@ -8,6 +8,11 @@
  * See: https://docs.colyseus.io/server
  */
 import { listen } from "@colyseus/tools";
+import { Encoder } from "@colyseus/schema";
+
+// Colyseus default buffer is 8 KB — too small for 60+ divisions with full schema.
+// Bump to 256 KB so state patches encode without overflow.
+Encoder.BUFFER_SIZE = 256 * 1024;
 
 // Import Colyseus config
 import app from "./app.config.js";

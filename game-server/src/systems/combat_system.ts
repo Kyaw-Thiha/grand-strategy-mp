@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { randomUUID } from "crypto";
 import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
 
@@ -43,6 +44,16 @@ const REAR_ANGLE_MIN  = (3 * Math.PI) / 4;   // 135° — counts as rear
 const FLANK_BONUS = 1.25;
 // Damage multiplier applied to a secondary attacker when hitting the rear
 const REAR_BONUS  = 1.50;
+
+// ─── Stacking constants ─────────────────────────────────────────────────────
+
+// Two same-nation stationary divisions within this distance form a positional stack
+const STACK_THRESHOLD_KM = 15.0;
+// Divisions with a move order are considered non-stationary; stacks dissolve when one moves
+// Suppression at which the front stack division rotates to the back
+const STACK_ROTATE_THRESHOLD = 50;
+// When the LAST stack position hits retreat threshold it actually retreats (no more rotation)
+const STACK_LAST_RETREAT_THRESHOLD = 60;
 
 // ─── Terrain modifier tables ────────────────────────────────────────────────
 // Each entry: [attacker_penalty, defender_bonus] as fractions of 1.0
@@ -147,6 +158,8 @@ export class CombatSystem {
   ): Set<string> {
     const changed = new Set<string>();
     this._handleDestroyed(state, changed, broadcast);
+    this._dissolveInvalidStacks(state, changed, broadcast);
+    this._detectStacks(state, changed, broadcast);
     this._detectEngagements(state, changed, broadcast);
     this._resolveCombat(state, changed, broadcast);
     this._checkDisengagement(state, changed);
@@ -174,6 +187,10 @@ export class CombatSystem {
         // Skip same-nation, destroyed
         if (a.nation_id === b.nation_id) continue;
         if (a.combat_state === "destroyed" || b.combat_state === "destroyed") continue;
+
+        // Only the stack front (position 0) can initiate combat on behalf of the stack
+        if (a.stack_id && a.stack_position !== 0) continue;
+        if (b.stack_id && b.stack_position !== 0) continue;
 
         // Skip if they are already mutually engaged in activePairs
         const key = this._pairKey(a.division_id, b.division_id);
@@ -390,15 +407,14 @@ export class CombatSystem {
     };
 
     if (pair.is_meeting) {
-      if (divA.suppression >= DEFENDER_SUPPRESS_THRESHOLD) this._initiateRetreat(divA, enemies(divA));
-      if (divB.suppression >= DEFENDER_SUPPRESS_THRESHOLD) this._initiateRetreat(divB, enemies(divB));
+      this._checkAutoRetreatOrRotate(divA, DEFENDER_SUPPRESS_THRESHOLD, enemies(divA), state, broadcast);
+      this._checkAutoRetreatOrRotate(divB, DEFENDER_SUPPRESS_THRESHOLD, enemies(divB), state, broadcast);
     } else {
-      // Defender
       const defender = divA.division_id === pair.defender_id ? divA : divB;
       const attacker = divA.division_id === pair.attacker_id ? divA : divB;
 
-      if (defender.suppression >= DEFENDER_SUPPRESS_THRESHOLD) this._initiateRetreat(defender, enemies(defender));
-      if (attacker.suppression >= ATTACKER_SUPPRESS_THRESHOLD) this._initiateRetreat(attacker, enemies(attacker));
+      this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, broadcast);
+      this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, broadcast);
     }
   }
 
@@ -642,6 +658,213 @@ export class CombatSystem {
 
   private _distKm(aLng: number, aLat: number, bLng: number, bLat: number): number {
     return Math.sqrt((aLng - bLng) ** 2 + (aLat - bLat) ** 2) * KM_PER_DEG;
+  }
+
+  // ---------------------------------------------------------------------------
+  // _checkAutoRetreatOrRotate
+  // For stacked divisions: rotate if stack_position == 0 hits STACK_ROTATE_THRESHOLD.
+  // The last stack member (highest position) follows normal retreat rules.
+  // ---------------------------------------------------------------------------
+
+  private _checkAutoRetreatOrRotate(
+    div:       DivisionState,
+    threshold: number,
+    enemies:   DivisionState[],
+    state:     GameRoomState,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    if (div.suppression < threshold) return;
+
+    // Encircled divisions cannot retreat — they are trapped
+    if (div.supply_status === "encircled") return;
+
+    if (!div.stack_id) {
+      // Not stacked — normal auto-retreat
+      this._initiateRetreat(div, enemies);
+      return;
+    }
+
+    // Find all divisions in this stack, ordered by position
+    const stackMembers = Array.from(state.divisions.values())
+      .filter(d => d.stack_id === div.stack_id && d.combat_state !== "destroyed")
+      .sort((a, b) => a.stack_position - b.stack_position);
+
+    if (stackMembers.length <= 1) {
+      // Solo stack member — just retreat
+      this._initiateRetreat(div, enemies);
+      return;
+    }
+
+    const maxPos = stackMembers[stackMembers.length - 1].stack_position;
+
+    if (div.stack_position === maxPos) {
+      // Last member hits threshold — actual retreat for the whole stack front
+      this._initiateRetreat(div, enemies);
+      return;
+    }
+
+    // Rotate: current front (position 0) → last position; rest shift forward
+    const oldPos = div.stack_position;
+    for (const member of stackMembers) {
+      if (member.stack_position > oldPos) {
+        member.stack_position -= 1;
+      }
+    }
+    div.stack_position = maxPos;
+
+    broadcast("STACK_ROTATION", {
+      stack_id:     div.stack_id,
+      rotated_back: div.division_id,
+      new_front:    stackMembers.find(m => m.stack_position === 0)?.division_id ?? "",
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // _detectStacks — form permanent positional stacks from same-nation stationary pairs
+  // ---------------------------------------------------------------------------
+
+  private _detectStacks(
+    state:     GameRoomState,
+    changed:   Set<string>,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    const divList = Array.from(state.divisions.values()).filter(
+      d => d.combat_state !== "destroyed" && d.move_order.length === 0,
+    );
+
+    for (let i = 0; i < divList.length; i++) {
+      for (let j = i + 1; j < divList.length; j++) {
+        const a = divList[i];
+        const b = divList[j];
+
+        if (a.nation_id !== b.nation_id) continue;
+        if (a.stack_id && b.stack_id && a.stack_id === b.stack_id) continue; // already stacked together
+
+        const dist = this._distKm(a.position_lng, a.position_lat, b.position_lng, b.position_lat);
+        if (dist > STACK_THRESHOLD_KM) continue;
+
+        // Merge into a stack
+        if (!a.stack_id && !b.stack_id) {
+          // New stack
+          const sid = randomUUID();
+          a.stack_id = sid; a.stack_position = 0;
+          b.stack_id = sid; b.stack_position = 1;
+          changed.add(a.division_id);
+          changed.add(b.division_id);
+          broadcast("STACK_FORMED", {
+            stack_id:  sid,
+            divisions: [a.division_id, b.division_id],
+          });
+        } else if (a.stack_id && !b.stack_id) {
+          // Add b to a's stack
+          const maxPos = this._stackMaxPosition(a.stack_id, state);
+          b.stack_id       = a.stack_id;
+          b.stack_position = maxPos + 1;
+          changed.add(b.division_id);
+        } else if (b.stack_id && !a.stack_id) {
+          const maxPos = this._stackMaxPosition(b.stack_id, state);
+          a.stack_id       = b.stack_id;
+          a.stack_position = maxPos + 1;
+          changed.add(a.division_id);
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // _dissolveInvalidStacks — remove divisions from stacks when they start moving
+  // ---------------------------------------------------------------------------
+
+  private _dissolveInvalidStacks(
+    state:     GameRoomState,
+    changed:   Set<string>,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    const toDissolve = new Map<string, DivisionState[]>(); // stackId → members leaving
+
+    for (const [, div] of state.divisions) {
+      if (!div.stack_id) continue;
+      if (div.combat_state === "destroyed") continue;
+      if (div.move_order.length > 0) {
+        // This division started moving — remove from stack
+        if (!toDissolve.has(div.stack_id)) toDissolve.set(div.stack_id, []);
+        toDissolve.get(div.stack_id)!.push(div);
+      }
+    }
+
+    for (const [stackId, leavers] of toDissolve) {
+      for (const leaving of leavers) {
+        leaving.stack_id = "";
+        leaving.stack_position = 0;
+        changed.add(leaving.division_id);
+      }
+
+      // Renumber remaining members from 0 upward
+      const remaining = Array.from(state.divisions.values())
+        .filter(d => d.stack_id === stackId && d.combat_state !== "destroyed")
+        .sort((a, b) => a.stack_position - b.stack_position);
+
+      if (remaining.length === 1) {
+        // Only one left — dissolve the stack entirely
+        remaining[0].stack_id = "";
+        remaining[0].stack_position = 0;
+        changed.add(remaining[0].division_id);
+        broadcast("STACK_DISSOLVED", { stack_id: stackId });
+      } else if (remaining.length > 1) {
+        remaining.forEach((d, idx) => {
+          d.stack_position = idx;
+          changed.add(d.division_id);
+        });
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // _stackMaxPosition — highest stack_position among live members of a stack
+  // ---------------------------------------------------------------------------
+
+  private _stackMaxPosition(stackId: string, state: GameRoomState): number {
+    let max = -1;
+    for (const [, div] of state.divisions) {
+      if (div.stack_id === stackId && div.combat_state !== "destroyed") {
+        if (div.stack_position > max) max = div.stack_position;
+      }
+    }
+    return max;
+  }
+
+  // ---------------------------------------------------------------------------
+  // reorderStack — called by GameRoom for REORDER_STACK command
+  // ---------------------------------------------------------------------------
+
+  /** Reorder divisions within a stack. newOrder is an array of division_ids, index = new position. */
+  reorderStack(
+    stackId:  string,
+    newOrder: string[],
+    state:    GameRoomState,
+    broadcast: (type: string, msg: unknown) => void,
+  ): boolean {
+    const members = Array.from(state.divisions.values()).filter(
+      d => d.stack_id === stackId && d.combat_state !== "destroyed",
+    );
+
+    if (members.length !== newOrder.length) return false;
+
+    // Validate all IDs belong to this stack
+    const memberIds = new Set(members.map(m => m.division_id));
+    if (!newOrder.every(id => memberIds.has(id))) return false;
+
+    // Check that no stack member is currently engaged (can't reorder mid-combat)
+    if (members.some(m => m.combat_state === "engaged")) return false;
+
+    // Apply new order
+    for (let i = 0; i < newOrder.length; i++) {
+      const div = state.divisions.get(newOrder[i]);
+      if (div) div.stack_position = i;
+    }
+
+    broadcast("STACK_REORDERED", { stack_id: stackId, new_order: newOrder });
+    return true;
   }
 
   // ---------------------------------------------------------------------------
