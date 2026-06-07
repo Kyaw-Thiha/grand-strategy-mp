@@ -74,7 +74,7 @@ func handle_input(event: InputEvent) -> void:
 			_submit_hold(_selected_division_id)
 		elif event.keycode == KEY_ESCAPE:
 			_move_mode = false
-			_deselect()
+			deselect()
 
 
 ## Called by the game scene when a map click occurs (world position in lng/lat).
@@ -89,7 +89,7 @@ func handle_map_click(lng: float, lat: float) -> void:
 	if clicked_id != "":
 		_select(clicked_id)
 	else:
-		_deselect()
+		deselect()
 
 
 # ── EventBus callbacks ────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ func _on_division_removed(division_id: String) -> void:
 		_icons.erase(division_id)
 		_target_positions.erase(division_id)
 	if _selected_division_id == division_id:
-		_deselect()
+		deselect()
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ func _select(division_id: String) -> void:
 	_move_mode = false
 
 
-func _deselect() -> void:
+func deselect() -> void:
 	if _selected_division_id != "" and _icons.has(_selected_division_id):
 		(_icons[_selected_division_id] as Node2D).set_selected(false)
 	_selected_division_id = ""

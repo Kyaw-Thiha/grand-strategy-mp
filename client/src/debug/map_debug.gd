@@ -51,6 +51,11 @@ func _on_map_loaded(province_count: int) -> void:
 	_map_interaction.on_map_loaded(province_count)
 	_map_interaction.province_hovered.connect(_on_province_hovered)
 	_map_interaction.province_clicked.connect(_on_province_clicked)
+	_map_interaction.province_clicked.connect(func(_id: String) -> void: _military_system.deselect())
+	EventBus.division_selected.connect(func(_id: String) -> void:
+		_map_interaction.deselect()
+		_map_renderer.clear_highlights()
+	)
 
 	# Wire MilitarySystem — inject stub divisions for visual testing
 	_military_system.setup(_map_loader, _division_layer)
