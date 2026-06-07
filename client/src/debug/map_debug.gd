@@ -32,15 +32,25 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Forward key events to military system (M, H, X, Escape hotkeys)
+	if event is InputEventKey:
+		_military_system.handle_input(event)
+		return
+
 	if not event is InputEventMouseButton:
 		return
 	var mb := event as InputEventMouseButton
-	if not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+	if not mb.pressed:
 		return
-	# Convert viewport coords → world coords, then check for division hit
+
 	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
-	if _military_system.try_click_at_world(world_pos):
-		get_viewport().set_input_as_handled()
+
+	if mb.button_index == MOUSE_BUTTON_LEFT:
+		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
+			get_viewport().set_input_as_handled()
+	elif mb.button_index == MOUSE_BUTTON_RIGHT:
+		if _military_system.try_right_click_at_world(world_pos):
+			get_viewport().set_input_as_handled()
 
 
 func _on_map_loaded(province_count: int) -> void:

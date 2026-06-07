@@ -10,6 +10,7 @@ var engagement_radius_px: float = 60.0
 var observation_radius_px: float = 120.0
 var is_selected: bool = false
 var is_moving: bool = false
+var is_move_mode: bool = false
 
 # NATO rectangle dimensions in pixels
 const RECT_W := 22.0
@@ -40,6 +41,12 @@ func set_selected(selected: bool) -> void:
 		queue_redraw()
 
 
+func set_move_mode(active: bool) -> void:
+	if is_move_mode != active:
+		is_move_mode = active
+		queue_redraw()
+
+
 func _draw() -> void:
 	var half_w := RECT_W * 0.5
 	var half_h := RECT_H * 0.5
@@ -52,9 +59,10 @@ func _draw() -> void:
 	var eng_color := Color(nation_color.r, nation_color.g, nation_color.b, 0.5)
 	draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 48, eng_color, 1.5)
 
-	# Selection highlight
+	# Selection highlight — cyan ring in move mode, yellow ring otherwise
 	if is_selected:
-		draw_arc(Vector2.ZERO, half_w + 5.0, 0.0, TAU, 24, Color(1.0, 0.9, 0.2, 0.9), 2.5)
+		var ring_color := Color(0.2, 1.0, 0.9, 0.95) if is_move_mode else Color(1.0, 0.9, 0.2, 0.9)
+		draw_arc(Vector2.ZERO, half_w + 5.0, 0.0, TAU, 24, ring_color, 2.5)
 
 	# NATO rectangle fill
 	var rect := Rect2(-half_w, -half_h, RECT_W, RECT_H)
