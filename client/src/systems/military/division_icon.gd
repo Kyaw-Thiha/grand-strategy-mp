@@ -11,6 +11,9 @@ var observation_radius_px: float = 120.0
 var is_selected: bool = false
 var is_moving: bool = false
 var is_move_mode: bool = false
+var supply_status: String = "normal"
+var stack_id: String = ""
+var stack_position: int = -1  # -1 = not in a stack
 
 # NATO rectangle dimensions in pixels
 const RECT_W := 22.0
@@ -26,12 +29,20 @@ func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float) -> void
 	engagement_radius_px = eng_px
 	observation_radius_px = obs_px
 	is_moving = (data.get("move_order", []) as Array).size() > 0
+	supply_status = data.get("supply_status", "normal")
+	stack_id = data.get("stack_id", "")
+	stack_position = int(data.get("stack_position", -1)) if stack_id != "" else -1
 	queue_redraw()
 
 
 func update_data(data: Dictionary) -> void:
 	hp = float(data.get("hp", hp))
 	is_moving = (data.get("move_order", []) as Array).size() > 0
+	if data.has("supply_status"):
+		supply_status = data["supply_status"]
+	if data.has("stack_id"):
+		stack_id = data["stack_id"]
+		stack_position = int(data.get("stack_position", 0)) if stack_id != "" else -1
 	queue_redraw()
 
 
@@ -59,6 +70,10 @@ func _draw() -> void:
 	var eng_color := Color(nation_color.r, nation_color.g, nation_color.b, 0.5)
 	draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 48, eng_color, 1.5)
 
+	# Encirclement ring — most prominent supply indicator, drawn before selection ring
+	if supply_status == "encircled":
+		draw_arc(Vector2.ZERO, half_w + 8.0, 0.0, TAU, 32, Color(0.90, 0.10, 0.10, 0.90), 2.5)
+
 	# Selection highlight — cyan ring in move mode, yellow ring otherwise
 	if is_selected:
 		var ring_color := Color(0.2, 1.0, 0.9, 0.95) if is_move_mode else Color(1.0, 0.9, 0.2, 0.9)
@@ -73,6 +88,14 @@ func _draw() -> void:
 	var cross_color := Color(0.0, 0.0, 0.0, 0.8)
 	draw_line(Vector2(-half_w + 2, 0.0), Vector2(half_w - 2, 0.0), cross_color, 1.0)
 
+	# Stack FRONT badge — gold strip on top edge when this division leads the stack
+	if stack_position == 0 and stack_id != "":
+		draw_rect(Rect2(-half_w, -half_h - 4.0, RECT_W, 3.0), Color(1.0, 0.80, 0.0, 0.95))
+	elif stack_position > 0 and stack_id != "":
+		# Non-front stack members: gray strip with position dot
+		draw_rect(Rect2(-half_w, -half_h - 4.0, RECT_W, 3.0), Color(0.50, 0.50, 0.50, 0.80))
+		draw_circle(Vector2(half_w - 3.0, -half_h - 2.5), 1.5, Color(1, 1, 1, 0.9))
+
 	# HP bar below the rectangle
 	var bar_x := -half_w
 	var bar_w := RECT_W
@@ -82,9 +105,23 @@ func _draw() -> void:
 	if fill_w > 0.0:
 		draw_rect(Rect2(bar_x, HP_BAR_Y, fill_w, HP_BAR_H), hp_color)
 
-	# Movement indicator: small arrow below HP bar when moving
+	# Supply status indicators — below HP bar
+	var indicator_y := HP_BAR_Y + HP_BAR_H + 3.0
+	match supply_status:
+		"out_of_supply":
+			# Amber filled dot
+			draw_circle(Vector2(-half_w + 3.0, indicator_y + 2.0), 2.5, Color(1.0, 0.65, 0.0, 0.95))
+		"cut_off":
+			# Red filled dot + X cross
+			draw_circle(Vector2(-half_w + 3.0, indicator_y + 2.0), 2.5, Color(0.90, 0.10, 0.10, 0.95))
+			var cx := -half_w + 3.0
+			var cy := indicator_y + 2.0
+			draw_line(Vector2(cx - 2, cy - 2), Vector2(cx + 2, cy + 2), Color(1, 1, 1, 0.9), 1.0)
+			draw_line(Vector2(cx + 2, cy - 2), Vector2(cx - 2, cy + 2), Color(1, 1, 1, 0.9), 1.0)
+
+	# Movement indicator: small arrow below supply area when moving
+	var arrow_y := indicator_y + 6.0
 	if is_moving:
-		var arrow_y := HP_BAR_Y + HP_BAR_H + 3.0
 		draw_line(Vector2(0, arrow_y), Vector2(0, arrow_y + 6), Color(1, 1, 1, 0.7), 1.5)
 		draw_line(Vector2(-2, arrow_y + 4), Vector2(0, arrow_y + 7), Color(1, 1, 1, 0.7), 1.5)
 		draw_line(Vector2(2, arrow_y + 4), Vector2(0, arrow_y + 7), Color(1, 1, 1, 0.7), 1.5)

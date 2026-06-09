@@ -20,6 +20,8 @@ var players: Dictionary = {}
 var provinces: Dictionary = {}
 # divisions: { division_id → DivisionState dict (mirrors server DivisionState) }
 var divisions: Dictionary = {}
+# frontline: { province_id → { nation_id: float share, ... } }
+var frontline: Dictionary = {}
 # relations: { "from_id:to_id" → { stance: String } }
 var relations: Dictionary = {}
 # proposals: { proposal_id → { from_id, to_id, stance, resolved } }
@@ -83,6 +85,16 @@ func _apply_unit_destroyed(data: Dictionary) -> void:
 		divisions[div_id]["combat_state"] = "destroyed"
 	EventBus.unit_destroyed.emit(div_id, nation_id)
 	EventBus.division_updated.emit(div_id)
+
+
+## Called by SessionManager when server sends FRONTLINE_UPDATED.
+func _apply_frontline_updated(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var shares: Dictionary = data.get("nation_shares", {})
+	if province_id.is_empty():
+		return
+	frontline[province_id] = shares
+	EventBus.frontline_updated.emit(province_id, shares)
 
 
 ## Called by SessionManager when server sends PROVINCE_CAPTURED.

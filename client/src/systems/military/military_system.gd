@@ -58,6 +58,16 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_removed.connect(_on_division_removed)
 
+	# Surface SUBMIT_MOVE_ORDER rejections in the console
+	CommandQueue.command_rejected.connect(func(type: String, reason: String) -> void:
+		if type == "SUBMIT_MOVE_ORDER":
+			push_warning("[MilitarySystem] move rejected: " + reason)
+	)
+
+	# Catch-up: create icons for divisions that arrived before setup() ran
+	for div_id: String in GameState.divisions:
+		_on_division_added(div_id)
+
 
 func _process(delta: float) -> void:
 	for div_id: String in _icons:
@@ -279,6 +289,9 @@ func _update_ghost() -> void:
 
 func _on_division_added(division_id: String) -> void:
 	if _map_loader == null or _icon_layer == null:
+		return
+	if _icons.has(division_id):
+		_on_division_updated(division_id)
 		return
 	var data: Dictionary = GameState.get_division(division_id)
 	if data.is_empty():

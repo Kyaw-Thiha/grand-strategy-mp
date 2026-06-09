@@ -53,3 +53,15 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"REAR_ATTACK":
 			EventBus.rear_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+
+		"FRONTLINE_BATCH":
+			for province_id: String in data.get("provinces", {}):
+				GameState._apply_frontline_updated({
+					"province_id": province_id,
+					"nation_shares": data["provinces"][province_id],
+				})
+
+		"MOVE_ORDER_REJECTED":
+			EventBus.notification_requested.emit(
+				"Move rejected: " + data.get("reason", "unknown"), "error"
+			)
