@@ -8,6 +8,7 @@ import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
+import { FrontlineSystem } from "../systems/frontline_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
@@ -28,9 +29,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private gameStartedAt: Date | null = null;
   private nationIds: string[] = [];
   private tickCount = 0;
-  private movementSystem = new MovementSystem();
-  private combatSystem   = new CombatSystem(this.movementSystem);
-  private supplySystem   = new SupplySystem();
+  private movementSystem   = new MovementSystem();
+  private combatSystem     = new CombatSystem(this.movementSystem);
+  private supplySystem     = new SupplySystem();
+  private frontlineSystem  = new FrontlineSystem();
 
   async onAuth(_client: Client, options: { token?: string }) {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -317,6 +319,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.movementSystem.loadWaypoints(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
+    this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
 
     // Spawn all divisions
@@ -381,6 +384,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.movementSystem.tick(this.state);
       const combatChanged = this.combatSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
       const updates = [];

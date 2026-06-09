@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
@@ -81,6 +81,27 @@ export class MovementSystem {
     }
 
     console.log(`[MovementSystem] loaded ${raw.nodes.length} waypoints, ${raw.edges.length} edges`);
+
+    // Load terrain grid (server-only — client uses road-only waypoints.json)
+    const terrainPath = join(gameServerRoot, "..", "client", "assets", "data", mapId, "waypoints_terrain.json");
+    if (existsSync(terrainPath)) {
+      const tRaw = JSON.parse(readFileSync(terrainPath, "utf-8")) as {
+        nodes: WaypointNode[];
+        edges: WaypointEdge[];
+      };
+      for (const node of tRaw.nodes) {
+        this.graph.nodes.set(node.id, node);
+        this.graph.adjacency.set(node.id, []);
+        // tg_ nodes intentionally omitted from road_node_ids → off-road speed applied
+      }
+      for (const edge of tRaw.edges) {
+        this.graph.adjacency.get(edge.from)?.push(edge.to);
+        this.graph.adjacency.get(edge.to)?.push(edge.from);
+        this.edgeSet.add(`${edge.from}|${edge.to}`);
+        this.edgeSet.add(`${edge.to}|${edge.from}`);
+      }
+      console.log(`[MovementSystem] merged terrain grid: ${tRaw.nodes.length} nodes, ${tRaw.edges.length} edges`);
+    }
   }
 
   getNearestWaypoint(lng: number, lat: number): WaypointNode | null {

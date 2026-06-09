@@ -5,6 +5,7 @@
  *   1. Submit a valid multi-hop connected path → accepted, division moves
  *   2. Submit a path with non-connected waypoints → MOVE_ORDER_REJECTED
  *   3. Submit a path with a non-existent waypoint ID → MOVE_ORDER_REJECTED
+ *   4. Submit a terrain-only path (tg_ nodes) → accepted (off-road movement)
  *
  * Run with: npx tsx test/4b-pathfinding.e2e.ts
  * Requires both servers running with DEV_MODE=true.
@@ -23,15 +24,23 @@ const BOT_B_EMAIL = "e2e-4b-bot-b@example.com";
 const PASSWORD    = "password123";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const WAYPOINTS_PATH = join(__dir, "../../client/assets/data/western_europe_6/waypoints.json");
+const DATA_DIR         = join(__dir, "../../client/assets/data/western_europe_6");
+const WAYPOINTS_PATH   = join(DATA_DIR, "waypoints.json");
+const TERRAIN_WP_PATH  = join(DATA_DIR, "waypoints_terrain.json");
 
 interface WaypointNode { id: string; lng: number; lat: number }
 interface WaypointEdge { from: string; to: string; base_cost: number; river_size: string | null }
 
 let waypointData: { nodes: WaypointNode[]; edges: WaypointEdge[] };
+let terrainData:  { nodes: WaypointNode[]; edges: WaypointEdge[] } | null = null;
 
 function loadWaypoints() {
   waypointData = JSON.parse(readFileSync(WAYPOINTS_PATH, "utf-8")) as typeof waypointData;
+  try {
+    terrainData = JSON.parse(readFileSync(TERRAIN_WP_PATH, "utf-8")) as typeof terrainData;
+  } catch {
+    terrainData = null;
+  }
 }
 
 /** Find nearest waypoint to (lng, lat) by sampling every 50th node. */
@@ -67,6 +76,37 @@ function findConnectedPath(startId: string, hops: number): string[] {
     current = next;
   }
   return path;
+}
+
+/**
+ * Find a connected path of `hops` edges consisting only of terrain grid (tg_) nodes.
+ * Returns null if no terrain nodes exist in the graph.
+ */
+function findTerrainPath(hops = 3): string[] | null {
+  if (!terrainData) return null;
+  // Build adjacency from terrain-only edges (tg_ → tg_ only)
+  const adj = new Map<string, string[]>();
+  for (const e of terrainData.edges) {
+    if (!e.from.startsWith("tg_") || !e.to.startsWith("tg_")) continue;
+    if (!adj.has(e.from)) adj.set(e.from, []);
+    if (!adj.has(e.to))   adj.set(e.to,   []);
+    adj.get(e.from)!.push(e.to);
+    adj.get(e.to)!.push(e.from);
+  }
+  for (const node of terrainData.nodes) {
+    if (!node.id.startsWith("tg_")) continue;
+    if (!adj.has(node.id)) continue;
+    const path = [node.id];
+    let current = node.id;
+    for (let i = 0; i < hops - 1; i++) {
+      const next = (adj.get(current) ?? []).find(n => !path.includes(n));
+      if (!next) break;
+      path.push(next);
+      current = next;
+    }
+    if (path.length >= hops) return path;
+  }
+  return null;
 }
 
 /** Find two waypoints that are definitely NOT directly connected. */
@@ -131,7 +171,8 @@ async function main() {
 
   console.log("Loading waypoints...");
   loadWaypoints();
-  console.log(`   ${waypointData.nodes.length} nodes, ${waypointData.edges.length} edges loaded`);
+  console.log(`   ${waypointData.nodes.length} road nodes, ${waypointData.edges.length} road edges`);
+  if (terrainData) console.log(`   ${terrainData.nodes.length} terrain nodes, ${terrainData.edges.length} terrain edges`);
 
   // 1. Register + login
   console.log("1. Registering and logging in...");
@@ -227,6 +268,22 @@ async function main() {
   await new Promise(r => setTimeout(r, 1500));
   assert(rejectedBadId, "Non-existent waypoint was not rejected");
   console.log("   ✓ Non-existent waypoint correctly rejected");
+
+  // 7. Test: terrain-only path (tg_ nodes) → accepted (off-road movement)
+  console.log("7. Test: terrain-only path (off-road tg_ nodes) → accepted...");
+  const terrainPath = findTerrainPath(3);
+  assert(
+    terrainPath !== null,
+    "No terrain (tg_) nodes found in waypoints.json — pipeline may not have generated terrain grid",
+  );
+  console.log(`   Terrain path: ${terrainPath!.slice(0, 3).join(" → ")}`);
+
+  let rejectedTerrain = false;
+  roomA.onMessage("MOVE_ORDER_REJECTED", () => { rejectedTerrain = true; });
+  roomA.send("SUBMIT_MOVE_ORDER", { division_id: "germany_div_01", waypoints: terrainPath! });
+  await new Promise(r => setTimeout(r, 2000));
+  assert(!rejectedTerrain, "Terrain-only path was unexpectedly rejected — off-road movement broken");
+  console.log("   ✓ Terrain path accepted — off-road movement works");
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
   roomA.leave();
