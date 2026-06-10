@@ -10,22 +10,27 @@ const KM_PER_DEG = 111.0;
 // How many game ticks between full supply-status recalculation
 const SUPPLY_TICK_INTERVAL = 5;
 
-// Tier 1: division is OUT_OF_SUPPLY when farther than this from any friendly province city
-const OOS_SUPPLY_RANGE_KM = 200;
+// Corridor check: walk outward in 8 directions, this many steps of STEP_KM each.
+// A direction "succeeds" when it reaches a friendly city within 1.5× STEP_KM without
+// crossing any enemy engagement radius.
+const CORRIDOR_STEP_KM  = 30;
+const CORRIDOR_MAX_STEPS = 5;   // 150 km max reach per direction
 
-// Tier 2: CUT_OFF requires Tier 1 AND no friendly division within this radius
-const CUTOFF_BUDDY_RANGE_KM = 120;
-
-// Tier 3: ENCIRCLED — sample points at MULT × engagement_radius from division centre;
-// if BLOCKED_THRESHOLD of ENCIRCLE_DIRS are inside an enemy's engagement radius → encircled
-const ENCIRCLE_SAMPLE_MULT      = 1.5;
-const ENCIRCLE_DIRS             = 8;
+// Encirclement: sample points at MULT × engagement_radius from division centre;
+// if BLOCKED_THRESHOLD of ENCIRCLE_DIRS are inside an enemy engagement radius → encircled
+const ENCIRCLE_SAMPLE_MULT       = 1.5;
+const ENCIRCLE_DIRS              = 8;
 const ENCIRCLE_BLOCKED_THRESHOLD = 7;  // 7 of 8 directions blocked
 
 // HP drained every game tick (not supply tick) based on supply tier
 const OOS_HP_DRAIN_PER_TICK       = 0.05;   // slow attrition out of supply
 const CUTOFF_HP_DRAIN_PER_TICK    = 0.15;   // fighting-withdrawal cost
 const ENCIRCLED_HP_DRAIN_PER_TICK = 0.35;   // rapid deterioration while fully encircled
+
+// A unit in enemy/neutral territory is still treated as "in friendly" if any friendly
+// city is within this distance — handles border units where a neutral city happens to
+// be geometrically closer than the nearest friendly one.
+const FRIENDLY_TERRITORIAL_REACH_KM = 250;
 
 // Status tiers in order of severity — degradation limited to one tier per supply tick
 const TIER_ORDER = ["normal", "out_of_supply", "cut_off", "encircled"] as const;
@@ -82,6 +87,12 @@ export class SupplySystem {
     tickCount:  number,
     broadcast:  (type: string, msg: unknown) => void,
   ): Set<string> {
+    // DISABLED: supply system temporarily disabled — pending rework.
+    // All logic below is preserved; re-enable by removing this early return.
+    void state; void tickCount; void broadcast;
+    return new Set<string>();
+
+    /* eslint-disable no-unreachable */
     const changed = new Set<string>();
 
     if (tickCount === 1) {
@@ -150,6 +161,7 @@ export class SupplySystem {
     }
 
     return changed;
+    /* eslint-enable no-unreachable */
   }
 
   // ---------------------------------------------------------------------------
@@ -161,28 +173,93 @@ export class SupplySystem {
     divList:  DivisionState[],
     state:    GameRoomState,
   ): string {
-    // Tier 1: distance to nearest friendly-owned province city
-    const nearestKm = this._nearestFriendlyProvinceKm(
+    const enemies = divList.filter(
+      d => d.nation_id !== div.nation_id && d.combat_state !== "destroyed",
+    );
+
+    // Step 1: Territory check — nearest province by city distance, with fallback for
+    // border units where a neutral city happens to be geometrically closer than the
+    // nearest friendly city (e.g. Saarbrücken is closer to Luxembourg than Frankfurt).
+    const nearestProv       = this._nearestProvince(div.position_lng, div.position_lat, state);
+    const nearestFriendlyKm = this._nearestFriendlyProvinceKm(
       div.nation_id, div.position_lng, div.position_lat, state,
     );
-    if (nearestKm <= OOS_SUPPLY_RANGE_KM) return "normal";
+    const inFriendly = nearestProv?.ownerId === div.nation_id
+                    || nearestFriendlyKm <= FRIENDLY_TERRITORIAL_REACH_KM;
 
-    // Tier 2: any friendly division within range?
-    const hasBuddy = divList.some(
-      d => d.division_id !== div.division_id
-        && d.nation_id   === div.nation_id
-        && d.combat_state !== "destroyed"
-        && this._distKm(
-             div.position_lng, div.position_lat,
-             d.position_lng,   d.position_lat,
-           ) <= CUTOFF_BUDDY_RANGE_KM,
-    );
-    if (hasBuddy) return "out_of_supply";
+    // Step 2: In friendly territory — only full encirclement can hurt supply
+    if (inFriendly) {
+      if (this._isEncircled(div, divList)) return "encircled";
+      return "normal";
+    }
 
-    // Tier 3: geometric encirclement check
+    // Step 3: In enemy/neutral territory — check whether supply corridor is open.
+    // A corridor is open if ANY of 8 outward directions reaches a friendly province
+    // city without crossing an enemy engagement radius.
+    const corridorOpen = this._corridorOpen(div, enemies, div.nation_id, state);
+    if (corridorOpen) return "out_of_supply";   // in enemy territory, line not yet cut
+
+    // Corridor is blocked — check full encirclement
     if (this._isEncircled(div, divList)) return "encircled";
-
     return "cut_off";
+  }
+
+  // ---------------------------------------------------------------------------
+  // _nearestProvince — find the nearest province city and its live owner
+  // ---------------------------------------------------------------------------
+
+  private _nearestProvince(
+    lng:   number,
+    lat:   number,
+    state: GameRoomState,
+  ): { ownerId: string } | null {
+    let best: { ownerId: string } | null = null;
+    let bestDist = Infinity;
+    for (const [provinceId, prov] of this.provinces) {
+      const d = this._distKm(lng, lat, prov.city_lng, prov.city_lat);
+      if (d < bestDist) {
+        bestDist = d;
+        const stateP = state.provinces.get(provinceId);
+        best = { ownerId: stateP ? stateP.owner_id : prov.nation_id };
+      }
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------------------------
+  // _corridorOpen — 8-direction walk to detect whether supply can reach the
+  // division from friendly territory without crossing enemy engagement radii
+  // ---------------------------------------------------------------------------
+
+  private _corridorOpen(
+    div:      DivisionState,
+    enemies:  DivisionState[],
+    nationId: string,
+    state:    GameRoomState,
+  ): boolean {
+    const friendlyReachKm = CORRIDOR_STEP_KM * 1.5;
+
+    for (let d = 0; d < ENCIRCLE_DIRS; d++) {
+      const angle = (2 * Math.PI * d) / ENCIRCLE_DIRS;
+
+      for (let step = 1; step <= CORRIDOR_MAX_STEPS; step++) {
+        const distKm = step * CORRIDOR_STEP_KM;
+        const sLng   = div.position_lng + Math.cos(angle) * (distKm / KM_PER_DEG);
+        const sLat   = div.position_lat + Math.sin(angle) * (distKm / KM_PER_DEG);
+
+        // Blocked if inside any enemy engagement radius
+        const blocked = enemies.some(
+          e => this._distKm(sLng, sLat, e.position_lng, e.position_lat) <= e.engagement_radius,
+        );
+        if (blocked) break;   // this direction is cut off, try next
+
+        // If this sample point is near a friendly city → corridor confirmed open
+        const nearestKm = this._nearestFriendlyProvinceKm(nationId, sLng, sLat, state);
+        if (nearestKm <= friendlyReachKm) return true;
+      }
+    }
+
+    return false;
   }
 
   // ---------------------------------------------------------------------------

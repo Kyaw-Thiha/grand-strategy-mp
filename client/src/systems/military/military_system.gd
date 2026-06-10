@@ -16,10 +16,10 @@ const NATION_COLORS: Dictionary = {
 }
 const NEUTRAL_COLOR := Color(0.45, 0.45, 0.45)
 
-const LERP_SPEED := 8.0
+const LERP_SPEED := 3.5
 const SNAP_THRESHOLD := 150.0
-const ENGAGEMENT_RADIUS_PX := 60.0
-const OBSERVATION_RADIUS_PX := 130.0
+const ENGAGEMENT_RADIUS_PX := 18.0
+const OBSERVATION_RADIUS_PX := 54.0
 const HIT_THRESHOLD_PX := 20.0
 
 var _map_loader: Node = null
@@ -38,6 +38,7 @@ var _pending_chain: Array[String] = []
 
 var _pathfinder: RefCounted = null
 var _ghost_overlay: Node2D = null
+var _route_overlay: Node2D = null
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -50,9 +51,11 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	if not wp_graph.is_empty():
 		_pathfinder.build(wp_graph)
 
-	# Ghost overlay node for planned waypoints
+	# Ghost overlay for pending route being built; route overlay for selected division's confirmed order
 	_ghost_overlay = MoveOrderOverlay.new()
 	_icon_layer.add_child(_ghost_overlay)
+	_route_overlay = MoveOrderOverlay.new()
+	_icon_layer.add_child(_route_overlay)
 
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
@@ -74,9 +77,7 @@ func _process(delta: float) -> void:
 		var icon: Node2D = _icons[div_id]
 		var target: Vector2 = _target_positions.get(div_id, icon.position)
 		var dist: float = icon.position.distance_to(target)
-		if dist > SNAP_THRESHOLD:
-			icon.position = target
-		elif dist > 0.5:
+		if dist > 0.5:
 			icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
 
 
@@ -105,6 +106,10 @@ func handle_input(event: InputEvent) -> void:
 			if _selected_division_id != "":
 				_clear_pending()
 				CommandQueue.submit("HOLD", { "division_id": _selected_division_id })
+		KEY_G:
+			if _selected_division_id != "":
+				_clear_pending()
+				CommandQueue.submit("RETREAT", { "division_id": _selected_division_id })
 		KEY_ESCAPE:
 			_clear_pending()
 			deselect()
@@ -269,6 +274,15 @@ func _get_ghost_positions() -> Array[Vector2]:
 	return positions
 
 
+func _get_chain_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	for wp_id: String in _pending_chain:
+		var node: Dictionary = _pathfinder.get_node(wp_id)
+		if not node.is_empty():
+			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+	return positions
+
+
 func _update_ghost() -> void:
 	if _ghost_overlay == null:
 		return
@@ -276,13 +290,33 @@ func _update_ghost() -> void:
 		_ghost_overlay.clear()
 		return
 
-	var positions: Array[Vector2] = _get_ghost_positions()
 	var color := Color.WHITE
 	if _selected_division_id != "":
 		var data: Dictionary = GameState.get_division(_selected_division_id)
 		color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 
-	_ghost_overlay.set_milestones(positions, color)
+	_ghost_overlay.set_path(_get_chain_positions(), _get_ghost_positions(), color)
+
+
+func _update_route_overlay() -> void:
+	if _route_overlay == null:
+		return
+	if _selected_division_id == "":
+		_route_overlay.clear()
+		return
+	var div_data: Dictionary = GameState.get_division(_selected_division_id)
+	var order: Array = div_data.get("move_order", [])
+	if order.is_empty():
+		_route_overlay.clear()
+		return
+	var positions: Array[Vector2] = []
+	for wp_id: String in order:
+		var node: Dictionary = _pathfinder.get_node(str(wp_id))
+		if not node.is_empty():
+			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+	var color: Color = NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
+	var no_milestones: Array[Vector2] = []
+	_route_overlay.set_path(positions, no_milestones, color.darkened(0.25))
 
 
 # ── EventBus callbacks ────────────────────────────────────────────────────────
@@ -323,7 +357,24 @@ func _on_division_updated(division_id: String) -> void:
 
 	var lng: float = float(data.get("position_lng", 0.0))
 	var lat: float = float(data.get("position_lat", 0.0))
-	_target_positions[division_id] = _map_loader.project_lng_lat(lng, lat)
+	var server_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
+
+	# When the division has a move order, target the next waypoint rather than
+	# the server position. This gives smooth continuous motion between 1 Hz
+	# server ticks instead of the jump-then-freeze pattern.
+	var order: Array = data.get("move_order", [])
+	if not order.is_empty() and _pathfinder != null:
+		var next_wp: Dictionary = _pathfinder.get_node(str(order[0]))
+		if not next_wp.is_empty():
+			_target_positions[division_id] = _map_loader.project_lng_lat(
+				float(next_wp["lng"]), float(next_wp["lat"]))
+		else:
+			_target_positions[division_id] = server_pos
+	else:
+		_target_positions[division_id] = server_pos
+
+	if division_id == _selected_division_id:
+		_update_route_overlay()
 
 
 func _on_division_removed(division_id: String) -> void:
@@ -346,6 +397,7 @@ func _select(division_id: String) -> void:
 		(_icons[division_id] as Node2D).set_selected(true)
 	EventBus.division_selected.emit(division_id)
 	_clear_pending()
+	_update_route_overlay()
 
 
 func deselect() -> void:
@@ -354,6 +406,8 @@ func deselect() -> void:
 	_selected_division_id = ""
 	EventBus.division_deselected.emit()
 	_clear_pending()
+	if _route_overlay != null:
+		_route_overlay.clear()
 
 
 func find_division_at_world(world_pos: Vector2) -> String:

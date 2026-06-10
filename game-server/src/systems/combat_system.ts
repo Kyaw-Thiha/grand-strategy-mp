@@ -10,6 +10,10 @@ import type { MovementSystem } from "./movement_system.js";
 // Kilometres represented by one degree of lat/lng (approximate, matches movement_system)
 const KM_PER_DEG = 111.0;
 
+// Engagement detection is skipped for this many ticks so players can issue starting
+// orders before border divisions auto-engage each other.
+const COMBAT_GRACE_TICKS = 10;
+
 // Raw outgoing damage per combat tick at full HP, before all modifiers
 const BASE_ATTRITION = 2.5;
 // Fraction of dealt damage that goes to the HP pool
@@ -34,8 +38,11 @@ const SUPPRESS_DECAY_IDLE = 1.5;
 // Suppression recovered per tick while retreating
 const SUPPRESS_DECAY_RETREAT = 3.5;
 
-// Division must be within this radius of a city to contest/capture it
-const CAPTURE_RADIUS_KM = 15.0;
+// Division must be within this radius of a city to capture it
+const CAPTURE_RADIUS_KM = 40.0;
+// Enemy must be THIS close to the city to contest capture (smaller than engagement radius so
+// far-away frontline units don't permanently block every nearby capture attempt)
+const CONTEST_RADIUS_KM = 20.0;
 
 // Angle thresholds for flanking classification (relative to primary attacker vector)
 const FLANK_ANGLE_MIN = Math.PI / 2;          // 90° — counts as flank
@@ -90,6 +97,7 @@ interface ProvinceInfo {
   city_lat: number;
   elevation: string;
   cover: string;
+  polygons: [number, number][][];
 }
 
 interface ActivePair {
@@ -108,6 +116,7 @@ export class CombatSystem {
   private provinces  = new Map<string, ProvinceInfo>();
   private activePairs = new Map<string, ActivePair>(); // sorted "idA|idB" → data
   private movementSystem: MovementSystem;
+  private _resolveCombatTickCount = 0;
 
   constructor(movementSystem: MovementSystem) {
     this.movementSystem = movementSystem;
@@ -141,6 +150,7 @@ export class CombatSystem {
         city_lat:  city_pos[1],
         elevation: (entry["terrain_elevation"] as string) ?? "flat",
         cover:     (entry["terrain_cover"]     as string) ?? "plains",
+        polygons:  (entry["polygons"] as [number, number][][]) ?? [],
       });
     }
 
@@ -154,13 +164,16 @@ export class CombatSystem {
 
   tick(
     state: GameRoomState,
+    tickCount: number,
     broadcast: (type: string, msg: unknown) => void,
   ): Set<string> {
     const changed = new Set<string>();
     this._handleDestroyed(state, changed, broadcast);
     this._dissolveInvalidStacks(state, changed, broadcast);
     this._detectStacks(state, changed, broadcast);
-    this._detectEngagements(state, changed, broadcast);
+    if (tickCount > COMBAT_GRACE_TICKS) {
+      this._detectEngagements(state, changed, broadcast);
+    }
     this._resolveCombat(state, changed, broadcast);
     this._checkDisengagement(state, changed);
     this._checkProvinceCapture(state, broadcast);
@@ -202,6 +215,7 @@ export class CombatSystem {
 
         if (distKm <= engageRange) {
           if (!this.activePairs.has(key)) {
+            console.log(`[Combat] ENGAGE: ${a.division_id} ↔ ${b.division_id}, dist=${distKm.toFixed(1)}km, range=${engageRange}km`);
             // ── New engagement ──────────────────────────────────────────────
             const aHasOrder = a.move_order.length > 0;
             const bHasOrder = b.move_order.length > 0;
@@ -326,6 +340,7 @@ export class CombatSystem {
     changed: Set<string>,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
+    this._resolveCombatTickCount++;
     // Single pass using keyed iteration so we can recover division IDs for all pair types
     for (const [key, pair] of this.activePairs) {
       let divA: DivisionState | undefined;
@@ -384,6 +399,10 @@ export class CombatSystem {
 
     const damageByA = computeDamage(divA, divB);
     const damageByB = computeDamage(divB, divA);
+
+    if (this._resolveCombatTickCount % 10 === 0) {
+      console.log(`[Combat] DAMAGE: ${divA.division_id}(hp=${divA.hp.toFixed(1)}) ↔ ${divB.division_id}(hp=${divB.hp.toFixed(1)})`);
+    }
 
     // Apply damage from A → B
     divB.hp           = Math.max(0, divB.hp           - damageByA * HP_DAMAGE_FRACTION);
@@ -469,17 +488,18 @@ export class CombatSystem {
         if (!stateProvince) continue;
         if (stateProvince.owner_id === div.nation_id) continue;
 
-        // Must be within capture radius of the city
-        const distToCity = this._distKm(div.position_lng, div.position_lat, prov.city_lng, prov.city_lat);
-        if (distToCity > CAPTURE_RADIUS_KM) continue;
+        // Must be physically inside the province polygon
+        if (!this._inProvince(div.position_lng, div.position_lat, prov)) continue;
+        console.log(`[Capture] ${div.division_id} inside ${province_id}`);
 
-        // No enemy division must have engagement area overlapping the city
+        // Capture is contested only if an enemy is physically at the city (within CONTEST_RADIUS_KM).
+        // Using engagement_radius (50 km) was too strict — any frontline unit blocked every nearby city.
         let contested = false;
         for (const enemy of divList) {
           if (enemy.nation_id === div.nation_id) continue;
           if (enemy.combat_state === "destroyed") continue;
           const enemyToCity = this._distKm(enemy.position_lng, enemy.position_lat, prov.city_lng, prov.city_lat);
-          if (enemyToCity <= enemy.engagement_radius) {
+          if (enemyToCity <= CONTEST_RADIUS_KM) {
             contested = true;
             break;
           }
@@ -865,6 +885,29 @@ export class CombatSystem {
 
     broadcast("STACK_REORDERED", { stack_id: stackId, new_order: newOrder });
     return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // _pointInRing — ray-casting point-in-polygon test for one ring [lng, lat][]
+  // ---------------------------------------------------------------------------
+
+  private _pointInRing(lng: number, lat: number, ring: [number, number][]): boolean {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (((yi > lat) !== (yj > lat)) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)
+        inside = !inside;
+    }
+    return inside;
+  }
+
+  private _inProvince(lng: number, lat: number, prov: ProvinceInfo): boolean {
+    if (prov.polygons.length === 0) {
+      // Fallback to city-distance if no polygon data available
+      return this._distKm(lng, lat, prov.city_lng, prov.city_lat) <= CAPTURE_RADIUS_KM;
+    }
+    return prov.polygons.some(ring => this._pointInRing(lng, lat, ring));
   }
 
   // ---------------------------------------------------------------------------

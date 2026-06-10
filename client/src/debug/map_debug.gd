@@ -5,6 +5,7 @@ extends Node
 ## Scene → Run Specific Scene in the Godot editor.
 
 const MAP_ID := "western_europe_6"
+const FrontlineOverlay := preload("res://src/systems/frontline/frontline_overlay.gd")
 
 @onready var _map_loader: Node       = $MapLoader
 @onready var _map_renderer: Node     = $MapRenderer
@@ -66,6 +67,11 @@ func _on_map_loaded(province_count: int) -> void:
 		_map_interaction.deselect()
 		_map_renderer.clear_highlights()
 	)
+
+	# Frontline overlay: additive colored circles around each unit, above terrain, below icons
+	var frontline_overlay: Node2D = FrontlineOverlay.new()
+	_division_layer.add_child(frontline_overlay)
+	frontline_overlay.setup(_map_loader)
 
 	# Wire MilitarySystem — inject stub divisions for visual testing
 	_military_system.setup(_map_loader, _division_layer)

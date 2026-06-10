@@ -9,8 +9,8 @@ import type { TemplateCell } from "../data/maps/western_europe_6/default_templat
 const KM_PER_DEG_LAT = 111.0;
 
 // Km/h at which divisions move on roads (game hours = ticks at speed 1).
-const ROAD_SPEED_KMH = 30;
-const OFFROAD_SPEED_KMH = 5;
+const ROAD_SPEED_KMH = 60;
+const OFFROAD_SPEED_KMH = 20;
 
 // Units considered "armoured" for type classification and engagement radius.
 const ARMOURED_UNIT_TYPES = new Set(["light_tank", "heavy_tank", "medium_tank"]);
@@ -222,15 +222,15 @@ export class MovementSystem {
 
   computeEngagementRadius(template: TemplateCell[]): number {
     const total = template.length;
-    if (total === 0) return 50;
+    if (total === 0) return 8;
     const armoured = template.filter(c => ARMOURED_UNIT_TYPES.has(c.unit_type)).length;
     const cavalry = template.filter(c => CAVALRY_UNIT_TYPES.has(c.unit_type)).length;
     const armouredFrac = armoured / total;
     const cavalryFrac = cavalry / total;
-    let radius = 50;
-    radius -= (Math.max(0, armouredFrac - 0.15) / 0.10) * 5;
-    radius -= (cavalryFrac / 0.10) * 2;
-    return Math.max(30, Math.min(50, radius));
+    let radius = 8;
+    radius -= (Math.max(0, armouredFrac - 0.15) / 0.10) * 1;
+    radius -= (cavalryFrac / 0.10) * 0.5;
+    return Math.max(5, Math.min(8, radius));
   }
 
   computeObservationRadius(_template: TemplateCell[]): number {

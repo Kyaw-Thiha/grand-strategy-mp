@@ -89,9 +89,7 @@ var _highlighted: Dictionary = {}       # province_id → original Color
 var _nation_label_layer: Node2D = null
 var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
-var _frontline: Dictionary = {}         # province_id → { nation_id → share float }
 
-const FRONTLINE_BLEND_STRENGTH := 0.55  # how strongly foreign influence tints the province
 
 
 func setup(map_loader: Node, data_source: Object) -> void:
@@ -102,11 +100,9 @@ func setup(map_loader: Node, data_source: Object) -> void:
 	_nation_label_layer.visible = false
 	_map_loader.add_child(_nation_label_layer)
 
-	# Auto-refresh province color on capture and frontline influence changes
+	# Auto-refresh province color on capture
 	if not EventBus.province_captured.is_connected(_on_province_captured):
 		EventBus.province_captured.connect(_on_province_captured)
-	if not EventBus.frontline_updated.is_connected(_on_frontline_updated):
-		EventBus.frontline_updated.connect(_on_frontline_updated)
 
 
 func on_map_loaded(_province_count: int) -> void:
@@ -214,22 +210,7 @@ func _province_color(province_id: String) -> Color:
 	match _overlay_mode:
 		OverlayMode.POLITICAL:
 			var owner: String = pdata.get("nation_id", "default")
-			var base: Color = NATION_PALETTE.get(owner, NATION_PALETTE["default"])
-			# Blend in dominant foreign influence from frontline data
-			var shares: Dictionary = _frontline.get(province_id, {})
-			if not shares.is_empty() and _overlay_mode == OverlayMode.POLITICAL:
-				var best_share := 0.0
-				var best_color := base
-				for nation_id: String in shares:
-					if nation_id == owner:
-						continue
-					var share: float = float(shares[nation_id])
-					if share > best_share:
-						best_share = share
-						best_color = NATION_PALETTE.get(nation_id, NATION_PALETTE["default"])
-				if best_share > 0.05:
-					return base.lerp(best_color, best_share * FRONTLINE_BLEND_STRENGTH)
-			return base
+			return NATION_PALETTE.get(owner, NATION_PALETTE["default"])
 		OverlayMode.COVER:
 			return Color(0.55, 0.55, 0.55, 0.35)  # neutral grey; cover cells render on top, gaps show grey not ocean blue
 		_:
@@ -238,12 +219,6 @@ func _province_color(province_id: String) -> Color:
 
 func _on_province_captured(province_id: String, _new_owner_id: String) -> void:
 	refresh_province(province_id)
-
-
-func _on_frontline_updated(province_id: String, nation_shares: Dictionary) -> void:
-	_frontline[province_id] = nation_shares
-	if _overlay_mode == OverlayMode.POLITICAL:
-		refresh_province(province_id)
 
 
 func _build_nation_labels() -> void:

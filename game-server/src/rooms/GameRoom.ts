@@ -382,7 +382,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     try {
       this.movementSystem.tick(this.state);
-      const combatChanged = this.combatSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
+      const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
 

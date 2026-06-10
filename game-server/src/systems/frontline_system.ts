@@ -11,10 +11,11 @@ const KM_PER_DEG = 111.0;
 const FRONTLINE_TICK_INTERVAL = 5;
 
 // Division influence falls to 0 beyond this distance from province city
-const MAX_INFLUENCE_RANGE_KM = 150;
+const MAX_INFLUENCE_RANGE_KM = 200;
 
 // Owning a province adds this much raw influence to the owner nation
-const OWNERSHIP_BONUS = 0.5;
+// Low so that a single enemy unit nearby is enough to shift border province colors.
+const OWNERSHIP_BONUS = 0.1;
 
 // ─── Internal types ─────────────────────────────────────────────────────────
 
@@ -67,6 +68,11 @@ export class FrontlineSystem {
     tickCount: number,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
+    // DISABLED: client-side FrontlineOverlay renders directly from division positions
+    void state; void tickCount; void broadcast;
+    return;
+
+    /* eslint-disable no-unreachable */
     if (tickCount % FRONTLINE_TICK_INTERVAL !== 0) return;
     if (this.provinces.size === 0) return;
 
@@ -114,6 +120,7 @@ export class FrontlineSystem {
     if (Object.keys(batch).length > 0) {
       broadcast("FRONTLINE_BATCH", { provinces: batch });
     }
+    /* eslint-enable no-unreachable */
   }
 
   // ---------------------------------------------------------------------------
