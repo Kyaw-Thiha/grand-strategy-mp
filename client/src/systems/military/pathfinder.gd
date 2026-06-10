@@ -155,45 +155,100 @@ func _find_nearest_road_node(from_id: String) -> String:
 	return best_id
 
 
-## Core A*. road_only=true skips edges where on_road==false.
+## Bidirectional A*. Runs forward from from_id and backward from to_id,
+## meeting in the middle. Roughly halves nodes explored vs unidirectional A*.
+## road_only=true skips edges where on_road==false.
 func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary, road_only: bool) -> Array:
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
 		return []
 
+	var from_node: Dictionary = _nodes[from_id]
 	var to_node: Dictionary = _nodes[to_id]
-	var g_score: Dictionary = { from_id: 0.0 }
-	var came_from: Dictionary = {}
-	var closed: Dictionary = {}
-	var heap := _MinHeap.new()
-	heap.push(0.0, from_id)
 
-	while not heap.is_empty():
-		var entry: Array = heap.pop()
-		var current_id: String = entry[1]
-		if closed.has(current_id):
-			continue
-		closed[current_id] = true
-		if current_id == to_id:
-			return _reconstruct(came_from, to_id)
-		var current_g: float = g_score.get(current_id, INF)
-		for edge: Dictionary in _adjacency.get(current_id, []):
-			var nb_id: String = edge["to"]
-			if closed.has(nb_id):
-				continue
-			if road_only and not edge["on_road"]:
-				continue
-			var cost := _edge_cost(edge, nb_id, movement_profile)
-			if not is_finite(cost):
-				continue
-			var tentative_g := current_g + cost
-			if tentative_g < g_score.get(nb_id, INF):
-				came_from[nb_id] = current_id
-				g_score[nb_id] = tentative_g
-				heap.push(tentative_g + _heuristic(_nodes[nb_id], to_node), nb_id)
+	# Forward search state (from_id → to_id)
+	var gf: Dictionary = { from_id: 0.0 }
+	var came_f: Dictionary = {}
+	var closed_f: Dictionary = {}
+	var heap_f := _MinHeap.new()
+	heap_f.push(_heuristic(from_node, to_node), from_id)
 
-	return []
+	# Backward search state (to_id → from_id, same undirected graph)
+	var gb: Dictionary = { to_id: 0.0 }
+	var came_b: Dictionary = {}
+	var closed_b: Dictionary = {}
+	var heap_b := _MinHeap.new()
+	heap_b.push(_heuristic(to_node, from_node), to_id)
+
+	var mu := INF   # best complete path cost seen through any meeting node
+	var meet := ""  # node where the two frontiers produced the best mu
+
+	while not heap_f.is_empty() and not heap_b.is_empty():
+		# Stop once neither frontier can improve on the best meeting path.
+		if mu < INF and heap_f.peek_priority() + heap_b.peek_priority() >= mu:
+			break
+
+		if heap_f.peek_priority() <= heap_b.peek_priority():
+			# ── Expand forward frontier ──
+			var entry: Array = heap_f.pop()
+			var u: String = entry[1]
+			if closed_f.has(u):
+				continue
+			closed_f[u] = true
+			# Check if backward search has already reached this node.
+			if gb.has(u):
+				var c: float = gf[u] + gb[u]
+				if c < mu:
+					mu = c
+					meet = u
+			var ug: float = gf[u]
+			for edge: Dictionary in _adjacency.get(u, []):
+				var v: String = edge["to"]
+				if closed_f.has(v):
+					continue
+				if road_only and not edge["on_road"]:
+					continue
+				var cost: float = _edge_cost(edge, v, movement_profile)
+				if not is_finite(cost):
+					continue
+				var tg: float = ug + cost
+				if tg < gf.get(v, INF):
+					came_f[v] = u
+					gf[v] = tg
+					heap_f.push(tg + _heuristic(_nodes[v], to_node), v)
+		else:
+			# ── Expand backward frontier ──
+			var entry: Array = heap_b.pop()
+			var u: String = entry[1]
+			if closed_b.has(u):
+				continue
+			closed_b[u] = true
+			# Check if forward search has already reached this node.
+			if gf.has(u):
+				var c: float = gf[u] + gb[u]
+				if c < mu:
+					mu = c
+					meet = u
+			var ug: float = gb[u]
+			for edge: Dictionary in _adjacency.get(u, []):
+				var v: String = edge["to"]
+				if closed_b.has(v):
+					continue
+				if road_only and not edge["on_road"]:
+					continue
+				var cost: float = _edge_cost(edge, v, movement_profile)
+				if not is_finite(cost):
+					continue
+				var tg: float = ug + cost
+				if tg < gb.get(v, INF):
+					came_b[v] = u
+					gb[v] = tg
+					heap_b.push(tg + _heuristic(_nodes[v], from_node), v)
+
+	if meet.is_empty():
+		return []
+	return _reconstruct_bidir(came_f, came_b, meet)
 
 
 ## Join two path segments, deduplicating the shared junction node.
@@ -285,6 +340,22 @@ func _reconstruct(came_from: Dictionary, to_id: String) -> Array:
 	return path
 
 
+## Stitch forward and backward came_from maps at the meeting node.
+func _reconstruct_bidir(came_f: Dictionary, came_b: Dictionary, meet: String) -> Array:
+	# Forward half: trace came_f back to start, then reverse → start…meet
+	var path: Array = [meet]
+	var cur := meet
+	while came_f.has(cur):
+		cur = came_f[cur]
+		path.push_front(cur)
+	# Backward half: trace came_b forward to goal → meet…goal (exclude meet)
+	cur = meet
+	while came_b.has(cur):
+		cur = came_b[cur]
+		path.append(cur)
+	return path
+
+
 # ── Min-heap ──────────────────────────────────────────────────────────────────
 
 class _MinHeap:
@@ -306,6 +377,11 @@ class _MinHeap:
 
 	func is_empty() -> bool:
 		return _data.is_empty()
+
+	func peek_priority() -> float:
+		if _data.is_empty():
+			return INF
+		return _data[0][0]
 
 	func _sift_up(i: int) -> void:
 		while i > 0:
