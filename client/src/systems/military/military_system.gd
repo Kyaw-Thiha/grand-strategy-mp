@@ -40,6 +40,9 @@ var _pathfinder: RefCounted = null
 var _ghost_overlay: Node2D = null
 var _route_overlay: Node2D = null
 
+var _path_thread: Thread = null
+var _path_pending: bool = false
+
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	_map_loader = map_loader
@@ -161,6 +164,10 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		_move_mode = false
 		return
 
+	# Ignore clicks while a path is already computing.
+	if _path_pending:
+		return
+
 	var div_data: Dictionary = GameState.get_division(_selected_division_id)
 	var movement_profile: Dictionary = {}
 	var profile_json: String = div_data.get("movement_profile_json", "")
@@ -169,7 +176,7 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		if parsed is Dictionary:
 			movement_profile = parsed
 
-	# Start from last milestone or division's current position
+	# Start from last milestone or division's current position.
 	var start_id: String
 	if _pending_chain.is_empty():
 		var div_lng: float = float(div_data.get("position_lng", 0.0))
@@ -180,14 +187,32 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 
 	var goal_id: String = _pathfinder.find_nearest(lng, lat)
 
-	var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	_path_pending = true
+	_path_thread = Thread.new()
+	var division_id_snapshot := _selected_division_id
+	_path_thread.start(func() -> void:
+		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		call_deferred("_on_segment_ready", segment, goal_id, shift_held, division_id_snapshot)
+	)
+
+
+func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, division_id_snapshot: String) -> void:
+	if _path_thread != null and _path_thread.is_started():
+		_path_thread.wait_to_finish()
+	_path_thread = null
+	_path_pending = false
+
+	# Division was deselected or mode changed while computing — discard result.
+	if not _move_mode or _selected_division_id != division_id_snapshot:
+		return
+
 	if segment.is_empty():
 		push_warning("[MilitarySystem] No path found to target")
 		if not shift_held:
 			_clear_pending()
 		return
 
-	# Skip the start node if it duplicates the end of the existing chain
+	# Skip the start node if it duplicates the end of the existing chain.
 	var skip_first: bool = false
 	if not _pending_chain.is_empty() and segment.size() > 0:
 		skip_first = str(segment[0]) == _pending_chain.back()
@@ -201,11 +226,11 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if shift_held:
 		_update_ghost()
 	else:
-		# Flash the route for 1.2 s so the player can see the planned path before it clears.
 		_update_ghost()
-		await get_tree().create_timer(1.2).timeout
-		if _move_mode:
-			_submit_pending()
+		get_tree().create_timer(1.2).timeout.connect(func() -> void:
+			if _move_mode:
+				_submit_pending()
+		, CONNECT_ONE_SHOT)
 
 
 func _recompute_chain() -> void:
@@ -256,6 +281,7 @@ func _clear_pending() -> void:
 	_pending_milestones.clear()
 	_pending_chain.clear()
 	_move_mode = false
+	_path_pending = false
 	_update_ghost()
 
 
