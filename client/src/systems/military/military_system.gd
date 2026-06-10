@@ -21,6 +21,10 @@ const SNAP_THRESHOLD := 150.0
 const ENGAGEMENT_RADIUS_PX := 18.0
 const OBSERVATION_RADIUS_PX := 54.0
 const HIT_THRESHOLD_PX := 20.0
+## Distance threshold (deg) at which road avoidance reaches maximum strength (~1500m).
+const OFFROAD_THRESHOLD_DEG := 0.014
+## Maximum road cost multiplier applied when player is deep off-road.
+const MAX_ROAD_MULTIPLIER := 13.0
 
 var _map_loader: Node = null
 var _icon_layer: Node2D = null
@@ -42,6 +46,9 @@ var _route_overlay: Node2D = null
 
 var _path_thread: Thread = null
 var _path_pending: bool = false
+var _pending_auto_submit: bool = false      # true during the 1.2s non-shift flash window
+var _submit_on_thread_complete: bool = false # submit chain as soon as current thread finishes
+var _shift_chain_started: bool = false      # true once the user has made at least one shift-click
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -90,10 +97,25 @@ func handle_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key := event as InputEventKey
-	if not key.pressed or key.echo:
+	if key.echo:
+		return
+
+	if not key.pressed:
+		# Key-up: only act on Shift release — submit if user actually shift-clicked.
+		if key.physical_keycode == KEY_SHIFT:
+			if _shift_chain_started and _move_mode and not _pending_milestones.is_empty():
+				if _path_pending:
+					_submit_on_thread_complete = true
+				else:
+					_submit_pending()
 		return
 
 	match key.physical_keycode:
+		KEY_SHIFT:
+			# Shift pressed during the 1.2s non-shift transition window → promote to chain.
+			if _pending_auto_submit and _move_mode and not _pending_milestones.is_empty():
+				_pending_auto_submit = false
+				_shift_chain_started = true
 		KEY_M:
 			if _selected_division_id != "":
 				_move_mode = true
@@ -187,11 +209,29 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 
 	var goal_id: String = _pathfinder.find_nearest(lng, lat)
 
+	if shift_held:
+		_shift_chain_started = true
+
+	# Compute avoidance multiplier on main thread (safe — read-only pathfinder access).
+	# waypoint_index 0 means this is the first shift-click; no avoidance on the first segment.
+	var waypoint_index := _pending_milestones.size()
+	var road_mult := 1.0
+	if shift_held and waypoint_index > 0:
+		var sn: Dictionary = _pathfinder.get_node(start_id)
+		if not sn.is_empty():
+			var d: float = _pathfinder.nearest_road_node_distance(float(sn["lng"]), float(sn["lat"]))
+			road_mult = _compute_avoidance_multiplier(d)
+
 	_path_pending = true
 	_path_thread = Thread.new()
 	var division_id_snapshot := _selected_division_id
 	_path_thread.start(func() -> void:
-		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		# Only apply avoidance when there is no road naturally lying between waypoints.
+		var effective_mult := 1.0
+		if shift_held and waypoint_index > 0 and road_mult > 1.0:
+			if not _pathfinder.road_crosses_segment(start_id, goal_id):
+				effective_mult = road_mult
+		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult)
 		call_deferred("_on_segment_ready", segment, goal_id, shift_held, division_id_snapshot)
 	)
 
@@ -204,15 +244,37 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 
 	# Division was deselected or mode changed while computing — discard result.
 	if not _move_mode or _selected_division_id != division_id_snapshot:
+		_submit_on_thread_complete = false
 		return
 
 	if segment.is_empty():
 		push_warning("[MilitarySystem] No path found to target")
 		if not shift_held:
 			_clear_pending()
+		_submit_on_thread_complete = false
 		return
 
-	# Skip the start node if it duplicates the end of the existing chain.
+	_append_segment_to_chain(segment, goal_id)
+
+	# Shift was released while this segment was computing — submit immediately.
+	if _submit_on_thread_complete:
+		_submit_on_thread_complete = false
+		_submit_pending()
+		return
+
+	if shift_held:
+		_update_ghost()
+	else:
+		_update_ghost()
+		_pending_auto_submit = true
+		get_tree().create_timer(1.2).timeout.connect(func() -> void:
+			if _pending_auto_submit and _move_mode:
+				_pending_auto_submit = false
+				_submit_pending()
+		, CONNECT_ONE_SHOT)
+
+
+func _append_segment_to_chain(segment: Array, goal_id: String) -> void:
 	var skip_first: bool = false
 	if not _pending_chain.is_empty() and segment.size() > 0:
 		skip_first = str(segment[0]) == _pending_chain.back()
@@ -220,17 +282,12 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 		if i == 0 and skip_first:
 			continue
 		_pending_chain.append(segment[i])
-
 	_pending_milestones.append(goal_id)
 
-	if shift_held:
-		_update_ghost()
-	else:
-		_update_ghost()
-		get_tree().create_timer(1.2).timeout.connect(func() -> void:
-			if _move_mode:
-				_submit_pending()
-		, CONNECT_ONE_SHOT)
+
+func _compute_avoidance_multiplier(dist_deg: float) -> float:
+	var factor := clampf(dist_deg / OFFROAD_THRESHOLD_DEG, 0.0, 1.0)
+	return 1.0 + factor * (MAX_ROAD_MULTIPLIER - 1.0)
 
 
 func _recompute_chain() -> void:
@@ -282,6 +339,9 @@ func _clear_pending() -> void:
 	_pending_chain.clear()
 	_move_mode = false
 	_path_pending = false
+	_pending_auto_submit = false
+	_submit_on_thread_complete = false
+	_shift_chain_started = false
 	_update_ghost()
 
 

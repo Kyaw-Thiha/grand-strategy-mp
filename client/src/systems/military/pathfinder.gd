@@ -14,6 +14,10 @@ const RIVER_PENALTIES := {
 const ROAD_SEARCH_RADIUS_SQ := 0.015 * 0.015
 ## Max squared distance (~5 km) allowed when string-pulling a skip.
 const MAX_SKIP_DIST_SQ := 0.05 * 0.05
+## Road-crossing detection constants for shift-move intent heuristic.
+const ROAD_PROXIMITY_DEG   := 0.003           # ~300m — counts as "road in the way"
+const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
+const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
@@ -97,11 +101,72 @@ func find_nearest(lng: float, lat: float) -> String:
 	return best_id
 
 
+## Returns distance in degrees from (lng, lat) to the nearest road node.
+## O(n road_nodes) — call on the main thread before spawning a path thread.
+func nearest_road_node_distance(lng: float, lat: float) -> float:
+	var best_sq := INF
+	for rid: String in _road_nodes:
+		var rn: Dictionary = _nodes.get(rid, {})
+		if rn.is_empty():
+			continue
+		var dx := float(rn["lng"]) - lng
+		var dy := float(rn["lat"]) - lat
+		var sq := dx * dx + dy * dy
+		if sq < best_sq:
+			best_sq = sq
+	return sqrt(best_sq)
+
+
+## Returns true if a significant road passes within ~300m of the line from_id→to_id.
+## Samples at ~200m intervals. Pre-filters road nodes to segment bbox before sampling
+## to avoid iterating the full road node set (~O(road_nodes + steps×nearby)).
+func road_crosses_segment(from_id: String, to_id: String) -> bool:
+	var a: Dictionary = _nodes.get(from_id, {})
+	var b: Dictionary = _nodes.get(to_id, {})
+	if a.is_empty() or b.is_empty():
+		return false
+	var alng := float(a["lng"]); var alat := float(a["lat"])
+	var blng := float(b["lng"]); var blat := float(b["lat"])
+	var dx := blng - alng
+	var dy := blat - alat
+
+	# Pre-filter: collect road node positions within the segment's bounding box + proximity pad.
+	var min_lng := minf(alng, blng) - ROAD_PROXIMITY_DEG
+	var max_lng := maxf(alng, blng) + ROAD_PROXIMITY_DEG
+	var min_lat := minf(alat, blat) - ROAD_PROXIMITY_DEG
+	var max_lat := maxf(alat, blat) + ROAD_PROXIMITY_DEG
+	var nearby: Array = []
+	for rid: String in _road_nodes:
+		var rn: Dictionary = _nodes.get(rid, {})
+		if rn.is_empty():
+			continue
+		var rlng := float(rn["lng"]); var rlat := float(rn["lat"])
+		if rlng >= min_lng and rlng <= max_lng and rlat >= min_lat and rlat <= max_lat:
+			nearby.append(Vector2(rlng, rlat))
+	if nearby.is_empty():
+		return false
+
+	var dist := sqrt(dx * dx + dy * dy)
+	var steps := maxi(int(dist / ROAD_CROSS_SAMPLE_DEG), 1)
+	for s in range(steps + 1):
+		var t := float(s) / float(steps)
+		var slng := alng + dx * t
+		var slat := alat + dy * t
+		for pos: Vector2 in nearby:
+			var rx := pos.x - slng; var ry := pos.y - slat
+			if rx * rx + ry * ry < ROAD_PROXIMITY_SQ:
+				return true
+	return false
+
+
 ## A* from from_id to to_id using the division's movement_profile.
 ## Two-phase: if start is off-road, routes to nearest road node first then
 ## road-only A* to goal. Falls back to full A* if either phase fails.
 ## String-pulling removes redundant intermediate waypoints from the result.
-func find_path(from_id: String, to_id: String, movement_profile: Dictionary) -> Array:
+## road_cost_multiplier inflates road edge costs — used by the shift-move intent heuristic
+## to discourage routing back through roads between consecutive off-road waypoints.
+func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
+		road_cost_multiplier: float = 1.0) -> Array:
 	if not _built or from_id.is_empty() or to_id.is_empty():
 		return []
 	if from_id == to_id:
@@ -112,7 +177,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary) -> 
 	# Phase 1: road entry pre-check.
 	if _road_nodes.has(from_id):
 		# Start is already on a road — try road-only A* first.
-		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true)
+		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true, road_cost_multiplier)
 		if not road_path.is_empty():
 			return _string_pull(road_path, movement_profile)
 		# Road-only failed (destination off-road) → fall to phase 2.
@@ -120,14 +185,14 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary) -> 
 		# Start is off-road — find nearest road node within ROAD_SEARCH_RADIUS.
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
-			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false)
-			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true)
+			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier)
+			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true, road_cost_multiplier)
 			if not seg1.is_empty() and not seg2.is_empty():
 				return _string_pull(_join_segments(seg1, seg2), movement_profile)
 		# No road nearby or road path failed → fall to phase 2.
 
-	# Phase 2: full A* across the entire graph (natural 18× road preference via costs).
-	var path: Array = _astar_impl(from_id, to_id, movement_profile, false)
+	# Phase 2: full A* across the entire graph (natural road preference via costs).
+	var path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier)
 	return _string_pull(path, movement_profile)
 
 
@@ -158,7 +223,9 @@ func _find_nearest_road_node(from_id: String) -> String:
 ## Bidirectional A*. Runs forward from from_id and backward from to_id,
 ## meeting in the middle. Roughly halves nodes explored vs unidirectional A*.
 ## road_only=true skips edges where on_road==false.
-func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary, road_only: bool) -> Array:
+## road_cost_multiplier scales road edge costs (>1 discourages road use).
+func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
+		road_only: bool, road_cost_multiplier: float = 1.0) -> Array:
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
@@ -209,7 +276,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary, r
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				var cost: float = _edge_cost(edge, v, movement_profile)
+				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
 					continue
 				var tg: float = ug + cost
@@ -237,7 +304,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary, r
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				var cost: float = _edge_cost(edge, v, movement_profile)
+				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
 					continue
 				var tg: float = ug + cost
@@ -306,11 +373,12 @@ func _can_skip_to(path: Array, from_idx: int, to_idx: int, movement_profile: Dic
 	return true
 
 
-func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary) -> float:
+func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary,
+		road_cost_multiplier: float = 1.0) -> float:
 	var river_penalty: float = edge["river_penalty"]
 	var dist: float = edge["dist_deg"]
 	if edge["on_road"]:
-		return ROAD_COST_BASE * dist * river_penalty
+		return ROAD_COST_BASE * dist * river_penalty * road_cost_multiplier
 
 	var nb: Dictionary = _nodes.get(nb_id, {})
 	var key: String = str(nb.get("cover_combat", "")) + "_" + str(nb.get("elevation", ""))
