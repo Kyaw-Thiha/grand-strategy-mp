@@ -16,6 +16,9 @@ const NATION_COLORS: Dictionary = {
 }
 const NEUTRAL_COLOR := Color(0.45, 0.45, 0.45)
 
+## Set false to allow issuing orders to any nation's units (debug only).
+const ENFORCE_OWNERSHIP := true
+
 const LERP_SPEED := 3.5
 const SNAP_THRESHOLD := 150.0
 const ENGAGEMENT_RADIUS_PX := 18.0
@@ -121,6 +124,17 @@ func _process(delta: float) -> void:
 				_refresh_chain_start()
 
 
+# ── Ownership ─────────────────────────────────────────────────────────────────
+
+func _is_own_unit(division_id: String) -> bool:
+	if not ENFORCE_OWNERSHIP:
+		return true
+	var my_nation: String = GameState.get_my_nation_id()
+	if my_nation.is_empty():
+		return true  # standalone debug (no auth) — allow all
+	return GameState.get_division(division_id).get("nation_id", "") == my_nation
+
+
 # ── Input ─────────────────────────────────────────────────────────────────────
 
 func handle_input(event: InputEvent) -> void:
@@ -147,22 +161,22 @@ func handle_input(event: InputEvent) -> void:
 				_pending_auto_submit = false
 				_shift_chain_started = true
 		KEY_M:
-			if _selected_division_id != "":
+			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
 				_move_mode = true
 				_pending_milestones.clear()
 				_pending_chain.clear()
 				_update_ghost()
 				_set_icon_move_mode(_selected_division_id, true)
 		KEY_H:
-			if _selected_division_id != "":
+			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
 				_clear_pending()
 				CommandQueue.submit("HOLD", { "division_id": _selected_division_id })
 		KEY_X:
-			if _selected_division_id != "":
+			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
 				_clear_pending()
 				CommandQueue.submit("HOLD", { "division_id": _selected_division_id })
 		KEY_G:
-			if _selected_division_id != "":
+			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
 				_clear_pending()
 				CommandQueue.submit("RETREAT", { "division_id": _selected_division_id })
 		KEY_ESCAPE:
@@ -497,6 +511,8 @@ func _submit_pending() -> void:
 		return
 
 	var div_id := _selected_division_id
+	if not _is_own_unit(div_id):
+		return
 
 	# Trim chain: drop waypoints already behind the unit so neither DR nor server reverses.
 	var chain_to_submit: Array[String] = _pending_chain.duplicate()
