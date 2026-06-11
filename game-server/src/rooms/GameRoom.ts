@@ -19,7 +19,7 @@ interface JwtPayload {
 }
 
 const API_SERVER_URL = process.env.API_SERVER_URL ?? "http://localhost:3000";
-const MIN_PLAYERS_TO_START = 2;
+const MIN_PLAYERS_TO_START = 1;
 const TICK_MS = 1000;
 
 export class GameRoom extends Room<{ state: GameRoomState }> {

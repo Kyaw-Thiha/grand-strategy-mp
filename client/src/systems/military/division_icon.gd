@@ -37,7 +37,6 @@ func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float) -> void
 
 func update_data(data: Dictionary) -> void:
 	hp = float(data.get("hp", hp))
-	is_moving = (data.get("move_order", []) as Array).size() > 0
 	if data.has("supply_status"):
 		supply_status = data["supply_status"]
 	if data.has("stack_id"):
@@ -55,6 +54,12 @@ func set_selected(selected: bool) -> void:
 func set_move_mode(active: bool) -> void:
 	if is_move_mode != active:
 		is_move_mode = active
+		queue_redraw()
+
+
+func set_moving(active: bool) -> void:
+	if is_moving != active:
+		is_moving = active
 		queue_redraw()
 
 

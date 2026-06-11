@@ -86,6 +86,11 @@ func get_node(wp_id: String) -> Dictionary:
 	return _nodes.get(wp_id, {})
 
 
+## Returns true if wp_id is a road-connected waypoint node.
+func is_road_node(wp_id: String) -> bool:
+	return _road_nodes.has(wp_id)
+
+
 ## Returns the nearest waypoint ID to (lng, lat). O(n) — call only on user clicks.
 func find_nearest(lng: float, lat: float) -> String:
 	var best_id := ""

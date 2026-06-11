@@ -120,10 +120,6 @@ export class MovementSystem {
     for (const id of waypointIds) {
       if (!this.graph.nodes.has(id)) return false;
     }
-    // Each consecutive pair must be a real edge
-    for (let i = 0; i < waypointIds.length - 1; i++) {
-      if (!this.edgeSet.has(`${waypointIds[i]}|${waypointIds[i + 1]}`)) return false;
-    }
     return true;
   }
 
@@ -154,6 +150,9 @@ export class MovementSystem {
       division.position_lng = nextNode.lng;
       division.position_lat = nextNode.lat;
       division.move_order.splice(0, 1);
+      if (division.move_order.length > 0) {
+        this._advanceDivision(division, speedMult);
+      }
       return;
     }
 
@@ -181,6 +180,13 @@ export class MovementSystem {
       division.position_lng = nextNode.lng;
       division.position_lat = nextNode.lat;
       division.move_order.splice(0, 1);
+      // Carry leftover budget into the next waypoint — mirrors client _advance_dr logic.
+      if (division.move_order.length > 0 && advanceDeg > 0) {
+        const leftoverMult = speedMult * (1.0 - distDeg / advanceDeg);
+        if (leftoverMult > 1e-4) {
+          this._advanceDivision(division, leftoverMult);
+        }
+      }
     } else {
       const ratio = advanceDeg / distDeg;
       division.position_lng += dx * ratio;

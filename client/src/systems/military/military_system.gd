@@ -25,6 +25,11 @@ const HIT_THRESHOLD_PX := 20.0
 const OFFROAD_THRESHOLD_DEG := 0.014
 ## Maximum road cost multiplier applied when player is deep off-road.
 const MAX_ROAD_MULTIPLIER := 13.0
+## Dead reckoning — must match movement_system.ts constants exactly.
+const DR_ROAD_KMH     := 60.0
+const DR_OFFROAD_KMH  := 20.0
+const DR_KM_PER_DEG   := 111.0
+const DR_SNAP_DEG     := 0.0001  # waypoint snap threshold (matches server)
 
 var _map_loader: Node = null
 var _icon_layer: Node2D = null
@@ -49,6 +54,19 @@ var _path_pending: bool = false
 var _pending_auto_submit: bool = false      # true during the 1.2s non-shift flash window
 var _submit_on_thread_complete: bool = false # submit chain as soon as current thread finishes
 var _shift_chain_started: bool = false      # true once the user has made at least one shift-click
+
+var _dr_pos_deg: Dictionary = {}   # div_id -> Vector2(lng, lat) — local simulated position
+var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local waypoint queue
+var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
+
+var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
+var _chain_last_refresh_time: float = 0.0
+const CHAIN_REFRESH_INTERVAL_SEC := 1.0
+const CHAIN_REFRESH_MIN_MOVE_DEG := 0.02
+
+
+func get_icons() -> Dictionary:
+	return _icons
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -85,10 +103,25 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 func _process(delta: float) -> void:
 	for div_id: String in _icons:
 		var icon: Node2D = _icons[div_id]
-		var target: Vector2 = _target_positions.get(div_id, icon.position)
-		var dist: float = icon.position.distance_to(target)
-		if dist > 0.5:
-			icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
+		if _dr_order.has(div_id) and not _dr_order[div_id].is_empty():
+			_advance_dr(div_id, delta)
+			if div_id == _selected_division_id:
+				_update_route_overlay()
+		else:
+			var target: Vector2 = _target_positions.get(div_id, icon.position)
+			if icon.position.distance_to(target) > 0.5:
+				icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
+
+	# Live ghost refresh while building a shift chain with a moving unit
+	if _move_mode and _shift_chain_started and not _pending_milestones.is_empty() and not _path_pending:
+		var sel_id := _selected_division_id
+		if _dr_order.has(sel_id) and not _dr_order[sel_id].is_empty():
+			var now := Time.get_ticks_msec() / 1000.0
+			var dr: Vector2 = _dr_pos_deg.get(sel_id, Vector2.ZERO)
+			if now - _chain_last_refresh_time >= CHAIN_REFRESH_INTERVAL_SEC \
+					and dr.distance_to(_pending_chain_origin_deg) > CHAIN_REFRESH_MIN_MOVE_DEG:
+				_chain_last_refresh_time = now
+				_refresh_chain_start()
 
 
 # ── Input ─────────────────────────────────────────────────────────────────────
@@ -198,14 +231,17 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		if parsed is Dictionary:
 			movement_profile = parsed
 
-	# Start from last milestone or division's current position.
+	# Start from last milestone, DR-simulated position, or server position (in priority order).
 	var start_id: String
-	if _pending_chain.is_empty():
-		var div_lng: float = float(div_data.get("position_lng", 0.0))
-		var div_lat: float = float(div_data.get("position_lat", 0.0))
-		start_id = _pathfinder.find_nearest(div_lng, div_lat)
-	else:
+	if not _pending_chain.is_empty():
 		start_id = _pending_chain.back()
+	elif _dr_pos_deg.has(_selected_division_id):
+		var dr: Vector2 = _dr_pos_deg[_selected_division_id]
+		start_id = _pathfinder.find_nearest(dr.x, dr.y)
+	else:
+		start_id = _pathfinder.find_nearest(
+				float(div_data.get("position_lng", 0.0)),
+				float(div_data.get("position_lat", 0.0)))
 
 	var goal_id: String = _pathfinder.find_nearest(lng, lat)
 
@@ -254,7 +290,11 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 		_submit_on_thread_complete = false
 		return
 
+	var was_empty := _pending_chain.is_empty()
 	_append_segment_to_chain(segment, goal_id)
+	if was_empty:
+		_pending_chain_origin_deg = _dr_pos_deg.get(_selected_division_id, Vector2.ZERO)
+		_chain_last_refresh_time = Time.get_ticks_msec() / 1000.0
 
 	# Shift was released while this segment was computing — submit immediately.
 	if _submit_on_thread_complete:
@@ -288,6 +328,139 @@ func _append_segment_to_chain(segment: Array, goal_id: String) -> void:
 func _compute_avoidance_multiplier(dist_deg: float) -> float:
 	var factor := clampf(dist_deg / OFFROAD_THRESHOLD_DEG, 0.0, 1.0)
 	return 1.0 + factor * (MAX_ROAD_MULTIPLIER - 1.0)
+
+
+func _refresh_chain_start() -> void:
+	var div_id := _selected_division_id
+	if not _dr_pos_deg.has(div_id) or _pending_milestones.is_empty():
+		return
+	var dr: Vector2 = _dr_pos_deg[div_id]
+	_pending_chain_origin_deg = dr
+
+	var div_data: Dictionary = GameState.get_division(div_id)
+	var movement_profile: Dictionary = {}
+	var pj: String = div_data.get("movement_profile_json", "")
+	if not pj.is_empty():
+		var parsed: Variant = JSON.parse_string(pj)
+		if parsed is Dictionary:
+			movement_profile = parsed
+
+	var start_id: String = _pathfinder.find_nearest(dr.x, dr.y)
+	var goal_id: String = _pending_milestones[0]
+	var milestones_snapshot: Array = _pending_milestones.duplicate()
+	var div_id_snapshot := div_id
+
+	_path_pending = true
+	_path_thread = Thread.new()
+	_path_thread.start(func() -> void:
+		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		call_deferred("_on_chain_refresh_ready", segment, milestones_snapshot, div_id_snapshot)
+	)
+
+
+func _on_chain_refresh_ready(segment: Array, milestones_at_refresh: Array, div_id_snapshot: String) -> void:
+	if _path_thread != null and _path_thread.is_started():
+		_path_thread.wait_to_finish()
+	_path_thread = null
+	_path_pending = false
+
+	var mode_changed: bool = not _move_mode or _selected_division_id != div_id_snapshot \
+			or _pending_milestones != milestones_at_refresh
+	if mode_changed:
+		if _submit_on_thread_complete:
+			_submit_on_thread_complete = false
+			_submit_pending()
+		return
+
+	if _submit_on_thread_complete:
+		_submit_on_thread_complete = false
+		if not segment.is_empty():
+			_replace_chain_first_segment(segment)
+		_submit_pending()
+		return
+
+	if segment.is_empty():
+		return
+	_replace_chain_first_segment(segment)
+	_update_ghost()
+
+
+func _replace_chain_first_segment(new_segment: Array) -> void:
+	if _pending_milestones.is_empty():
+		return
+	var first_milestone := _pending_milestones[0]
+	var milestone_idx := _pending_chain.find(first_milestone)
+	if milestone_idx < 0:
+		return
+
+	var tail: Array[String] = []
+	for i: int in range(milestone_idx + 1, _pending_chain.size()):
+		tail.append(_pending_chain[i])
+
+	_pending_chain.clear()
+	for wp: Variant in new_segment:
+		_pending_chain.append(str(wp))
+	_pending_chain.append_array(tail)
+
+
+func _advance_dr(div_id: String, delta: float) -> void:
+	var order: Array[String] = _dr_order[div_id]
+	if order.is_empty():
+		return
+	var pos_deg: Vector2 = _dr_pos_deg[div_id]
+
+	var next_id: String = order[0]
+	var next_node: Dictionary = _pathfinder.get_node(next_id)
+	if next_node.is_empty():
+		return
+
+	var target_deg := Vector2(float(next_node["lng"]), float(next_node["lat"]))
+
+	# Speed — mirrors movement_system.ts formula exactly.
+	var kmh: float
+	if _pathfinder.is_road_node(next_id):
+		kmh = DR_ROAD_KMH
+	else:
+		var profile: Dictionary = _dr_profiles.get(div_id, {})
+		var terrain_key := str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
+		var cost: float = float(profile.get(terrain_key, 1.0))
+		if not is_finite(cost) or cost <= 0.0:
+			return  # impassable — wait for server to reroute
+		kmh = DR_OFFROAD_KMH / cost
+
+	var speed_degs: float = (kmh / DR_KM_PER_DEG) * float(GameState.game_speed)
+	var advance: float = speed_degs * delta
+
+	var to_target: Vector2 = target_deg - pos_deg
+	var dist: float = to_target.length()
+
+	if dist < DR_SNAP_DEG or advance >= dist:
+		# Reached waypoint — snap and carry leftover time into the next segment.
+		_dr_pos_deg[div_id] = target_deg
+		order.pop_front()
+		_dr_order[div_id] = order
+		if order.is_empty():
+			# DR exhausted — park icon at final waypoint so lerp doesn't pull back to origin.
+			_target_positions[div_id] = _map_loader.project_lng_lat(
+					_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
+			if div_id == _selected_division_id:
+				_update_route_overlay()
+			var done_icon := _icons[div_id] as Node2D
+			done_icon.position = _target_positions[div_id]
+			done_icon.set_moving(false)
+			return
+		if dist > 0.0:
+			var leftover: float = delta * maxf(1.0 - dist / maxf(advance, 1e-9), 0.0)
+			if leftover > 0.001:
+				_advance_dr(div_id, leftover)
+				return  # icon position already updated by recursive call
+	else:
+		_dr_pos_deg[div_id] = pos_deg + to_target.normalized() * advance
+
+	var moving_icon := _icons[div_id] as Node2D
+	moving_icon.position = _map_loader.project_lng_lat(
+			_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
+	moving_icon.queue_redraw()
 
 
 func _recompute_chain() -> void:
@@ -326,10 +499,62 @@ func _recompute_chain() -> void:
 func _submit_pending() -> void:
 	if _pending_chain.is_empty():
 		return
+
+	var div_id := _selected_division_id
+
+	# Trim chain: drop waypoints already behind the unit so neither DR nor server reverses.
+	var chain_to_submit: Array[String] = _pending_chain.duplicate()
+	if _dr_pos_deg.has(div_id) and chain_to_submit.size() > 1:
+		var dr: Vector2 = _dr_pos_deg[div_id]
+		var nearest_idx := 0
+		var nearest_d2 := INF
+		for i: int in chain_to_submit.size():
+			var node: Dictionary = _pathfinder.get_node(chain_to_submit[i])
+			if node.is_empty():
+				continue
+			var dx := float(node["lng"]) - dr.x
+			var dy := float(node["lat"]) - dr.y
+			var d2 := dx * dx + dy * dy
+			if d2 < nearest_d2:
+				nearest_d2 = d2
+				nearest_idx = i
+		if nearest_idx > 0:
+			chain_to_submit = chain_to_submit.slice(nearest_idx)
+
+	var chain_snapshot: Array = chain_to_submit
+
 	CommandQueue.submit("SUBMIT_MOVE_ORDER", {
-		"division_id": _selected_division_id,
-		"waypoints": _pending_chain.duplicate(),
+		"division_id": div_id,
+		"waypoints": chain_snapshot,
 	})
+
+	# Seed DR immediately — don't wait for the server's ~1s DIVISION_UPDATES confirmation.
+	if not _dr_pos_deg.has(div_id):
+		var div_data: Dictionary = GameState.get_division(div_id)
+		_dr_pos_deg[div_id] = Vector2(
+				float(div_data.get("position_lng", 0.0)),
+				float(div_data.get("position_lat", 0.0)))
+
+	if not _dr_profiles.has(div_id):
+		var div_data: Dictionary = GameState.get_division(div_id)
+		var pj: String = div_data.get("movement_profile_json", "")
+		if not pj.is_empty():
+			var parsed: Variant = JSON.parse_string(pj)
+			if parsed is Dictionary:
+				_dr_profiles[div_id] = parsed
+
+	var str_order: Array[String] = []
+	for wp: Variant in chain_snapshot:
+		str_order.append(str(wp))
+	_dr_order[div_id] = str_order
+
+	var icon_node := _icons.get(div_id) as Node2D
+	if icon_node:
+		icon_node.set_moving(true)
+
+	if div_id == _selected_division_id:
+		_update_route_overlay()
+
 	_clear_pending()
 
 
@@ -342,6 +567,8 @@ func _clear_pending() -> void:
 	_pending_auto_submit = false
 	_submit_on_thread_complete = false
 	_shift_chain_started = false
+	_pending_chain_origin_deg = Vector2.ZERO
+	_chain_last_refresh_time = 0.0
 	_update_ghost()
 
 
@@ -373,6 +600,7 @@ func _update_ghost() -> void:
 	if _ghost_overlay == null:
 		return
 	if _pending_milestones.is_empty():
+		_ghost_overlay.start_node = null
 		_ghost_overlay.clear()
 		return
 
@@ -381,6 +609,11 @@ func _update_ghost() -> void:
 		var data: Dictionary = GameState.get_division(_selected_division_id)
 		color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 
+	var icon: Node2D = _icons.get(_selected_division_id) as Node2D
+	var dr_active: bool = _dr_order.has(_selected_division_id) \
+			and not _dr_order[_selected_division_id].is_empty()
+	_ghost_overlay.start_node = icon if (dr_active and icon != null) else null
+
 	_ghost_overlay.set_path(_get_chain_positions(), _get_ghost_positions(), color)
 
 
@@ -388,21 +621,47 @@ func _update_route_overlay() -> void:
 	if _route_overlay == null:
 		return
 	if _selected_division_id == "":
+		_route_overlay.start_node = null
 		_route_overlay.clear()
 		return
 	var div_data: Dictionary = GameState.get_division(_selected_division_id)
+	var color: Color = NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
+	var no_milestones: Array[Vector2] = []
+
+	# DR was active but client-side queue is now empty — clear immediately without
+	# waiting for the server's ~1 s confirmation.
+	if _dr_order.has(_selected_division_id) and _dr_order[_selected_division_id].is_empty():
+		_route_overlay.start_node = null
+		_route_overlay.clear()
+		return
+
+	# During DR movement use the client-side remaining order (60 fps resolution).
+	# start_node tracks the icon live each frame so the line start never lags.
+	var dr_order: Array = _dr_order.get(_selected_division_id, [])
+	var icon: Node2D = _icons.get(_selected_division_id) as Node2D
+	if not dr_order.is_empty() and icon != null:
+		var positions: Array[Vector2] = []
+		# No icon.position here — start_node handles that live in _draw().
+		for wp_id: Variant in dr_order:
+			var node: Dictionary = _pathfinder.get_node(str(wp_id))
+			if not node.is_empty():
+				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+		_route_overlay.start_node = icon
+		_route_overlay.set_path(positions, no_milestones, color.darkened(0.25))
+		return
+
+	# Fallback: server move_order (division stopped or not yet in DR).
+	_route_overlay.start_node = null
 	var order: Array = div_data.get("move_order", [])
 	if order.is_empty():
 		_route_overlay.clear()
 		return
-	var positions: Array[Vector2] = []
-	for wp_id: String in order:
+	var server_positions: Array[Vector2] = []
+	for wp_id: Variant in order:
 		var node: Dictionary = _pathfinder.get_node(str(wp_id))
 		if not node.is_empty():
-			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
-	var color: Color = NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
-	var no_milestones: Array[Vector2] = []
-	_route_overlay.set_path(positions, no_milestones, color.darkened(0.25))
+			server_positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+	_route_overlay.set_path(server_positions, no_milestones, color.darkened(0.25))
 
 
 # ── EventBus callbacks ────────────────────────────────────────────────────────
@@ -441,23 +700,47 @@ func _on_division_updated(division_id: String) -> void:
 
 	icon.update_data(data)
 
-	var lng: float = float(data.get("position_lng", 0.0))
-	var lat: float = float(data.get("position_lat", 0.0))
-	var server_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
+	var server_lng := float(data.get("position_lng", 0.0))
+	var server_lat := float(data.get("position_lat", 0.0))
 
-	# When the division has a move order, target the next waypoint rather than
-	# the server position. This gives smooth continuous motion between 1 Hz
-	# server ticks instead of the jump-then-freeze pattern.
 	var order: Array = data.get("move_order", [])
-	if not order.is_empty() and _pathfinder != null:
-		var next_wp: Dictionary = _pathfinder.get_node(str(order[0]))
-		if not next_wp.is_empty():
-			_target_positions[division_id] = _map_loader.project_lng_lat(
-				float(next_wp["lng"]), float(next_wp["lat"]))
-		else:
-			_target_positions[division_id] = server_pos
+
+	if order.is_empty():
+		# Division stopped — clear DR, snap icon to server position.
+		_dr_pos_deg.erase(division_id)
+		_dr_order.erase(division_id)
+		_dr_profiles.erase(division_id)
+		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
+		(icon as Node2D).set_moving(false)
+		if division_id == _selected_division_id:
+			_update_route_overlay()
+		return
+
+	# Cache movement profile once (doesn't change during a session).
+	if not _dr_profiles.has(division_id):
+		var pj: String = data.get("movement_profile_json", "")
+		if not pj.is_empty():
+			var parsed: Variant = JSON.parse_string(pj)
+			if parsed is Dictionary:
+				_dr_profiles[division_id] = parsed
+
+	# Build typed String order.
+	var str_order: Array[String] = []
+	for wp: Variant in order:
+		str_order.append(str(wp))
+
+	if not _dr_pos_deg.has(division_id):
+		# First update — seed DR from server position.
+		_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+		_dr_order[division_id] = str_order
+		(icon as Node2D).set_moving(true)
 	else:
-		_target_positions[division_id] = server_pos
+		# Only advance to server's order when server has consumed more waypoints
+		# (server order is shorter). Never regress — restoring already-passed
+		# waypoints forces the icon to reverse, causing oscillation.
+		var cur_order: Array = _dr_order[division_id]
+		if str_order.size() < cur_order.size():
+			_dr_order[division_id] = str_order
 
 	if division_id == _selected_division_id:
 		_update_route_overlay()
@@ -469,6 +752,9 @@ func _on_division_removed(division_id: String) -> void:
 		icon.queue_free()
 		_icons.erase(division_id)
 		_target_positions.erase(division_id)
+	_dr_pos_deg.erase(division_id)
+	_dr_order.erase(division_id)
+	_dr_profiles.erase(division_id)
 	if _selected_division_id == division_id:
 		deselect()
 
