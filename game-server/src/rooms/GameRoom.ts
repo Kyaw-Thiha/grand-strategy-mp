@@ -335,8 +335,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       game_speed: this.state.game_speed,
     });
 
-    // Send full initial division state
+    // Send full initial division state — profile sent once at top level (shared by all divisions)
+    const sharedProfileJson = this.state.divisions.values().next().value?.movement_profile_json ?? "";
     this.broadcast("DIVISIONS_SPAWNED", {
+      shared_profile_json: sharedProfileJson,
       divisions: this.serializeDivisions(),
     });
 

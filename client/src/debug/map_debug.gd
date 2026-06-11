@@ -76,7 +76,8 @@ func _on_map_loaded(province_count: int) -> void:
 	# Wire MilitarySystem — inject stub divisions for visual testing
 	_military_system.setup(_map_loader, _division_layer)
 	frontline_overlay.set_icons_ref(_military_system.get_icons())
-	_inject_debug_divisions()
+	if GameState.divisions.is_empty():
+		_inject_debug_divisions()
 
 	_hud_count.text = "Provinces: %d" % province_count
 	_clear_info_panel()

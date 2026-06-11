@@ -47,7 +47,7 @@ var _pending_chain: Array[String] = []
 
 var _pathfinder: RefCounted = null
 var _ghost_overlay: Node2D = null
-var _route_overlay: Node2D = null
+var _route_overlays: Dictionary = {}   # div_id → MoveOrderOverlay node
 
 var _path_thread: Thread = null
 var _path_pending: bool = false
@@ -79,11 +79,9 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	if not wp_graph.is_empty():
 		_pathfinder.build(wp_graph)
 
-	# Ghost overlay for pending route being built; route overlay for selected division's confirmed order
+	# Ghost overlay for the pending route being built (shift+click chain preview)
 	_ghost_overlay = MoveOrderOverlay.new()
 	_icon_layer.add_child(_ghost_overlay)
-	_route_overlay = MoveOrderOverlay.new()
-	_icon_layer.add_child(_route_overlay)
 
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
@@ -105,8 +103,7 @@ func _process(delta: float) -> void:
 		var icon: Node2D = _icons[div_id]
 		if _dr_order.has(div_id) and not _dr_order[div_id].is_empty():
 			_advance_dr(div_id, delta)
-			if div_id == _selected_division_id:
-				_update_route_overlay()
+			_update_division_route(div_id)
 		else:
 			var target: Vector2 = _target_positions.get(div_id, icon.position)
 			if icon.position.distance_to(target) > 0.5:
@@ -443,8 +440,7 @@ func _advance_dr(div_id: String, delta: float) -> void:
 			# DR exhausted — park icon at final waypoint so lerp doesn't pull back to origin.
 			_target_positions[div_id] = _map_loader.project_lng_lat(
 					_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
-			if div_id == _selected_division_id:
-				_update_route_overlay()
+			_update_division_route(div_id)
 			var done_icon := _icons[div_id] as Node2D
 			done_icon.position = _target_positions[div_id]
 			done_icon.set_moving(false)
@@ -552,8 +548,7 @@ func _submit_pending() -> void:
 	if icon_node:
 		icon_node.set_moving(true)
 
-	if div_id == _selected_division_id:
-		_update_route_overlay()
+	_update_division_route(div_id)
 
 	_clear_pending()
 
@@ -617,51 +612,42 @@ func _update_ghost() -> void:
 	_ghost_overlay.set_path(_get_chain_positions(), _get_ghost_positions(), color)
 
 
-func _update_route_overlay() -> void:
-	if _route_overlay == null:
+func _update_division_route(division_id: String) -> void:
+	var route := _route_overlays.get(division_id) as Node2D
+	if route == null:
 		return
-	if _selected_division_id == "":
-		_route_overlay.start_node = null
-		_route_overlay.clear()
-		return
-	var div_data: Dictionary = GameState.get_division(_selected_division_id)
+
+	var div_data: Dictionary = GameState.get_division(division_id)
 	var color: Color = NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
 	var no_milestones: Array[Vector2] = []
+	var icon: Node2D = _icons.get(division_id) as Node2D
 
-	# DR was active but client-side queue is now empty — clear immediately without
-	# waiting for the server's ~1 s confirmation.
-	if _dr_order.has(_selected_division_id) and _dr_order[_selected_division_id].is_empty():
-		_route_overlay.start_node = null
-		_route_overlay.clear()
-		return
-
-	# During DR movement use the client-side remaining order (60 fps resolution).
-	# start_node tracks the icon live each frame so the line start never lags.
-	var dr_order: Array = _dr_order.get(_selected_division_id, [])
-	var icon: Node2D = _icons.get(_selected_division_id) as Node2D
+	# DR active (owning client) — 60fps update via client-side remaining order.
+	var dr_order: Array = _dr_order.get(division_id, [])
 	if not dr_order.is_empty() and icon != null:
 		var positions: Array[Vector2] = []
-		# No icon.position here — start_node handles that live in _draw().
 		for wp_id: Variant in dr_order:
 			var node: Dictionary = _pathfinder.get_node(str(wp_id))
 			if not node.is_empty():
 				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
-		_route_overlay.start_node = icon
-		_route_overlay.set_path(positions, no_milestones, color.darkened(0.25))
+		route.start_node = icon
+		route.set_path(positions, no_milestones, color.darkened(0.25))
 		return
 
-	# Fallback: server move_order (division stopped or not yet in DR).
-	_route_overlay.start_node = null
+	# No local DR — draw from server move_order (foreign unit or stopped/arrived).
+	route.start_node = null
 	var order: Array = div_data.get("move_order", [])
 	if order.is_empty():
-		_route_overlay.clear()
+		route.clear()
 		return
-	var server_positions: Array[Vector2] = []
+	var positions: Array[Vector2] = []
 	for wp_id: Variant in order:
 		var node: Dictionary = _pathfinder.get_node(str(wp_id))
 		if not node.is_empty():
-			server_positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
-	_route_overlay.set_path(server_positions, no_milestones, color.darkened(0.25))
+			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+	if icon != null:
+		route.start_node = icon
+	route.set_path(positions, no_milestones, color.darkened(0.25))
 
 
 # ── EventBus callbacks ────────────────────────────────────────────────────────
@@ -689,6 +675,10 @@ func _on_division_added(division_id: String) -> void:
 	_icon_layer.add_child(icon)
 	_icons[division_id] = icon
 
+	var route: Node2D = MoveOrderOverlay.new()
+	_icon_layer.add_child(route)
+	_route_overlays[division_id] = route
+
 
 func _on_division_updated(division_id: String) -> void:
 	var icon = _icons.get(division_id)
@@ -712,8 +702,7 @@ func _on_division_updated(division_id: String) -> void:
 		_dr_profiles.erase(division_id)
 		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
 		(icon as Node2D).set_moving(false)
-		if division_id == _selected_division_id:
-			_update_route_overlay()
+		_update_division_route(division_id)
 		return
 
 	# Cache movement profile once (doesn't change during a session).
@@ -730,20 +719,17 @@ func _on_division_updated(division_id: String) -> void:
 		str_order.append(str(wp))
 
 	if not _dr_pos_deg.has(division_id):
-		# First update — seed DR from server position.
-		_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
-		_dr_order[division_id] = str_order
+		# Foreign unit (no local DR seeded by submit) — lerp to server position.
+		# Route is drawn from server move_order waypoints without running pathfinding.
+		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
 		(icon as Node2D).set_moving(true)
 	else:
-		# Only advance to server's order when server has consumed more waypoints
-		# (server order is shorter). Never regress — restoring already-passed
-		# waypoints forces the icon to reverse, causing oscillation.
+		# Owning client — sync DR order when server consumed more waypoints.
 		var cur_order: Array = _dr_order[division_id]
 		if str_order.size() < cur_order.size():
 			_dr_order[division_id] = str_order
 
-	if division_id == _selected_division_id:
-		_update_route_overlay()
+	_update_division_route(division_id)
 
 
 func _on_division_removed(division_id: String) -> void:
@@ -752,6 +738,10 @@ func _on_division_removed(division_id: String) -> void:
 		icon.queue_free()
 		_icons.erase(division_id)
 		_target_positions.erase(division_id)
+	var route := _route_overlays.get(division_id) as Node2D
+	if route:
+		route.queue_free()
+	_route_overlays.erase(division_id)
 	_dr_pos_deg.erase(division_id)
 	_dr_order.erase(division_id)
 	_dr_profiles.erase(division_id)
@@ -769,7 +759,6 @@ func _select(division_id: String) -> void:
 		(_icons[division_id] as Node2D).set_selected(true)
 	EventBus.division_selected.emit(division_id)
 	_clear_pending()
-	_update_route_overlay()
 
 
 func deselect() -> void:
@@ -778,8 +767,6 @@ func deselect() -> void:
 	_selected_division_id = ""
 	EventBus.division_deselected.emit()
 	_clear_pending()
-	if _route_overlay != null:
-		_route_overlay.clear()
 
 
 func find_division_at_world(world_pos: Vector2) -> String:

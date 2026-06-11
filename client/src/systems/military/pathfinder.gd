@@ -372,7 +372,10 @@ func _can_skip_to(path: Array, from_idx: int, to_idx: int, movement_profile: Dic
 		if mid.is_empty():
 			return false
 		var key: String = str(mid.get("cover_combat", "")) + "_" + str(mid.get("elevation", ""))
-		var cost: float = float(movement_profile.get(key, 1.0))
+		var raw_cost: Variant = movement_profile.get(key, 1.0)
+		if raw_cost == null:
+			return false
+		var cost: float = float(raw_cost)
 		if cost == INF or not is_finite(cost):
 			return false
 	return true
@@ -389,7 +392,10 @@ func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary,
 	var key: String = str(nb.get("cover_combat", "")) + "_" + str(nb.get("elevation", ""))
 	# Default to 1.0 when no profile set — allows debug divisions without
 	# movement_profile_json to traverse any terrain.
-	var profile_cost: float = float(movement_profile.get(key, 1.0))
+	var raw: Variant = movement_profile.get(key, 1.0)
+	if raw == null:
+		return INF  # JSON.stringify(Infinity) → null; treat as impassable
+	var profile_cost: float = float(raw)
 	if profile_cost == INF or not is_finite(profile_cost):
 		return INF
 	return dist * edge["base_cost"] * profile_cost * river_penalty

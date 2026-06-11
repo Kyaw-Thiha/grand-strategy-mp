@@ -55,11 +55,15 @@ func _apply_server_delta(delta: Dictionary) -> void:
 
 ## Called by SessionManager when server sends DIVISIONS_SPAWNED.
 func _apply_divisions_spawned(data: Dictionary) -> void:
+	var shared_profile: String = data.get("shared_profile_json", "")
 	for div_data: Dictionary in data.get("divisions", []):
 		var div_id: String = div_data.get("division_id", "")
 		if div_id.is_empty():
 			continue
-		divisions[div_id] = div_data.duplicate()
+		var entry: Dictionary = div_data.duplicate()
+		if not shared_profile.is_empty():
+			entry["movement_profile_json"] = shared_profile
+		divisions[div_id] = entry
 		EventBus.division_added.emit(div_id)
 
 
