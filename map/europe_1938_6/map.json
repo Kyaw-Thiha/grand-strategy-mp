@@ -1,0 +1,12 @@
+{
+  "map_id": "western_europe_6",
+  "source_dir": "europe_1938_6",
+  "bounds": {
+    "min_lng": -12.3,
+    "max_lng": 22.0,
+    "min_lat": 33.0,
+    "max_lat": 59.9
+  },
+  "dem_source": "shared/dem",
+  "simplify_tolerance": 0.001
+}
