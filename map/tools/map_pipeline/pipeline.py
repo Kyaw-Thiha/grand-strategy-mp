@@ -843,7 +843,7 @@ def generate_nonuniform_terrain_grid(
     MEDIUM_STEP  = 0.10   # denser in transitional terrain
     COMPLEX_STEP = 0.07   # finest in terrain that most constrains movement
 
-    CONNECT_DEG      = 0.25   # max terrain-to-terrain connection distance
+    CONNECT_DEG      = 0.40   # must exceed lng_step=OPEN_STEP/cos_lat≈0.285° and its diagonal≈0.348°; stays below English Channel (~0.55° in degree-space)
     ROAD_CONNECT_DEG = 0.11   # road snap radius — matches original generate_terrain_grid cap
     K_TERRAIN        = 8      # max terrain-to-terrain neighbors (mirrors original 8-adjacency)
     K_ROAD           = 3      # max road nodes to snap per terrain node
