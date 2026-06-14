@@ -434,7 +434,10 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	else:
 		var profile: Dictionary = _dr_profiles.get(div_id, {})
 		var terrain_key := str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
-		var cost: float = float(profile.get(terrain_key, 1.0))
+		var raw_cost: Variant = profile.get(terrain_key, 1.0)
+		if raw_cost == null:
+			return  # impassable (null = Infinity from server JSON) — wait for server to reroute
+		var cost: float = float(raw_cost)
 		if not is_finite(cost) or cost <= 0.0:
 			return  # impassable — wait for server to reroute
 		kmh = DR_OFFROAD_KMH / cost

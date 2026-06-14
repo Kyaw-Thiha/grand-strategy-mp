@@ -179,6 +179,22 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
 		return []
 
+	# Off-road purity pre-check: when both endpoints are off-road, run A* once to see
+	# if the natural path avoids roads entirely. If so, skip Phase 1 — it would only
+	# pull the route onto a road unnecessarily. Falls through when A* picks a road node
+	# (e.g., mountain bridge), returns empty, or when either endpoint is on a road.
+	# Untyped for loop (no ": String") avoids a Godot 4 thread coercion crash.
+	if not _road_nodes.has(from_id) and not _road_nodes.has(to_id):
+		var offroad_path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier)
+		var has_road := false
+		for wp_id in offroad_path:
+			if _road_nodes.has(wp_id):
+				has_road = true
+				break
+		if not offroad_path.is_empty() and not has_road:
+			return _string_pull(offroad_path, movement_profile)
+		# Path crossed a road or A* failed — fall through to Phase 1.
+
 	# Phase 1: road entry pre-check.
 	if _road_nodes.has(from_id):
 		# Start is already on a road — try road-only A* first.
