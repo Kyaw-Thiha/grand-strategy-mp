@@ -194,18 +194,27 @@ end-to-end first means the tactical grid can be layered on top cleanly in Phase 
 Unit tests for movement profile computation and A* path validity.
 
 ### Pipeline (prerequisite — before Phase 4 Godot work)
-- [ ] Waypoint graph generation step added to `pipeline.py` — sample terrain rasters at
-      ~750m intervals, assign cover_combat + elevation to each node, compute base_cost per
-      edge (cover_move × elevation_move), flag river-crossing edges with river_size, connect
-      road graph endpoints to nearest waypoint nodes
-- [ ] Output: `waypoints.json` written to `godot/assets/data/<map_id>/`
-- [ ] Pipeline summary updated to print waypoint node count alongside province count
+- [x] Waypoint graph generation step added to `pipeline.py` — **non-uniform density**:
+      three tiers (open 0.20°/~22km: plains/steppe/desert/tundra; medium 0.10°/~11km:
+      light_forest/shrubland/hills; complex 0.07°/~7.5km: dense_forest/jungle/swamp/urban/
+      mountains); longitude steps are latitude-corrected; assign cover_combat + elevation
+      to each node, compute base_cost per edge (cover_move × elevation_move); flag
+      river-crossing edges with river_size; connect road graph endpoints to nearest
+      waypoint nodes (K=3, within 0.11°); terrain-to-terrain K=8 within CONNECT_DEG=0.40°
+- [x] Road edge cost set to `base_distance × 0.05` (road base 0.05/deg vs terrain 1.0+/deg)
+- [x] Output: `waypoints.json` written to `client/assets/data/<map_id>/`
+- [x] Pipeline summary prints waypoint node count alongside province count
+- See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
 - [ ] Division spawning at game start (from starting positions config per nation)
 - [ ] Nation config loaded at game start from `nation_config` per nation per map;
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
+- [ ] `STARTING_WARS` array in `nations.ts` — DEV ONLY, replace with real diplomacy
+      in Phase 8: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
+      in `GameRoom.onCreate()`; `at_war` 6×6 matrix sent to all clients at game start;
+      frontline and influence only activates between nations where `at_war == true`
 - [ ] Division type classification — three types only (no Defensive type):
       armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
 - [ ] Engagement radius computed from template composition at spawn and on template change:
@@ -292,25 +301,22 @@ Unit tests for movement profile computation and A* path validity.
       - [ ] Angle classification locked at moment of second contact initiation;
             not recalculated mid-combat (prevents bonus loss from minor drift)
       - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification
-- [ ] Dynamic frontline influence computation per province per tick:
-      - [ ] Both sides' units contribute influence simultaneously — frontline is net
-            result of all nations competing, not a binary ownership flag
-      - [ ] unit_influence[nation][province] = sum(hp_fraction × distance_falloff)
-            for all divisions of that nation whose engagement area overlaps the province
-      - [ ] Recon units excluded from influence calculation
-      - [ ] HP fraction = aggregate living HP / max possible HP for full 25-unit grid
-      - [ ] Ownership bonus: province owner gets passive influence bonus from ownership
-            (administrative control, infrastructure, road network); added to unit influence
-      - [ ] total_influence[province] = sum across all nations;
-            nation_share = nation_influence / total_influence
-      - [ ] City capture: ownership bonus flips to new owner immediately; previous owner
-            loses bonus and projects influence only from unit positions + roads they
-            physically control (same rules as attacker before capture)
-      - [ ] Frontline does not snap to fully new-owner-coloured on capture — previous
-            owner's unit-based influence persists wherever their units remain
-      - [ ] Broadcast province influence values to all connected players each tick
-            (belligerents receive full data; neutrals receive province-level scalars only,
-            not division positions or compositions)
+- [ ] Dynamic frontline influence computation — **128×128 grid, per supply tick**:
+      - [ ] `computeInfluenceGrid()` in `GameRoom.ts`: for each division, add
+            hp_fraction × distance_falloff contribution to cells within influence radius
+            (falloff_radius = engagement_radius × 2.5 in grid cells); recon units excluded
+      - [ ] Ownership bonus: add `OWNERSHIP_BONUS` constant to province owner's cells
+            (covers cells within province boundaries at grid resolution)
+      - [ ] Serialize to `dominant[Uint8Array]` + `advantage[Float32Array]` — leading
+            nation per cell and its margin over second-place nation
+      - [ ] Broadcast `FRONTLINE_UPDATE` with binary payload every supply tick (~5s);
+            all players receive same grid; division visibility is filtered separately
+      - [ ] Only compute/include influence for nations where `at_war == true` against
+            at least one other present nation; neutral-vs-neutral pairs produce no contest
+      - [ ] City capture: ownership bonus cell coverage updates immediately on
+            `PROVINCE_CAPTURED`; next `FRONTLINE_UPDATE` reflects new ownership
+      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for algorithm design
+      - [ ] `FRONTLINE_UPDATE` event replaces old per-province broadcast approach
 - [ ] Frontline supply connectivity check (separate from road graph supply):
       - [ ] Trace backward from division position through waypoint graph to nearest supply hub
       - [ ] Check each waypoint: if influence < 50% friendly, connection broken
@@ -324,11 +330,18 @@ Unit tests for movement profile computation and A* path validity.
       model; full graph-based supply is Phase 6)
 
 ### Godot
-- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified A*
+- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
       graph; movement profile applied at query time per selected division
-- [ ] A* pathfinding — road edges win naturally via low cost; off-road waypoint edges use
-      division movement profile multiplier; infinity-cost edges excluded; river crossing
-      penalty on flagged edges
+- [x] Pathfinding uses **two-phase routing** (bidirectional A*): off-road purity pre-check;
+      road entry pre-check (nearest road within 0.015°²/~1.5km → route to road then
+      road-only to goal); full graph fallback (see `docs/PATHFINDING.md` — Two-Phase Routing)
+- [x] **String-pulling post-processor** applied to raw A* output — greedy forward skip
+      to furthest passable node within 0.05°²/~5km (see `docs/PATHFINDING.md` — String-Pulling)
+- [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
+      check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
+      depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
+- [ ] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
+      edges; server validates smoothed path (not raw A* path)
 - [ ] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display
 - [ ] Engagement area rendering:
       - [ ] Own engagement area: solid circle, radius from composition-based formula
@@ -352,12 +365,14 @@ Unit tests for movement profile computation and A* path validity.
       formation bonus glows, row perk labels, attack pattern overlay, recon indicator,
       terrain modifier display, river crossing penalty indicator, round timer,
       flanking angle indicator showing measured angle and active bonus tier
-- [ ] Client rendering uses **LERP smoothing only** — no client-side prediction.
-      On state update: cache server position. In `_process(delta)`: lerp visual
-      position toward server position at ~10× speed. Snap directly if distance
-      exceeds threshold (e.g. redeployment teleport). HP bars, suppression bars,
-      and frontline colour values all lerp the same way between server updates.
-      Server is always authoritative — client never simulates movement itself
+- [ ] Movement rendering uses **dead reckoning** — client drives animation locally
+      using the pre-validated waypoint list and terrain speed; no waiting for server
+      per-waypoint acknowledgements. Server sends `DIVISION_WAYPOINT_REACHED` on
+      each waypoint arrival and `DIVISION_POSITION_CORRECTION` every ~3 seconds;
+      client applies correction only if divergence > 15 map units (lerp over 0.5s).
+      HP bars, suppression bars, frontline values lerp between server updates.
+      Dead reckoning implementation in `client/src/systems/military/military_system.gd`;
+      see `docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
 - [ ] Move order UX:
@@ -376,20 +391,29 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
-- [ ] `FrontlineRenderer` — province interior colour wash shader driven by per-province
-      influence values received from server:
-      - [ ] Each province interior shaded by blending owner's predefined nation colour
-            (baseline) with dominating nation's predefined nation colour proportional to
-            their influence advantage
-      - [ ] Frontline isoline rendered at 50% influence threshold, smoothed with curve
-            fit for organic appearance; purely cosmetic, no mechanical role
+- [ ] `FrontlineRenderer` — GPU shader approach (not CPU polygon per tick):
+      - [ ] Server sends 128×128 influence grid as two binary arrays: `dominant[Uint8]`
+            (leading nation per cell) and `advantage[Float32]` (dominance margin) every
+            ~5 seconds; ~80KB payload total
+      - [ ] Client uploads arrays as two `ImageTexture` uniforms (`FORMAT_R8` and
+            `FORMAT_RF`) on `FRONTLINE_UPDATE` receipt
+      - [ ] `advantage` texture lerps smoothly over 2 seconds between updates;
+            `dominant` texture snaps immediately (discrete ownership change)
+      - [ ] `frontline.gdshader` fragment shader on a `MeshInstance2D` covering full
+            map bounds: blends nation colours by dominant/advantage; renders edge glow
+            at zero-crossing of advantage; `political_view` uniform toggles fill vs
+            line-only rendering; z-index above base map, below unit dots
+      - [ ] `set_political_view(bool)` function toggles shader uniform
+      - [ ] Frontline only renders between nations marked `at_war = true` in game state;
+            `at_war` uniform is a 6×6 bool matrix sent once at game start
       - [ ] Province borders remain static (political map, never changes)
-      - [ ] City node marker on each province; changes to capturing nation's icon on
-            `PROVINCE_CAPTURED`; province baseline colour updates to new owner
-      - [ ] Neutral player receives same province influence scalars; sees colour wash;
+      - [ ] City node marker changes to capturing nation's icon on `PROVINCE_CAPTURED`
+      - [ ] Neutral player receives same influence grid broadcast; sees colour wash;
             does not see enemy division dots outside their own observation radius
-      - [ ] Intensity of colour wash proportional to division HP fraction — fading colour
-            regions indicate weakening fronts readable without opening any panel
+      - [ ] Intensity of colour wash proportional to division HP fraction (baked into
+            server influence computation) — fading regions indicate weakening fronts
+      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for shader
+            design and server computation approach
 - [ ] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`; shader
       continues to apply influence wash on top of new baseline colour
 - [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,

@@ -116,28 +116,37 @@ Recomputed whenever the template is saved — same trigger as the movement profi
 
 ### Pathfinding Architecture
 
-Client-side A* over a two-level unified graph. Server validates the submitted path.
+Client-side bidirectional A* over a two-level unified graph. Server validates the submitted
+path. Full implementation reference: `docs/PATHFINDING.md`.
 
-**Level 1 — Road graph:** The existing road network from roads.geojson. On-road edges
-have low uniform cost; road_level governs animation speed, not pathfinding cost. All
-division types use the road graph identically.
+**Level 1 — Road graph:** Road network from `roads.geojson`. Road edges have a fixed low
+cost (0.05/deg); road_level governs animation speed, not pathfinding cost. All division
+types use the road graph identically.
 
-**Level 2 — Waypoint graph:** A sparse grid pre-baked by the pipeline at regular intervals
-across the map, stored in waypoints.json. Each waypoint node stores its sampled
-cover_combat group and elevation band. Each edge stores the raw composable terrain cost
-(cover_move x elevation_move from MAP_DATA_CONTRACT).
+**Level 2 — Waypoint graph:** A non-uniform terrain grid pre-baked by the pipeline,
+stored in `waypoints.json`. Three density tiers: open terrain (~22 km spacing), medium
+complexity (~11 km), dense/complex (~7.5 km). Each node stores `cover_combat` and
+`elevation`; each edge stores `base_cost = cover_move × elevation_move`.
 
 **At pathfinding time:**
-The client computes edge_cost = waypoint_graph raw_cost × division movement_profile for
-that edge terrain. If movement_profile for a terrain is infinity, that edge is excluded
-from the search — A* will not route through impassable terrain.
+`edge_cost = base_cost × division_movement_profile[terrain]`. Impassable terrain
+(`profile_cost == INF`) is excluded from the search entirely.
 
-**Road snapping:** Road edges have dramatically lower cost than off-road waypoint edges,
-so A* naturally finds road-hugging paths without any explicit snapping logic.
+**Two-phase routing:** Pathfinding runs an off-road purity pre-check, then a road entry
+pre-check (route to the nearest road node, then road-only to goal). Only if both fail
+does it fall back to the full unified graph. This is explicit routing logic, not just
+cost-weighting.
 
-**River crossing:** Waypoint edges that cross a river LineString are flagged with the
-river's river_size at pipeline time. The edge cost gets a crossing penalty multiplier.
-Road crossings (bridges) on the road graph have no river penalty.
+**String-pulling:** After A* returns a raw waypoint list, a greedy pass removes redundant
+intermediate nodes, producing clean straight segments between key turns.
+
+**Shift-move road avoidance:** On the second and later segments of a shift-move chain,
+a continuous avoidance multiplier (1.0–13.0×) inflates road costs based on how deep
+off-road the previous waypoint was. A road crossing check (200 m sample intervals) gates
+this — if a road naturally lies between waypoints, the normal algorithm is used instead.
+
+**River crossing:** Edges crossing a river LineString are flagged at pipeline time with
+a multiplier (minor 1.8×, moderate 3.0×, major 4.5×). Road crossings (bridges) exempt.
 
 **Server validation:** The client submits the ordered waypoint list. The server validates
 each step against the division's server-side movement profile and the authoritative graph.
@@ -177,58 +186,50 @@ lock the player into either mode — friction teaches strategy.
 
 ### Division dot and engagement areas
 
-Each division is represented as a dot on the strategic map with two concentric areas:
+Each division is represented as a dot on the strategic map with three concentric areas:
 
-**Observation area (large radius):**
-- Always larger than the engagement area — a player sees an enemy division dot well
-  before engagement areas touch, giving meaningful warning before combat initiates
+**Scouting range (large outer ring):**
+- Always the largest ring — forward scouts ranging ahead of the division's main body
 - Reveals enemy division positions within range as dots on the player's map
-- At low observation value, enemy composition shows as "?" — unit types unknown
-- As observation value increases (via recon units in the division template, or sustained
-  proximity), enemy composition begins to reveal progressively
-- Enemy divisions with high stealth composition reduce how much is revealed even at high
-  observation values
-
-**Observation radius determination:**
-- The division's observation radius equals the **maximum** observation range among
-  all recon units present in the template — not the sum or average
-- Multiple recon units add redundancy (if the best is killed mid-combat, the next
-  best takes over) but do not geometrically stack range
-- Units contributing to observation radius: recon infantry (base range), recon light
-  tank variants (medium range), armoured car with recon specialisation (high range),
-  cavalry (medium range — fast-moving scouts)
-- Research upgrades improve specific unit types' observation range; the division's
-  effective radius updates on next movement profile recomputation
-- A division with no recon units has a short baseline observation radius representing
-  basic visual contact from forward scouts
-
-**Enemy movement path visibility:**
-- Enemy division movement paths (dotted waypoint trail) are only visible when the
-  enemy division dot is within the player's observation radius — same visibility gate
-- Ally and map-sharing nations: all paths visible regardless of observation radius
+- Enemy movement paths (dotted waypoint trail) are only visible when the enemy division
+  dot is within the player's scouting range — same visibility gate
+- Ally and map-sharing nations: all paths visible regardless of scouting range
 - Neutral nations: see province-level frontline colour wash but not division dots
-  or paths outside their own observation areas
+  or paths outside their own scouting areas
 
-**Scouting range (shorter inner circle, inside observation range):**
+**Scouting radius determination:**
+- The division's scouting radius equals the **maximum** scouting range among all recon
+  units present in the template — not the sum or average
+- Multiple recon units add redundancy (if the best is killed mid-combat, the next best
+  takes over) but do not geometrically stack range
+- Units contributing to scouting radius: recon infantry (base range), recon light tank
+  variants (medium range), armoured car with recon specialisation (high range), cavalry
+  (medium range — fast-moving scouts)
+- Research upgrades improve specific unit types' scouting range; the division's effective
+  radius updates on next movement profile recomputation
+- A division with no recon units has a short baseline scouting radius representing basic
+  forward visibility from the unit's vanguard
+
+**Observation range (inner ring, inside scouting range):**
 - A second, shorter-radius circle within which partial-to-full enemy composition
   becomes visible — rather than just seeing the dot and its movement
-- At base scouting range (standard recon infantry): unit category counts visible
+- At base observation range (standard recon infantry): unit category counts visible
   (e.g. "3 armoured, 8 infantry, 2 support") but not specific types
-- At upgraded scouting (research-improved recon unit): specific unit types visible
+- At upgraded observation (research-improved recon unit): specific unit types visible
   (e.g. "medium tanks, MG teams, AT guns")
-- At maximum scouting (elite recon armoured car, highest research tier): full grid
+- At maximum observation (elite recon armoured car, highest research tier): full grid
   composition visible — exactly what units are in the enemy 5×5 grid
-- **Scouting radius determination:** max of recon units in the template (same rule
-  as observation radius — not cumulative). Research upgrades two separate axes per
-  recon unit: (1) scouting radius and (2) composition detail quality. Both increase
+- **Observation radius determination:** max of recon units in the template (same rule
+  as scouting radius — not cumulative). Research upgrades two separate axes per recon
+  unit: (1) observation radius and (2) composition detail quality. Both increase
   independently on the recon unit research tree
-- Scouting range is not shown by default on the map — only shown when the player
-  hovers over an enemy division dot that is within scouting range. A partial or full
+- Observation range is not shown by default on the map — only shown when the player
+  hovers over an enemy division dot that is within observation range. A partial or full
   composition panel appears on hover
 - **Historical grounding:** US military doctrine explicitly classified recon as
   close/short-range (composition detail) and distant/long-range (position and
   movement only). The two-range system directly reflects this doctrine
-- Stealth units in the enemy division are not revealed by scouting unless the
+- Stealth units in the enemy division are not revealed by observation unless the
   scouting unit has sufficient anti-stealth level (same anti-stealth rules as
   tactical grid)
 
@@ -537,6 +538,8 @@ runtime via the settings UI. GDScript handles keyboard input cleanly through `In
 ---
 
 ## Dynamic Frontline System
+
+> **Status: Deferred — planned for a later development phase (supply system milestone).**
 
 ### Overview
 
@@ -1014,13 +1017,6 @@ number — it is the difference between losing one division and losing the front
   — balance between path quality and graph size)
 - Movement profile recomputation trigger debounce (avoid recomputing on every keystroke
   during template editing — trigger on save/confirm)
-- Frontline influence tick rate (target: same as supply tick, every 5–10 seconds; faster
-  feels reactive but increases broadcast frequency)
-- Distance falloff function for influence projection (linear vs quadratic decay from
-  division centre to province edge — affects how "sharp" the frontline looks)
-- Influence connectivity threshold for supply severance (currently 50% — may need tuning
-  to avoid supply lines blinking in/out on lightly contested ground)
-- Frontline line smoothing curve parameters (how organic vs angular the isoline appears)
 
 ---
 
