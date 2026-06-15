@@ -24,19 +24,19 @@ var _icons_ref: Dictionary = {}  # reference to MilitarySystem._icons (DR positi
 
 
 func setup(map_loader: Node) -> void:
+	# Frontline influence visualization — deferred to a later development phase (supply system milestone).
 	_map_loader = map_loader
+	# Additive blend material and draw calls disabled until the frontline system is implemented.
+	#var mat := CanvasItemMaterial.new()
+	#mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	#material = mat
 
-	var mat := CanvasItemMaterial.new()
-	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-	material = mat
+	#EventBus.division_added.connect(_on_division_changed)
+	#EventBus.division_updated.connect(_on_division_changed)
+	#EventBus.division_removed.connect(_on_division_removed)
 
-	EventBus.division_added.connect(_on_division_changed)
-	EventBus.division_updated.connect(_on_division_changed)
-	EventBus.division_removed.connect(_on_division_removed)
-
-	# Catch up with divisions that already exist
-	for div_id: String in GameState.divisions:
-		_on_division_changed(div_id)
+	#for div_id: String in GameState.divisions:
+	#	_on_division_changed(div_id)
 
 
 func set_icons_ref(icons: Dictionary) -> void:
@@ -66,15 +66,16 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
-	if _map_loader == null:
-		return
-	for div_id: String in _divisions:
-		var d: Dictionary = _divisions[div_id]
-		var icon := _icons_ref.get(div_id) as Node2D
-		if icon == null:
-			continue
-		var col: Color = NATION_COLORS.get(d["nation_id"], NEUTRAL_COLOR)
-		var hp_frac: float = clampf(float(d["hp"]) / 100.0, 0.0, 1.0)
-		var pos: Vector2 = icon.position
-		draw_circle(pos, INFLUENCE_RADIUS,       Color(col.r, col.g, col.b, ALPHA_OUTER * hp_frac))
-		draw_circle(pos, INFLUENCE_RADIUS * 0.5, Color(col.r, col.g, col.b, ALPHA_INNER * hp_frac))
+	pass  # Deferred — see setup() comment above.
+	#if _map_loader == null:
+	#	return
+	#for div_id: String in _divisions:
+	#	var d: Dictionary = _divisions[div_id]
+	#	var icon := _icons_ref.get(div_id) as Node2D
+	#	if icon == null:
+	#		continue
+	#	var col: Color = NATION_COLORS.get(d["nation_id"], NEUTRAL_COLOR)
+	#	var hp_frac: float = clampf(float(d["hp"]) / 100.0, 0.0, 1.0)
+	#	var pos: Vector2 = icon.position
+	#	draw_circle(pos, INFLUENCE_RADIUS,       Color(col.r, col.g, col.b, ALPHA_OUTER * hp_frac))
+	#	draw_circle(pos, INFLUENCE_RADIUS * 0.5, Color(col.r, col.g, col.b, ALPHA_INNER * hp_frac))

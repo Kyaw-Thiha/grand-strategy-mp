@@ -7,7 +7,8 @@ var division_id: String = ""
 var nation_color: Color = Color(0.6, 0.6, 0.6)
 var hp: float = 100.0
 var engagement_radius_px: float = 60.0
-var observation_radius_px: float = 120.0
+var observation_radius_px: float = 45.0
+var scouting_radius_px: float = 60.0
 var is_selected: bool = false
 var is_moving: bool = false
 var is_move_mode: bool = false
@@ -22,12 +23,13 @@ const HP_BAR_H := 3.0
 const HP_BAR_Y := RECT_H * 0.5 + 3.0
 
 
-func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float) -> void:
+func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float, scout_px: float) -> void:
 	division_id = data.get("division_id", "")
 	nation_color = color
 	hp = float(data.get("hp", 100))
 	engagement_radius_px = eng_px
 	observation_radius_px = obs_px
+	scouting_radius_px = scout_px
 	is_moving = (data.get("move_order", []) as Array).size() > 0
 	supply_status = data.get("supply_status", "normal")
 	stack_id = data.get("stack_id", "")
@@ -67,9 +69,10 @@ func _draw() -> void:
 	var half_w := RECT_W * 0.5
 	var half_h := RECT_H * 0.5
 
-	# Observation circle — large faded ring, drawn first (behind everything)
-	draw_arc(Vector2.ZERO, observation_radius_px, 0.0, TAU, 48,
-		Color(1.0, 1.0, 1.0, 0.12), 1.0)
+	# Scouting soft field — outermost, very faint filled disc, drawn first (behind everything)
+	draw_circle(Vector2.ZERO, scouting_radius_px,    Color(1.0, 1.0, 1.0, 0.06))
+	# Observation soft field — inner filled disc; overlaps center to create a gradient effect
+	draw_circle(Vector2.ZERO, observation_radius_px, Color(1.0, 1.0, 1.0, 0.18))
 
 	# Engagement circle
 	var eng_color := Color(nation_color.r, nation_color.g, nation_color.b, 0.5)

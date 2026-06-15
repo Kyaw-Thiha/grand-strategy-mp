@@ -22,12 +22,15 @@ const ENFORCE_OWNERSHIP := true
 const LERP_SPEED := 3.5
 const SNAP_THRESHOLD := 150.0
 const ENGAGEMENT_RADIUS_PX := 18.0
-const OBSERVATION_RADIUS_PX := 54.0
+const OBSERVATION_RADIUS_PX := 45.0
+const SCOUTING_RADIUS_PX := 60.0
 const HIT_THRESHOLD_PX := 20.0
 ## Distance threshold (deg) at which road avoidance reaches maximum strength (~1500m).
 const OFFROAD_THRESHOLD_DEG := 0.014
 ## Maximum road cost multiplier applied when player is deep off-road.
 const MAX_ROAD_MULTIPLIER := 13.0
+## Set false to revert foreign units to legacy lerp mode (useful for late-game perf testing).
+const FOREIGN_UNIT_PATH_DR := true
 ## Dead reckoning — must match movement_system.ts constants exactly.
 const DR_ROAD_KMH     := 60.0
 const DR_OFFROAD_KMH  := 20.0
@@ -683,7 +686,7 @@ func _on_division_added(division_id: String) -> void:
 
 	var icon: Node2D = DIVISION_ICON_SCENE.instantiate()
 	var color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
-	icon.setup(data, color, ENGAGEMENT_RADIUS_PX, OBSERVATION_RADIUS_PX)
+	icon.setup(data, color, ENGAGEMENT_RADIUS_PX, OBSERVATION_RADIUS_PX, SCOUTING_RADIUS_PX)
 
 	var lng: float = float(data.get("position_lng", 0.0))
 	var lat: float = float(data.get("position_lat", 0.0))
@@ -738,14 +741,25 @@ func _on_division_updated(division_id: String) -> void:
 		str_order.append(str(wp))
 
 	if not _dr_pos_deg.has(division_id):
-		# Foreign unit (no local DR seeded by submit) — lerp to server position.
-		# Route is drawn from server move_order waypoints without running pathfinding.
-		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
+		# First update with a live order — seed DR from server position.
+		# For foreign units, fall back to legacy lerp if FOREIGN_UNIT_PATH_DR is off.
+		if not FOREIGN_UNIT_PATH_DR and not _is_own_unit(division_id):
+			_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
+		else:
+			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+			_dr_order[division_id] = str_order
 		(icon as Node2D).set_moving(true)
 	else:
-		# Owning client — sync DR order when server consumed more waypoints.
 		var cur_order: Array = _dr_order[division_id]
-		if str_order.size() < cur_order.size():
+		var cur_lead: String = cur_order[0] if not cur_order.is_empty() else ""
+		var new_lead: String = str_order[0] if not str_order.is_empty() else ""
+		if cur_lead != new_lead:
+			# Leading waypoint changed — path re-routed mid-move.
+			# Re-seed from server position so all clients track the new path.
+			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+			_dr_order[division_id] = str_order
+		elif str_order.size() < cur_order.size():
+			# Server consumed leading waypoints — trim local order to match.
 			_dr_order[division_id] = str_order
 
 	_update_division_route(division_id)
