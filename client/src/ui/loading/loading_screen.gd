@@ -24,6 +24,7 @@ const LOADING_TIPS: Array[String] = [
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _loading_image_paths: Array[String] = []
 var _remaining_image_paths: Array[String] = []
+var _current_image_path: String = ""
 var _active_background: TextureRect = null
 var _inactive_background: TextureRect = null
 var _target_scene_path: String = ""
@@ -48,7 +49,8 @@ func _ready() -> void:
 	_show_next_loading_card(false)
 	_rotation_timer.wait_time = BACKGROUND_ROTATION_SECONDS
 	_rotation_timer.timeout.connect(_on_rotation_timer_timeout)
-	_rotation_timer.start()
+	if _loading_image_paths.size() > 1:
+		_rotation_timer.start()
 
 	_target_scene_path = SceneManager.get_loading_target_scene_path()
 	_waiting_for_game_start = SceneManager.should_loading_wait_for_game_start()
@@ -116,6 +118,7 @@ func _is_loading_screen_image(file_name: String) -> bool:
 func _show_next_loading_card(fade: bool) -> void:
 	var image_path: String = _take_next_image_path()
 	if not image_path.is_empty():
+		_current_image_path = image_path
 		var image_texture: Texture2D = load(image_path) as Texture2D
 		if fade:
 			_crossfade_to_texture(image_texture)
@@ -134,7 +137,11 @@ func _take_next_image_path() -> String:
 	if _remaining_image_paths.is_empty():
 		_remaining_image_paths = _loading_image_paths.duplicate()
 		_remaining_image_paths.shuffle()
-	return _remaining_image_paths.pop_back()
+	var next_image_path: String = _remaining_image_paths.pop_back()
+	if _loading_image_paths.size() > 1 and next_image_path == _current_image_path:
+		_remaining_image_paths.push_front(next_image_path)
+		next_image_path = _remaining_image_paths.pop_back()
+	return next_image_path
 
 
 ## Crossfades the inactive background layer in with a new texture.

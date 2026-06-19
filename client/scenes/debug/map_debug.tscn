@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://pg6npcixro2h"]
+[gd_scene load_steps=8 format=3 uid="uid://pg6npcixro2h"]
 
 [ext_resource type="Script" uid="uid://dmqgwqpo6epw" path="res://src/debug/map_debug.gd" id="1"]
 [ext_resource type="Script" uid="uid://8omsbyqn8kvy" path="res://src/systems/map/map_loader.gd" id="2"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://ysq1gwl2alpv" path="res://src/systems/map/map_interaction.gd" id="4"]
 [ext_resource type="Script" uid="uid://2xapaninscrt" path="res://src/systems/map/camera_system.gd" id="5"]
 [ext_resource type="Script" uid="uid://dfwuurc2gegdp" path="res://src/systems/military/military_system.gd" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/game/pause_menu.tscn" id="7"]
 
 [node name="MapDebug" type="Node" unique_id=693291787]
 script = ExtResource("1")
@@ -79,3 +80,5 @@ text = "Elevation"
 [node name="BtnCover" type="Button" parent="HUD/Panel/VBox/OverlayButtons" unique_id=2104817738]
 layout_mode = 2
 text = "Cover"
+
+[node name="PauseMenu" parent="." instance=ExtResource("7")]

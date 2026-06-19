@@ -21,6 +21,13 @@ func goto_main_menu() -> void:
 	_transition(SCENE_MAIN_MENU, "main_menu")
 
 
+## Shows the loading screen before entering the main menu.
+## Parameters: none.
+## Returns: nothing.
+func goto_main_menu_loading() -> void:
+	goto_loading_target(SCENE_MAIN_MENU, "main_menu")
+
+
 func goto_lobby() -> void:
 	_transition(SCENE_LOBBY, "lobby")
 
@@ -34,10 +41,21 @@ func goto_game() -> void:
 ## - wait_for_game_start: true when the screen should wait for GAME_STARTED before loading the game scene.
 ## Returns: nothing.
 func goto_game_loading(wait_for_game_start: bool) -> void:
-	_loading_target_scene_path = SCENE_GAME
-	_loading_target_scene_name = "game"
+	_set_loading_target(SCENE_GAME, "game")
 	_loading_waits_for_game_start = wait_for_game_start
 	_game_start_confirmed = not wait_for_game_start
+	_transition(SCENE_LOADING, "loading")
+
+
+## Shows the loading screen before entering an arbitrary target scene.
+## Parameters:
+## - scene_path: scene resource path to load.
+## - scene_name: semantic scene name emitted after transition.
+## Returns: nothing.
+func goto_loading_target(scene_path: String, scene_name: String) -> void:
+	_set_loading_target(scene_path, scene_name)
+	_loading_waits_for_game_start = false
+	_game_start_confirmed = true
 	_transition(SCENE_LOADING, "loading")
 
 
@@ -109,6 +127,11 @@ func complete_loading_transition(packed_scene: PackedScene) -> void:
 	_game_start_confirmed = false
 	get_tree().change_scene_to_packed(packed_scene)
 	scene_changed.emit(scene_name)
+
+
+func _set_loading_target(scene_path: String, scene_name: String) -> void:
+	_loading_target_scene_path = scene_path
+	_loading_target_scene_name = scene_name
 
 
 func _transition(scene_path: String, scene_name: String) -> void:

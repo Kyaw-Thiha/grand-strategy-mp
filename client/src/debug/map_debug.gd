@@ -14,6 +14,7 @@ const MAP_ID := "western_europe_6"
 @onready var _camera: Camera2D       = $Camera2D
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
+@onready var _pause_menu: CanvasLayer = $PauseMenu
 
 @onready var _hud_name:   Label = $HUD/Panel/VBox/ProvinceName
 @onready var _hud_nation: Label = $HUD/Panel/VBox/NationId
@@ -24,6 +25,7 @@ const MAP_ID := "western_europe_6"
 
 
 func _ready() -> void:
+	_pause_menu.set_restore_clear_color(RenderingServer.get_default_clear_color())
 	RenderingServer.set_default_clear_color(Color(0.20, 0.50, 0.80))
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
@@ -32,8 +34,23 @@ func _ready() -> void:
 	_map_loader.load_map(MAP_ID) 
 
 
-func _input(event: InputEvent) -> void:
-	# Forward key events to military system (M, H, X, Escape hotkeys)
+func _unhandled_input(event: InputEvent) -> void:
+	if _pause_menu.visible:
+		if event is InputEventKey:
+			var key: InputEventKey = event
+			if key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
+				_pause_menu.hide_menu()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventKey:
+		var key: InputEventKey = event
+		if key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
+			_pause_menu.show_menu()
+			get_viewport().set_input_as_handled()
+			return
+
+	# Forward key events to military system (M, H, X hotkeys)
 	if event is InputEventKey:
 		_military_system.handle_input(event)
 		return
