@@ -1,13 +1,16 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://baagwye0hv82y"]
 
-[ext_resource type="Script" path="res://src/ui/lobby/lobby_ui.gd" id="1"]
+[ext_resource type="Script" uid="uid://j3m8bgujt7wn" path="res://src/ui/lobby/lobby_ui.gd" id="1"]
 
-[node name="Lobby" type="Control"]
+[node name="Lobby" type="Control" unique_id=711941043]
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1")
 
-[node name="VBox" type="VBoxContainer" parent="."]
+[node name="VBox" type="VBoxContainer" parent="." unique_id=781907998]
+layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 16.0
@@ -15,58 +18,98 @@ offset_top = 16.0
 offset_right = -16.0
 offset_bottom = -16.0
 
-[node name="Header" type="HBoxContainer" parent="VBox"]
-
-[node name="CodeLabel" type="Label" parent="VBox/Header"]
-unique_name_in_owner = true
-text = "Lobby  •  Code: ------"
-theme_override_font_sizes/font_size = 18
-
-[node name="HSep" type="HSeparator" parent="VBox"]
+[node name="Header" type="HBoxContainer" parent="VBox" unique_id=986174931]
 layout_mode = 2
 
-[node name="Content" type="HSplitContainer" parent="VBox"]
+[node name="CodeLabel" type="Label" parent="VBox/Header" unique_id=390969231]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Lobby  •  Code: ------"
+
+[node name="HSep" type="HSeparator" parent="VBox" unique_id=879106094]
+layout_mode = 2
+
+[node name="Content" type="HSplitContainer" parent="VBox" unique_id=597267004]
 layout_mode = 2
 size_flags_vertical = 3
+split_offsets = PackedInt32Array(220)
 split_offset = 220
 
-[node name="NationsPane" type="VBoxContainer" parent="VBox/Content"]
+[node name="NationsPane" type="VBoxContainer" parent="VBox/Content" unique_id=358919016]
 layout_mode = 2
 
-[node name="NationsTitle" type="Label" parent="VBox/Content/NationsPane"]
+[node name="NationsTitle" type="Label" parent="VBox/Content/NationsPane" unique_id=735558780]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "Nations"
-theme_override_font_sizes/font_size = 14
 
-[node name="NationsList" type="VBoxContainer" parent="VBox/Content/NationsPane"]
+[node name="NationsList" type="VBoxContainer" parent="VBox/Content/NationsPane" unique_id=921513008]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="PlayersPane" type="VBoxContainer" parent="VBox/Content"]
+[node name="PlayersPane" type="VBoxContainer" parent="VBox/Content" unique_id=1008843686]
 layout_mode = 2
 
-[node name="PlayersTitle" type="Label" parent="VBox/Content/PlayersPane"]
+[node name="PlayersTitle" type="Label" parent="VBox/Content/PlayersPane" unique_id=412827437]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "Players"
-theme_override_font_sizes/font_size = 14
 
-[node name="PlayersList" type="VBoxContainer" parent="VBox/Content/PlayersPane"]
+[node name="PlayersList" type="VBoxContainer" parent="VBox/Content/PlayersPane" unique_id=590952427]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="Footer" type="HBoxContainer" parent="VBox"]
+[node name="Footer" type="HBoxContainer" parent="VBox" unique_id=146851600]
+layout_mode = 2
 
-[node name="StatusLabel" type="Label" parent="VBox/Footer"]
+[node name="StatusLabel" type="Label" parent="VBox/Footer" unique_id=1708742900]
 unique_name_in_owner = true
+layout_mode = 2
 size_flags_horizontal = 3
-text = ""
 
-[node name="ReadyBtn" type="Button" parent="VBox/Footer"]
+[node name="ReadyBtn" type="Button" parent="VBox/Footer" unique_id=1982506936]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Ready Up"
 
-[node name="StartBtn" type="Button" parent="VBox/Footer"]
+[node name="StartBtn" type="Button" parent="VBox/Footer" unique_id=883699750]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Start"
-visible = false
+
+[node name="SelectedFlagPanel" type="PanelContainer" parent="." unique_id=1863313307]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 126)
+layout_mode = 0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -150.0
+offset_right = 236.0
+offset_bottom = -16.0
+mouse_filter = 2
+
+[node name="FlagVBox" type="VBoxContainer" parent="SelectedFlagPanel" unique_id=1453880529]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="SelectedFlagTexture" type="TextureRect" parent="SelectedFlagPanel/FlagVBox" unique_id=417862746]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(188, 86)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SelectedFlagLabel" type="Label" parent="SelectedFlagPanel/FlagVBox" unique_id=957530289]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+text = "Select a nation"
+horizontal_alignment = 1
 
 [connection signal="pressed" from="VBox/Footer/ReadyBtn" to="." method="_on_ready_btn_pressed"]
 [connection signal="pressed" from="VBox/Footer/StartBtn" to="." method="_on_start_btn_pressed"]

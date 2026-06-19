@@ -1,23 +1,21 @@
-[gd_scene format=3 uid="uid://province_template"]
+[gd_scene format=3 uid="uid://oruobnvfkel4"]
 
-[node name="ProvinceNode" type="Node2D"]
+[node name="ProvinceNode" type="Node2D" unique_id=708780184]
 
-[node name="Fill" type="Polygon2D" parent="."]
+[node name="Fill" type="Polygon2D" parent="." unique_id=1309437017]
 color = Color(0.55, 0.55, 0.55, 1)
 
-[node name="Border" type="Line2D" parent="."]
-default_color = Color(0.1, 0.1, 0.1, 0.8)
+[node name="Border" type="Line2D" parent="." unique_id=209202187]
 width = 1.0
+default_color = Color(0.1, 0.1, 0.1, 0.8)
 
-[node name="Clickbox" type="Area2D" parent="."]
+[node name="Clickbox" type="Area2D" parent="." unique_id=392081968]
 
-[node name="Shape" type="CollisionPolygon2D" parent="Clickbox"]
+[node name="Shape" type="CollisionPolygon2D" parent="Clickbox" unique_id=1324975506]
 
-[node name="CityLabel" type="Label" parent="."]
-text = ""
-label_settings = null
+[node name="CityLabel" type="Label" parent="." unique_id=960886285]
 
-[node name="CityIcon" type="Sprite2D" parent="."]
+[node name="CityIcon" type="Sprite2D" parent="." unique_id=1003523188]
 visible = false
 
-[node name="UnitAnchor" type="Node2D" parent="."]
+[node name="UnitAnchor" type="Node2D" parent="." unique_id=1315722028]

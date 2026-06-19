@@ -486,6 +486,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     this.broadcast("LOBBY_STATE_UPDATE", {
       phase: this.state.phase,
+      map_id: this.state.map_id,
       host_session_id: this.hostSessionId,
       nations,
       players,

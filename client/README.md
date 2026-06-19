@@ -1,5 +1,10 @@
 # Grand Strategy Game — Godot Client
 
+## credits
+country flags: https://commons.wikimedia.org/wiki/Category:Historical_flags?
+
+
+
 ## Requirements
 - Godot 4.x (Forward+ renderer)
 - GodotSteam and Supabase addons (included in `addons/`)

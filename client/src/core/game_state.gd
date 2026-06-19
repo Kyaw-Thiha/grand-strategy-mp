@@ -39,6 +39,7 @@ func _apply_server_delta(delta: Dictionary) -> void:
 		EventBus.phase_changed.emit(phase)
 
 	host_session_id = delta.get("host_session_id", host_session_id)
+	map_id = delta.get("map_id", map_id)
 	game_speed = delta.get("game_speed", game_speed)
 
 	# Overwrite lobby collections with the full snapshot from the server

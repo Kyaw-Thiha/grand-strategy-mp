@@ -29,7 +29,7 @@ func _ready() -> void:
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
-	_map_loader.load_map(MAP_ID)
+	_map_loader.load_map(MAP_ID) 
 
 
 func _input(event: InputEvent) -> void:
