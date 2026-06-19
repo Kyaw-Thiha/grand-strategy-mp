@@ -102,6 +102,7 @@ func _on_map_loaded(province_count: int) -> void:
 	$HUD/Panel/VBox/OverlayButtons/BtnPolitical.pressed.connect(_on_overlay_political)
 	$HUD/Panel/VBox/OverlayButtons/BtnElevation.pressed.connect(_on_overlay_elevation)
 	$HUD/Panel/VBox/OverlayButtons/BtnCover.pressed.connect(_on_overlay_cover)
+	%PauseMenuButton.pressed.connect(_pause_menu.show_menu)
 
 
 func _on_map_load_failed(error: String) -> void:
