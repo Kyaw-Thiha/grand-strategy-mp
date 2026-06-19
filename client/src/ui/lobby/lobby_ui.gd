@@ -39,6 +39,7 @@ func _on_ready_btn_pressed() -> void:
 
 func _on_start_btn_pressed() -> void:
 	LobbySystem.start_game()
+	SceneManager.goto_game_loading(true)
 
 
 func _on_nation_btn_pressed(nation_id: String) -> void:

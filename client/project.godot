@@ -30,6 +30,11 @@ SessionManager="*res://src/systems/session/session_manager.gd"
 LobbySystem="*res://src/systems/session/lobby_system.gd"
 SceneManager="*res://src/core/scene_manager.gd"
 
+[display]
+
+window/stretch/mode="viewport"
+window/stretch/aspect="expand"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg", "res://addons/supabase/plugin.cfg")

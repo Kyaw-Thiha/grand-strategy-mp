@@ -2,6 +2,9 @@
 
 ## credits
 country flags: https://commons.wikimedia.org/wiki/Category:Historical_flags?
+~~stupid jokes used for screen transition tips: https://www.hilariousjokesworld.com/archives/8249~~
+stupid jokes used for screen transition tips:
+	
 
 
 
