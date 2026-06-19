@@ -1,7 +1,7 @@
 extends Control
 
 const DEFAULT_MAP_ID: String = "western_europe_6"
-const MIN_PLAYERS_TO_START: int = 2
+const MIN_PLAYERS_TO_START: int = 1
 const SELECT_NATION_TEXT: String = "Select a nation"
 
 @onready var _code_label: Label          = %CodeLabel
