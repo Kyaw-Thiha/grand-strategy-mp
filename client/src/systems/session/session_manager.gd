@@ -17,7 +17,17 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			var assignments: Dictionary = data.get("nation_assignments", {})
 			var speed: int = data.get("game_speed", 1)
 			session_started.emit(assignments, speed)
-			SceneManager.goto_game()
+			if SceneManager.is_game_loading_pending():
+				SceneManager.confirm_game_start()
+			else:
+				SceneManager.goto_game()
+
+		"ERROR":
+			var message: String = data.get("message", "Server error")
+			if SceneManager.should_loading_wait_for_game_start():
+				SceneManager.cancel_game_start_loading(message)
+			else:
+				EventBus.notification_requested.emit(message, "error")
 
 		"GAME_ENDED":
 			var winner: String = data.get("winner_id", "")

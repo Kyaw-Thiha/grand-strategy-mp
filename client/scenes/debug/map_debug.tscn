@@ -6,6 +6,8 @@
 [ext_resource type="Script" uid="uid://ysq1gwl2alpv" path="res://src/systems/map/map_interaction.gd" id="4"]
 [ext_resource type="Script" uid="uid://2xapaninscrt" path="res://src/systems/map/camera_system.gd" id="5"]
 [ext_resource type="Script" uid="uid://dfwuurc2gegdp" path="res://src/systems/military/military_system.gd" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/game/pause_menu.tscn" id="7"]
+[ext_resource type="Texture2D" uid="uid://cuvkcr4ohyy2h" path="res://assets/ui/setting-gear.png" id="8"]
 
 [node name="MapDebug" type="Node" unique_id=693291787]
 script = ExtResource("1")
@@ -45,7 +47,7 @@ text = "Hover a province"
 
 [node name="NationId" type="Label" parent="HUD/Panel/VBox" unique_id=1888408714]
 layout_mode = 2
-
+kevin-loves-dfsa-nfsa-pda-context-free-grammar-structural-induction
 [node name="Elevation" type="Label" parent="HUD/Panel/VBox" unique_id=113301355]
 layout_mode = 2
 
@@ -69,7 +71,7 @@ layout_mode = 2
 layout_mode = 2
 
 [node name="BtnPolitical" type="Button" parent="HUD/Panel/VBox/OverlayButtons" unique_id=1753460678]
-layout_mode = 2
+layout_mode = 2kevin-loves-dfsa-nfsa-pda-context-free-grammar-structural-induction
 text = "Political"
 
 [node name="BtnElevation" type="Button" parent="HUD/Panel/VBox/OverlayButtons" unique_id=423714249]
@@ -79,3 +81,20 @@ text = "Elevation"
 [node name="BtnCover" type="Button" parent="HUD/Panel/VBox/OverlayButtons" unique_id=2104817738]
 layout_mode = 2
 text = "Cover"
+
+[node name="Separator3" type="HSeparator" parent="HUD/Panel/VBox" unique_id=1233400274]
+layout_mode = 2
+
+[node name="MenuSection" type="HBoxContainer" parent="HUD/Panel/VBox" unique_id=22652307]
+layout_mode = 2
+alignment = 2
+
+[node name="PauseMenuButton" type="Button" parent="HUD/Panel/VBox/MenuSection" unique_id=241158760]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+tooltip_text = "Menu"
+icon = ExtResource("8")
+expand_icon = true
+
+[node name="PauseMenu" parent="." unique_id=1071408045 instance=ExtResource("7")]

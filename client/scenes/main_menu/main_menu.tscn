@@ -1,75 +1,95 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://xqq3f4en7krh"]
 
-[ext_resource type="Script" path="res://src/ui/main_menu/main_menu.gd" id="1"]
+[ext_resource type="Script" uid="uid://bbt5luk2j4pvl" path="res://src/ui/main_menu/main_menu.gd" id="1"]
 
-[node name="MainMenu" type="Control"]
+[node name="MainMenu" type="Control" unique_id=2074206307]
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1")
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Center" type="CenterContainer" parent="." unique_id=1919694559]
+layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 
-[node name="VBox" type="VBoxContainer" parent="Center"]
+[node name="VBox" type="VBoxContainer" parent="Center" unique_id=907934379]
 custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
 
-[node name="Title" type="Label" parent="Center/VBox"]
-text = "Grand Strategy"
+[node name="Title" type="Label" parent="Center/VBox" unique_id=2021813584]
+layout_mode = 2
 theme_override_font_sizes/font_size = 28
+text = "Grand Strategy"
 horizontal_alignment = 1
 
-[node name="Spacer" type="Control" parent="Center/VBox"]
+[node name="Spacer" type="Control" parent="Center/VBox" unique_id=1969119581]
 custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
 
-[node name="EmailLabel" type="Label" parent="Center/VBox"]
+[node name="EmailLabel" type="Label" parent="Center/VBox" unique_id=1418847913]
+layout_mode = 2
 text = "Email"
 
-[node name="EmailField" type="LineEdit" parent="Center/VBox"]
+[node name="EmailField" type="LineEdit" parent="Center/VBox" unique_id=1061215721]
 unique_name_in_owner = true
+layout_mode = 2
 placeholder_text = "user@example.com"
 
-[node name="PassLabel" type="Label" parent="Center/VBox"]
+[node name="PassLabel" type="Label" parent="Center/VBox" unique_id=1937656029]
+layout_mode = 2
 text = "Password"
 
-[node name="PassField" type="LineEdit" parent="Center/VBox"]
+[node name="PassField" type="LineEdit" parent="Center/VBox" unique_id=2116763291]
 unique_name_in_owner = true
+layout_mode = 2
 placeholder_text = "••••••••"
 secret = true
 
-[node name="LoginBtn" type="Button" parent="Center/VBox"]
+[node name="LoginBtn" type="Button" parent="Center/VBox" unique_id=508978714]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Login"
 
-[node name="StatusLabel" type="Label" parent="Center/VBox"]
+[node name="StatusLabel" type="Label" parent="Center/VBox" unique_id=1763795752]
 unique_name_in_owner = true
-text = ""
+layout_mode = 2
 autowrap_mode = 3
 
-[node name="PostLogin" type="VBoxContainer" parent="Center/VBox"]
+[node name="PostLogin" type="VBoxContainer" parent="Center/VBox" unique_id=399318403]
 unique_name_in_owner = true
 visible = false
+layout_mode = 2
 
-[node name="Separator" type="HSeparator" parent="Center/VBox/PostLogin"]
+[node name="Separator" type="HSeparator" parent="Center/VBox/PostLogin" unique_id=101332026]
+layout_mode = 2
 
-[node name="CreateGameBtn" type="Button" parent="Center/VBox/PostLogin"]
+[node name="CreateGameBtn" type="Button" parent="Center/VBox/PostLogin" unique_id=1540792571]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Create Game"
 
-[node name="JoinRow" type="HBoxContainer" parent="Center/VBox/PostLogin"]
+[node name="JoinRow" type="HBoxContainer" parent="Center/VBox/PostLogin" unique_id=5892188]
+layout_mode = 2
 
-[node name="JoinCodeField" type="LineEdit" parent="Center/VBox/PostLogin/JoinRow"]
+[node name="JoinCodeField" type="LineEdit" parent="Center/VBox/PostLogin/JoinRow" unique_id=1330954675]
 unique_name_in_owner = true
+layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Join code"
 max_length = 6
 
-[node name="JoinBtn" type="Button" parent="Center/VBox/PostLogin/JoinRow"]
+[node name="JoinBtn" type="Button" parent="Center/VBox/PostLogin/JoinRow" unique_id=1258490415]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Join"
 
-[node name="BrowseBtn" type="Button" parent="Center/VBox/PostLogin"]
+[node name="BrowseBtn" type="Button" parent="Center/VBox/PostLogin" unique_id=686290512]
 unique_name_in_owner = true
+layout_mode = 2
 text = "Browse Public Games"
 
 [connection signal="pressed" from="Center/VBox/LoginBtn" to="." method="_on_login_btn_pressed"]

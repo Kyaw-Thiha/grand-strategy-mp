@@ -5,3 +5,9 @@ build
 .env.development
 .env.production
 .env
+
+# Bun lockfile accidentally created in npm workspace
+bun.lock
+
+# Local backup files
+*.bak

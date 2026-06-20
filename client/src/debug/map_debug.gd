@@ -14,6 +14,7 @@ const MAP_ID := "western_europe_6"
 @onready var _camera: Camera2D       = $Camera2D
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
+@onready var _pause_menu: CanvasLayer = $PauseMenu
 
 @onready var _hud_name:   Label = $HUD/Panel/VBox/ProvinceName
 @onready var _hud_nation: Label = $HUD/Panel/VBox/NationId
@@ -24,12 +25,50 @@ const MAP_ID := "western_europe_6"
 
 
 func _ready() -> void:
+	_pause_menu.set_restore_clear_color(RenderingServer.get_default_clear_color())
 	RenderingServer.set_default_clear_color(Color(0.20, 0.50, 0.80))
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
-	_map_loader.load_map(MAP_ID)
+	_map_loader.load_map(MAP_ID) 
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _pause_menu.visible:
+		if event is InputEventKey:
+			var key: InputEventKey = event
+			if key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
+				_pause_menu.hide_menu()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventKey:
+		var key: InputEventKey = event
+		if key.pressed and not key.echo and key.physical_keycode == KEY_ESCAPE:
+			_pause_menu.show_menu()
+			get_viewport().set_input_as_handled()
+			return
+
+	# Forward key events to military system (M, H, X hotkeys)
+	if event is InputEventKey:
+		_military_system.handle_input(event)
+		return
+
+	if not event is InputEventMouseButton:
+		return
+	var mb := event as InputEventMouseButton
+	if not mb.pressed:
+		return
+
+	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
+
+	if mb.button_index == MOUSE_BUTTON_LEFT:
+		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
+			get_viewport().set_input_as_handled()
+	elif mb.button_index == MOUSE_BUTTON_RIGHT:
+		if _military_system.try_right_click_at_world(world_pos):
+			get_viewport().set_input_as_handled()
 
 
 func _input(event: InputEvent) -> void:
@@ -85,6 +124,7 @@ func _on_map_loaded(province_count: int) -> void:
 	$HUD/Panel/VBox/OverlayButtons/BtnPolitical.pressed.connect(_on_overlay_political)
 	$HUD/Panel/VBox/OverlayButtons/BtnElevation.pressed.connect(_on_overlay_elevation)
 	$HUD/Panel/VBox/OverlayButtons/BtnCover.pressed.connect(_on_overlay_cover)
+	%PauseMenuButton.pressed.connect(_pause_menu.show_menu)
 
 
 func _on_map_load_failed(error: String) -> void:

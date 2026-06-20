@@ -1,0 +1,103 @@
+[gd_scene format=3 uid="uid://dsnu1vxaymcj1"]
+
+[ext_resource type="Script" uid="uid://d36q41wfj8gva" path="res://src/ui/loading/loading_screen.gd" id="1"]
+
+[node name="LoadingScreen" type="Control" unique_id=1668265698]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="FallbackBackground" type="ColorRect" parent="." unique_id=213356744]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.025, 0.03, 1)
+
+[node name="BackgroundA" type="TextureRect" parent="." unique_id=1383710995]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="BackgroundB" type="TextureRect" parent="." unique_id=924274313]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Shade" type="ColorRect" parent="." unique_id=1243631410]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0.38)
+
+[node name="ProgressPanel" type="PanelContainer" parent="." unique_id=1248153329]
+custom_minimum_size = Vector2(420, 76)
+layout_mode = 0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 32.0
+offset_top = -112.0
+offset_right = 452.0
+offset_bottom = -32.0
+mouse_filter = 2
+
+[node name="ProgressVBox" type="VBoxContainer" parent="ProgressPanel" unique_id=1183310152]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ProgressLabel" type="Label" parent="ProgressPanel/ProgressVBox" unique_id=1757154935]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Loading... 0%"
+
+[node name="ProgressBar" type="ProgressBar" parent="ProgressPanel/ProgressVBox" unique_id=1758350038]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/outline_size = 0
+show_percentage = false
+
+[node name="TipPanel" type="PanelContainer" parent="." unique_id=1148520010]
+custom_minimum_size = Vector2(360, 96)
+layout_mode = 0
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -392.0
+offset_top = -132.0
+offset_right = -32.0
+offset_bottom = -32.0
+mouse_filter = 2
+
+[node name="TipLabel" type="Label" parent="TipPanel" unique_id=1945243788]
+unique_name_in_owner = true
+layout_mode = 2
+text = "this is a little tip"
+autowrap_mode = 3
+
+[node name="RotationTimer" type="Timer" parent="." unique_id=314604886]
+unique_name_in_owner = true
+wait_time = 10.0
