@@ -7,6 +7,8 @@ extends Node
 const MAP_ID := "western_europe_6"
 #const FrontlineOverlay := preload("res://src/systems/frontline/frontline_overlay.gd")  # deferred
 
+var _nation_definitions_by_id: Dictionary = {}
+
 @onready var _map_loader: Node       = $MapLoader
 @onready var _map_renderer: Node     = $MapRenderer
 @onready var _map_interaction: Node  = $MapInteraction
@@ -125,10 +127,57 @@ func _on_map_loaded(province_count: int) -> void:
 	$HUD/Panel/VBox/OverlayButtons/BtnElevation.pressed.connect(_on_overlay_elevation)
 	$HUD/Panel/VBox/OverlayButtons/BtnCover.pressed.connect(_on_overlay_cover)
 	%PauseMenuButton.pressed.connect(_pause_menu.show_menu)
+	_center_camera_on_selected_nation()
 
 
 func _on_map_load_failed(error: String) -> void:
 	push_error("MapDebug: map load failed — %s" % error)
+
+
+## Centers the camera on the selected player's nation capital after the map loads.
+## Parameters: none.
+## Returns: nothing.
+func _center_camera_on_selected_nation() -> void:
+	var nation_id: String = GameState.get_my_nation_id()
+	if nation_id.is_empty():
+		return
+
+	_ensure_nation_definitions_loaded()
+	var nation_definition: Dictionary = _nation_definitions_by_id.get(nation_id, {})
+	var capital_province_id: String = nation_definition.get("capital_province_id", "")
+	if capital_province_id.is_empty():
+		push_warning("MapDebug: selected nation has no capital province: %s" % nation_id)
+		return
+
+	_camera_system.pan_to_province(capital_province_id)
+
+
+## Loads nation metadata for the active debug map if it has not been loaded yet.
+## Parameters: none.
+## Returns: nothing.
+func _ensure_nation_definitions_loaded() -> void:
+	if not _nation_definitions_by_id.is_empty():
+		return
+
+	var path: String = "res://assets/data/%s/nations.json" % MAP_ID
+	if not FileAccess.file_exists(path):
+		push_warning("MapDebug: missing nation metadata: " + path)
+		return
+
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not parsed is Array:
+		push_warning("MapDebug: invalid nation metadata: " + path)
+		return
+
+	var raw_definitions: Array = parsed
+	for raw_definition: Variant in raw_definitions:
+		if not raw_definition is Dictionary:
+			continue
+		var nation_definition: Dictionary = raw_definition
+		var nation_id: String = nation_definition.get("id", "")
+		if nation_id.is_empty():
+			continue
+		_nation_definitions_by_id[nation_id] = nation_definition
 
 
 func _on_province_hovered(province_id: String) -> void:

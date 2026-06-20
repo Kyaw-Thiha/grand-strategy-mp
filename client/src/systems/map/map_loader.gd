@@ -82,6 +82,18 @@ func get_province_data(province_id: String) -> Dictionary:
 	return _province_data.get(province_id, {})
 
 
+## Returns the preferred world-space camera focus point for a province.
+## Parameters:
+## - province_id: processed map province identifier.
+## Returns: projected city position when available, otherwise Vector2.INF.
+func get_province_focus_position(province_id: String) -> Vector2:
+	var province_data: Dictionary = get_province_data(province_id)
+	var city_position: Array = province_data.get("city_position", [])
+	if city_position.size() < 2:
+		return Vector2.INF
+	return project_lng_lat(float(city_position[0]), float(city_position[1]))
+
+
 func get_all_province_ids() -> Array[String]:
 	var ids: Array[String] = []
 	for k in _province_data.keys():

@@ -74,6 +74,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func pan_to_province(province_id: String) -> void:
 	if _map_loader == null:
 		return
+	var focus_position: Vector2 = _map_loader.get_province_focus_position(province_id)
+	if focus_position != Vector2.INF:
+		pan_to_position(focus_position)
+		return
 	var node: Node2D = _map_loader.get_province_node(province_id)
 	if node:
 		pan_to_position(node.position)
