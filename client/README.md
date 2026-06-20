@@ -2,7 +2,9 @@
 
 ## credits
 country flags: https://commons.wikimedia.org/wiki/Category:Historical_flags?
-Zector font: https://ggbot.itch.io/zector-font
+Zector font: 
+- https://ggbot.itch.io/zector-font
+- https://openfontlicense.org/
 
 ## Requirements
 - Godot 4.x (Forward+ renderer)
