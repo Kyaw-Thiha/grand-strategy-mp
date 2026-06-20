@@ -18,8 +18,10 @@ var players: Dictionary = {}
 # ── In-game state (populated from Phase 4+ events) ───────────────────────────
 # provinces: { province_id → { owner_id: String, ... } }
 var provinces: Dictionary = {}
-# units: { unit_id → { owner_id: String, province_id: String } }
-var units: Dictionary = {}
+# divisions: { division_id → DivisionState dict (mirrors server DivisionState) }
+var divisions: Dictionary = {}
+# frontline: { province_id → { nation_id: float share, ... } }
+var frontline: Dictionary = {}
 # relations: { "from_id:to_id" → { stance: String } }
 var relations: Dictionary = {}
 # proposals: { proposal_id → { from_id, to_id, stance, resolved } }
@@ -51,6 +53,67 @@ func _apply_server_delta(delta: Dictionary) -> void:
 		EventBus.lobby_state_updated.emit()
 
 
+## Called by SessionManager when server sends DIVISIONS_SPAWNED.
+func _apply_divisions_spawned(data: Dictionary) -> void:
+	var shared_profile: String = data.get("shared_profile_json", "")
+	for div_data: Dictionary in data.get("divisions", []):
+		var div_id: String = div_data.get("division_id", "")
+		if div_id.is_empty():
+			continue
+		var entry: Dictionary = div_data.duplicate()
+		if not shared_profile.is_empty():
+			entry["movement_profile_json"] = shared_profile
+		divisions[div_id] = entry
+		EventBus.division_added.emit(div_id)
+
+
+## Called by SessionManager when server sends DIVISION_UPDATES.
+func _apply_division_updates(data: Dictionary) -> void:
+	for div_data: Dictionary in data.get("divisions", []):
+		var div_id: String = div_data.get("division_id", "")
+		if div_id.is_empty() or not divisions.has(div_id):
+			continue
+		var existing: Dictionary = divisions[div_id]
+		for key: String in div_data:
+			existing[key] = div_data[key]
+		EventBus.division_updated.emit(div_id)
+
+
+## Called by SessionManager when server sends UNIT_DESTROYED.
+func _apply_unit_destroyed(data: Dictionary) -> void:
+	var div_id: String = data.get("division_id", "")
+	var nation_id: String = data.get("nation_id", "")
+	if div_id.is_empty():
+		return
+	if divisions.has(div_id):
+		divisions[div_id]["combat_state"] = "destroyed"
+	EventBus.unit_destroyed.emit(div_id, nation_id)
+	EventBus.division_updated.emit(div_id)
+
+
+## Called by SessionManager when server sends FRONTLINE_UPDATED.
+func _apply_frontline_updated(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var shares: Dictionary = data.get("nation_shares", {})
+	if province_id.is_empty():
+		return
+	frontline[province_id] = shares
+	EventBus.frontline_updated.emit(province_id, shares)
+
+
+## Called by SessionManager when server sends PROVINCE_CAPTURED.
+func _apply_province_captured(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var new_owner: String   = data.get("new_owner_id", "")
+	if province_id.is_empty():
+		return
+	if not provinces.has(province_id):
+		provinces[province_id] = {}
+	provinces[province_id]["owner_id"]  = new_owner
+	provinces[province_id]["nation_id"] = new_owner
+	EventBus.province_captured.emit(province_id, new_owner)
+
+
 # ── Getters ──────────────────────────────────────────────────────────────────
 
 func get_phase() -> String:
@@ -62,8 +125,23 @@ func get_game_speed() -> int:
 func get_province(province_id: String) -> Dictionary:
 	return provinces.get(province_id, {})
 
-func get_unit(unit_id: String) -> Dictionary:
-	return units.get(unit_id, {})
+func get_division(division_id: String) -> Dictionary:
+	return divisions.get(division_id, {})
+
+func get_my_nation_divisions() -> Array:
+	var nation_id := get_my_nation_id()
+	var result: Array = []
+	for div_id: String in divisions:
+		if divisions[div_id].get("nation_id", "") == nation_id:
+			result.append(div_id)
+	return result
+
+func get_divisions_for_nation(nation_id: String) -> Array:
+	var result: Array = []
+	for div_id: String in divisions:
+		if divisions[div_id].get("nation_id", "") == nation_id:
+			result.append(div_id)
+	return result
 
 ## Returns the player dict for the given user_id (searched across session map).
 func get_player(user_id: String) -> Dictionary:
@@ -87,11 +165,7 @@ func get_my_provinces() -> Array:
 	return result
 
 func get_my_units() -> Array:
-	var result: Array = []
-	for uid: String in units:
-		if units[uid].get("owner_id", "") == AuthManager.user_id:
-			result.append(uid)
-	return result
+	return get_my_nation_divisions()
 
 ## Returns the nation_id this player has selected in the lobby, or "".
 func get_my_nation_id() -> String:

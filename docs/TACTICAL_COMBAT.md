@@ -434,6 +434,167 @@ tier. This makes elite commando and stealth AT units extremely valuable across a
 
 ---
 
+### Cavalry — off-road exploitation and reconnaissance
+
+**Units:** Mounted cavalry, horse-drawn scouts.
+
+**Availability:** Available to all nations from game start on the current western Europe
+map. Nation-specific availability and bonuses are configurable via `nation_config` per
+map for future historical scenarios.
+
+**Grid combat role:** Horizontal attack like infantry. Gains a **charge bonus in Round 1
+only** — increased HP damage and suppression in the opening round before the enemy can
+react to mounted assault. After Round 1, combat values drop to standard infantry levels.
+Cavalry cannot sustain a prolonged firefight effectively — it is a shock unit, not a
+grinding unit.
+
+**Damage profile:**
+- Round 1: charge bonus — high HP damage and suppression vs infantry targets
+- Round 2+: standard infantry values
+- Highly vulnerable to MG fire — MG units are the primary hard counter to cavalry.
+  Artillery suppression affects cavalry less than infantry (horses scatter and reform
+  faster than stationary troops under bombardment)
+
+**Strategic movement profile:**
+- **Fastest off-road unit in the game** across most terrain types
+- Particularly strong in forest, hills, and rough steppe — terrain that slows vehicles
+  but not horses
+- Slower than motorised units on paved roads (horses vs trucks on highways)
+- Impassable in: swamp, glacier (same as all units)
+- Future module: winter conditions penalty-free for cavalry while mechanised divisions
+  are severely slowed — models historical utility of cavalry in Russian winters
+
+**Observation contribution:** Medium-high — cavalry units contribute meaningfully to the
+division's observation radius, second only to dedicated recon armoured cars. Fast-moving
+horse scouts cover ground quickly and report enemy positions.
+
+**Stealth:** Moderate in forest and hills; low in plains; zero in desert. A cavalry force
+moving through forest is harder to detect than a motorised column.
+
+**Design intent:** Cavalry is an early-game and terrain-specific tool. It provides fast
+off-road force projection before motorisation research is available, and retains a niche
+advantage on forest-heavy maps and in rough terrain throughout the game. It becomes less
+central as mechanisation progresses but is never useless in the right context.
+
+---
+
+### Motorisation and Mechanisation
+
+**Motorisation — single global research:**
+Motorisation is a standalone research node in the General Technology panel (not part of
+any unit specialisation tree). It represents the nation building sufficient truck
+production capacity to transport infantry by vehicle.
+
+- Once researched, most infantry unit types can be toggled to their motorised version
+  in the division template builder
+- **Effect:** purely strategic map speed upgrade — on-road and off-road movement costs
+  improve to motorised profile values. Zero change to 5×5 grid combat stats
+- **Units that can be motorised:** standard infantry, assault infantry, MG teams, AT
+  infantry, recon infantry, flamethrower teams — any unit that would realistically
+  ride in a truck
+- **Units that cannot be motorised:** snipers (stealth role requires independent movement),
+  commandos (same — unconventional movement is their core trait), towed AT guns and
+  artillery (these already have towed-motorised movement costs baked into their base
+  profile; the gun itself doesn't change, only the towing vehicle)
+- Sits at mid-tier in the General Technology panel — available after meaningful economic
+  investment but not a late-game unlock. Historically major powers had motorised
+  divisions from 1939
+
+**Mechanisation — armour research branch:**
+Mechanisation is a distinct unit type (mechanised infantry) unlocked via the armour
+research branch, not the infantry branch. Historically, mechanised infantry emerged from
+panzer division doctrine — the Panzergrenadier concept grew from combined-arms armour
+doctrine, not from infantry development.
+
+- Requires medium tank research tier to be reached first before the mechanised infantry
+  branch unlocks — representing that APCs only make sense in the context of a tank force
+  to integrate with
+- Mechanised infantry is a **different unit type in the 5×5 grid**, not a toggled version
+  of standard infantry:
+  - Partial armour value (vulnerable to AT weapons but resistant to small arms suppression)
+  - Cannot be fully suppressed by MG fire alone
+  - Higher off-road movement capability than motorised infantry (tracked or heavy
+    all-wheel drive vehicles)
+  - Higher cost per unit to build and maintain
+- Specialisation path within the branch: basic APC (half-track) → improved APC (full
+  tracked) → infantry fighting vehicle (IFV, provides fire support from the vehicle)
+- Each upgrade improves the unit's armour value and suppression resistance in the grid
+
+**Research tree structure summary:**
+```
+General Technology panel:
+└── Motorisation ─── enables motorised toggle for applicable infantry
+
+Armour research branch:
+├── Light tank
+├── Medium tank
+│   └── Mechanised infantry (APC half-track)
+│       └── Improved APC (full tracked)
+│           └── IFV
+└── Heavy tank
+```
+
+**Horse-drawn logistics (implicit, no separate mechanic):**
+Artillery and heavy weapons before motorisation research are implicitly horse-drawn —
+their base movement profile represents draught horse speed (faster than foot infantry
+on roads, slower than trucks). When motorisation is researched and toggled, those units
+switch to truck-towed movement costs. No separate horse logistics unit is required.
+
+---
+
+## Unit Incapacitated State
+
+When a unit's HP drops below a threshold, it enters **Incapacitated** state rather than
+being destroyed. This models the historical reality that most front-line units go to ground
+and stop contributing long before they are completely eliminated.
+
+### HP floor thresholds
+
+| Unit category | Incapacitation threshold | Rationale |
+|---|---|---|
+| Infantry, MG, AT infantry, cavalry, sniper, commando, flamethrower, recon infantry | 20% of max HP | Leg infantry can go to ground and survive |
+| Armoured units (light/medium/heavy tank, armoured car) | 30% of max HP | Mobility kills (broken track, wounded crew) happen before total destruction |
+| Artillery, towed AT gun, AA gun | **No incapacitation** | Crew-served weapons cannot easily be abandoned; crews fought until overrun |
+
+### Incapacitated state behaviour
+
+While incapacitated:
+- Deals zero damage and zero suppression — completely out of the fight
+- Not targeted by enemy attacks (below the threshold of "worth shooting at")
+- Not counted toward the division's retreat/destroy suppression threshold
+  (same exclusion rule as stealthed units)
+- HP does not decay further from combat damage — the unit is out of the fight,
+  not continuing to die
+- Recovers HP via supply at the standard rate once the division is no longer engaged
+
+### Experience on incapacitation
+
+A unit that went incapacitated during combat retains **60% of the experience** it would
+have gained that combat. The unit did not fight through to the end — partial credit only.
+
+If the **division is destroyed** while units are incapacitated, those units are also
+destroyed even though their HP is above zero. Experience is lost entirely in this case.
+The incapacitated state only preserves units if the division survives the engagement.
+
+### What this prevents
+
+Without this mechanic, a heavily damaged division that loses its front-line infantry would
+have those units permanently destroyed — losing both their combat contribution and their
+accumulated experience. With the floor, damaged front-line units drop out of the fight
+temporarily but survive to recover. Players are less catastrophically punished for
+sustaining damage, while the strategic cost of losing a battle (retreat, supply disruption,
+HP recovery time) is preserved.
+
+### Future extensibility
+
+Doctrines can modify this mechanic:
+- "Total war" doctrine: removes the incapacitation floor for a unit type — push through
+  to the last man (higher lethality, more experience loss)
+- "Manoeuvre doctrine": incapacitated units recover HP faster from supply
+Not implemented in the base game — the mechanic is designed to be extensible.
+
+---
+
 ## Armour Penetration System
 
 Armoured units have two armour values:
@@ -747,6 +908,9 @@ The panel can be closed at any time. Combat continues regardless.
 - Flank attack bonus percentage at strategic layer
 - Armour pen values per AT variant vs armour values per tank variant (coupled balance)
 - Exact suppression output values: MG vs flamethrower vs AT (AT must be very low)
+- Incapacitation HP floor values (confirmed qualitatively: infantry ~20%,
+  armour ~30%, artillery has no floor — exact values from playtesting)
+- Experience retention on incapacitation (confirmed: 60% of combat gain)
 - Column shift flanking and envelopment damage multiplier values
 - Row perk percentage bonuses (R5 suppression%, R4 HP damage%, R3 suppression resistance%,
   R2 decay rate multiplier) — all confirmed qualitatively, exact values from playtesting

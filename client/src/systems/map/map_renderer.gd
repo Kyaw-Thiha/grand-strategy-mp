@@ -91,6 +91,7 @@ var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
 
 
+
 func setup(map_loader: Node, data_source: Object) -> void:
 	_map_loader = map_loader
 	_data_source = data_source
@@ -98,6 +99,10 @@ func setup(map_loader: Node, data_source: Object) -> void:
 	_nation_label_layer.name = "NationLabelLayer"
 	_nation_label_layer.visible = false
 	_map_loader.add_child(_nation_label_layer)
+
+	# Auto-refresh province color on capture
+	if not EventBus.province_captured.is_connected(_on_province_captured):
+		EventBus.province_captured.connect(_on_province_captured)
 
 
 func on_map_loaded(_province_count: int) -> void:
@@ -173,6 +178,11 @@ func refresh_province(province_id: String) -> void:
 	_highlighted.erase(province_id)
 
 
+## Call after GameState.provinces has been updated with the new owner.
+func update_province_owner(province_id: String, _new_owner_id: String) -> void:
+	refresh_province(province_id)
+
+
 # ── internal ──────────────────────────────────────────────────────────────────
 
 func _refresh_all() -> void:
@@ -199,12 +209,16 @@ func _province_color(province_id: String) -> Color:
 
 	match _overlay_mode:
 		OverlayMode.POLITICAL:
-			var nation: String = pdata.get("nation_id", "default")
-			return NATION_PALETTE.get(nation, NATION_PALETTE["default"])
+			var owner: String = pdata.get("nation_id", "default")
+			return NATION_PALETTE.get(owner, NATION_PALETTE["default"])
 		OverlayMode.COVER:
 			return Color(0.55, 0.55, 0.55, 0.35)  # neutral grey; cover cells render on top, gaps show grey not ocean blue
 		_:
 			return Color(0, 0, 0, 0)
+
+
+func _on_province_captured(province_id: String, _new_owner_id: String) -> void:
+	refresh_province(province_id)
 
 
 func _build_nation_labels() -> void:

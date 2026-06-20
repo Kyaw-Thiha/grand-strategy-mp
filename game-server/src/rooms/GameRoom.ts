@@ -1,7 +1,16 @@
 import { Room, Client, CloseCode } from "colyseus";
 import { jwtVerify } from "jose";
-import { GameRoomState, PlayerState, NationState } from "./schema/GameRoomState.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState } from "./schema/GameRoomState.js";
 import { getMapNationIds } from "../data/map_loader.js";
+import { MovementSystem } from "../systems/movement_system.js";
+import { CombatSystem } from "../systems/combat_system.js";
+import { SupplySystem } from "../systems/supply_system.js";
+import { FrontlineSystem } from "../systems/frontline_system.js";
+import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
+import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
 interface JwtPayload {
   sub: string;
@@ -10,7 +19,8 @@ interface JwtPayload {
 }
 
 const API_SERVER_URL = process.env.API_SERVER_URL ?? "http://localhost:3000";
-const MIN_PLAYERS_TO_START = 2;
+const MIN_PLAYERS_TO_START = 1;
+const TICK_MS = 1000;
 
 export class GameRoom extends Room<{ state: GameRoomState }> {
   maxClients = 6;
@@ -18,12 +28,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private hostSessionId: string = "";
   private gameStartedAt: Date | null = null;
   private nationIds: string[] = [];
+  private tickCount = 0;
+  private movementSystem   = new MovementSystem();
+  private combatSystem     = new CombatSystem(this.movementSystem);
+  private supplySystem     = new SupplySystem();
+  private frontlineSystem  = new FrontlineSystem();
 
   async onAuth(_client: Client, options: { token?: string }) {
-    /**
-     * Verify the JWT issued by the Hono api-server.
-     * Throws on failure — Colyseus rejects the client automatically.
-     */
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
     try {
       const { payload } = await jwtVerify(options.token ?? "", secret, { algorithms: ["HS256"] });
@@ -34,10 +45,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   async onCreate() {
-    /**
-     * Seed the nations map with all 6 playable slots (empty player_id).
-     * Slots are claimed by SELECT_NATION messages.
-     */
     this.setState(new GameRoomState());
 
     this.nationIds = await getMapNationIds(this.state.map_id);
@@ -47,12 +54,20 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.state.nations.set(nationId, slot);
     }
 
-    this.onMessage("SELECT_NATION",  (client, msg) => this.handleSelectNation(client, msg));
-    this.onMessage("DESELECT_NATION", (client, _msg) => this.handleDeselectNation(client));
-    this.onMessage("SET_READY",      (client, msg) => this.handleSetReady(client, msg));
-    this.onMessage("START_GAME",     (client, _msg) => this.handleStartGame(client));
-    this.onMessage("VOTE_SPEED",     (client, msg) => this.handleVoteSpeed(client, msg));
-    this.onMessage("END_GAME",       (client, _msg) => this.handleEndGame(client));
+    this.onMessage("SELECT_NATION",    (client, msg) => this.handleSelectNation(client, msg));
+    this.onMessage("DESELECT_NATION",  (client, _msg) => this.handleDeselectNation(client));
+    this.onMessage("SET_READY",        (client, msg) => this.handleSetReady(client, msg));
+    this.onMessage("START_GAME",       (client, _msg) => this.handleStartGame(client));
+    this.onMessage("VOTE_SPEED",       (client, msg) => this.handleVoteSpeed(client, msg));
+    this.onMessage("END_GAME",         (client, _msg) => this.handleEndGame(client));
+    this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
+    this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
+    this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
+    this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
+    if (process.env.DEV_MODE === "true") {
+      this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
+      this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
+    }
 
     console.log(`[GameRoom] ${this.roomId} created`);
   }
@@ -64,7 +79,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     player.hasHostPass = auth.has_host_pass;
     this.state.players.set(client.sessionId, player);
 
-    // First to join is host
     if (this.state.players.size === 1) {
       this.hostSessionId = client.sessionId;
     }
@@ -79,7 +93,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     this.state.players.delete(client.sessionId);
 
-    // Free any nation slot this player held
     if (userId) {
       for (const nation of this.state.nations.values()) {
         if (nation.player_id === userId) {
@@ -90,7 +103,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       }
     }
 
-    // Transfer host if needed
     if (this.hostSessionId === client.sessionId && this.state.players.size > 0) {
       this.hostSessionId = this.state.players.keys().next().value ?? "";
       console.log(`[GameRoom] host transferred to ${this.hostSessionId}`);
@@ -124,9 +136,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       return;
     }
 
-    // Free the player's previous slot if they had one
     this.clearNationForPlayer(player.userId);
-
     slot.player_id = player.userId;
     slot.is_ready = false;
 
@@ -144,16 +154,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
   private handleSetReady(client: Client, msg: { ready?: boolean }) {
     if (this.state.phase !== "lobby") return;
-
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
-
     const nation = this.getNationForPlayer(player.userId);
     if (!nation) {
       client.send("ERROR", { message: "Select a nation before readying" });
       return;
     }
-
     nation.is_ready = msg.ready ?? true;
     this.broadcastLobbyState();
     this.checkAutoStart();
@@ -190,9 +197,222 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       client.send("ERROR", { message: "Only the host can end the game" });
       return;
     }
+    this.endGame("");
+  }
 
-    const winner = this.resolveWinner();
-    this.endGame(winner);
+  private handleSubmitMoveOrder(client: Client, msg: { division_id?: string; waypoints?: string[] }) {
+    if (this.state.phase !== "running") return;
+    const divisionId = msg.division_id ?? "";
+    const waypoints = msg.waypoints ?? [];
+
+    const division = this.state.divisions.get(divisionId);
+    if (!division) {
+      client.send("ERROR", { message: `Unknown division: ${divisionId}` });
+      return;
+    }
+
+    // Verify ownership
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation || nation.nation_id !== division.nation_id) {
+      client.send("ERROR", { message: "Not your division" });
+      return;
+    }
+
+    if (!this.movementSystem.validateMoveOrder(waypoints)) {
+      client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "invalid_waypoints" });
+      return;
+    }
+
+    // Replace existing move order
+    division.move_order.splice(0, division.move_order.length);
+    for (const wpId of waypoints) {
+      division.move_order.push(wpId);
+    }
+  }
+
+  private handleHold(client: Client, msg: { division_id?: string }) {
+    if (this.state.phase !== "running") return;
+    const divisionId = msg.division_id ?? "";
+    const division = this.state.divisions.get(divisionId);
+    if (!division) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation || nation.nation_id !== division.nation_id) return;
+
+    division.move_order.splice(0, division.move_order.length);
+  }
+
+  private handleRetreat(client: Client, msg: { division_id?: string }) {
+    if (this.state.phase !== "running") return;
+    const divisionId = msg.division_id ?? "";
+    const division = this.state.divisions.get(divisionId);
+    if (!division) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation || nation.nation_id !== division.nation_id) return;
+
+    const enemies: DivisionState[] = [];
+    for (const eid of division.engaged_with) {
+      const e = this.state.divisions.get(eid);
+      if (e) enemies.push(e);
+    }
+    this.combatSystem.initiateRetreat(division, enemies);
+  }
+
+  private handleReorderStack(client: Client, msg: { stack_id?: string; new_order?: string[] }) {
+    if (this.state.phase !== "running") return;
+    const stackId  = msg.stack_id  ?? "";
+    const newOrder = msg.new_order ?? [];
+    if (!stackId || newOrder.length === 0) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation) return;
+
+    // Verify all divisions in the order belong to this player's nation
+    for (const divId of newOrder) {
+      const div = this.state.divisions.get(divId);
+      if (!div || div.nation_id !== nation.nation_id) {
+        client.send("ERROR", { message: "Stack contains divisions from another nation" });
+        return;
+      }
+    }
+
+    const ok = this.combatSystem.reorderStack(stackId, newOrder, this.state, (type, msg) => this.broadcast(type, msg));
+    if (!ok) client.send("ERROR", { message: "Cannot reorder stack (invalid or engaged)" });
+  }
+
+  /** DEV_MODE only — instantly teleport any division to given coordinates. */
+  private handleDevTeleport(msg: { division_id?: string; lng?: number; lat?: number }) {
+    const div = this.state.divisions.get(msg.division_id ?? "");
+    if (!div) return;
+    if (msg.lng !== undefined) div.position_lng = msg.lng;
+    if (msg.lat !== undefined) div.position_lat = msg.lat;
+    div.move_order.splice(0, div.move_order.length);
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
+  }
+
+  /** DEV_MODE only — force a division's supply_status for testing. */
+  private handleDevSetSupply(msg: { division_id?: string; supply_status?: string }) {
+    const div = this.state.divisions.get(msg.division_id ?? "");
+    if (!div) return;
+    const valid = ["normal", "out_of_supply", "cut_off", "encircled"];
+    if (!valid.includes(msg.supply_status ?? "")) return;
+    div.supply_status = msg.supply_status!;
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
+  }
+
+  // ── Game lifecycle ──────────────────────────────────────────────────────────
+
+  private startGame() {
+    this.state.phase = "running";
+    this.gameStartedAt = new Date();
+
+    // Load waypoints for movement and map data for combat + supply
+    this.movementSystem.loadWaypoints(this.state.map_id);
+    this.combatSystem.loadMapData(this.state.map_id);
+    this.supplySystem.loadMapData(this.state.map_id);
+    this.frontlineSystem.loadMapData(this.state.map_id);
+    this._initProvinces(this.state.map_id);
+
+    // Spawn all divisions
+    this.spawnDivisions();
+
+    // Broadcast GAME_STARTED (existing clients listen for this)
+    const assignments: Record<string, string> = {};
+    for (const [id, nation] of this.state.nations.entries()) {
+      assignments[id] = nation.player_id;
+    }
+    this.broadcast("GAME_STARTED", {
+      nation_assignments: assignments,
+      game_speed: this.state.game_speed,
+    });
+
+    // Send full initial division state — profile sent once at top level (shared by all divisions)
+    const sharedProfileJson = this.state.divisions.values().next().value?.movement_profile_json ?? "";
+    this.broadcast("DIVISIONS_SPAWNED", {
+      shared_profile_json: sharedProfileJson,
+      divisions: this.serializeDivisions(),
+    });
+
+    // Start game loop
+    this.clock.setInterval(() => this.gameTick(), TICK_MS);
+
+    console.log(`[GameRoom] ${this.roomId} game started, ${this.state.divisions.size} divisions spawned`);
+  }
+
+  private spawnDivisions() {
+    const profile = this.movementSystem.computeMovementProfile(DEFAULT_TEMPLATE);
+    const divisionType = this.movementSystem.classifyDivisionType(DEFAULT_TEMPLATE);
+    const engagementRadius = this.movementSystem.computeEngagementRadius(DEFAULT_TEMPLATE);
+    const observationRadius = this.movementSystem.computeObservationRadius(DEFAULT_TEMPLATE);
+    const profileJson = JSON.stringify(profile);
+
+    for (const spawn of STARTING_POSITIONS) {
+      const div = new DivisionState();
+      div.division_id = spawn.division_id;
+      div.nation_id = spawn.nation_id;
+      div.division_type = divisionType;
+      div.position_lng = spawn.lng;
+      div.position_lat = spawn.lat;
+      div.hp = 100;
+      div.suppression = 0;
+      div.combat_state = "idle";
+      div.supply_status = "normal";
+      div.observation_radius = observationRadius;
+      div.engagement_radius = engagementRadius;
+      div.movement_profile_json = profileJson;
+      this.state.divisions.set(spawn.division_id, div);
+    }
+  }
+
+  private gameTick() {
+    if (this.state.phase !== "running") return;
+    this.tickCount++;
+
+    const activeBefore = new Set<string>();
+    for (const [id, div] of this.state.divisions) {
+      if (div.move_order.length > 0 || div.combat_state !== "idle") activeBefore.add(id);
+    }
+
+    try {
+      this.movementSystem.tick(this.state);
+      const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+
+      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
+      const updates = [];
+      for (const id of toUpdate) {
+        const div = this.state.divisions.get(id);
+        if (div) updates.push(this.serializeDivision(div));
+      }
+      if (updates.length > 0) {
+        this.broadcast("DIVISION_UPDATES", { divisions: updates });
+      }
+    } catch (err) {
+      console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
+    }
+  }
+
+  private resolveWinner(): string {
+    return "";
+  }
+
+  private endGame(winnerId: string) {
+    this.state.phase = "ended";
+    this.broadcast("GAME_ENDED", { winner_id: winnerId, reason: "host_ended" });
+    this.notifyGameEnd(winnerId).catch(err =>
+      console.error("[GameRoom] Failed to notify game end:", err)
+    );
+    console.log(`[GameRoom] ${this.roomId} game ended`);
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -214,64 +434,45 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     return null;
   }
 
-  /**
-   * Auto-start when all 6 nation slots are filled and every filled slot is ready.
-   * Requires at least MIN_PLAYERS_TO_START players.
-   */
   private checkAutoStart() {
     if (this.state.phase !== "lobby") return;
-
     const slots = [...this.state.nations.values()];
     const filled = slots.filter(n => n.player_id !== "");
     const allReady = filled.length >= MIN_PLAYERS_TO_START &&
       filled.every(n => n.is_ready) &&
-      filled.length === this.nationIds.length; // all slots taken
-
+      filled.length === this.nationIds.length;
     if (allReady) this.startGame();
   }
 
-  private startGame() {
-    this.state.phase = "running";
-    this.gameStartedAt = new Date();
+  private serializeDivision(div: DivisionState): object {
+    return {
+      division_id: div.division_id,
+      nation_id: div.nation_id,
+      division_type: div.division_type,
+      position_lng: div.position_lng,
+      position_lat: div.position_lat,
+      hp: div.hp,
+      suppression: div.suppression,
+      combat_state: div.combat_state,
+      supply_status: div.supply_status,
+      observation_radius: div.observation_radius,
+      engagement_radius: div.engagement_radius,
+      move_order: [...div.move_order],
+      stack_id: div.stack_id,
+      stack_position: div.stack_position,
+      attacker_role: div.attacker_role,
+      engaged_with: [...div.engaged_with],
+    };
+  }
 
-    const assignments: Record<string, string> = {};
-    for (const [id, nation] of this.state.nations.entries()) {
-      assignments[id] = nation.player_id;
+  private serializeDivisions(): object[] {
+    const result = [];
+    for (const div of this.state.divisions.values()) {
+      result.push(this.serializeDivision(div));
     }
-
-    this.broadcast("GAME_STARTED", {
-      nation_assignments: assignments,
-      game_speed: this.state.game_speed,
-    });
-
-    console.log(`[GameRoom] ${this.roomId} game started`);
+    return result;
   }
 
-  private resolveWinner(): string {
-    // Placeholder — Phase 4/5 will compute the real winner from game state
-    return "";
-  }
-
-  private endGame(winnerId: string) {
-    this.state.phase = "ended";
-
-    this.broadcast("GAME_ENDED", {
-      winner_id: winnerId,
-      reason: "host_ended",
-    });
-
-    this.notifyGameEnd(winnerId).catch(err =>
-      console.error("[GameRoom] Failed to notify game end:", err)
-    );
-
-    console.log(`[GameRoom] ${this.roomId} game ended`);
-  }
-
-  /**
-   * Broadcasts the full lobby state as a plain JSON object so clients can update
-   * their GameState without decoding binary schema patches.
-   * Called after every state-changing message handler.
-   */
   private broadcastLobbyState(): void {
     const nations: Record<string, { player_id: string; is_ready: boolean }> = {};
     for (const [id, nation] of Array.from(this.state.nations.entries())) {
@@ -290,6 +491,27 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       players,
       game_speed: this.state.game_speed,
     });
+  }
+
+  /** Populate state.provinces from map_data.json initial nation owners. */
+  private _initProvinces(mapId: string): void {
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const dataPath = join(__dir, "../..", "..", "client", "assets", "data", mapId, "map_data.json");
+    try {
+      const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
+        provinces: Array<{ province_id: string; nation_id: string }>;
+      };
+      for (const p of raw.provinces ?? []) {
+        if (!p.province_id) continue;
+        const slot = new ProvinceState();
+        slot.province_id = p.province_id;
+        slot.owner_id    = p.nation_id ?? "";
+        this.state.provinces.set(p.province_id, slot);
+      }
+      console.log(`[GameRoom] initialized ${this.state.provinces.size} provinces`);
+    } catch {
+      console.warn(`[GameRoom] could not load map_data.json for province init`);
+    }
   }
 
   private async notifyGameEnd(winnerId: string) {

@@ -11,6 +11,7 @@ The map_dir must contain a map.json with map_id, bounds, and dem_source.
 
 import argparse
 import json
+import math
 import shutil
 import sys
 import warnings
@@ -21,7 +22,7 @@ import rasterio
 from rasterio.merge import merge as rasterio_merge
 from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.warp import reproject, Resampling, transform_bounds
-from shapely.geometry import shape
+from shapely.geometry import Point, LineString as ShapelyLS, shape
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
@@ -484,6 +485,583 @@ def write_map_data(output_dir: Path, map_config: dict,
     print(f"  map_data.json written ({out_path.stat().st_size / 1024:.0f} KB)")
 
 
+def generate_waypoints(sources: dict, output_dir: Path) -> None:
+    """
+    Sample road geometry at ~750m intervals to build the waypoint graph.
+
+    Each node records lng/lat, cover_combat, and elevation at that point.
+    Edges connect consecutive sampled points on the same road segment.
+    River crossings are flagged per edge for penalty calculation in 4B+.
+
+    Output: waypoints.json with { nodes, edges, road_connections }.
+    """
+    SAMPLE_DEG = 0.007  # ~750m at 50°N latitude
+
+    # Movement cost tables for base_cost computation (cover × elevation).
+    COVER_MOVE: dict[str, float] = {
+        "plains": 1.0, "steppe": 1.1, "shrubland": 1.2, "light_forest": 1.3,
+        "dense_forest": 1.8, "jungle": 2.5, "desert": 1.4, "swamp": 2.0,
+        "tundra": 1.5, "glacier": 9999.0, "urban": 0.9,
+    }
+    ELEV_MOVE: dict[str, float] = {"flat": 1.0, "hills": 1.4, "mountains": 2.2}
+
+    # Build spatial indices over cover and elevation polygons.
+    cover_feats = sources.get("cover", [])
+    elev_feats = sources.get("elevation", [])
+    river_feats = sources.get("rivers", [])
+
+    cover_geoms = [shape(f["geometry"]) for f in cover_feats]
+    elev_geoms = [shape(f["geometry"]) for f in elev_feats]
+    river_geoms = [shape(f["geometry"]) for f in river_feats]
+    river_sizes = [f["properties"].get("river_size", "stream") for f in river_feats]
+
+    cover_tree = STRtree(cover_geoms) if cover_geoms else None
+    elev_tree = STRtree(elev_geoms) if elev_geoms else None
+    river_tree = STRtree(river_geoms) if river_geoms else None
+
+    def _tag(lng: float, lat: float) -> tuple[str, str]:
+        """Return (cover_combat, elevation) for a point."""
+        pt = Point(lng, lat)
+        cover_combat = "plains"
+        elevation = "flat"
+        if cover_tree is not None:
+            for idx in cover_tree.query(pt, predicate="intersects"):
+                if cover_geoms[idx].contains(pt):
+                    cover_combat = cover_feats[idx]["properties"].get("cover_combat", "plains")
+                    break
+        if elev_tree is not None:
+            for idx in elev_tree.query(pt, predicate="intersects"):
+                if elev_geoms[idx].contains(pt):
+                    elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
+                    break
+        return cover_combat, elevation
+
+    def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
+        seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
+        if river_tree is not None:
+            for idx in river_tree.query(seg, predicate="intersects"):
+                if seg.intersects(river_geoms[idx]):
+                    return river_sizes[idx]
+        return None
+
+    def _interpolate(coords: list, interval: float) -> list[tuple[float, float]]:
+        """Yield (lng, lat) pairs along a coordinate list at roughly interval spacing."""
+        result: list[tuple[float, float]] = [(coords[0][0], coords[0][1])]
+        for i in range(len(coords) - 1):
+            lng0, lat0 = coords[i][0], coords[i][1]
+            lng1, lat1 = coords[i + 1][0], coords[i + 1][1]
+            dx, dy = lng1 - lng0, lat1 - lat0
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist > interval * 1.5:
+                steps = max(1, round(dist / interval))
+                for s in range(1, steps):
+                    t = s / steps
+                    result.append((lng0 + dx * t, lat0 + dy * t))
+            result.append((lng1, lat1))
+        return result
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    road_connections: list[dict] = []
+
+    # Deduplicate nodes by rounded coordinate to merge nearby road intersections.
+    node_by_key: dict[tuple[int, int], str] = {}
+    wp_counter = 0
+
+    def _get_or_create(lng: float, lat: float) -> str:
+        nonlocal wp_counter
+        key = (round(lng * 100000), round(lat * 100000))  # ~1m grid
+        if key in node_by_key:
+            return node_by_key[key]
+        wp_counter += 1
+        wid = f"wp_{wp_counter:06d}"
+        cover, elev = _tag(lng, lat)
+        nodes.append({
+            "id": wid,
+            "lng": round(lng, 6),
+            "lat": round(lat, 6),
+            "cover_combat": cover,
+            "elevation": elev,
+        })
+        node_by_key[key] = wid
+        return wid
+
+    node_pos: dict[str, tuple[float, float]] = {}  # id → (lng, lat) for edge cost lookup
+
+    seen_edges: set[tuple[str, str]] = set()
+
+    for feat in sources.get("roads", []):
+        road_id = feat["properties"].get("road_id", "")
+        geom = shape(feat["geometry"])
+        lines = []
+        if geom.geom_type == "LineString":
+            lines = [list(geom.coords)]
+        elif geom.geom_type == "MultiLineString":
+            lines = [list(g.coords) for g in geom.geoms]
+
+        for raw_coords in lines:
+            pts = _interpolate(raw_coords, SAMPLE_DEG)
+            wp_ids: list[str] = []
+
+            for lng, lat in pts:
+                wid = _get_or_create(lng, lat)
+                node_pos[wid] = (lng, lat)
+                if not wp_ids or wp_ids[-1] != wid:
+                    wp_ids.append(wid)
+
+            # Register road_connections (deduped by road_id + waypoint_id)
+            seen_rc: set[str] = set()
+            for wid in wp_ids:
+                key_rc = f"{road_id}:{wid}"
+                if key_rc not in seen_rc:
+                    seen_rc.add(key_rc)
+                    road_connections.append({"road_id": road_id, "waypoint_id": wid})
+
+            # Create edges between consecutive waypoints
+            node_data: dict[str, dict] = {n["id"]: n for n in nodes}
+            for k in range(len(wp_ids) - 1):
+                a_id, b_id = wp_ids[k], wp_ids[k + 1]
+                edge_key = (min(a_id, b_id), max(a_id, b_id))
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+
+                a = node_data[a_id]
+                river = _river_crossing(a["lng"], a["lat"],
+                                        node_data[b_id]["lng"], node_data[b_id]["lat"])
+                cover_cost = COVER_MOVE.get(a["cover_combat"], 1.0)
+                elev_cost = ELEV_MOVE.get(a["elevation"], 1.0)
+                edges.append({
+                    "from": a_id,
+                    "to": b_id,
+                    "base_cost": round(cover_cost * elev_cost, 3),
+                    "river_size": river,
+                })
+
+    out_path = output_dir / "waypoints.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"nodes": nodes, "edges": edges, "road_connections": road_connections},
+                  f, ensure_ascii=False, separators=(",", ":"))
+    print(f"  waypoints.json: {len(nodes)} nodes, {len(edges)} edges")
+
+
+def generate_terrain_grid(
+    sources: dict,
+    existing_wp: dict,
+    grid_deg: float = 0.07,
+    id_prefix: str = "tg",
+) -> tuple[list[dict], list[dict]]:
+    """
+    Generate a terrain grid for off-road movement and connect it to the waypoint graph.
+
+    grid_deg:  spacing between grid nodes in degrees (default 0.07° ≈ 7.5 km at 50°N)
+    id_prefix: prefix for generated node IDs ('tg' for fine/server, 'ct' for coarse/client)
+
+    Returns (new_nodes, new_edges) to merge into a waypoints file.
+    """
+    TERRAIN_GRID_DEG    = grid_deg
+    TERRAIN_CONNECT_DEG = min(grid_deg * 1.3, 0.11)  # cap at ~12 km to limit road connections
+
+    COVER_MOVE: dict[str, float] = {
+        "plains": 1.0, "steppe": 1.1, "shrubland": 1.2, "light_forest": 1.3,
+        "dense_forest": 1.8, "jungle": 2.5, "desert": 1.4, "swamp": 2.0,
+        "tundra": 1.5, "glacier": 9999.0, "urban": 0.9,
+    }
+    ELEV_MOVE: dict[str, float] = {"flat": 1.0, "hills": 1.4, "mountains": 2.2}
+
+    # Build spatial indices (same pattern as generate_waypoints)
+    cover_feats = sources.get("cover", [])
+    elev_feats  = sources.get("elevation", [])
+    river_feats = sources.get("rivers", [])
+    water_feats = sources.get("base_water", [])
+
+    cover_geoms = [shape(f["geometry"]) for f in cover_feats]
+    elev_geoms  = [shape(f["geometry"]) for f in elev_feats]
+    river_geoms = [shape(f["geometry"]) for f in river_feats]
+    water_geoms = [shape(f["geometry"]) for f in water_feats]
+    river_sizes = [f["properties"].get("river_size", "stream") for f in river_feats]
+
+    cover_tree = STRtree(cover_geoms) if cover_geoms else None
+    elev_tree  = STRtree(elev_geoms)  if elev_geoms  else None
+    river_tree = STRtree(river_geoms) if river_geoms else None
+    water_tree = STRtree(water_geoms) if water_geoms else None
+
+    def _in_water(lng: float, lat: float) -> bool:
+        pt = Point(lng, lat)
+        if water_tree is None:
+            return False
+        for idx in water_tree.query(pt, predicate="intersects"):
+            if water_geoms[idx].contains(pt):
+                return True
+        return False
+
+    def _tag(lng: float, lat: float) -> tuple[str, str]:
+        pt = Point(lng, lat)
+        cover_combat, elevation = "plains", "flat"
+        if cover_tree is not None:
+            for idx in cover_tree.query(pt, predicate="intersects"):
+                if cover_geoms[idx].contains(pt):
+                    cover_combat = cover_feats[idx]["properties"].get("cover_combat", "plains")
+                    break
+        if elev_tree is not None:
+            for idx in elev_tree.query(pt, predicate="intersects"):
+                if elev_geoms[idx].contains(pt):
+                    elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
+                    break
+        return cover_combat, elevation
+
+    def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
+        seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
+        if river_tree is not None:
+            for idx in river_tree.query(seg, predicate="intersects"):
+                if seg.intersects(river_geoms[idx]):
+                    return river_sizes[idx]
+        return None
+
+    road_nodes = existing_wp.get("nodes", [])
+    if not road_nodes:
+        print("  [WARN] No road nodes found — skipping terrain grid")
+        return [], []
+
+    all_lngs = [n["lng"] for n in road_nodes]
+    all_lats = [n["lat"] for n in road_nodes]
+    min_lng, max_lng = min(all_lngs), max(all_lngs)
+    min_lat, max_lat = min(all_lats), max(all_lats)
+
+    # Adjust lng step for latitude to keep grid cells roughly square
+    lat_mid  = (min_lat + max_lat) / 2
+    lng_step = TERRAIN_GRID_DEG / math.cos(math.radians(lat_mid))
+    lat_step = TERRAIN_GRID_DEG
+
+    # Spatial index over road nodes for snapping connection edges
+    road_pts  = [Point(n["lng"], n["lat"]) for n in road_nodes]
+    road_tree = STRtree(road_pts)
+    road_ids  = [n["id"] for n in road_nodes]
+
+    # 1. Generate terrain grid nodes
+    grid_map:  dict[tuple[int, int], dict] = {}
+    new_nodes: list[dict] = []
+    node_counter = 1
+
+    lat = min_lat
+    while lat <= max_lat + lat_step * 0.5:
+        gy  = round((lat - min_lat) / lat_step)
+        lng = min_lng
+        while lng <= max_lng + lng_step * 0.5:
+            gx = round((lng - min_lng) / lng_step)
+            if not _in_water(lng, lat):
+                cover_combat, elevation = _tag(lng, lat)
+                if COVER_MOVE.get(cover_combat, 1.0) < 9000:  # skip glacier
+                    node: dict = {
+                        "id":           f"{id_prefix}_{node_counter:06d}",
+                        "lng":          round(lng, 6),
+                        "lat":          round(lat, 6),
+                        "cover_combat": cover_combat,
+                        "elevation":    elevation,
+                    }
+                    grid_map[(gx, gy)] = node
+                    new_nodes.append(node)
+                    node_counter += 1
+            lng += lng_step
+        lat += lat_step
+
+    print(f"  terrain grid: {len(new_nodes)} nodes")
+
+    # 2. Connect 8-adjacent terrain grid neighbors
+    new_edges:        list[dict] = []
+    seen_terrain_edges: set[tuple[str, str]] = set()
+
+    for (gx, gy), node in grid_map.items():
+        for dgx, dgy in [(-1, 0), (1, 0), (0, -1), (0, 1),
+                          (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            nb = grid_map.get((gx + dgx, gy + dgy))
+            if nb is None:
+                continue
+            edge_key = (min(node["id"], nb["id"]), max(node["id"], nb["id"]))
+            if edge_key in seen_terrain_edges:
+                continue
+            seen_terrain_edges.add(edge_key)
+            c1 = COVER_MOVE.get(node["cover_combat"], 1.0) * ELEV_MOVE.get(node["elevation"], 1.0)
+            c2 = COVER_MOVE.get(nb["cover_combat"],   1.0) * ELEV_MOVE.get(nb["elevation"],   1.0)
+            river = _river_crossing(node["lng"], node["lat"], nb["lng"], nb["lat"])
+            new_edges.append({
+                "from":       node["id"],
+                "to":         nb["id"],
+                "base_cost":  round((c1 + c2) / 2, 3),
+                "river_size": river,
+            })
+
+    # 3. Snap terrain nodes to nearby road nodes with connection edges
+    connect_sq = TERRAIN_CONNECT_DEG ** 2
+    road_seen_pairs: set[tuple[str, str]] = set()
+
+    for node in new_nodes:
+        pt = Point(node["lng"], node["lat"])
+        for idx in road_tree.query(pt.buffer(TERRAIN_CONNECT_DEG), predicate="intersects"):
+            rpt = road_pts[idx]
+            dist_sq = (node["lng"] - rpt.x) ** 2 + (node["lat"] - rpt.y) ** 2
+            if dist_sq > connect_sq:
+                continue
+            pair = (node["id"], road_ids[idx])
+            if pair in road_seen_pairs:
+                continue
+            road_seen_pairs.add(pair)
+            cost  = round(
+                COVER_MOVE.get(node["cover_combat"], 1.0) *
+                ELEV_MOVE.get(node["elevation"],    1.0), 3
+            )
+            river = _river_crossing(node["lng"], node["lat"], rpt.x, rpt.y)
+            new_edges.append({
+                "from":       node["id"],
+                "to":         road_ids[idx],
+                "base_cost":  cost,
+                "river_size": river,
+            })
+
+    road_conn_count = len(road_seen_pairs)
+    print(f"  terrain grid: {len(new_edges)} edges ({road_conn_count} road connections)")
+    return new_nodes, new_edges
+
+
+def generate_nonuniform_terrain_grid(
+    sources: dict,
+    existing_wp: dict,
+    id_prefix: str = "ct",
+) -> tuple[list[dict], list[dict]]:
+    """
+    Non-uniform coarse terrain grid for client-side off-road routing.
+
+    Sampling density adapts to terrain type:
+      complex (dense_forest, jungle, swamp, urban, mountains): COMPLEX_STEP (~7.5 km)
+      medium  (light_forest, shrubland, hills):                MEDIUM_STEP  (~11 km)
+      open    (plains, steppe, desert, tundra):                OPEN_STEP    (~22 km)
+
+    Nodes are generated by three independent grid sweeps (one per tier), then
+    merged and deduplicated. Edges connect any two nodes within CONNECT_DEG.
+    """
+    OPEN_STEP    = 0.20   # degrees — same density as old uniform grid in open terrain
+    MEDIUM_STEP  = 0.10   # denser in transitional terrain
+    COMPLEX_STEP = 0.07   # finest in terrain that most constrains movement
+
+    CONNECT_DEG      = 0.40   # must exceed lng_step=OPEN_STEP/cos_lat≈0.285° and its diagonal≈0.348°; stays below English Channel (~0.55° in degree-space)
+    ROAD_CONNECT_DEG = 0.11   # road snap radius — matches original generate_terrain_grid cap
+    K_TERRAIN        = 8      # max terrain-to-terrain neighbors (mirrors original 8-adjacency)
+    K_ROAD           = 3      # max road nodes to snap per terrain node
+
+    COMPLEX_COVERS = {"dense_forest", "jungle", "swamp", "urban"}
+    MEDIUM_COVERS  = {"light_forest", "shrubland"}
+    COMPLEX_ELEVS  = {"mountains"}
+    MEDIUM_ELEVS   = {"hills"}
+
+    COVER_MOVE: dict[str, float] = {
+        "plains": 1.0, "steppe": 1.1, "shrubland": 1.2, "light_forest": 1.3,
+        "dense_forest": 1.8, "jungle": 2.5, "desert": 1.4, "swamp": 2.0,
+        "tundra": 1.5, "glacier": 9999.0, "urban": 0.9,
+    }
+    ELEV_MOVE: dict[str, float] = {"flat": 1.0, "hills": 1.4, "mountains": 2.2}
+
+    cover_feats = sources.get("cover", [])
+    elev_feats  = sources.get("elevation", [])
+    river_feats = sources.get("rivers", [])
+    water_feats = sources.get("base_water", [])
+
+    cover_geoms  = [shape(f["geometry"]) for f in cover_feats]
+    elev_geoms   = [shape(f["geometry"]) for f in elev_feats]
+    river_geoms  = [shape(f["geometry"]) for f in river_feats]
+    water_geoms  = [shape(f["geometry"]) for f in water_feats]
+    river_sizes  = [f["properties"].get("river_size", "stream") for f in river_feats]
+
+    cover_tree = STRtree(cover_geoms) if cover_geoms else None
+    elev_tree  = STRtree(elev_geoms)  if elev_geoms  else None
+    river_tree = STRtree(river_geoms) if river_geoms else None
+    water_tree = STRtree(water_geoms) if water_geoms else None
+
+    def _in_water(lng: float, lat: float) -> bool:
+        pt = Point(lng, lat)
+        if water_tree is None:
+            return False
+        for idx in water_tree.query(pt, predicate="intersects"):
+            if water_geoms[idx].contains(pt):
+                return True
+        return False
+
+    def _tag(lng: float, lat: float) -> tuple[str, str]:
+        pt = Point(lng, lat)
+        cover_combat, elevation = "plains", "flat"
+        if cover_tree is not None:
+            for idx in cover_tree.query(pt, predicate="intersects"):
+                if cover_geoms[idx].contains(pt):
+                    cover_combat = cover_feats[idx]["properties"].get("cover_combat", "plains")
+                    break
+        if elev_tree is not None:
+            for idx in elev_tree.query(pt, predicate="intersects"):
+                if elev_geoms[idx].contains(pt):
+                    elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
+                    break
+        return cover_combat, elevation
+
+    def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
+        seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
+        if river_tree is not None:
+            for idx in river_tree.query(seg, predicate="intersects"):
+                if seg.intersects(river_geoms[idx]):
+                    return river_sizes[idx]
+        return None
+
+    def _tier(cover: str, elev: str) -> str:
+        if cover in COMPLEX_COVERS or elev in COMPLEX_ELEVS:
+            return "complex"
+        if cover in MEDIUM_COVERS or elev in MEDIUM_ELEVS:
+            return "medium"
+        return "open"
+
+    road_nodes = existing_wp.get("nodes", [])
+    if not road_nodes:
+        print("  [WARN] No road nodes found — skipping non-uniform terrain grid")
+        return [], []
+
+    all_lngs = [n["lng"] for n in road_nodes]
+    all_lats = [n["lat"] for n in road_nodes]
+    min_lng, max_lng = min(all_lngs), max(all_lngs)
+    min_lat, max_lat = min(all_lats), max(all_lats)
+
+    lat_mid = (min_lat + max_lat) / 2
+    cos_lat = math.cos(math.radians(lat_mid))
+
+    road_pts      = [Point(n["lng"], n["lat"]) for n in road_nodes]
+    road_strtree  = STRtree(road_pts)
+    road_ids      = [n["id"] for n in road_nodes]
+
+    # Deduplicate at ~100 m resolution (same as generate_waypoints)
+    node_by_key: dict[tuple[int, int], dict] = {}
+    node_counter = [1]
+
+    def _try_add(lng: float, lat: float) -> None:
+        if lng < min_lng or lng > max_lng or lat < min_lat or lat > max_lat:
+            return
+        if _in_water(lng, lat):
+            return
+        cover, elev = _tag(lng, lat)
+        if COVER_MOVE.get(cover, 1.0) >= 9000:
+            return
+        key = (round(lng * 100_000), round(lat * 100_000))
+        if key in node_by_key:
+            return
+        nid = f"{id_prefix}_{node_counter[0]:06d}"
+        node_counter[0] += 1
+        node_by_key[key] = {
+            "id": nid, "lng": round(lng, 6), "lat": round(lat, 6),
+            "cover_combat": cover, "elevation": elev,
+        }
+
+    # Three sweeps — each only emits the tier it owns (or finer).
+    # Open sweep: all land at OPEN_STEP.
+    step     = OPEN_STEP
+    lng_step = step / cos_lat
+    lat = min_lat
+    while lat <= max_lat + step * 0.5:
+        lng = min_lng
+        while lng <= max_lng + lng_step * 0.5:
+            _try_add(lng, lat)
+            lng += lng_step
+        lat += step
+
+    # Medium sweep: medium + complex terrain at MEDIUM_STEP.
+    step     = MEDIUM_STEP
+    lng_step = step / cos_lat
+    lat = min_lat
+    while lat <= max_lat + step * 0.5:
+        lng = min_lng
+        while lng <= max_lng + lng_step * 0.5:
+            cover, elev = _tag(lng, lat)
+            if _tier(cover, elev) in ("medium", "complex"):
+                _try_add(lng, lat)
+            lng += lng_step
+        lat += step
+
+    # Complex sweep: complex terrain only at COMPLEX_STEP.
+    step     = COMPLEX_STEP
+    lng_step = step / cos_lat
+    lat = min_lat
+    while lat <= max_lat + step * 0.5:
+        lng = min_lng
+        while lng <= max_lng + lng_step * 0.5:
+            cover, elev = _tag(lng, lat)
+            if _tier(cover, elev) == "complex":
+                _try_add(lng, lat)
+            lng += lng_step
+        lat += step
+
+    new_nodes = list(node_by_key.values())
+    print(f"  non-uniform terrain grid: {len(new_nodes)} nodes ({id_prefix})")
+
+    # Build STRtree for proximity-based edge generation.
+    new_pts  = [Point(n["lng"], n["lat"]) for n in new_nodes]
+    new_tree = STRtree(new_pts)
+
+    new_edges:   list[dict] = []
+    seen_edges:  set[tuple[str, str]] = set()
+    connect_sq = CONNECT_DEG ** 2
+
+    for i, node in enumerate(new_nodes):
+        pt = Point(node["lng"], node["lat"])
+        candidates: list[tuple[float, int]] = []
+        for j in new_tree.query(pt.buffer(CONNECT_DEG), predicate="intersects"):
+            if i == j:
+                continue
+            nb = new_nodes[j]
+            dist_sq = (node["lng"] - nb["lng"]) ** 2 + (node["lat"] - nb["lat"]) ** 2
+            if dist_sq <= connect_sq:
+                candidates.append((dist_sq, j))
+        candidates.sort()
+        for _, j in candidates[:K_TERRAIN]:
+            nb = new_nodes[j]
+            edge_key = (min(node["id"], nb["id"]), max(node["id"], nb["id"]))
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            c1 = COVER_MOVE.get(node["cover_combat"], 1.0) * ELEV_MOVE.get(node["elevation"], 1.0)
+            c2 = COVER_MOVE.get(nb["cover_combat"],   1.0) * ELEV_MOVE.get(nb["elevation"],   1.0)
+            river = _river_crossing(node["lng"], node["lat"], nb["lng"], nb["lat"])
+            new_edges.append({
+                "from": node["id"], "to": nb["id"],
+                "base_cost": round((c1 + c2) / 2, 3), "river_size": river,
+            })
+
+    # Snap each terrain node to at most K_ROAD nearest road nodes.
+    road_connect_sq  = ROAD_CONNECT_DEG ** 2
+    road_seen_pairs: set[tuple[str, str]] = set()
+
+    for node in new_nodes:
+        pt = Point(node["lng"], node["lat"])
+        candidates: list[tuple[float, int]] = []
+        for idx in road_strtree.query(pt.buffer(ROAD_CONNECT_DEG), predicate="intersects"):
+            rpt = road_pts[idx]
+            dist_sq = (node["lng"] - rpt.x) ** 2 + (node["lat"] - rpt.y) ** 2
+            if dist_sq <= road_connect_sq:
+                candidates.append((dist_sq, idx))
+        candidates.sort()
+        for _, idx in candidates[:K_ROAD]:
+            rpt = road_pts[idx]
+            pair = (node["id"], road_ids[idx])
+            if pair in road_seen_pairs:
+                continue
+            road_seen_pairs.add(pair)
+            cost  = round(
+                COVER_MOVE.get(node["cover_combat"], 1.0) *
+                ELEV_MOVE.get(node["elevation"],    1.0), 3
+            )
+            river = _river_crossing(node["lng"], node["lat"], rpt.x, rpt.y)
+            new_edges.append({
+                "from": node["id"], "to": road_ids[idx],
+                "base_cost": cost, "river_size": river,
+            })
+
+    road_conn_count = len(road_seen_pairs)
+    print(f"  non-uniform terrain grid: {len(new_edges)} edges ({road_conn_count} road connections)")
+    return new_nodes, new_edges
+
+
 def copy_passthrough_files(map_dir: Path, output_dir: Path) -> None:
     """
     Copy visual-layer files unchanged from map_dir to output_dir.
@@ -550,6 +1128,37 @@ def main() -> None:
     write_map_data(output_dir, map_config, provinces, adjacency)
     copy_passthrough_files(map_dir, output_dir)
 
+    print("Building waypoint graph (roads)...")
+    generate_waypoints(sources, output_dir)
+
+    print("Adding terrain grid for off-road movement...")
+    wp_path = output_dir / "waypoints.json"
+    with open(wp_path) as f:
+        existing_wp = json.load(f)
+
+    # Non-uniform coarse grid: merged into waypoints.json for client-side A* routing.
+    # Denser in complex/medium terrain than the old uniform 0.2° grid.
+    coarse_nodes, coarse_edges = generate_nonuniform_terrain_grid(
+        sources, existing_wp, id_prefix="ct")
+    if coarse_nodes:
+        existing_wp["nodes"].extend(coarse_nodes)
+        existing_wp["edges"].extend(coarse_edges)
+        with open(wp_path, "w", encoding="utf-8") as f:
+            json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"  waypoints.json: +{len(coarse_nodes)} coarse nodes → "
+              f"{len(existing_wp['nodes'])} total, {len(existing_wp['edges'])} edges")
+
+    # Fine grid (0.07° ≈ 7.5 km): server-only — generated after coarse so fine nodes
+    # can connect to coarse nodes via the TERRAIN_CONNECT_DEG snapping
+    fine_nodes, fine_edges = generate_terrain_grid(
+        sources, existing_wp, grid_deg=0.07, id_prefix="tg")
+    if fine_nodes:
+        terrain_path = output_dir / "waypoints_terrain.json"
+        with open(terrain_path, "w", encoding="utf-8") as f:
+            json.dump({"nodes": fine_nodes, "edges": fine_edges},
+                      f, ensure_ascii=False, separators=(",", ":"))
+        print(f"  waypoints_terrain.json: {len(fine_nodes)} fine nodes, {len(fine_edges)} edges")
+
     if args.skip_dem:
         print("  Skipping heightmap (--skip-dem)")
     else:
@@ -563,6 +1172,13 @@ def main() -> None:
 
     road_edges = sum(1 for e in adjacency if e["road_level"] is not None)
 
+    waypoints_path = output_dir / "waypoints.json"
+    wp_count = 0
+    if waypoints_path.exists():
+        with open(waypoints_path) as f:
+            wp_data = json.load(f)
+        wp_count = len(wp_data.get("nodes", []))
+
     print()
     print("── Summary ──────────────────────────────────")
     print(f"  Provinces:      {len(provinces)}")
@@ -570,6 +1186,7 @@ def main() -> None:
     for btype, count in sorted(border_counts.items()):
         print(f"    {btype:<14} {count}")
     print(f"  Road crossings: {road_edges}")
+    print(f"  Waypoint nodes: {wp_count}")
     print("─────────────────────────────────────────────")
     print("Done.")
 

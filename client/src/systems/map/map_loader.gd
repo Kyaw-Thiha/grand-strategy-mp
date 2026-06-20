@@ -19,6 +19,7 @@ var _provinces: Dictionary = {}       # province_id → Node2D
 var _province_data: Dictionary = {}   # province_id → Dictionary (raw JSON data)
 var _adjacency: Array = []
 var _terrain_lookup: Dictionary = {}
+var _waypoints: Dictionary = {}    # { nodes: [], edges: [], road_connections: [] }
 
 var _proj_center: Vector2 = Vector2.ZERO
 var _scale: float = 1.0
@@ -28,17 +29,18 @@ func load_map(map_id: String) -> void:
 	_map_id = map_id
 	var data_root := "res://assets/data/%s" % map_id
 
-	var map_data := _load_json("%s/map_data.json" % data_root)
-	if map_data.is_empty():
+	var map_data_raw: Variant = _load_json("%s/map_data.json" % data_root)
+	if not map_data_raw is Dictionary:
 		map_load_failed.emit("Failed to load map_data.json for '%s'" % map_id)
 		return
+	var map_data: Dictionary = map_data_raw
 
 	_bounds = map_data.get("bounds", {})
 	_adjacency = map_data.get("adjacency", [])
 	_setup_projection()
 
-	var terrain_raw := _load_json("%s/terrain_lookup.json" % data_root)
-	if not terrain_raw.is_empty():
+	var terrain_raw: Variant = _load_json("%s/terrain_lookup.json" % data_root)
+	if terrain_raw is Dictionary:
 		_terrain_lookup = terrain_raw
 
 	# Water must be added first so it renders behind everything
@@ -61,6 +63,13 @@ func load_map(map_id: String) -> void:
 	_load_overlay_layer("elevation", "%s/elevation.json" % data_root)
 	_load_linear_layer("rivers", "%s/rivers.json" % data_root)
 	_load_linear_layer("roads", "%s/roads.json" % data_root)
+
+	# Load waypoint graph (Phase 4A) — non-fatal if not yet generated
+	var wp_raw: Variant = _load_json("%s/waypoints.json" % data_root)
+	if wp_raw is Dictionary:
+		_waypoints = wp_raw
+	else:
+		push_warning("MapLoader: waypoints.json missing — run pipeline to generate it")
 
 	map_loaded.emit(_provinces.size())
 
@@ -86,6 +95,25 @@ func get_adjacency() -> Array:
 
 func get_terrain_lookup() -> Dictionary:
 	return _terrain_lookup
+
+func get_waypoint_graph() -> Dictionary:
+	return _waypoints
+
+## Converts WGS84 (lng, lat) to Godot screen-space Vector2.
+## Public wrapper around the internal Mercator projection.
+func project_lng_lat(lng: float, lat: float) -> Vector2:
+	return _project(lng, lat)
+
+
+## Inverse of project_lng_lat. Returns [lng, lat] for a world-space pixel position.
+func world_to_lng_lat(world_pos: Vector2) -> Vector2:
+	if _scale == 0.0:
+		return Vector2.ZERO
+	var raw_x: float = world_pos.x / _scale + _proj_center.x
+	var raw_y: float = -world_pos.y / _scale + _proj_center.y
+	var lng: float = raw_x * 180.0 / PI
+	var lat: float = (atan(exp(raw_y)) - PI / 4.0) * 360.0 / PI
+	return Vector2(lng, lat)
 
 
 func get_map_bounds() -> Rect2:
@@ -225,9 +253,10 @@ func _make_circle_dot(center: Vector2, radius: float, color: Color, sides: int =
 # ── water layer ───────────────────────────────────────────────────────────────
 
 func _load_water_layer(path: String) -> void:
-	var geojson := _load_json(path)
-	if geojson.is_empty():
+	var geojson_raw: Variant = _load_json(path)
+	if not geojson_raw is Dictionary:
 		return
+	var geojson: Dictionary = geojson_raw
 
 	var container := Node2D.new()
 	container.name = "WaterLayer"
@@ -255,9 +284,10 @@ func _add_water_polygon(parent: Node, ring: Array) -> void:
 # ── overlay + linear layers ───────────────────────────────────────────────────
 
 func _load_overlay_layer(layer_name: String, path: String) -> void:
-	var geojson := _load_json(path)
-	if geojson.is_empty():
+	var geojson_raw: Variant = _load_json(path)
+	if not geojson_raw is Dictionary:
 		return
+	var geojson: Dictionary = geojson_raw
 
 	var container := Node2D.new()
 	container.name = layer_name.capitalize() + "Layer"
@@ -320,9 +350,10 @@ func _add_overlay_polygon(parent: Node, ring: Array, props: Dictionary) -> void:
 
 
 func _load_linear_layer(layer_name: String, path: String) -> void:
-	var geojson := _load_json(path)
-	if geojson.is_empty():
+	var geojson_raw: Variant = _load_json(path)
+	if not geojson_raw is Dictionary:
 		return
+	var geojson: Dictionary = geojson_raw
 
 	var container := Node2D.new()
 	container.name = layer_name.capitalize() + "Layer"
@@ -363,7 +394,7 @@ func _add_line(parent: Node, coords: Array, props: Dictionary, layer_name: Strin
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-func _load_json(path: String) -> Dictionary:
+func _load_json(path: String) -> Variant:
 	if not FileAccess.file_exists(path):
 		push_warning("MapLoader: file not found — %s" % path)
 		return {}
@@ -376,5 +407,5 @@ func _load_json(path: String) -> Dictionary:
 	var result: Variant = JSON.parse_string(text)
 	if result == null:
 		push_warning("MapLoader: JSON parse error — %s" % path)
-		return {}
+		return null
 	return result

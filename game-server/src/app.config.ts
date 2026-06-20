@@ -6,6 +6,7 @@ import {
     createRouter,
     createEndpoint,
 } from "colyseus";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 
 /**
  * Import your Room files
@@ -13,6 +14,10 @@ import {
 import { GameRoom } from "./rooms/GameRoom.js";
 
 const server = defineServer({
+    transport: new WebSocketTransport({
+        maxPayload: 1 * 1024 * 1024, // 1 MB — Colyseus default is 4 KB which rejects long move orders
+    }),
+
     /**
      * Define your room handlers:
      */

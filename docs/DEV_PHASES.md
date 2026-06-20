@@ -194,20 +194,37 @@ end-to-end first means the tactical grid can be layered on top cleanly in Phase 
 Unit tests for movement profile computation and A* path validity.
 
 ### Pipeline (prerequisite — before Phase 4 Godot work)
-- [ ] Waypoint graph generation step added to `pipeline.py` — sample terrain rasters at
-      ~750m intervals, assign cover_combat + elevation to each node, compute base_cost per
-      edge (cover_move × elevation_move), flag river-crossing edges with river_size, connect
-      road graph endpoints to nearest waypoint nodes
-- [ ] Output: `waypoints.json` written to `godot/assets/data/<map_id>/`
-- [ ] Pipeline summary updated to print waypoint node count alongside province count
+- [x] Waypoint graph generation step added to `pipeline.py` — **non-uniform density**:
+      three tiers (open 0.20°/~22km: plains/steppe/desert/tundra; medium 0.10°/~11km:
+      light_forest/shrubland/hills; complex 0.07°/~7.5km: dense_forest/jungle/swamp/urban/
+      mountains); longitude steps are latitude-corrected; assign cover_combat + elevation
+      to each node, compute base_cost per edge (cover_move × elevation_move); flag
+      river-crossing edges with river_size; connect road graph endpoints to nearest
+      waypoint nodes (K=3, within 0.11°); terrain-to-terrain K=8 within CONNECT_DEG=0.40°
+- [x] Road edge cost set to `base_distance × 0.05` (road base 0.05/deg vs terrain 1.0+/deg)
+- [x] Output: `waypoints.json` written to `client/assets/data/<map_id>/`
+- [x] Pipeline summary prints waypoint node count alongside province count
+- See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
 - [ ] Division spawning at game start (from starting positions config per nation)
-- [ ] Division type classification — compute from template cell counts at spawn:
-      armoured (>=40% armoured cells), motorised (15-39%), defensive (>30% support), infantry
+- [ ] Nation config loaded at game start from `nation_config` per nation per map;
+      current map uses balanced config (cavalry available to all, no unique modifiers,
+      same research starting points); engine reads config and never hardcodes nation identity
+- [ ] `STARTING_WARS` array in `nations.ts` — DEV ONLY, replace with real diplomacy
+      in Phase 8: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
+      in `GameRoom.onCreate()`; `at_war` 6×6 matrix sent to all clients at game start;
+      frontline and influence only activates between nations where `at_war == true`
+- [ ] Division type classification — three types only (no Defensive type):
+      armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
+- [ ] Engagement radius computed from template composition at spawn and on template change:
+      base 50 (infantry floor); subtract 5 per 10% armoured fraction above 15%;
+      subtract 2 per 10% cavalry fraction; clamp to [30, 50] map units;
+      recomputed same trigger as movement profile (template save / research upgrade)
 - [ ] Division movement profile — computed from template at spawn and on template change;
-      33-value table (11 cover_combat × 3 elevation) using max(unit terrain costs); cached
-      server-side for path validation
+      33-value table (11 cover_combat × 3 elevation) using weighted formula:
+      (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
+      cached server-side for path validation
 - [ ] Division movement tick — advance toward player-set target waypoints each server tick;
       speed = road_level speed on roads; slowest-unit speed off-road from movement profile
 - [ ] Engagement area collision detection — circular areas, radius by division type;
@@ -222,13 +239,30 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] River crossing check at combat initiation — line segment between division centres
       intersects rivers.geojson → penalty applied to attacker for rounds 1-2 (minor) or
       1-3 (major)
-- [ ] Observation area — divisions within observation radius appear as dots; composition
-      reveals progressively with observation value
+- [ ] Observation area — divisions within observation radius appear as dots;
+      movement path visible if within observation range
+- [ ] Scouting range (shorter inner circle within observation area):
+      - [ ] At base scouting range: unit category counts visible to enemy player
+            (e.g. '3 armoured, 8 infantry') but not specific unit types
+      - [ ] At upgraded scouting (research): specific unit types visible
+      - [ ] At max scouting tier: full 5×5 grid composition visible
+      - [ ] Scouting radius = max recon unit scouting range in template
+      - [ ] Research upgrades two axes per recon unit: radius and detail quality
+      - [ ] Scouting range circle shown only on hover of enemy dot within range;
+            composition panel appears on hover
+      - [ ] Stealth units not revealed by scouting unless anti-stealth level met
+- [ ] Move order persistence:
+      - [ ] Divisions with active move orders resume them after combat if not retreated
+      - [ ] Move orders can be issued during combat; queued for post-combat execution
+      - [ ] Defender status locked at combat initiation — move order given during
+            combat does not reclassify defending division as attacker
 - [ ] Strategic combat resolution (simplified) — HP and suppression tracked at division
       level (no 5×5 grid yet); combat ticks apply attrition per round
 - [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
-- [ ] Auto-retreat for defenders when suppressed + road open
-- [ ] Manual retreat command for attackers (no auto-retreat)
+- [ ] Auto-retreat for defenders when suppressed (base 60% threshold) + road open
+- [ ] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
+      before breaking; manual retreat always available at any suppression level;
+      encirclement takes precedence (auto-retreat disabled when no escape route)
 - [ ] Meeting battle icon state — distinct from standard Engaged
 - [ ] Positional stack mechanics:
       - [ ] Allied divisions at same position form ordered stack; player can reorder
@@ -236,22 +270,53 @@ Unit tests for movement profile computation and A* path validity.
             of stack, second steps forward (no physical retreat until last division suppressed)
       - [ ] Supply priority: first division gets supply first; remainder get overflow
       - [ ] Encirclement applies to whole stack — rotation does not help if surrounded
-- [ ] Encirclement debuffs (stacking per tick when no escape route):
-      - [ ] All units: HP recovery rate → 0
-      - [ ] All units: suppression threshold reduced per tick
-      - [ ] Armoured units: damage output decays per tick; reaches 0 after N ticks
-      - [ ] Infantry units: slower degradation than armour
+- [ ] Three-tier supply/encirclement status system (checked each supply tick):
+      - [ ] Tier 1 — Out of Supply: supply connectivity check fails (<50% friendly
+            influence on waypoint path to any supply hub); debuffs: no HP recovery,
+            slow suppression threshold decay, reduced movement speed; clean retreat
+            still available; `OUT_OF_SUPPLY` event fires
+      - [ ] Tier 2 — Cut Off: no retreat path through ≥50% friendly-influenced
+            waypoints in any direction; all Tier 1 debuffs plus fighting withdrawal
+            on retreat (division takes HP damage proportional to enemy influence
+            density along escape path); `CUT_OFF` event fires
+      - [ ] Tier 3 — Encircled: 8-direction check from division centre — all 8
+            directions blocked by enemy division engagement area overlap OR ≥70%
+            enemy influence; retreat command disabled; all Tier 2 debuffs plus:
+            - Armoured units: damage output decays per tick → 0 after N ticks
+            - Infantry units: slower degradation than armour
+            - All units: suppression threshold lowered further per tick
+            `ENCIRCLED` event fires
+      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
+      - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
+            → destroyed (not retreated); experience and template lost permanently
 - [ ] Province capture — ownership transfers when defending division/stack is destroyed or
       retreated; city node must be physically occupied by capturing division
-- [ ] Flanking bonus — second enemy division engaging already-engaged target gets bonus damage
-- [ ] Dynamic frontline influence computation per province per tick:
-      - [ ] influence[nation][province] = sum(division_hp_fraction × distance_falloff)
-            for all divisions of that nation whose engagement area overlaps the province
-      - [ ] Recon units excluded from influence calculation
-      - [ ] HP fraction = aggregate living HP / max possible HP for full 25-unit grid
-      - [ ] Broadcast province influence values to all connected players each tick
-            (belligerents receive full data; neutrals receive province-level scalars only,
-            not division positions or compositions)
+- [ ] Angle-based flanking system:
+      - [ ] When second enemy division's engagement area overlaps an already-engaged
+            division, compute angle at defender between line-to-attacker-1 and
+            line-to-attacker-2 (dot product of the two vectors)
+      - [ ] < 90°: no flanking bonus — converging frontal assault only
+      - [ ] 90°–135°: standard flank attack bonus (% damage increase to second attacker)
+      - [ ] 135°–180°: enhanced rear attack bonus (higher % damage increase)
+      - [ ] Angle classification locked at moment of second contact initiation;
+            not recalculated mid-combat (prevents bonus loss from minor drift)
+      - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification
+- [ ] Dynamic frontline influence computation — **128×128 grid, per supply tick**:
+      - [ ] `computeInfluenceGrid()` in `GameRoom.ts`: for each division, add
+            hp_fraction × distance_falloff contribution to cells within influence radius
+            (falloff_radius = engagement_radius × 2.5 in grid cells); recon units excluded
+      - [ ] Ownership bonus: add `OWNERSHIP_BONUS` constant to province owner's cells
+            (covers cells within province boundaries at grid resolution)
+      - [ ] Serialize to `dominant[Uint8Array]` + `advantage[Float32Array]` — leading
+            nation per cell and its margin over second-place nation
+      - [ ] Broadcast `FRONTLINE_UPDATE` with binary payload every supply tick (~5s);
+            all players receive same grid; division visibility is filtered separately
+      - [ ] Only compute/include influence for nations where `at_war == true` against
+            at least one other present nation; neutral-vs-neutral pairs produce no contest
+      - [ ] City capture: ownership bonus cell coverage updates immediately on
+            `PROVINCE_CAPTURED`; next `FRONTLINE_UPDATE` reflects new ownership
+      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for algorithm design
+      - [ ] `FRONTLINE_UPDATE` event replaces old per-province broadcast approach
 - [ ] Frontline supply connectivity check (separate from road graph supply):
       - [ ] Trace backward from division position through waypoint graph to nearest supply hub
       - [ ] Check each waypoint: if influence < 50% friendly, connection broken
@@ -265,30 +330,90 @@ Unit tests for movement profile computation and A* path validity.
       model; full graph-based supply is Phase 6)
 
 ### Godot
-- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified A*
+- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
       graph; movement profile applied at query time per selected division
-- [ ] A* pathfinding — road edges win naturally via low cost; off-road waypoint edges use
-      division movement profile multiplier; infinity-cost edges excluded; river crossing
-      penalty on flagged edges
-- [ ] `MilitarySystem` — division dot rendering, circular engagement area visualisation,
-      observation area rendering, selection, move orders, stack badge display
+- [x] Pathfinding uses **two-phase routing** (bidirectional A*): off-road purity pre-check;
+      road entry pre-check (nearest road within 0.015°²/~1.5km → route to road then
+      road-only to goal); full graph fallback (see `docs/PATHFINDING.md` — Two-Phase Routing)
+- [x] **String-pulling post-processor** applied to raw A* output — greedy forward skip
+      to furthest passable node within 0.05°²/~5km (see `docs/PATHFINDING.md` — String-Pulling)
+- [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
+      check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
+      depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
+- [ ] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
+      edges; server validates smoothed path (not raw A* path)
+- [ ] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display
+- [ ] Engagement area rendering:
+      - [ ] Own engagement area: solid circle, radius from composition-based formula
+      - [ ] Enemy engagement areas: faded/dashed circle — visible to all players;
+            essential for players to judge flanking angle before committing
+      - [ ] Observation area: larger faded circle (always larger than engagement area)
+      - [ ] Scouting range: innermost circle, shown only on hover of enemy dot
+            within scouting range
+- [ ] Division status visual indicators (all stackable, no conflicts):
+      - [ ] Engaged: subtle pulse on division dot; combat icon over engagement point
+      - [ ] Out of Supply (Tier 1): amber supply icon below dot
+      - [ ] Cut Off (Tier 2): red supply icon + broken chain symbol
+      - [ ] Encircled (Tier 3): red ring around division dot (most dominant indicator)
+      - [ ] Flank attack (90°–135°): diagonal arrow on flanking division dot
+      - [ ] Rear attack (135°–180°): double diagonal arrow on flanking division dot
+      - [ ] Meeting battle: distinct head-on combat icon (not standard crossed swords)
+      - [ ] Retreating: retreat arrow on dot pointing direction of withdrawal
+      - [ ] Redeploying: dot greyed out with gear/refresh symbol
+- [ ] Tactical combat pop-up button on combat icon (crossed-swords symbol):
+      opens 5×5 vs 5×5 grid panel with HP/suppression bars, experience badges,
+      formation bonus glows, row perk labels, attack pattern overlay, recon indicator,
+      terrain modifier display, river crossing penalty indicator, round timer,
+      flanking angle indicator showing measured angle and active bonus tier
+- [ ] Movement rendering uses **dead reckoning** — client drives animation locally
+      using the pre-validated waypoint list and terrain speed; no waiting for server
+      per-waypoint acknowledgements. Server sends `DIVISION_WAYPOINT_REACHED` on
+      each waypoint arrival and `DIVISION_POSITION_CORRECTION` every ~3 seconds;
+      client applies correction only if divergence > 15 map units (lerp over 0.5s).
+      HP bars, suppression bars, frontline values lerp between server updates.
+      Dead reckoning implementation in `client/src/systems/military/military_system.gd`;
+      see `docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
+- [ ] Observation radius computed as max recon unit range in template; baseline radius
+      for divisions with no recon units; updates when movement profile recomputes
+- [ ] Move order UX:
+      - [ ] Select division → press M (or Move button) → cursor enters move mode
+      - [ ] Single click: pathfind to destination, one waypoint, division deselected
+      - [ ] Shift+click: add waypoint to chain, division stays selected and in move mode
+      - [ ] Escape: cancel move mode, clear pending waypoints
+      - [ ] Right-click existing waypoint: delete it from chain
+      - [ ] Click moving division: show remaining waypoints; allow chain editing
+      - [ ] Ghost dot at each waypoint: faded division icon + faded engagement circle;
+            observation radius shown on hover only; estimated arrival time tooltip
+      - [ ] Ghost dots and paths: visible to owner and allies; visible to enemy/neutral
+            only if ghost dot falls within their observation radius
+- [ ] Hotkey system: Q=Military, E=Economy, R=Diplomacy, F=Politics, Tab=toggle panels,
+      M=Move, H=Hold, G=Retreat, X=Cancel, all remappable via InputMap
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
-- [ ] `FrontlineRenderer` — province interior colour wash shader driven by per-province
-      influence values received from server:
-      - [ ] Each province interior shaded by blending owner's predefined nation colour
-            (baseline) with dominating nation's predefined nation colour proportional to
-            their influence advantage
-      - [ ] Frontline isoline rendered at 50% influence threshold, smoothed with curve
-            fit for organic appearance; purely cosmetic, no mechanical role
+- [ ] `FrontlineRenderer` — GPU shader approach (not CPU polygon per tick):
+      - [ ] Server sends 128×128 influence grid as two binary arrays: `dominant[Uint8]`
+            (leading nation per cell) and `advantage[Float32]` (dominance margin) every
+            ~5 seconds; ~80KB payload total
+      - [ ] Client uploads arrays as two `ImageTexture` uniforms (`FORMAT_R8` and
+            `FORMAT_RF`) on `FRONTLINE_UPDATE` receipt
+      - [ ] `advantage` texture lerps smoothly over 2 seconds between updates;
+            `dominant` texture snaps immediately (discrete ownership change)
+      - [ ] `frontline.gdshader` fragment shader on a `MeshInstance2D` covering full
+            map bounds: blends nation colours by dominant/advantage; renders edge glow
+            at zero-crossing of advantage; `political_view` uniform toggles fill vs
+            line-only rendering; z-index above base map, below unit dots
+      - [ ] `set_political_view(bool)` function toggles shader uniform
+      - [ ] Frontline only renders between nations marked `at_war = true` in game state;
+            `at_war` uniform is a 6×6 bool matrix sent once at game start
       - [ ] Province borders remain static (political map, never changes)
-      - [ ] City node marker on each province; changes to capturing nation's icon on
-            `PROVINCE_CAPTURED`; province baseline colour updates to new owner
-      - [ ] Neutral player receives same province influence scalars; sees colour wash;
+      - [ ] City node marker changes to capturing nation's icon on `PROVINCE_CAPTURED`
+      - [ ] Neutral player receives same influence grid broadcast; sees colour wash;
             does not see enemy division dots outside their own observation radius
-      - [ ] Intensity of colour wash proportional to division HP fraction — fading colour
-            regions indicate weakening fronts readable without opening any panel
+      - [ ] Intensity of colour wash proportional to division HP fraction (baked into
+            server influence computation) — fading regions indicate weakening fronts
+      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for shader
+            design and server computation approach
 - [ ] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`; shader
       continues to apply influence wash on top of new baseline colour
 - [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,
@@ -304,14 +429,26 @@ bonus applies. Stack two friendly divisions → first engages → hits suppressi
 second steps up → combat continues without physical retreat. Last stack division suppressed
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
 decays over ticks → eventually deals zero damage.
+Engagement radii: pure infantry template has radius ~50; pure armoured has radius ~30;
+verify formula clamps correctly at both extremes. Enemy engagement area visible as
+faded circle — own unit moving toward enemy can see enemy's engagement area before
+entering it. Flanking angle: two units attack defender from 85° → no bonus; reposition
+second unit to 95° → FLANK_ATTACK fires → standard bonus applied; reposition to 140°
+→ REAR_ATTACK fires → enhanced bonus. Angle classification locked at first contact —
+minor drift during combat does not change the bonus tier.
 Frontline: advance division into contested province → province interior colour begins
-washing toward advancing nation's predefined colour → recon unit advance does not shift
-colour. Division takes HP damage → colour intensity fades proportionally. Enemy advance
-cuts through province influence chain between division and supply hub → supply severed
-notification fires → out-of-supply attrition begins even though road is still physically
-open. Division captures city node → province baseline snaps to capturing nation's colour →
-province border unchanged. Neutral observer sees colour wash shifting but cannot see
-enemy division dots outside their own observation radius.
+washing toward advancing nation’s predefined colour → recon unit advance does not shift
+colour. Both attacking and defending units contribute influence simultaneously → frontline
+sits where forces balance. Division takes HP damage → colour intensity fades. Enemy advance
+cuts through province influence chain → OUT_OF_SUPPLY fires → attrition begins; player
+pushes relief force → supply restored. No relief comes → CUT_OFF fires → retreat triggers
+fighting withdrawal (division takes damage while moving). Enemy divisions close all 8
+directions → ENCIRCLED fires → retreat disabled → armour damage decays per tick →
+division suppressed → destroyed (not retreated). Division captures city node → ownership
+bonus flips to new owner immediately → previous owner’s unit influence persists where
+their units are → frontline shifts but does not snap fully → province border unchanged.
+Friendly colour persists along roads still defended by retreating forces. Neutral observer
+sees colour wash shifting but not enemy division dots outside their observation radius.
 
 ---
 
@@ -336,6 +473,10 @@ for all attack pattern logic before any Godot work.
   - [ ] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
         targets first row with at least one living unit; damage distributed only among
         living units in that row)
+  - [ ] Cavalry — horizontal attack like infantry; charge bonus (higher HP damage and
+        suppression) in Round 1 only; standard infantry values from Round 2+; very high
+        MG suppression vulnerability; moderate-high observation radius contribution;
+        moderate stealth in forest/hills; fastest off-road unit type in movement profile
   - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
         column shift disabled in dense_forest and urban terrain
   - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift;
@@ -365,6 +506,16 @@ for all attack pattern logic before any Godot work.
 - [ ] Suppression decay per round (base rate); 2–3× faster during retreat; no instant reset
 - [ ] Division-level suppression threshold (base 60%) → feeds Suppressed state in strategic
       layer; stealthed units excluded from threshold calculation
+- [ ] Unit incapacitated state:
+      - [ ] Infantry/cavalry/sniper/commando/flamethrower/MG/AT-inf/recon-inf: incapacitate
+            at ~20% HP — zero damage, zero suppression, not targeted, not counted toward
+            retreat threshold, HP stops decaying from combat
+      - [ ] Armoured units: incapacitate at ~30% HP (mobility kill threshold)
+      - [ ] Artillery, towed AT gun, AA gun: no incapacitation — fight until destroyed
+      - [ ] Incapacitated units recover HP via supply when division not engaged
+      - [ ] Experience on incapacitation: unit retains 60% of combat experience gained
+      - [ ] Incapacitated units destroyed if division is destroyed (even at HP > 0)
+      - [ ] `UNIT_INCAPACITATED`, `UNIT_RECOVERED` events
 - [ ] Armour penetration scale (60/70/80/90/100% thresholds → 0/20/30/40/70/100% damage)
 - [ ] Stealth system — stealthed units deal damage, cannot be targeted, excluded from retreat
       threshold; destroyed division puts stealthed units into reserve with experience retained
@@ -401,7 +552,9 @@ for all attack pattern logic before any Godot work.
 - [ ] `DivisionBuilder` (MVP) — template builder UI in main menu; create/edit/save custom
       templates; shows movement profile summary (which terrains are impassable, slowest
       terrain); formation bonus preview (highlight when placing adjacent synergy units);
-      select from nation presets in lobby
+      select from nation presets in lobby; cavalry unit available to all nations per
+      nation_config; motorised toggle available after motorisation research (Phase 8);
+      mechanised infantry unit available after armour research branch unlocks it (Phase 8+)
 - [ ] Template redeployment — switch template when out of combat; 1-minute flat cooldown;
       division redeploys at nearest friendly city; experience on existing units lost on redeploy
 - [ ] Movement profile displayed on division selection — player can see what terrain their
@@ -498,26 +651,34 @@ Create custom template in main menu → start game → redeploy a division to th
 
 ---
 
-## Phase 8 — Economy + Diplomacy
+## Phase 8 — Economy + Diplomacy + General Technology
 
 **Goal:** Resources accumulate, buildings can be constructed, players can form alliances
-and declare war.
+and declare war. General Technology research (motorisation) is available.
 
 **Testing:** Bot client for diplomacy (needs two-player proposals/responses).
 
 ### Colyseus
 - [ ] Economy tick — resource generation per province per tick, stored in player state
 - [ ] `BUILD` handler — construct buildings in provinces (costs resources); supply hub,
-      fort, port, airbase, factory
+      fort, port, airbase, factory, barracks
+- [ ] General Technology research panel — motorisation node (mid-tier); once researched,
+      applicable infantry units can be toggled to motorised versions in template builder;
+      movement profile recomputed on toggle; zero grid combat stat change
 - [ ] `PROPOSE_DIPLO`, `RESPOND_DIPLO`, `BREAK_DIPLO` handlers
 - [ ] Relation state updates, `DIPLO_PROPOSAL`, `DIPLO_ACCEPTED`, `DIPLO_REJECTED` events
 - [ ] Alliance combat rules — allied units do not engage each other
+- [ ] Map-sharing agreement — allied nations can see all division dots, paths, and
+      composition of each other regardless of observation radius
 
 ### Godot
 - [ ] `EconomySystem` — resource bars, production display from GameState
 - [ ] `DiplomacySystem` — proposal cache, propose/respond methods
-- [ ] `DiplomacyUI` panel — propose alliance, accept/reject incoming proposals, treaty list
+- [ ] `DiplomacyUI` panel — propose alliance, accept/reject incoming proposals, treaty list,
+      map-sharing agreement option
 - [ ] `EconomyUI` panel — resource overview, province production detail, build queue
+- [ ] `ResearchUI` panel — General Technology tree; motorisation node; research progress;
+      motorised toggle per unit type in DivisionBuilder unlocks after research completes
 
 ### Verification gate
 Resources tick up → build a supply hub → propose alliance to bot → bot accepts → bot's units
@@ -630,8 +791,11 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       level, supply base level — each built and levelled separately with resources
 - [ ] Multiple ports per province each have their own independent upgrade levels
 - [ ] Port level: passive income per tick scales with level; trade route throughput capacity
-- [ ] Naval base level: refit speed and capacity; ship HP damage reduction for docked ships
-      (target: ~10–15% at level 1, ~40–50% at max level); applies only to docked ships
+- [ ] Naval base level: governs repair rate, repair capacity (simultaneous ships = base
+      level), refit capacity, and new ship construction throughput — all share the same
+      slot pool; repair takes priority over refit; repair slots occupied → construction
+      slows proportionally or stops if all slots full; HP damage reduction for docked
+      ships (~10–15% at level 1, ~40–50% at max); applies only to docked ships
 - [ ] Supply base: acts as supply hub (same graph flow as Phase 6 inland supply hubs);
       deactivates when port sea zone is under full blockade (Engagement range or deeper)
 - [ ] Coastal battery building: fires at surface flotillas overlapping port sea zone at any
@@ -699,6 +863,25 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       in patrolled zones
 - [ ] Naval supply interdiction: Active submarine flow reduction on coastal supply paths
       (feeds Phase 6 supply graph)
+- [ ] Zone lethality system:
+      - [ ] Screen zone: ship withdrawal when HP drops to threshold (not zero);
+            submarines destroyed if detected+pinned, otherwise withdraw damaged;
+            Active-mode undetected submarine takes chip damage only
+      - [ ] Engagement zone: higher lethality than Screen; damaged ships withdraw
+            to port at HP threshold; destroyers and submarines can be destroyed here
+      - [ ] Strike zone: no withdrawal during combat; ships fight to HP zero;
+            damaged ships receive combat debuffs (accuracy, torpedo capacity, speed)
+            but remain in combat
+- [ ] Automatic repair system:
+      - [ ] Damaged ships auto-queue for repair on arriving at friendly port
+      - [ ] Repair rate proportional to naval base level
+      - [ ] Repair capacity = naval base level (additional ships queue)
+      - [ ] Repair slots shared with construction: occupied repair slots slow
+            new ship construction proportionally
+      - [ ] Refit queued behind repair for same ship (repair takes priority)
+      - [ ] Ship auto-rejoins assigned flotilla at full HP — no player action needed
+      - [ ] `SHIP_DAMAGED`, `SHIP_WITHDRAWN`, `SHIP_REPAIRING`, `SHIP_REPAIRED`,
+            `CONSTRUCTION_SLOWED` events
 - [ ] Port strike: naval base level reduces damage to docked ships
 - [ ] Naval strike handler
 - [ ] `NAVAL_CONTACT`, `NAVAL_ENGAGEMENT`, `NAVAL_STRIKE`, `FLOTILLA_DESTROYED`,
@@ -747,6 +930,17 @@ reduces battery HP loss → fort must be destroyed over multiple rounds before b
 offline. Naval base level 3 port → docked ships take ~35% reduced damage from port strike.
 
 ---
+Repair/construction: fleet takes damage in Engagement zone → ships withdraw to port
+automatically → repair queue fills to naval base level capacity → new construction
+slows → ships repaired in order → auto-rejoin flotilla → construction resumes.
+Zone lethality: ship in Strike zone takes damage → continues fighting with debuffs
+(reduced accuracy visible in damage output) → not destroyed until HP reaches zero.
+Screen zone submarine detection: ASW destroyer detects Active submarine → submarine
+takes significant damage → destroyed before it can disengage.
+Scouting: own recon armoured car division approaches enemy division → within scouting
+radius → hover enemy dot → partial composition panel appears → upgraded recon → full
+grid composition revealed. Move order: division with move order engages enemy → combat
+resolves → division automatically resumes move order from current position.
 
 ## Phase 11 — Steam Auth Swap + Polish
 
