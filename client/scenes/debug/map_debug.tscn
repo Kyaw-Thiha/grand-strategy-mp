@@ -98,4 +98,3 @@ icon = ExtResource("8")
 expand_icon = true
 
 [node name="PauseMenu" parent="." unique_id=1071408045 instance=ExtResource("7")]
-visible = true
