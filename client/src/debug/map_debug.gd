@@ -71,6 +71,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
+func _input(event: InputEvent) -> void:
+	# Forward key events to military system (M, H, X, Escape hotkeys)
+	if event is InputEventKey:
+		_military_system.handle_input(event)
+		return
+
+	if not event is InputEventMouseButton:
+		return
+	var mb := event as InputEventMouseButton
+	if not mb.pressed:
+		return
+
+	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
+
+	if mb.button_index == MOUSE_BUTTON_LEFT:
+		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
+			get_viewport().set_input_as_handled()
+	elif mb.button_index == MOUSE_BUTTON_RIGHT:
+		if _military_system.try_right_click_at_world(world_pos):
+			get_viewport().set_input_as_handled()
+
+
 func _on_map_loaded(province_count: int) -> void:
 	_map_renderer.setup(_map_loader, _DebugDataSource.new(_map_loader))
 	_map_renderer.on_map_loaded(province_count)
