@@ -29,7 +29,7 @@ var _nation_definitions_by_id: Dictionary = {}
 
 func _ready() -> void:
 	_pause_menu.set_restore_clear_color(RenderingServer.get_default_clear_color())
-	RenderingServer.set_default_clear_color(Color(0.20, 0.50, 0.80))
+	RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0))
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
