@@ -1,6 +1,6 @@
 extends Node
 ## All mouse input on provinces lives here.
-## Connects to Area2D signals on every province node after map_loaded.
+## Connects to generated Area2D signals after map_loaded.
 
 signal province_clicked(province_id: String)
 signal province_hovered(province_id: String)
@@ -20,23 +20,11 @@ func on_map_loaded(_province_count: int) -> void:
 	if _map_loader == null:
 		return
 	for pid in _map_loader.get_all_province_ids():
-		var node: Node2D = _map_loader.get_province_node(pid)
-		if node == null:
-			continue
-		var area: Area2D = node.get_node_or_null("Clickbox")
-		if area == null:
-			continue
-		area.set_meta("province_id", pid)
-		area.mouse_entered.connect(_on_area_mouse_entered.bind(pid))
-		area.mouse_exited.connect(_on_area_mouse_exited.bind(pid))
-		area.input_event.connect(_on_area_input_event.bind(pid))
-
-		# Connect extra Area2D nodes added for secondary rings (MultiPolygon provinces)
-		for child in node.get_children():
-			if child is Area2D and child != area:
-				child.mouse_entered.connect(_on_area_mouse_entered.bind(pid))
-				child.mouse_exited.connect(_on_area_mouse_exited.bind(pid))
-				child.input_event.connect(_on_area_input_event.bind(pid))
+		for area: Area2D in _map_loader.get_province_click_areas(pid):
+			area.set_meta("province_id", pid)
+			area.mouse_entered.connect(_on_area_mouse_entered.bind(pid))
+			area.mouse_exited.connect(_on_area_mouse_exited.bind(pid))
+			area.input_event.connect(_on_area_input_event.bind(pid))
 
 
 func deselect() -> void:
