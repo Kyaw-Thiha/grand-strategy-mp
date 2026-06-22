@@ -6,6 +6,9 @@ Zector font:
 - https://ggbot.itch.io/zector-font
 - https://openfontlicense.org/
 
+Beholden font:
+- https://amorphous.itch.io/beholden
+
 Font Awesome Icons (for icon assets, not font!):
 - https://docs.fontawesome.com/
 - https://fontawesome.com/v4/license/
