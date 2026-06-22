@@ -41,7 +41,7 @@ enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg", "res://addons/su
 
 [gui]
 
-theme/custom_font="uid://tf5c8lgjegxt"
+theme/custom_font="uid://b3t4ddnq56emc"
 
 [physics]
 
