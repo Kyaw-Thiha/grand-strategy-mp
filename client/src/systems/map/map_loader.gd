@@ -1,6 +1,6 @@
 extends Node
-## Loads a processed map from client/assets/data/<map_id>/ and instantiates
-## province nodes, overlay layers, and linear feature layers.
+## Loads a processed map from client/assets/data/<map_id>/ and instances
+## the generated static scene from client/scenes/map/<map_id>.scn.
 ## Only place in the codebase that converts lng/lat to Godot screen space.
 
 signal map_loaded(province_count: int)
@@ -8,15 +8,13 @@ signal map_load_failed(error: String)
 
 const MAP_CANVAS_WIDTH := 4096.0
 const MAP_CANVAS_HEIGHT := 3000.0
-const CITY_DOT_RADIUS  := 8.0
-const PORT_DOT_RADIUS  := 8.0
-
-const PROVINCE_SCENE := preload("res://scenes/systems/map/province.tscn")
+const GENERATED_SCENE_ROOT := "res://scenes/map"
 
 var _map_id: String = ""
 var _bounds: Dictionary = {}
 var _provinces: Dictionary = {}       # province_id → Node2D
 var _province_data: Dictionary = {}   # province_id → Dictionary (raw JSON data)
+var _province_click_areas: Dictionary = {} # province_id → Array[Area2D]
 var _adjacency: Array = []
 var _terrain_lookup: Dictionary = {}
 var _waypoints: Dictionary = {}    # { nodes: [], edges: [], road_connections: [] }
@@ -26,6 +24,7 @@ var _scale: float = 1.0
 
 
 func load_map(map_id: String) -> void:
+	_clear_loaded_map()
 	_map_id = map_id
 	var data_root := "res://assets/data/%s" % map_id
 
@@ -43,26 +42,17 @@ func load_map(map_id: String) -> void:
 	if terrain_raw is Dictionary:
 		_terrain_lookup = terrain_raw
 
-	# Water must be added first so it renders behind everything
-	_load_water_layer("%s/base_water.json" % data_root)
-
-	var province_container := Node2D.new()
-	province_container.name = "Provinces"
-	add_child(province_container)
-
-	for pdata in map_data.get("provinces", []):
-		var pid: String = pdata.get("province_id", "")
+	for province_data_variant: Variant in map_data.get("provinces", []):
+		if not province_data_variant is Dictionary:
+			continue
+		var province_data: Dictionary = province_data_variant
+		var pid: String = province_data.get("province_id", "")
 		if pid.is_empty():
 			continue
-		_province_data[pid] = pdata
-		var node := _instantiate_province(pdata)
-		province_container.add_child(node)
-		_provinces[pid] = node
+		_province_data[pid] = province_data
 
-	_load_overlay_layer("cover", "%s/cover.json" % data_root)
-	_load_overlay_layer("elevation", "%s/elevation.json" % data_root)
-	_load_linear_layer("rivers", "%s/rivers.json" % data_root)
-	_load_linear_layer("roads", "%s/roads.json" % data_root)
+	if not _load_generated_scene(map_id):
+		return
 
 	# Load waypoint graph (Phase 4A) — non-fatal if not yet generated
 	var wp_raw: Variant = _load_json("%s/waypoints.json" % data_root)
@@ -80,6 +70,17 @@ func get_province_node(province_id: String) -> Node2D:
 
 func get_province_data(province_id: String) -> Dictionary:
 	return _province_data.get(province_id, {})
+
+
+## Returns generated province click areas for the interaction system.
+## Parameters:
+## - province_id: processed map province identifier.
+## Returns: Area2D nodes whose metadata points at the province.
+func get_province_click_areas(province_id: String) -> Array[Area2D]:
+	var result: Array[Area2D] = []
+	for area: Area2D in _province_click_areas.get(province_id, []):
+		result.append(area)
+	return result
 
 
 ## Returns the preferred world-space camera focus point for a province.
@@ -164,244 +165,132 @@ func _project(lng: float, lat: float) -> Vector2:
 	)
 
 
-# ── province instantiation ────────────────────────────────────────────────────
+# ── generated scene loading ───────────────────────────────────────────────────
 
-func _instantiate_province(pdata: Dictionary) -> Node2D:
-	var node: Node2D = PROVINCE_SCENE.instantiate()
-	node.name = pdata.get("province_id", "province")
-
-	var polygons: Array = pdata.get("polygons", [])
-	if polygons.is_empty():
-		return node
-
-	# First ring uses the pre-built scene nodes
-	var first_pts := _ring_to_vector2(polygons[0])
-	var fill: Polygon2D = node.get_node("Fill")
-	fill.polygon = first_pts
-
-	var border: Line2D = node.get_node("Border")
-	border.points = first_pts
-	if first_pts.size() > 0:
-		border.add_point(first_pts[0])
-
-	var shape: CollisionPolygon2D = node.get_node("Clickbox/Shape")
-	shape.polygon = first_pts
-
-	# Additional rings (MultiPolygon — e.g. island groups, Northern Ireland)
-	for i in range(1, polygons.size()):
-		var pts := _ring_to_vector2(polygons[i])
-
-		var extra_fill := Polygon2D.new()
-		extra_fill.color = fill.color
-		node.add_child(extra_fill)
-		extra_fill.polygon = pts
-
-		var extra_border := Line2D.new()
-		extra_border.default_color = border.default_color
-		extra_border.width = border.width
-		extra_border.points = pts
-		if pts.size() > 0:
-			extra_border.add_point(pts[0])
-		node.add_child(extra_border)
-
-		var extra_area := Area2D.new()
-		var extra_shape := CollisionPolygon2D.new()
-		extra_shape.polygon = pts
-		extra_area.add_child(extra_shape)
-		node.add_child(extra_area)
-
-	var city_pos_raw: Array = pdata.get("city_position", [])
-	if city_pos_raw.size() >= 2:
-		var city_v := _project(float(city_pos_raw[0]), float(city_pos_raw[1]))
-
-		var label: Label = node.get_node("CityLabel")
-		label.position = city_v + Vector2(10, -4)
-		label.text = pdata.get("city_name", "")
-		label.z_as_relative = false
-		label.z_index = 10
-
-		var city_dot := _make_circle_dot(city_v, CITY_DOT_RADIUS, Color(1.0, 1.0, 0.8))
-		city_dot.set_meta("is_marker", true)
-		city_dot.z_as_relative = false
-		city_dot.z_index = 9
-		node.add_child(city_dot)
-
-		var has_port: bool = pdata.get("has_port", false)
-		if has_port:
-			var port_dot := _make_circle_dot(city_v + Vector2(12, -12), PORT_DOT_RADIUS, Color(0.3, 0.9, 1.0))
-			port_dot.set_meta("is_marker", true)
-			port_dot.z_as_relative = false
-			port_dot.z_index = 9
-			node.add_child(port_dot)
-
-		var anchor: Node2D = node.get_node("UnitAnchor")
-		anchor.position = city_v
-
-	node.set_meta("province_id", pdata.get("province_id", ""))
-	return node
+## Clears loaded map scene nodes and indexed lookup data.
+## Parameters: none.
+## Returns: nothing.
+func _clear_loaded_map() -> void:
+	for child: Node in get_children():
+		remove_child(child)
+		child.queue_free()
+	_provinces.clear()
+	_province_data.clear()
+	_province_click_areas.clear()
+	_bounds.clear()
+	_adjacency.clear()
+	_terrain_lookup.clear()
+	_waypoints.clear()
 
 
-func _ring_to_vector2(ring: Array) -> PackedVector2Array:
-	var pts := PackedVector2Array()
-	pts.resize(ring.size())
-	for i in ring.size():
-		var coord: Array = ring[i]
-		pts[i] = _project(float(coord[0]), float(coord[1]))
-	return pts
+## Instances the generated static map scene and indexes its runtime nodes.
+## Parameters:
+## - map_id: processed map identifier.
+## Returns: true when scene load and indexing succeeded.
+func _load_generated_scene(map_id: String) -> bool:
+	var scene_path: String = "%s/%s.scn" % [GENERATED_SCENE_ROOT, map_id]
+	if not ResourceLoader.exists(scene_path):
+		map_load_failed.emit("Generated map scene is missing: %s" % scene_path)
+		return false
+
+	var resource: Resource = ResourceLoader.load(scene_path)
+	if not resource is PackedScene:
+		map_load_failed.emit("Generated map scene is not a PackedScene: %s" % scene_path)
+		return false
+
+	var packed_scene: PackedScene = resource
+	var generated_root: Node = packed_scene.instantiate()
+	if generated_root == null:
+		map_load_failed.emit("Failed to instance generated map scene: %s" % scene_path)
+		return false
+
+	_adopt_generated_scene_children(generated_root)
+	generated_root.free()
+
+	if not _index_generated_provinces():
+		return false
+	if not _index_generated_click_areas():
+		return false
+	return true
 
 
-func _make_circle_dot(center: Vector2, radius: float, color: Color, sides: int = 8) -> Polygon2D:
-	var poly := Polygon2D.new()
-	var pts := PackedVector2Array()
-	pts.resize(sides)
-	for i in sides:
-		var angle := i * TAU / sides
-		pts[i] = center + Vector2(cos(angle), sin(angle)) * radius
-	poly.polygon = pts
-	poly.color = color
-	return poly
+## Moves generated scene layers under this loader so existing systems keep using direct child paths.
+## Parameters:
+## - generated_root: root node instanced from the generated map scene.
+## Returns: nothing.
+func _adopt_generated_scene_children(generated_root: Node) -> void:
+	while generated_root.get_child_count() > 0:
+		var child: Node = generated_root.get_child(0)
+		generated_root.remove_child(child)
+		_clear_scene_owner_recursive(child)
+		add_child(child)
 
 
-# ── water layer ───────────────────────────────────────────────────────────────
-
-func _load_water_layer(path: String) -> void:
-	var geojson_raw: Variant = _load_json(path)
-	if not geojson_raw is Dictionary:
-		return
-	var geojson: Dictionary = geojson_raw
-
-	var container := Node2D.new()
-	container.name = "WaterLayer"
-	add_child(container)
-
-	for feat in geojson.get("features", []):
-		var geom: Dictionary = feat.get("geometry", {})
-		var gtype: String = geom.get("type", "")
-		var coords: Array = geom.get("coordinates", [])
-
-		if gtype == "Polygon":
-			_add_water_polygon(container, coords[0])
-		elif gtype == "MultiPolygon":
-			for part in coords:
-				_add_water_polygon(container, part[0])
+## Clears PackedScene owner links before moving generated nodes under the runtime loader.
+## Parameters:
+## - node: generated node being adopted into the active scene tree.
+## Returns: nothing.
+func _clear_scene_owner_recursive(node: Node) -> void:
+	node.owner = null
+	for child: Node in node.get_children():
+		_clear_scene_owner_recursive(child)
 
 
-func _add_water_polygon(parent: Node, ring: Array) -> void:
-	var poly := Polygon2D.new()
-	poly.polygon = _ring_to_vector2(ring)
-	poly.color = Color(0.25, 0.55, 0.85, 1.0)
-	parent.add_child(poly)
+## Indexes generated province nodes by province id.
+## Parameters: none.
+## Returns: true when the generated Provinces layer exists.
+func _index_generated_provinces() -> bool:
+	var province_container: Node = get_node_or_null("Provinces")
+	if province_container == null:
+		map_load_failed.emit("Generated map scene is missing Provinces")
+		return false
+
+	for province_id: String in _province_data.keys():
+		var province_node: Node2D = province_container.get_node_or_null(province_id)
+		if province_node == null:
+			push_warning("MapLoader: generated scene is missing province node: %s" % province_id)
+			continue
+		_provinces[province_id] = province_node
+
+	return true
 
 
-# ── overlay + linear layers ───────────────────────────────────────────────────
+## Indexes generated collision areas by province id for interaction.
+## Parameters: none.
+## Returns: true when the generated CollisionLayer exists.
+func _index_generated_click_areas() -> bool:
+	var collision_layer: CanvasItem = get_node_or_null("CollisionLayer")
+	if collision_layer == null:
+		map_load_failed.emit("Generated map scene is missing CollisionLayer")
+		return false
 
-func _load_overlay_layer(layer_name: String, path: String) -> void:
-	var geojson_raw: Variant = _load_json(path)
-	if not geojson_raw is Dictionary:
-		return
-	var geojson: Dictionary = geojson_raw
+	collision_layer.visible = true
+	for child: Node in collision_layer.get_children():
+		if not child is Area2D:
+			continue
+		var area: Area2D = child
+		var province_id: String = area.get_meta("province_id", "")
+		if province_id.is_empty():
+			push_warning("MapLoader: generated collision area missing province_id: %s" % area.name)
+			continue
+		area.input_pickable = true
+		_hide_collision_debug_shapes(area)
+		if not _province_click_areas.has(province_id):
+			_province_click_areas[province_id] = []
+		_province_click_areas[province_id].append(area)
 
-	var container := Node2D.new()
-	container.name = layer_name.capitalize() + "Layer"
-	container.visible = false
-	add_child(container)
-
-	for feat in geojson.get("features", []):
-		var geom: Dictionary = feat.get("geometry", {})
-		var gtype: String = geom.get("type", "")
-		var coords: Array = geom.get("coordinates", [])
-		var props: Dictionary = feat.get("properties", {})
-
-		if gtype == "Polygon":
-			_add_overlay_polygon(container, coords[0], props)
-		elif gtype == "MultiPolygon":
-			for part in coords:
-				_add_overlay_polygon(container, part[0], props)
-
-
-func _add_overlay_polygon(parent: Node, ring: Array, props: Dictionary) -> void:
-	var poly := Polygon2D.new()
-	poly.polygon = _ring_to_vector2(ring)
-	poly.set_meta("props", props)
-
-	if parent.name == "CoverLayer":
-		var cover_type: String = props.get("cover_visual", "grassland")
-		var cover_colors: Dictionary = {
-			"farmland":            Color(0.76, 0.70, 0.50, 0.7),
-			"hot_desert":          Color(0.95, 0.85, 0.60, 0.7),
-			"cold_desert":         Color(0.80, 0.80, 0.85, 0.7),
-			"steppe":              Color(0.85, 0.80, 0.55, 0.7),
-			"open_forest":         Color(0.45, 0.65, 0.35, 0.7),
-			"temperate_forest":    Color(0.35, 0.50, 0.25, 0.7),
-			"boreal_forest":       Color(0.30, 0.45, 0.35, 0.7),
-			"urban":               Color(0.55, 0.55, 0.60, 0.7),
-			"town":                Color(0.65, 0.60, 0.55, 0.7),
-			"grassland":           Color(0.65, 0.80, 0.45, 0.7),
-			"mediterranean_scrub": Color(0.70, 0.65, 0.45, 0.7),
-			"heathland":           Color(0.65, 0.50, 0.55, 0.7),
-			"wetland":             Color(0.40, 0.60, 0.55, 0.7),
-			"glacier":             Color(0.85, 0.92, 0.97, 0.7),
-			"tundra":              Color(0.72, 0.78, 0.72, 0.7),
-			"jungle":              Color(0.20, 0.50, 0.20, 0.7),
-			"mangrove":            Color(0.30, 0.55, 0.40, 0.7),
-		}
-		poly.color = cover_colors.get(cover_type, Color(0.65, 0.80, 0.45, 0.7))
-	elif parent.name == "ElevationLayer":
-		# elevation.json features use either "elev_type" (original) or "elevation_type" (gap-fill)
-		var elev_type: String = props.get("elev_type", props.get("elevation_type", "flat"))
-		var elev_colors: Dictionary = {
-			"flat":      Color(0.70, 0.85, 0.60, 0.7),
-			"hills":     Color(0.55, 0.70, 0.35, 0.7),
-			"mountains": Color(0.60, 0.50, 0.40, 0.7),
-		}
-		poly.color = elev_colors.get(elev_type, Color(0.70, 0.85, 0.60, 0.7))
-	else:
-		poly.color = Color(1, 1, 1, 0.4)
-
-	parent.add_child(poly)
+	return true
 
 
-func _load_linear_layer(layer_name: String, path: String) -> void:
-	var geojson_raw: Variant = _load_json(path)
-	if not geojson_raw is Dictionary:
-		return
-	var geojson: Dictionary = geojson_raw
-
-	var container := Node2D.new()
-	container.name = layer_name.capitalize() + "Layer"
-	add_child(container)
-
-	for feat in geojson.get("features", []):
-		var geom: Dictionary = feat.get("geometry", {})
-		var gtype: String = geom.get("type", "")
-		var coords: Array = geom.get("coordinates", [])
-		var props: Dictionary = feat.get("properties", {})
-
-		if gtype == "LineString":
-			_add_line(container, coords, props, layer_name)
-		elif gtype == "MultiLineString":
-			for segment in coords:
-				_add_line(container, segment, props, layer_name)
-
-
-func _add_line(parent: Node, coords: Array, props: Dictionary, layer_name: String) -> void:
-	var line := Line2D.new()
-	var pts := PackedVector2Array()
-	pts.resize(coords.size())
-	for i in coords.size():
-		pts[i] = _project(float(coords[i][0]), float(coords[i][1]))
-	line.points = pts
-
-	if layer_name == "rivers":
-		var size: String = props.get("river_size", "stream")
-		line.width = 3.0 if size == "major" else (2.0 if size == "minor" else 1.0)
-		line.default_color = Color(0.2, 0.5, 0.9, 0.8)
-	elif layer_name == "roads":
-		var level: int = props.get("road_level", 2)
-		line.width = 2.0 if level == 3 else 1.0
-		line.default_color = Color(0.6, 0.4, 0.2, 0.9)
-
-	parent.add_child(line)
+## Hides generated collision polygons from normal/debug rendering while keeping Area2D input active.
+## Parameters:
+## - area: generated province click area.
+## Returns: nothing.
+func _hide_collision_debug_shapes(area: Area2D) -> void:
+	for child: Node in area.get_children():
+		if child is CanvasItem:
+			var canvas_item: CanvasItem = child
+			canvas_item.visible = false
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
