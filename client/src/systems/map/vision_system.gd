@@ -6,6 +6,7 @@ extends Node
 ## Never writes to GameState.
 
 const DARKNESS_COLOR: Color = Color(0.02, 0.025, 0.035, 1.0)
+const OCEAN_COLOR: Color = Color(0.20, 0.50, 0.80)
 const OWNED_PROVINCE_LIGHT_ENERGY: float = 1.0
 const UNIT_LIGHT_ENERGY: float = 0.85
 const OWNED_PROVINCE_LIGHT_RADIUS: float = 400.0
@@ -20,6 +21,7 @@ var _map_loader: Node = null
 var _visible_provinces: Dictionary = {}
 
 var _darkness_modulate: CanvasModulate = null
+var _ocean_background: Polygon2D = null
 var _light_layer: Node2D = null
 var _light_texture: GradientTexture2D = null
 var _active_lights: Array[PointLight2D] = []
@@ -77,11 +79,13 @@ func is_province_visible(province_id: String) -> bool:
 
 # ── visual layer setup ────────────────────────────────────────────────────────
 
-## Creates DarknessLayer (CanvasModulate) and VisionLightLayer (Node2D) as children.
+## Creates OceanBackground, DarknessLayer, and VisionLightLayer as children.
 ## CanvasModulate placed in world space (not under a CanvasLayer) so it darkens only
 ## the main viewport canvas — HUD and PauseMenu CanvasLayers are unaffected.
 ## Returns: nothing.
 func _build_visual_layer() -> void:
+	_build_ocean_background()
+
 	_darkness_modulate = CanvasModulate.new()
 	_darkness_modulate.name = "DarknessLayer"
 	_darkness_modulate.color = DARKNESS_COLOR
@@ -92,6 +96,26 @@ func _build_visual_layer() -> void:
 	add_child(_light_layer)
 
 	_light_texture = _create_light_texture()
+
+
+## Creates a large ocean-blue Polygon2D behind all map content.
+## Because it is a CanvasItem, CanvasModulate darkens it in unlit areas and
+## province lights (BLEND_MODE_MIX) restore it to original blue in lit areas.
+## The clear color (black) cannot be lit by PointLight2D, so it must be replaced
+## with an actual polygon to make coastal ocean respond to vision.
+## Size ±15000 px safely covers the map at any zoom level.
+## Returns: nothing.
+func _build_ocean_background() -> void:
+	_ocean_background = Polygon2D.new()
+	_ocean_background.name = "OceanBackground"
+	var s := 15000.0
+	_ocean_background.polygon = PackedVector2Array([
+		Vector2(-s, -s), Vector2(s, -s), Vector2(s, s), Vector2(-s, s),
+	])
+	_ocean_background.color = OCEAN_COLOR
+	_ocean_background.z_as_relative = false
+	_ocean_background.z_index = -1
+	add_child(_ocean_background)
 
 
 ## Builds a 256×256 radial gradient texture: white-opaque at center → white-transparent at edge.
