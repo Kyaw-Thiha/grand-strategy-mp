@@ -6,6 +6,10 @@ Zector font:
 - https://ggbot.itch.io/zector-font
 - https://openfontlicense.org/
 
+Font Awesome Icons (for icon assets, not font!):
+- https://docs.fontawesome.com/
+- https://fontawesome.com/v4/license/
+
 ## Requirements
 - Godot 4.x (Forward+ renderer)
 - GodotSteam and Supabase addons (included in `addons/`)
