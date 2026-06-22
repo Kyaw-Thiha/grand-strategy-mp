@@ -16,6 +16,7 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _camera: Camera2D       = $Camera2D
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
+@onready var _vision_system: Node    = $VisionSystem
 @onready var _pause_menu: CanvasLayer = $PauseMenu
 
 @onready var _hud_name:   Label = $HUD/Panel/VBox/ProvinceName
@@ -119,6 +120,10 @@ func _on_map_loaded(province_count: int) -> void:
 	#frontline_overlay.set_icons_ref(_military_system.get_icons())
 	if GameState.divisions.is_empty():
 		_inject_debug_divisions()
+
+	# Setup VisionSystem after debug state is injected so first refresh sees correct data
+	_vision_system.setup(_map_loader)
+	_vision_system.on_map_loaded(province_count)
 
 	_hud_count.text = "Provinces: %d" % province_count
 	_clear_info_panel()
@@ -227,6 +232,12 @@ func _inject_debug_divisions() -> void:
 		var div_id: String = div_data["division_id"]
 		GameState.divisions[div_id] = div_data.duplicate()
 		EventBus.division_added.emit(div_id)
+
+	# Establish a debug player nation so VisionSystem can compute visibility.
+	# VisionSystem.on_map_loaded() is called after this and picks up the state on first refresh.
+	if AuthManager.user_id.is_empty():
+		AuthManager.user_id = "debug_player"
+	GameState.nations["germany"] = {"player_id": "debug_player", "is_ready": true}
 
 
 func _clear_info_panel() -> void:
