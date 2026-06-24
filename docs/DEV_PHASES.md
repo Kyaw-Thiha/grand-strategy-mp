@@ -62,13 +62,13 @@ problems here, not later.
 
 ### Hono
 - [x] `/auth/email` — register + login with email/password (Steam replacement for dev)
-- [ ] `/auth/refresh` — token refresh *(deferred to Phase 10 — Steam auth swap)*
-- [ ] `/profile` GET + PUT *(deferred to Phase 7 — player persistence)*
+- [ ] `/auth/refresh` — token refresh *(deferred to Phase 15 — Steam auth swap)*
+- [ ] `/profile` GET + PUT *(deferred to Phase 8 — player persistence)*
 - [x] JWT signed with `{ sub: user_id, has_host_pass: bool, exp: 24h }`
 
 ### Supabase
 - [x] `players` table + RLS policy
-- [ ] `division_templates` table + RLS policy *(deferred to Phase 7)*
+- [ ] `division_templates` table + RLS policy *(deferred to Phase 8)*
 - [x] `game_sessions` table
 
 ### Colyseus
@@ -88,7 +88,7 @@ Godot logs in → receives JWT → connects to Colyseus room → Colyseus logs t
 user_id. Nothing more. If this works cleanly, Phase 1 is done.
 
 > **Phase 1 completed 2026-05.** Email auth + JWT → Colyseus handshake verified end-to-end
-> via `scripts/e2e-auth-handshake.sh`. Steam auth deferred to Phase 10.
+> via `scripts/e2e-auth-handshake.sh`. Steam auth deferred to Phase 15.
 
 ---
 
@@ -131,7 +131,7 @@ Launch Godot → map renders → can click provinces → camera pans and zooms s
 - [x] Full `GameRoomState` schema (nations, provinces, units, relations, proposals maps)
 - [x] Lobby phase: nation selection, ready state, host-starts (≥2 ready) or all-6-filled
       auto-start
-- [x] Game speed voting (`VOTE_SPEED` majority vote); pause/resume deferred to Phase 11
+- [x] Game speed voting (`VOTE_SPEED` majority vote); pause/resume deferred to Phase 15
 - [x] `GAME_STARTED`, `GAME_ENDED` events broadcast
 - [x] `game-server/src/data/maps/western_europe_6/nations.ts` + `map_loader.ts` —
       map-scoped nation definitions
@@ -188,7 +188,7 @@ uses the two-level road + waypoint graph. Stacking mechanics and encirclement de
 **Why before tactical grid:** The strategic movement and engagement area system is the
 foundation the tactical grid sits on. Getting division dots moving, engagement areas
 colliding, and basic combat states (Engaged → Suppressed → Retreat → Destroyed) working
-end-to-end first means the tactical grid can be layered on top cleanly in Phase 5.
+end-to-end first means the tactical grid can be layered on top cleanly in Phase 6.
 
 **Testing:** Bot client sending opposing move orders and engaging your Godot client.
 Unit tests for movement profile computation and A* path validity.
@@ -204,6 +204,14 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Road edge cost set to `base_distance × 0.05` (road base 0.05/deg vs terrain 1.0+/deg)
 - [x] Output: `waypoints.json` written to `client/assets/data/<map_id>/`
 - [x] Pipeline summary prints waypoint node count alongside province count
+- [ ] Hierarchical layer added to `pipeline.py` — partition the completed waypoint graph
+      into clusters (provinces, since they're already a first-class map concept); for each
+      cluster, pre-compute and cache optimal path cost between every pair of border nodes
+      (nodes connecting to a neighbouring cluster); output an abstract graph (one node per
+      border crossing) alongside the existing `waypoints.json`, not replacing it; see
+      `docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
+      behaviour. This item is new work, added after the original waypoint graph generation
+      above and not part of what's already complete on this map
 - See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
@@ -212,7 +220,7 @@ Unit tests for movement profile computation and A* path validity.
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
 - [ ] `STARTING_WARS` array in `nations.ts` — DEV ONLY, replace with real diplomacy
-      in Phase 8: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
+      in Phase 10: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
       in `GameRoom.onCreate()`; `at_war` 6×6 matrix sent to all clients at game start;
       frontline and influence only activates between nations where `at_war == true`
 - [ ] Division type classification — three types only (no Defensive type):
@@ -311,15 +319,22 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Province capture — ownership transfers when defending division/stack is destroyed or
       retreated; city node must be physically occupied by capturing division
 - [ ] Angle-based flanking system:
-      - [ ] When second enemy division's engagement area overlaps an already-engaged
-            division, compute angle at defender between line-to-attacker-1 and
-            line-to-attacker-2 (dot product of the two vectors)
+      - [ ] When a second (or further) enemy division's engagement area overlaps an
+            already-engaged division, compute the angle at the defender between every
+            pairwise combination of currently-attacking divisions' position vectors
+            (dot product of each pair); with exactly two attackers this is one pair, with
+            N attackers this is every pairwise combination among them
+      - [ ] Classification uses the **maximum** of all computed pairwise angles, looked up
+            against the same thresholds regardless of attacker count
       - [ ] < 90°: no flanking bonus — converging frontal assault only
-      - [ ] 90°–135°: standard flank attack bonus (% damage increase to second attacker)
+      - [ ] 90°–135°: standard flank attack bonus (% damage increase to non-primary attackers)
       - [ ] 135°–180°: enhanced rear attack bonus (higher % damage increase)
-      - [ ] Angle classification locked at moment of second contact initiation;
-            not recalculated mid-combat (prevents bonus loss from minor drift)
-      - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification
+      - [ ] Angle classification locked at the moment each *new* division's engagement
+            area first overlaps — not recalculated mid-combat or on every tick; a third+
+            division joining triggers one fresh evaluation considering all pairwise angles
+            at that instant, which then holds until the next division joins or one departs
+      - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification, including
+            which pair of divisions produced the winning (maximum) angle
 - [ ] Dynamic frontline influence computation — **128×128 grid, per supply tick**:
       - [ ] `computeInfluenceGrid()` in `GameRoom.ts`: for each division, add
             hp_fraction × distance_falloff contribution to cells within influence radius
@@ -346,7 +361,7 @@ Unit tests for movement profile computation and A* path validity.
       `UNIT_DESTROYED`, `STACK_ROTATION`, `DIVISION_ENCIRCLED`, `SUPPLY_SEVERED_FRONTLINE`,
       `SUPPLY_RESTORED_FRONTLINE`, `FRONTLINE_UPDATED` events
 - [ ] Basic supply — divisions out of supply take increased attrition (simplified supply
-      model; full graph-based supply is Phase 6)
+      model; full graph-based supply is Phase 7)
 
 ### Godot
 - [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
@@ -359,6 +374,16 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
       check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
       depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
+- [ ] Hierarchical query added on top of the existing two-phase routing above (new work,
+      not replacing it): cheap abstract-graph search across clusters first, identifying
+      which clusters the route crosses; full two-phase A* (unchanged) runs only within
+      those clusters, always at full precision at the start and goal clusters; results
+      stitched at border-crossing nodes (see `docs/PATHFINDING.md` — Hierarchical Layer)
+- [ ] Path smoothing — centripetal Catmull-Rom spline fit through the string-pulled
+      waypoint list, client-side, before handing to dead reckoning; deviation from the
+      original straight-line polyline clamped to ~750m so the curve cannot cut across
+      terrain the route deliberately avoided; falls back to a straight segment if the
+      clamp would be exceeded (see `docs/PATHFINDING.md` — Path Smoothing)
 - [ ] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
       edges; server validates smoothed path (not raw A* path)
 - [ ] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display
@@ -395,7 +420,8 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
 - [ ] Move order UX:
-      - [ ] Select division → press M (or Move button) → cursor enters move mode
+      - [ ] Select division → press Move hotkey (or Move button) → cursor enters move mode
+            (exact key per `UI_UX_DESIGN.md` §9 / Phase 5's `InputMap`, not hardcoded here)
       - [ ] Single click: pathfind to destination, one waypoint, division deselected
       - [ ] Shift+click: add waypoint to chain, division stays selected and in move mode
       - [ ] Escape: cancel move mode, clear pending waypoints
@@ -405,8 +431,26 @@ Unit tests for movement profile computation and A* path validity.
             observation radius shown on hover only; estimated arrival time tooltip
       - [ ] Ghost dots and paths: visible to owner and allies; visible to enemy/neutral
             only if ghost dot falls within their observation radius
-- [ ] Hotkey system: Q=Military, E=Economy, R=Diplomacy, F=Politics, Tab=toggle panels,
-      M=Move, H=Hold, G=Retreat, X=Cancel, all remappable via InputMap
+      - [ ] Waypoint Drag Refinement: press-and-hold (rather than click-and-release) on
+            any waypoint placement — final destination or any shift-click intermediate
+            waypoint — drags the ghost dot live with the cursor; release commits at final
+            cursor position; live preview during drag uses the hierarchical pathfinding
+            abstract-layer estimate only (see `PATHFINDING.md` — Hierarchical Layer), full
+            precision A* runs once on release, not on every drag-frame
+      - [ ] Move is never triggered by drag alone — only by the click described above,
+            after move mode is entered via hotkey/button; drag is reserved for refining an
+            already-triggered waypoint and for Box Selection (below), which must not be
+            ambiguous with each other or with plain camera panning
+- [ ] Box Selection — drag over empty map space with no move mode active draws a selection
+      rectangle; on release, every division dot inside it is added to the selection;
+      `Shift+drag` adds to existing selection, `Ctrl+drag` removes from it; does not create
+      or modify a saved control group on its own
+- [ ] Formation Move — move order issued to 2+ selected divisions spreads them into a grid
+      formation around the destination point rather than converging on one point; adjacent
+      division spacing derived from each division's own engagement radius (sum of the two
+      radii at every adjacent pair, not a new constant); divisions already stacked together
+      before the order move as one formation slot, not unstacked into the spread; slot
+      assignment uses a cheap nearest-available heuristic, not an optimal assignment search
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
@@ -450,10 +494,32 @@ Both advancing head-on → meeting battle icon appears, neither gets terrain bon
 divisions already overlapping while neutral → war declared between their nations → declaring
 nation's division is the attacker, other division is the defender with terrain bonuses, with
 no movement having occurred. Commit second division to already-engaged enemy → flanking
-bonus applies. Stack two friendly divisions → first engages → hits suppression → rotates →
+bonus applies. Commit a third division to the same engagement at an angle that falls
+*inside* the arc already covered by the first two attackers → classification unchanged
+(maximum pairwise angle still comes from the original pair) — confirms a new attacker can
+never silently downgrade an existing flank/rear classification. Commit a third division
+that widens the existing arc instead → classification upgrades accordingly (e.g. flank →
+rear attack) at the instant of that third division's overlap, not continuously. Stack two
+friendly divisions → first engages → hits suppression → rotates →
 second steps up → combat continues without physical retreat. Last stack division suppressed
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
-decays over ticks → eventually deals zero damage. Division with a move order already queued
+decays over ticks → eventually deals zero damage. Box-select three divisions over empty map
+space → all three added to selection; Shift+drag a fourth division's area → added to
+existing selection without clearing it. Issue a move order to the three boxed divisions →
+they spread into formation around the destination rather than converging on one point;
+adjacent spacing in the formation is at least the sum of each pair's engagement radii.
+Box-select two divisions that are already stacked together plus one unstacked division →
+issue group move → the pre-existing stack moves as a single formation slot, not split into
+two separately-spread divisions. Enter move mode, press and hold at a destination, drag
+before releasing → ghost dot follows the cursor live using the cheap hierarchical-layer
+estimate, not a full A* recompute every frame → release → full-precision path computed once
+at the final position. Long-distance move order spanning many provinces → hierarchical
+query resolves at a small fraction of the equivalent full-graph A* search time, with the
+resulting path's total cost within a small margin of the non-hierarchical result. Move
+order producing a route with at least one sharp turn → rendered path curves smoothly
+through the turn instead of snapping heading at the waypoint, while still not cutting
+across terrain the original route avoided (verify clamp behaviour against a route
+deliberately routed around impassable terrain). Division with a move order already queued
 before combat begins → gets pulled into an engagement → does nothing unusual, order remains
 queued, executes automatically only after combat resolves — confirms ordinary move orders
 never auto-trigger Reposition. Division engaged but not yet Suppressed →
@@ -486,22 +552,23 @@ sees colour wash shifting but not enemy division dots outside their observation 
 
 ---
 
-## Phase 4.5 — UI Foundation
+## Phase 5 — UI Foundation
 
 **Goal:** Shared panel and input scaffolding exists before any panel content gets built.
-`HUDManager` and the finalized `InputMap` are real and working — pulled forward from Phase 11
-— so Phase 5 onward registers panels into a system that already enforces the rules in
+`HUDManager` and the finalized `InputMap` are real and working — pulled forward from Phase 15
+— so Phase 6 onward registers panels into a system that already enforces the rules in
 `UI_UX_DESIGN.md`, instead of each phase hand-rolling its own panel visibility logic and
 keybindings that need retrofitting later.
 
 **Why this phase exists:** `HUDManager` and `SettingsUI` keybind remapping were originally
-scheduled in Phase 11 — Polish, on the assumption that panel orchestration is a cosmetic
+scheduled in Phase 15 — Polish, on the assumption that panel orchestration is a cosmetic
 finishing step. It isn't, for this game specifically. `UI_UX_DESIGN.md` specifies cross-cutting
 rules — same-hotkey-closes/different-hotkey-swaps panel behaviour, Tab's dual meaning
 (sub-tab cycle inside a panel vs. attention-cycle when none is open), Escape's recursive
 back-out state machine — that every later panel (`DivisionBuilder` and `TacticalGridUI` in
-Phase 5, Research in Phase 8, Air/Naval in Phase 9–10) needs to consume identically. If
-`HUDManager` doesn't exist until Phase 11, those five-plus panels each get built against no
+Phase 6, Economy/Building/Market panels in Phase 9, Research in Phase 10, Unit Specialization
+Research in Phase 11, Air/Naval in Phase 12–13) needs to consume identically. If
+`HUDManager` doesn't exist until Phase 15, those five-plus panels each get built against no
 shared contract and need retrofitting once `HUDManager` finally arrives. Building the
 scaffolding once, here, removes that retrofit risk entirely.
 
@@ -510,9 +577,9 @@ This is also the first phase with two panels designed to deliberately share a co
 (`UI_UX_DESIGN.md` §6.6, §7.4). That sharing needs a home before either panel is built, or
 one of them will build its own copy.
 
-**Why before Phase 5, not folded into it:** Phase 5's own goal is the tactical grid's combat
+**Why before Phase 6, not folded into it:** Phase 6's own goal is the tactical grid's combat
 logic and the auto-battler loop — `DivisionBuilder` and `TacticalGridUI` are explicitly listed
-Godot tasks inside it. Giving Phase 5 a clean, pre-existing panel/input substrate to build on
+Godot tasks inside it. Giving Phase 6 a clean, pre-existing panel/input substrate to build on
 keeps its own scope focused on grid logic rather than mixing in foundational UI plumbing.
 
 **Scope discipline:** this phase is infrastructure only — registry, orchestration rules,
@@ -527,7 +594,7 @@ open/close/swap rules and Tab/Escape state transitions before any real panel con
 ### Godot
 - [ ] `HUDManager` — implemented now per its existing `[MVP]` contract in `MODULES.md`
       (panel registry, `show_panel`/`hide_panel`/`toggle_panel`/`close_all`,
-      `panel_opened`/`panel_closed` signals) — moved forward from Phase 11
+      `panel_opened`/`panel_closed` signals) — moved forward from Phase 15
 - [ ] Panel open/close orchestration rules enforced in `HUDManager`, per
       `UI_UX_DESIGN.md` §5.5: pressing a panel's hotkey while it is already open closes it;
       pressing a different panel's hotkey closes the current panel and opens the new one;
@@ -540,9 +607,9 @@ open/close/swap rules and Tab/Escape state transitions before any real panel con
       nothing else is open). Implemented as one recursive rule, not per-context special cases
 - [ ] Reusable two-column layout shell (fixed left content area / context-sensitive right
       column that swaps by state) per `UI_UX_DESIGN.md` §6.1 — built generically so
-      `DivisionBuilder` and `TacticalGridUI` (Phase 5) both consume it rather than each
+      `DivisionBuilder` and `TacticalGridUI` (Phase 6) both consume it rather than each
       implementing their own grid-plus-context-panel layout
-- [ ] `UnitProfile` component scaffolded (empty/placeholder content is fine — Phase 5 fills
+- [ ] `UnitProfile` component scaffolded (empty/placeholder content is fine — Phase 6 fills
       it in) per `UI_UX_DESIGN.md` §6.6, as a standalone reusable component rather than
       built inside either `DivisionBuilder` or `TacticalGridUI` — both will open the same
       instance on a unit click (§7.4)
@@ -558,9 +625,9 @@ open/close/swap rules and Tab/Escape state transitions before any real panel con
       this design pass and is now superseded
 - [ ] Left-handed mirror keymap shipped as a second named default mapping, not a
       runtime-computed mirror — per `UI_UX_DESIGN.md` §9.1
-- [ ] Settings keybind remapping UI moved forward from Phase 11's `SettingsUI` — minimum
+- [ ] Settings keybind remapping UI moved forward from Phase 15's `SettingsUI` — minimum
       viable version only (list bindings, rebind, reset to default/left-handed preset,
-      persist to local config). Full audio/graphics settings remain in Phase 11; only the
+      persist to local config). Full audio/graphics settings remain in Phase 15; only the
       keybind remapping piece moves here, since it depends on the same `InputMap` work
 - [ ] Reserved-but-unbound input actions registered now for future use, so later phases
       extend rather than retrofit: `Z`/`V` (idle-division-select / engaged-division-cycle),
@@ -646,12 +713,12 @@ preset → all bindings swap to the mirrored layout in one action.
 
 ---
 
-## Phase 5 — Tactical Grid
+## Phase 6 — Tactical Grid
 
 **Goal:** The 5×5 grid activates when strategic combat initiates. Grid composition determines
 combat outcomes. The auto-battler loop works end-to-end. Nation preset templates are playable.
 
-**Why after Phase 4:** Phase 4 proves the strategic layer works. Phase 5 replaces the
+**Why after Phase 4:** Phase 4 proves the strategic layer works. Phase 6 replaces the
 simplified strategic attrition model with proper tactical grid resolution while keeping all
 Phase 4 strategic plumbing intact.
 
@@ -729,7 +796,7 @@ for all attack pattern logic before any Godot work.
 ### Hono
 - [ ] `/divisions` CRUD routes — basic template persistence including movement profile
       cached alongside template; invalidated on research upgrade (minimal; full persistence
-      in Phase 7)
+      in Phase 8)
 - [ ] Nation preset templates served from `game-server/src/data/templates/<nation_id>/`
 - [ ] `/internal/player/:user_id/templates` — loads player templates + movement profiles
       into Colyseus at game start
@@ -747,8 +814,8 @@ for all attack pattern logic before any Godot work.
       templates; shows movement profile summary (which terrains are impassable, slowest
       terrain); formation bonus preview (highlight when placing adjacent synergy units);
       select from nation presets in lobby; cavalry unit available to all nations per
-      nation_config; motorised toggle available after motorisation research (Phase 8);
-      mechanised infantry unit available after armour research branch unlocks it (Phase 8+)
+      nation_config; motorised toggle available after motorisation research (Phase 10);
+      mechanised infantry unit available after armour research branch unlocks it (Phase 10+)
 - [ ] Template redeployment — switch template when out of combat; 1-minute flat cooldown;
       division redeploys at nearest friendly city; experience on existing units lost on redeploy
 - [ ] Movement profile displayed on division selection — player can see what terrain their
@@ -768,7 +835,7 @@ previously impassable for that unit type.
 
 ---
 
-## Phase 6 — Supply System
+## Phase 7 — Supply System
 
 **Goal:** Full road-segment graph supply replaces the simplified Phase 4 supply model.
 Encirclement via supply cut is a reliable, satisfying outcome. Air interdiction of roads works.
@@ -814,16 +881,16 @@ reduces downstream division supply for the correct duration.
 
 ---
 
-## Phase 7 — Player Persistence
+## Phase 8 — Player Persistence
 
 **Goal:** Division templates persist between sessions. Stats accumulate after each game.
 Full template builder is complete.
 
 ### Hono
-- [ ] `/divisions` CRUD routes fully implemented and tested (extended from Phase 5 MVP)
+- [ ] `/divisions` CRUD routes fully implemented and tested (extended from Phase 6 MVP)
 - [ ] `/internal/game-end` updates player stats (games_played, games_won, playtime_hrs)
 - [ ] `/internal/player/:user_id/templates` loads full template set into Colyseus at game
-      start (extended from Phase 5 MVP)
+      start (extended from Phase 6 MVP)
 
 ### Supabase
 - [ ] `division_templates` table + RLS policy
@@ -845,42 +912,317 @@ Create custom template in main menu → start game → redeploy a division to th
 
 ---
 
-## Phase 8 — Economy + Diplomacy + General Technology
+## Phase 9 — Resource Economy + Buildings
 
-**Goal:** Resources accumulate, buildings can be constructed, players can form alliances
-and declare war. General Technology research (motorisation) is available.
+**Goal:** The full ten-resource economy from RESOURCE_ECONOMY.md is live — each resource's
+distinct mechanic (oil's flow debuff, rubber/nitrate combat attrition, tungsten's
+substitution, chromium/aluminium's hard draw-blocks, uranium's research-bound identity)
+actually functions, not just a generic per-tick number going up. Every building in
+ECONOMY_BUILDINGS.md can be constructed, leveled, and researched into its perk tree. The
+national industry pool, population/manpower, and both market mechanisms (spot order book,
+standing trade routes) are playable.
+
+**Why this phase is no longer "Resources accumulate, buildings can be constructed":** the
+original one-line goal predates RESOURCE_ECONOMY.md and ECONOMY_BUILDINGS.md entirely, from
+when MAP_DATA_CONTRACT.md's resource envelope was still an explicit placeholder
+(`manpower, steel, oil, fuel, coal`, "TBD pending game design decisions"). That placeholder
+has since been replaced with a real ten-resource roster, each with its own mechanic, plus
+roughly fifteen buildings each with their own perk-tree research, a national allocation
+pool, and a real player-driven market. None of that fits a flat `BUILD` handler and a generic
+economy tick — this phase is rewritten in full to match what was actually designed.
+
+**Why Diplomacy and General Technology move to Phase 10, not bundled in here:** the
+original Phase 9 combined three largely-independent systems (economy, diplomacy, General
+Technology) under one goal because all three were small at the time. Economy alone has
+since grown into the largest single system in the game outside of combat — ten resources,
+fifteen-plus buildings, perk-tree research, a market, population/manpower. Diplomacy and
+General Technology have not grown at all and remain exactly as small as before. Keeping them
+bundled would force this phase's verification gate to mix economy correctness with
+alliance-proposal correctness, two unrelated failure surfaces. Splitting lets Phase 9 close
+on "the economy works" alone, and Phase 10 close on "diplomacy and motorisation work" alone,
+mirroring how Phase 5 was split out of Phase 15 for the same reason — a system that grew
+past the size that justified bundling it with its original neighbours.
+
+**Testing:** Unit tests for each resource's mechanic in isolation (oil debuff curve at each
+demand band, rubber/nitrate attrition rate, tungsten's stat-table shift, chromium/aluminium
+draw-block thresholds). Bot client for the spot market (needs a second party to match orders
+against) and for standing trade routes (needs a second nation to negotiate with).
+
+### Colyseus
+- [ ] Resource envelope migrated to the ten-key schema (`money, grain, iron, oil, rubber,
+      nitrates, tungsten, chromium, aluminium, uranium`) per MAP_DATA_CONTRACT.md's updated
+      Resources section — replaces the old five-key placeholder entirely, not additive
+- [ ] Per-resource extraction tick — each resource-extraction building (Iron Mine, Grain
+      Farm, Oil Derrick/Offshore Platform, Rubber Plantation/Synthetic Plant, Nitrate
+      Works/Synthetic Works, Tungsten Mine, Chromium Mine, Bauxite Mine+Refinery, Uranium
+      Mine) produces its base-tier output with **zero** industry allocated — confirms the
+      no-forgetfulness-trap guarantee from ECONOMY_BUILDINGS.md before the industry
+      multiplier is layered on top
+- [ ] National Industry Pool — single pool fed by all factories nationally; one slider per
+      resource type + construction speed + unit production speed; diminishing-returns curve
+      applied per slice independently; near-instant reallocation (short cooldown only, to
+      prevent frame-perfect switching); new factories default-allocate to money production +
+      construction speed, player-changeable at any time
+- [ ] Oil mechanic — continuous draw from oil-consuming unit types only (motorised,
+      armoured, naval, air); soft debuff curve at 100–50% / 50–20% / <20% demand-met bands;
+      military/balanced/economy allocation-priority toggle per nation; HP recovery-rate
+      degradation for oil-dependent units layered under existing supply-tier status, not
+      replacing it
+- [ ] Rubber mechanic — stockpile depletion from vehicle-type unit build cost AND from
+      vehicle-type units' combat participation (per-round drain while engaged); shortage
+      slows HP recovery rate for vehicle-type units specifically
+- [ ] Nitrates/Sulfur mechanic — mirrors Rubber exactly but targets infantry/artillery-type
+      units' ammunition expenditure and recovery rate instead of vehicle wear
+- [ ] Tungsten mechanic — national tungsten availability shifts which row of the existing
+      armour-penetration threshold table (TACTICAL_COMBAT.md) a nation's AT/tank-gun units
+      resolve against; zero tungsten never blocks production or slows recovery, only
+      downgrades the resolved penetration tier
+- [ ] Chromium mechanic — premium-tier units (heavy tank tier, battleship belt-armour tier,
+      and equivalents) draw supply independently of the rest of their division; below the
+      national chromium threshold, only the chromium-gated units in a division stop
+      recovering HP, the rest of the division is unaffected
+- [ ] Aluminium mechanic — hard ceiling on air-unit supply throughput, same draw-block shape
+      as Chromium but air-specific; **gated on a placeholder research flag in this phase**,
+      not the real air-doctrine tier (which has no content until Air Combat and the Air
+      specialization tree exist — see the Economy Integration phase, after Naval Combat,
+      for the swap to the real tech-tier gate); flag starts false for every nation, so the
+      mechanic is inert and untestable beyond "ceiling exists" until that follow-up phase
+- [ ] Uranium mechanic — Uranium Mine output is research-bound, not geography-bound; reaching
+      the relevant tech node grants a one-time research-currency injection (see Phase 10's
+      research-currency model) — no combat-stat mechanic, deliberately kept to this single
+      use case
+- [ ] Population — per-province stock, flat-or-lightly-accelerating tick-based growth;
+      feeds the `vp_value × population reached` end-of-session VP weighting; manpower is
+      derived from population at recruitment time (part of each unit's existing build-cost
+      vector), not tracked as an independent field
+- [ ] Manpower soft cap — recruiting from a heavily exhausted manpower pool costs
+      progressively more (money/time multiplier), never hard-blocks
+- [ ] Division build cost — fixed resource-vector cost paid once at raise time, sum of unit
+      costs (each unit type's cost vector includes money/iron/manpower plus whichever
+      restricted resources that unit type consumes)
+- [ ] Division supply draw — at each tick, `(missing HP fraction) × (division's build-cost
+      resource vector)`, drawn from whatever is flowing down the existing STRATEGIC_COMBAT.md
+      supply graph; the flow becomes a resource-mix vector per division type, not a flat
+      scalar — reuses the existing hub→road-graph→division flow model, does not replace it
+- [ ] `BUILD` handler reworked for the perk-tree model — construct/level a building (costs
+      resources, capped at level 5 per ECONOMY_BUILDINGS.md); base level produces exactly one
+      fixed effect scaling in magnitude only; building does not gain new effect categories
+      from leveling alone
+- [ ] Research-to-building perk handler — applying a researched perk node to a building
+      unlocks a new effect or redistributes existing effect weighting (per the adjacency-web
+      rules in ECONOMY_BUILDINGS.md: paths adjacent-unlock, tier-local mutual exclusivity
+      only at designated locked tiers); unlocked perks scale automatically with building
+      level going forward, no re-research needed per level
+- [ ] All eighteen building trees from ECONOMY_BUILDINGS.md implemented: School, Hospital
+      (with nationally-pooled hard-diminishing-returns casualty reduction), Infrastructure,
+      Warehouse/Depot, Shipyard, Town Hall, and the nine resource-extraction/processing
+      buildings listed above
+- [ ] Spot market — global per-resource order book; money-only (no resource-for-resource
+      barter); matched orders resolve instantly; symmetric ~10–20% spread penalty applied to
+      both legs (seller receives less, buyer pays more), difference burned as a money sink;
+      NPC liquidity floor (baseline AI buy/sell wall) seeded at session start so no resource
+      is ever fully illiquid
+- [ ] Standing trade routes — port-to-port and capital-to-capital/province-to-province for
+      land-bordering nations only; resource-for-resource barter allowed here, unlike the
+      spot market; no spread penalty — friction is setup time and exposure to disruption
+      instead. **Two pieces are placeholders in this phase, both replaced in the Economy
+      Integration phase after Naval Combat:** (1) port-to-port route disruption uses a flat
+      "is an enemy unit present in the port's sea zone" check, not real
+      NAVAL_COMBAT.md blockade-percentage math, since naval combat doesn't exist yet; (2)
+      land routes are border-adjacency-only — no third-party transit-rights routing through
+      a non-participant neighbour, since the transit-rights flag is defined in Phase 10,
+      which has not run yet at this point in the build
+- [ ] `RESOURCE_TICK`, `MARKET_ORDER_FILLED`, `TRADE_ROUTE_ESTABLISHED`,
+      `TRADE_ROUTE_DISRUPTED`, `BUILDING_CONSTRUCTED`, `BUILDING_LEVELED`, `PERK_RESEARCHED`
+      events
+
+### Godot
+- [ ] `EconomySystem` — replaces the old generic resource-bar display; ten distinct resource
+      readouts, each with its own mechanic-appropriate UI treatment (e.g. oil shows a flow
+      rate and the allocation-priority toggle, not just a static bar)
+- [ ] `EconomyUI` panel — resource overview (ten resources, common tier visually distinct
+      from restricted tier), province production detail, build queue, **Industry Pool
+      allocation panel** (live sliders, one per resource + construction + production speed)
+- [ ] `BuildingUI` — per-building detail view showing current level, active perks, and the
+      building's own perk tree (adjacency web rendering shared with the unit-research panel's
+      tree-rendering component where the underlying shape matches — see
+      `docs/UI_UX_DESIGN.md` for the shared adjacency-web widget)
+- [ ] `MarketUI` — spot market order book (post buy/sell, view standing orders, see fills);
+      separate `TradeRouteUI` for establishing/viewing standing routes, distinct panel since
+      barter (resource-for-resource) only applies here, not on the spot market
+- [ ] Population/manpower readout on the province detail view and the nation-overview panel
+
+### Verification gate
+Build an Oil Derrick at zero industry allocation → produces full base-tier oil output
+immediately, confirming the no-forgetfulness guarantee. Allocate industry toward oil →
+output increases on a diminishing-returns curve, not linearly. Nation's oil demand drops
+below 50% → oil-consuming units show a visible but minor readiness penalty; non-oil units
+(standard infantry) completely unaffected. Toggle allocation priority to Military → civilian
+oil throughput throttles first under continued scarcity. Tank-heavy division fights several
+rounds while engaged → rubber stockpile visibly depletes from combat alone, independent of
+any new vehicle production. Nation's tungsten stock hits zero → AT/tank-gun units continue
+building and fighting, but resolve at a lower armour-penetration tier on the existing
+TACTICAL_COMBAT.md threshold table — no production block, no recovery-rate penalty. Nation's
+chromium stock hits zero → a division with both standard and chromium-gated premium units
+stops healing the premium units only; standard units in the same division recover normally.
+Raise a new division → resource vector deducted once at raise time, matches the sum of unit
+costs. Damaged division sitting on a supply-connected road segment → draws a resource-mix
+vector proportional to missing HP and its own composition, not a flat number. Post a sell
+order on the spot market → a matching buy order (player or NPC floor) fills it → seller
+receives ~80–90% of listed price. Establish a standing port-to-port trade route between two
+nations → an enemy unit physically present in either port's sea zone disrupts the route
+using this phase's placeholder check (real blockade-percentage math is verified in the
+Economy Integration phase, after Naval Combat). Land trade route attempted between two
+non-bordering nations → rejected, no transit-rights exception exists yet in this phase
+(verified once Phase 10 and the Economy Integration phase have both run). Research a
+Hospital perk node on the Logistics Integration path → hospital begins contributing to local
+supply-graph throughput, which it did not do at base level. Population in an undisturbed
+province grows over the session → that province's effective end-of-session VP contribution
+(`vp_value × population reached`) is visibly higher than an equally-`vp_value` province that
+saw heavy fighting and population loss.
+
+---
+
+## Phase 10 — Diplomacy + General Technology
+
+**Goal:** Players can form alliances and declare war. General Technology research
+(motorisation) is available. Split out of the original combined Phase 9 — see Phase 9's
+rationale above for why economy and these two smaller systems no longer belong in the same
+phase. Functionally unchanged from the original Phase 9 scope for these two systems
+specifically; this phase's content is a relocation, not a redesign.
+
+**Why this phase exists between Economy (Phase 9) and Naval Combat:** the transit-rights
+diplomacy flag this phase defines (a non-bordering nation routing trade through a willing
+third-party neighbour) is a diplomacy-layer concept that Phase 9's land trade routes were
+deliberately built without — Phase 9 ships border-adjacency-only land routes and defers
+transit-rights routing entirely to the Economy Integration phase, after Naval Combat, rather
+than having Phase 9 stub the flag. This phase simply needs to exist and be real before that
+later integration phase can consume it; it does not need to land immediately adjacent to
+Phase 9 the way an earlier draft of this plan assumed.
 
 **Testing:** Bot client for diplomacy (needs two-player proposals/responses).
 
 ### Colyseus
-- [ ] Economy tick — resource generation per province per tick, stored in player state
-- [ ] `BUILD` handler — construct buildings in provinces (costs resources); supply hub,
-      fort, port, airbase, factory, barracks
-- [ ] General Technology research panel — motorisation node (mid-tier); once researched,
-      applicable infantry units can be toggled to motorised versions in template builder;
-      movement profile recomputed on toggle; zero grid combat stat change
 - [ ] `PROPOSE_DIPLO`, `RESPOND_DIPLO`, `BREAK_DIPLO` handlers
 - [ ] Relation state updates, `DIPLO_PROPOSAL`, `DIPLO_ACCEPTED`, `DIPLO_REJECTED` events
 - [ ] Alliance combat rules — allied units do not engage each other
 - [ ] Map-sharing agreement — allied nations can see all division dots, paths, and
       composition of each other regardless of observation radius
+- [ ] Transit-rights flag — a nation can grant another nation permission to route a land
+      trade line through its territory without itself being a party to that trade. Defined
+      and testable in isolation here (the flag can be set/unset/queried); not yet wired into
+      trade-route logic, since Phase 9's land trade routes shipped border-adjacency-only by
+      design — the wiring happens in the Economy Integration phase, after Naval Combat
+- [ ] General Technology research panel — motorisation node (mid-tier); once researched,
+      applicable infantry units can be toggled to motorised versions in template builder;
+      movement profile recomputed on toggle; zero grid combat stat change
+- [ ] Research-currency model — the funding mechanism research draws from (money + science
+      currency, generated by School buildings per ECONOMY_BUILDINGS.md); concurrency cost
+      curve for running multiple research projects simultaneously (soft cap via cost, not a
+      hard slot limit); this is the shared currency every research system in the game draws
+      from — Phase 9's building perk trees, this phase's General Technology node, Phase 9's
+      Uranium research-currency-injection mechanic (a one-time lump deposit into this pool),
+      and Phase 11's unit specialization trees all spend from the same pool, not separate
+      per-system currencies
 
 ### Godot
-- [ ] `EconomySystem` — resource bars, production display from GameState
 - [ ] `DiplomacySystem` — proposal cache, propose/respond methods
 - [ ] `DiplomacyUI` panel — propose alliance, accept/reject incoming proposals, treaty list,
-      map-sharing agreement option
-- [ ] `EconomyUI` panel — resource overview, province production detail, build queue
-- [ ] `ResearchUI` panel — General Technology tree; motorisation node; research progress;
-      motorised toggle per unit type in DivisionBuilder unlocks after research completes
+      map-sharing agreement option, transit-rights grant option
+- [ ] `GeneralTechUI` panel — General Technology tree; motorisation node; research progress;
+      motorised toggle per unit type in DivisionBuilder unlocks after research completes;
+      research-currency readout (science + money cost of active projects, concurrency cost
+      indicator) — this readout is shared chrome that Phase 11's unit-research panel and
+      Phase 9's building-perk UI also display, since all three spend from the one currency
+      pool this phase establishes
 
 ### Verification gate
-Resources tick up → build a supply hub → propose alliance to bot → bot accepts → bot's units
-no longer engage yours → break alliance → war declared → supply hub generates supply flow.
+Propose alliance to bot → bot accepts → bot's units no longer engage yours → break alliance →
+war declared. Grant transit rights to a third nation → that nation's land trade route through
+your territory becomes possible; revoke → route disrupted using the same mechanism as a
+border closure. Research motorisation → applicable infantry units show the motorised toggle
+in DivisionBuilder → toggling recomputes movement profile with zero grid combat stat change.
+Run two research projects simultaneously → confirm the concurrency cost curve, not a flat
+per-project cost. Uranium tech node completed (Phase 9 mechanic) → one-time currency
+injection lands in this phase's research-currency pool, confirming the cross-phase interface
+works.
 
 ---
 
-## Phase 9 — Air Combat
+## Phase 11 — Unit Specialization Research (Minimal)
+
+**Goal:** A bare-bones version of the unit specialization research system exists and is
+wired into the existing Armoured branch skeleton already defined in TACTICAL_COMBAT.md
+(motorisation → mechanisation → APC → improved APC → IFV). Nothing here commits to final
+content for Infantry, Artillery, Air, or Naval doctrine trees — those are not designed yet.
+This phase exists so the *mechanism* (adjacency-web tree, variants coexisting in the same
+division, tier-local mutual exclusivity) is real and testable against one concrete branch,
+without blocking on design work that hasn't happened.
+
+**Why minimal, and why its own phase rather than waiting:** the spatially-adjacent web
+system (paths unlock adjacent paths at the same tier, variable width/depth per unit
+complexity, scattered mutual-exclusivity nodes) is a confirmed design but currently only has
+one real worked skeleton to build against — Armoured's existing motorisation/mechanisation
+chain. Building the full mechanism now, against that one branch, and leaving Infantry/
+Artillery/Air/Naval as explicit stubs is preferable to either (a) blocking this phase
+entirely until all five branches are designed, which has no scheduled endpoint, or (b)
+quietly building Air/Naval combat in later phases with no research system underneath them
+at all. A minimal real implementation now means later phases extend a working system with
+more content, rather than retrofitting a research mechanism into combat systems that
+shipped without one.
+
+**Why after Phase 10, not before:** this phase's research draws from the same research-
+currency pool Phase 10 establishes (see Phase 10's Colyseus notes). Building the unit-tree
+mechanism before that currency model exists would mean stubbing the funding side instead,
+which is the same retrofit risk this phase is otherwise trying to avoid for combat systems.
+
+**Testing:** Unit tests confirming a variant unlock does not retroactively break any
+existing division template (the "no template ever breaks due to missing research"
+guarantee from the unit research design tenets).
+
+### Colyseus
+- [ ] Adjacency-web tree data structure — paths, tiers, per-path-per-tier node definitions,
+      adjacency unlock rule (unlocking a tier unlocks the next tier same-path + same-tier
+      adjacent-path), tier-local mutual exclusivity flag (not path-local)
+- [ ] Armoured branch populated into this structure using the existing TACTICAL_COMBAT.md
+      skeleton (motorisation → mechanisation → APC → improved APC → IFV) as real tree
+      content — the only branch with real content in this phase
+- [ ] Infantry, Artillery, Air, Naval branches — empty stub trees only (structure exists,
+      zero nodes defined); explicitly not designed in this phase
+- [ ] Variant coexistence — researching a specialization produces a new unit *variant*
+      that coexists with the unverspecialized base and with other variants of the same base
+      unit, never a destructive replace; a template referencing an unresearched variant
+      defaults silently to the base unit, never breaks
+- [ ] Research draws from the Phase 10 research-currency pool; no separate currency
+      introduced for unit research specifically
+
+### Godot
+- [ ] Shared adjacency-web rendering widget — the tree visualization (paths as columns,
+      tiers as rows, locked-tier nodes visually distinct) used by both this phase's
+      Armoured panel and, retroactively, by Phase 9's building-perk trees (Phase 9 shipped
+      ahead of this widget existing — this phase backfills the shared component Phase 9's
+      `BuildingUI` was written assuming would exist; Phase 9's perk-tree UI should be
+      revisited once this widget is real, rather than maintaining two separate tree-drawing
+      implementations)
+- [ ] `LandDoctrineUI` panel — Armoured sub-tab populated with real content; Infantry/
+      Artillery sub-tabs present but empty, clearly marked not-yet-available rather than
+      hidden, so the panel structure is correct even though most content is stubbed
+- [ ] `DivisionBuilder` — variant selection at the unit-slot level once a variant is
+      researched; unresearched slots show the base unit only, no broken or greyed-out state
+
+### Verification gate
+Research the Armoured tree's motorisation node → mechanisation node becomes available
+(same-path, next-tier) → Infantry's stub tree remains empty and clearly marked, not
+silently populated with placeholder content. Build a division template referencing a
+not-yet-researched Armoured variant → template loads using the base unit, does not error.
+Research a variant → existing saved templates referencing the base unit are unaffected;
+only newly-built templates can select the variant. Confirm Infantry/Artillery/Air/Naval
+panels render their empty-stub state without crashing or showing Armoured's content by
+mistake.
+
+---
+
+## Phase 12 — Air Combat
 
 **Goal:** Air wings exist, can be assigned missions, and affect land combat and supply.
 Air-to-air combat drives off enemy wings. CAS damage lands on the tactical grid.
@@ -900,7 +1242,7 @@ superiority. Unit tests for all damage pattern calculations.
   - [ ] Column strafing — rocket/MG strafing column targeting
   - [ ] Dive bomber — high precision single-cell high damage
 - [ ] Logistics strike handler — reduces road segment throughput in province (integrates
-      with Phase 6 supply graph)
+      with Phase 7 supply graph)
 - [ ] Infra strike handler — reduces building levels / province infrastructure value
 - [ ] Detection accumulation — radar buildings, recon planes, passive air unit detection
 - [ ] Distance penalty — damage reduction at extreme range from home air base
@@ -923,14 +1265,14 @@ detection value for air-to-air in its province.
 
 ---
 
-## Phase 10 — Naval Combat
+## Phase 13 — Naval Combat
 
 **Goal:** Flotillas with all ten ship classes exist on the strategic map. Three-zone
 engagement resolves correctly. Submarine Active/Silent modes, class posture controls, fog of
 war, and carrier presets all work. Port economy (three independent upgrade tracks per port),
 trade routes, blockade system, naval bombardment, coastal battery and fort buildings, cargo
 simulation with sinking events, and naval base shielding are all functional. Naval supply
-interdiction feeds into the Phase 6 supply graph.
+interdiction feeds into the Phase 7 supply graph.
 
 **Testing:** Bot flotillas of different compositions across all three zones. Unit tests for
 class matchup math, ASW detection, torpedo reload, refit queue, blockade income reduction,
@@ -990,7 +1332,7 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       slot pool; repair takes priority over refit; repair slots occupied → construction
       slows proportionally or stops if all slots full; HP damage reduction for docked
       ships (~10–15% at level 1, ~40–50% at max); applies only to docked ships
-- [ ] Supply base: acts as supply hub (same graph flow as Phase 6 inland supply hubs);
+- [ ] Supply base: acts as supply hub (same graph flow as Phase 7 inland supply hubs);
       deactivates when port sea zone is under full blockade (Engagement range or deeper)
 - [ ] Coastal battery building: fires at surface flotillas overlapping port sea zone at any
       zone level; does not fire at submerged submarines; damage scales with battery level:
@@ -1056,7 +1398,7 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
 - [ ] Maritime patrol aircraft reveals approximate enemy flotilla positions and trade routes
       in patrolled zones
 - [ ] Naval supply interdiction: Active submarine flow reduction on coastal supply paths
-      (feeds Phase 6 supply graph)
+      (feeds Phase 7 supply graph)
 - [ ] Zone lethality system:
       - [ ] Screen zone: ship withdrawal when HP drops to threshold (not zero);
             submarines destroyed if detected+pinned, otherwise withdraw damaged;
@@ -1136,7 +1478,80 @@ radius → hover enemy dot → partial composition panel appears → upgraded re
 grid composition revealed. Move order: division with move order engages enemy → combat
 resolves → division automatically resumes move order from current position.
 
-## Phase 11 — Steam Auth Swap + Polish
+---
+
+## Phase 14 — Economy Integration
+
+**Goal:** The three placeholder mechanics shipped in Phase 9 because their real dependencies
+didn't exist yet are now wired to the genuine systems those dependencies provide. No new
+player-facing mechanic is introduced in this phase — everything here was already designed
+and already playable in placeholder form; this phase only replaces the placeholder
+implementation with the real one.
+
+**Why this phase exists instead of just stubbing forever:** Phase 9 (Resource Economy)
+needed to ship before Naval Combat (Phase 13) and before Air Combat (Phase 12) had any real
+content, because Economy is a prerequisite for a playable strategic loop far earlier than
+either combat system is ready. Rather than let three mechanics stay permanently degraded
+(flat sea-zone-presence checks instead of real blockade percentages, a placeholder research
+flag instead of a real air-doctrine gate, border-adjacency-only trade with no transit
+routing), this phase closes that gap once every real dependency is finally available.
+
+**Why here, after Naval Combat, and not earlier:** two of the three items need Naval Combat
+specifically (the blockade-percentage swap needs Phase 13's working blockade system; nothing
+upstream of Phase 13 would let this phase do anything but stub again). The third item
+(transit-rights routing) only needs Phase 10 (Diplomacy), which finished long before this
+point — it could technically have been wired in earlier, but bundling all three swaps into
+one phase, done once after the last of the three dependencies (Naval Combat) is ready, is
+simpler to schedule and verify than splitting the transit-rights swap out on its own for no
+real benefit.
+
+**A note on Aluminium specifically:** this phase swaps Aluminium's placeholder research flag
+for the real air-doctrine-tier gate only if Phase 11's Air specialization tree has real
+content by this point. Phase 11 explicitly stubs Air as an empty tree — if Air doctrine
+research still has no real nodes when this phase runs, Aluminium's mechanic should be
+flagged as still-deferred here rather than wired to an empty tree that would make the
+mechanic permanently inert. This phase does not commit to designing Air's tree itself; that
+remains out of scope for everything in this document, same as it was in Phase 11.
+
+**Testing:** Regression tests confirming the placeholder-to-real swap doesn't change behaviour
+for nations not currently affected by a blockade/transit grant (i.e. the swap should be
+invisible until the real mechanic is actually exercised).
+
+### Colyseus
+- [ ] Standing trade route disruption — replace Phase 9's flat "enemy unit present in sea
+      zone" check with real NAVAL_COMBAT.md blockade-percentage throughput reduction; existing
+      trade routes re-evaluate against the real check immediately on this system going live,
+      no save-data migration needed since the route's existence and parties are unchanged,
+      only the disruption math underneath it
+- [ ] Land trade route transit routing — consume the Phase 10 transit-rights flag to allow a
+      land route through a non-participant neighbour's territory; routes that were previously
+      rejected for non-bordering nations become possible once a transit grant exists
+- [ ] Aluminium mechanic — replace Phase 9's placeholder research flag with the real
+      air-doctrine-research-tier gate, **conditional on Phase 11's Air tree having real
+      content by this point**; if it does not, leave the placeholder in place and note this
+      explicitly rather than wiring to an empty tree
+
+### Godot
+- [ ] `TradeRouteUI` — sea-zone disruption indicator updated to reflect real blockade
+      percentage rather than a binary present/absent enemy-unit flag
+- [ ] `DiplomacyUI` — transit-rights grant option now visibly enables a previously-rejected
+      land route in the trade route planner, rather than the option existing with no
+      observable effect
+
+### Verification gate
+Establish a standing port-to-port trade route → enemy fleet partially blockades the sea zone
+(not full presence/absence, an actual percentage) → route throughput reduces proportionally,
+matching Phase 13's blockade math exactly, not a binary cutoff. Attempt a land trade route
+between two non-bordering nations with no transit grant → still rejected; grant transit
+rights via Phase 10's flag → route becomes possible, confirming the deferred wiring from
+Phase 9's original verification gate. If Phase 11's Air tree has real content by this point,
+confirm Aluminium's ceiling now scales with actual air-doctrine tier rather than the flat
+placeholder flag; if Air's tree is still stubbed, confirm the placeholder remains active and
+no error occurs from attempting to read an empty tree.
+
+---
+
+## Phase 15 — Steam Auth Swap + Polish
 
 **Goal:** Email auth replaced with real Steam auth. Core loop polished enough for first
 playtesters. Notification system complete across all combat layers.
@@ -1155,7 +1570,7 @@ kept the JWT shape identical so this is a drop-in swap at the Hono layer.
 - [ ] Steam overlay integration (open store page, etc)
 
 ### Polish
-- [ ] `HUDManager` — *(moved to Phase 4.5 — UI Foundation; built there so Phase 5 onward
+- [ ] `HUDManager` — *(moved to Phase 5 — UI Foundation; built there so Phase 6 onward
       has a working panel orchestration system from the start)*
 - [ ] `NotificationSystem` — full event coverage across land, air, and naval; toast queue
       and animation; naval response window notifications
@@ -1163,7 +1578,7 @@ kept the JWT shape identical so this is a drop-in swap at the Hono layer.
 - [ ] `MainMenuUI` — final polish, news/changelog panel
 - [ ] `LobbyUI` — final polish, join code display, spectator option
 - [ ] `SettingsUI` — audio, graphics settings, final polish *(keybind remapping MVP moved
-      to Phase 4.5 — UI Foundation; this phase adds audio/graphics and polishes the
+      to Phase 5 — UI Foundation; this phase adds audio/graphics and polishes the
       keybind UI built there)*
 
 ### Verification gate
@@ -1173,7 +1588,7 @@ see Steam achievement unlock.
 
 ---
 
-## Phase 12 — Later Modules
+## Phase 16 — Later Modules
 
 Full contracts written when implementation begins. Prioritise based on playtester feedback.
 
@@ -1190,8 +1605,8 @@ Full contracts written when implementation begins. Prioritise based on playteste
 | `AchievementSystem` | `[LATER]` | Steam achievement unlocks from game events |
 | `AIPlayerSystem` | `[LATER]` | Server-side AI for unfilled nation slots (Colyseus module) |
 | `LobbyTimerSystem` | `[LATER]` | Auto-start lobby after configurable countdown. Requires `AIPlayerSystem`. |
-| `AmphbiousSystem` | `[LATER]` | Shore bombardment and amphibious assault. Requires Phase 10 naval complete. |
-| `MineWarfareSystem` | `[LATER]` | Minelayer and minesweeper ship classes. Sea zone denial via minefield placement. Requires Phase 10 naval complete. |
+| `AmphbiousSystem` | `[LATER]` | Shore bombardment and amphibious assault. Requires Phase 13 naval complete. |
+| `MineWarfareSystem` | `[LATER]` | Minelayer and minesweeper ship classes. Sea zone denial via minefield placement. Requires Phase 13 naval complete. |
 | `MidgetSubmarineSystem` | `[LATER]` | Harbour-penetration submarine variant. Requires naval-land integration design. |
 | `WeatherSystem` | `[OPTIONAL]` | Weather overlay affecting terrain movement and combat. Visual + mechanical. |
 | `GeneralSystem` | `[OPTIONAL]` | Attachable general units that modify division suppression threshold, retreat behaviour, and attack patterns. |
@@ -1203,7 +1618,7 @@ Full contracts written when implementation begins. Prioritise based on playteste
 
 - **Bot clients from Phase 3 onward.** One bot script per multiplayer scenario. Run them as
   regression tests whenever a new system is added.
-- **Steam auth is Phase 11, not Phase 1.** Email auth keeps JWT shape identical — the swap
+- **Steam auth is Phase 15, not Phase 1.** Email auth keeps JWT shape identical — the swap
   is one Hono route change.
 - **Server is always authoritative.** If a system needs client-side prediction later, add it
   then — don't pre-optimise.
