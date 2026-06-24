@@ -44,7 +44,7 @@ const CAPTURE_RADIUS_KM = 40.0;
 // far-away frontline units don't permanently block every nearby capture attempt)
 const CONTEST_RADIUS_KM = 20.0;
 
-// Angle thresholds for flanking classification (relative to primary attacker vector)
+// Angle thresholds for flanking classification (max pairwise angle across all attacking divisions)
 const FLANK_ANGLE_MIN = Math.PI / 2;          // 90° — counts as flank
 const REAR_ANGLE_MIN  = (3 * Math.PI) / 4;   // 135° — counts as rear
 // Damage multiplier applied to a secondary attacker when flanking
@@ -107,7 +107,8 @@ interface ActivePair {
   terrain_mult_atk: number; // multiplier on attacker outgoing damage (≤ 1.0 = penalty)
   terrain_mult_def: number; // multiplier on defender outgoing damage (≥ 1.0 = bonus)
   round: number;
-  flanked_by: Map<string, "flank" | "rear">; // secondary attacker id → classification
+  is_primary_attacker: boolean;              // false for meeting battles; first attacker on this defender = true
+  flank_class: "none" | "flank" | "rear";   // engagement-wide classification; "none" for primary/meeting
 }
 
 // ─── CombatSystem ────────────────────────────────────────────────────────────
@@ -238,6 +239,10 @@ export class CombatSystem {
             const midLat = (a.position_lat + b.position_lat) / 2;
             const { atk, def } = this._terrainModifiers(midLng, midLat);
 
+            // Primary = first attacker to engage this specific defender
+            const isPrimary = is_meeting || !Array.from(this.activePairs.values())
+              .some(p => p.defender_id === defender_id && !p.is_meeting);
+
             const pair: ActivePair = {
               attacker_id,
               defender_id,
@@ -245,7 +250,8 @@ export class CombatSystem {
               terrain_mult_atk: atk,
               terrain_mult_def: def,
               round: 0,
-              flanked_by: new Map(),
+              is_primary_attacker: isPrimary,
+              flank_class: "none",
             };
             this.activePairs.set(key, pair);
 
@@ -269,65 +275,92 @@ export class CombatSystem {
               attacker_id:       pair.attacker_id,
             });
 
-          } else {
-            // ── Existing engagement — check for new flankers ────────────────
-            const pair = this.activePairs.get(key)!;
-            if (pair.is_meeting) continue; // no flank tracking in meeting battles
-
-            // Only track flanks on the defender
-            const defenderId  = pair.defender_id;
-            const attackerId  = pair.attacker_id;
-            if (!defenderId || !attackerId) continue;
-
-            const defender = state.divisions.get(defenderId);
-            const attacker = state.divisions.get(attackerId);
-            if (!defender || !attacker) continue;
-
-            // Look for a third division engaged with the defender that is NOT the original attacker
-            for (const div of divList) {
-              if (div.division_id === attackerId) continue;
-              if (div.division_id === defenderId) continue;
-              if (div.nation_id === defender.nation_id) continue;
-              if (div.combat_state === "destroyed") continue;
-              if (!div.engaged_with.includes(defenderId)) continue;
-              if (pair.flanked_by.has(div.division_id)) continue;
-
-              // Compute angle at defender between original attacker direction and new attacker direction
-              const toOrigAtk_x = attacker.position_lng - defender.position_lng;
-              const toOrigAtk_y = attacker.position_lat - defender.position_lat;
-              const toNewAtk_x  = div.position_lng - defender.position_lng;
-              const toNewAtk_y  = div.position_lat - defender.position_lat;
-
-              const lenOrig = Math.sqrt(toOrigAtk_x ** 2 + toOrigAtk_y ** 2);
-              const lenNew  = Math.sqrt(toNewAtk_x  ** 2 + toNewAtk_y  ** 2);
-              if (lenOrig === 0 || lenNew === 0) continue;
-
-              const dot   = (toOrigAtk_x * toNewAtk_x + toOrigAtk_y * toNewAtk_y) / (lenOrig * lenNew);
-              const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
-
-              let classification: "flank" | "rear";
-              let eventType: string;
-
-              if (angle >= REAR_ANGLE_MIN) {
-                classification = "rear";
-                eventType = "REAR_ATTACK";
-              } else if (angle >= FLANK_ANGLE_MIN) {
-                classification = "flank";
-                eventType = "FLANK_ATTACK";
-              } else {
-                continue; // not a flank angle
-              }
-
-              pair.flanked_by.set(div.division_id, classification);
-              broadcast(eventType, {
-                flanker_id:  div.division_id,
-                defender_id: defenderId,
-                attacker_id: attackerId,
-              });
+            // If this is a secondary attacker on the same defender, re-evaluate
+            // all pairwise angles now that this division has joined the engagement
+            if (!is_meeting && !isPrimary) {
+              this._evaluateFlankingForDefender(defender_id, state, broadcast);
             }
           }
         }
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // _evaluateFlankingForDefender
+  // Called when a new secondary attacker joins an engagement. Recomputes all
+  // pairwise angles between every attacking division at the defender, finds the
+  // maximum, and applies that single engagement-wide classification to all
+  // secondary pairs. Locked at this instant per the spec — not re-evaluated
+  // each tick or on position drift, only when another division joins or leaves.
+  // ---------------------------------------------------------------------------
+
+  private _evaluateFlankingForDefender(
+    defenderId: string,
+    state: GameRoomState,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    const defender = state.divisions.get(defenderId);
+    if (!defender) return;
+
+    // All non-meeting pairs where this division is the defender
+    const pairs = Array.from(this.activePairs.entries())
+      .filter(([, p]) => p.defender_id === defenderId && !p.is_meeting);
+
+    if (pairs.length < 2) return;
+
+    const attackerIds = pairs.map(([, p]) => p.attacker_id);
+
+    // Find the max pairwise angle across every combination of attackers
+    let maxAngle = 0;
+    let winnerA  = "";
+    let winnerB  = "";
+
+    for (let i = 0; i < attackerIds.length; i++) {
+      for (let j = i + 1; j < attackerIds.length; j++) {
+        const a = state.divisions.get(attackerIds[i]);
+        const b = state.divisions.get(attackerIds[j]);
+        if (!a || !b) continue;
+
+        const toA_x = a.position_lng - defender.position_lng;
+        const toA_y = a.position_lat - defender.position_lat;
+        const toB_x = b.position_lng - defender.position_lng;
+        const toB_y = b.position_lat - defender.position_lat;
+
+        const lenA = Math.sqrt(toA_x ** 2 + toA_y ** 2);
+        const lenB = Math.sqrt(toB_x ** 2 + toB_y ** 2);
+        if (lenA === 0 || lenB === 0) continue;
+
+        const dot   = (toA_x * toB_x + toA_y * toB_y) / (lenA * lenB);
+        const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+
+        if (angle > maxAngle) {
+          maxAngle = angle;
+          winnerA  = attackerIds[i];
+          winnerB  = attackerIds[j];
+        }
+      }
+    }
+
+    const newClass: "none" | "flank" | "rear" =
+      maxAngle >= REAR_ANGLE_MIN  ? "rear"  :
+      maxAngle >= FLANK_ANGLE_MIN ? "flank" :
+      "none";
+
+    // Apply to all secondary pairs; fire event if classification upgraded
+    let prevClass: "none" | "flank" | "rear" = "none";
+    for (const [, pair] of pairs) {
+      if (pair.is_primary_attacker) continue;
+      if (prevClass === "none") prevClass = pair.flank_class;
+      pair.flank_class = newClass;
+    }
+
+    if (newClass !== "none" && newClass !== prevClass) {
+      broadcast(newClass === "rear" ? "REAR_ATTACK" : "FLANK_ATTACK", {
+        defender_id: defenderId,
+        attacker_a:  winnerA,
+        attacker_b:  winnerB,
+      });
     }
   }
 
@@ -386,12 +419,13 @@ export class CombatSystem {
           dmg *= pair.terrain_mult_def;
         }
       }
-      // Flanking bonus (is this attacker a secondary flanker of the defender?)
-      const flankClass = pair.flanked_by.get(attacker.division_id);
-      if (flankClass === "rear") {
-        dmg *= REAR_BONUS;
-      } else if (flankClass === "flank") {
-        dmg *= FLANK_BONUS;
+      // Flanking bonus: applies to the attacker in a secondary pair (non-primary, non-meeting)
+      if (!pair.is_primary_attacker && !pair.is_meeting && attacker.division_id === pair.attacker_id) {
+        if (pair.flank_class === "rear") {
+          dmg *= REAR_BONUS;
+        } else if (pair.flank_class === "flank") {
+          dmg *= FLANK_BONUS;
+        }
       }
 
       return dmg;
