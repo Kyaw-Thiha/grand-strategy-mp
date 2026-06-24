@@ -279,12 +279,12 @@ Each division is represented as a dot on the strategic map with three concentric
 
 ### Flanking at the strategic layer
 
-When a second enemy division's engagement area overlaps a division already in tactical
-combat, flanking may apply — but only if the angle between the two attackers is
-sufficiently wide. Two units attacking from roughly the same direction is weight of
-numbers, not flanking.
+When a second (or third, fourth, etc.) enemy division's engagement area overlaps a
+division already in tactical combat, flanking may apply — but only if the angle between
+attackers is sufficiently wide. Two units attacking from roughly the same direction is
+weight of numbers, not flanking.
 
-**Angle-based flanking determination:**
+**Angle-based flanking determination (two attackers):**
 The angle is measured at the defender's position, between the two lines connecting the
 defender to each attacker (dot product of the two vectors). Classification is set at
 the moment the second division's engagement area first overlaps — not continuously
@@ -301,11 +301,38 @@ attacker is perpendicular to the main axis of engagement — the true geometric 
 Anything less is still broadly frontal. The 135° threshold for rear attack reflects
 that the defender's formation is now facing away from one attacker entirely.
 
+**Generalisation to three or more attackers:** the same table applies, but the angle fed
+into it is the **widest angle between any two attackers**, not a fixed pair. Concretely:
+compute the angle at the defender between every pairwise combination of attacking
+divisions' position vectors, and take the maximum. That maximum angle is looked up
+against the table above exactly as the two-attacker case already is.
+
+This is a direct extrapolation, not a new rule: with exactly two attackers there is only
+one pair to measure, so the "widest pair" reduces to the existing single-angle case
+automatically. Adding a third attacker can only ever widen or maintain the existing
+spread (a new attacker either falls inside the arc already covered by the two widest
+existing attackers, in which case the maximum is unchanged, or it extends the arc
+further, in which case the maximum increases) — it can never narrow the classification
+a defender is already suffering. This monotonic property means the rule never produces
+a surprising downgrade (e.g. going from "rear attacked" back to "flanked" by virtue of a
+third division arriving) purely as an artefact of which pair happens to be measured.
+
+**Classification timing with 3+ attackers:** as with the two-attacker case, the
+classification is re-evaluated and locked at the moment each *new* division's engagement
+area first overlaps — not continuously every tick. A third division joining an existing
+two-attacker engagement triggers one fresh evaluation at that instant (now considering
+all three pairwise angles), which then holds until a fourth division joins or one of the
+existing attackers disengages.
+
 **Engagement area visibility enables flanking play:** Because enemy engagement areas
 are visible as faded circles, a player can judge whether their manoeuvring division
 will reach the 90° threshold before committing. Without that visibility, flanking
 angle is guesswork. This is why engagement area visibility is confirmed for both
-own and enemy divisions.
+own and enemy divisions. With 3+ attackers, this same visibility lets a player
+judge the *widest pairwise gap* among all currently-engaged friendly divisions before
+committing a new one — useful for deliberately closing a gap to upgrade a flank into a
+rear attack, or recognising that a new division would fall inside the existing arc and
+contribute nothing beyond weight of numbers.
 
 **Relief mechanic:** When the flanking division is itself engaged by a friendly ally
 unit, it redirects to the new threat and stops attacking the original target. This
@@ -523,6 +550,108 @@ it simply has a queued destination it will head to after the fight.
 7. **Right-click any waypoint** in an existing chain: deletes that waypoint; subsequent
    waypoints reorder automatically; division continues on updated path
 
+### Move Trigger: Click, Not Drag
+
+Movement is triggered by the click described above (hotkey/button to enter move mode,
+then a single click to commit), never by pressing and dragging from the division's
+current position. This is a deliberate choice, not an oversight: the genre converged on
+click-to-move specifically because it lets the entire game be played with the mouse
+alone, with no extra time-consuming step — the destination is communicated by one
+unambiguous, instantaneous action. Drag-to-move would also collide structurally with
+**Box Selection** (below), which is itself a click-and-drag gesture — the same input
+cannot mean both "select everything in this box" and "move the unit under my cursor" at
+once. Drag is reserved entirely for *refining* a move that has already been triggered —
+see Waypoint Drag Refinement and Formation Move below — never for triggering the move
+itself.
+
+### Waypoint Drag Refinement
+
+While placing any waypoint — the final destination or any intermediate shift-click
+waypoint in a chain — the player can press and hold rather than click-and-release, drag
+to fine-tune the exact position, and release to commit. This applies identically to every
+waypoint in a shift-move chain, not only the last one: each press-hold-drag-release cycle
+commits one waypoint and is independent of the others in the chain.
+
+- While held, the **ghost dot** for that waypoint (see Waypoint Visualisation above)
+  follows the cursor live, reusing the existing ghost-dot rendering rather than
+  introducing a second preview element
+- Releasing commits the waypoint at the cursor's final position at release time
+- The full-precision path to that waypoint is computed once, on release — not
+  continuously during the drag. During the drag itself, only a cheap live estimate is
+  shown (the abstract-layer distance/route estimate from the hierarchical pathfinding
+  structure — see `PATHFINDING.md`), to avoid running full A* dozens of times per second
+  for a single drag gesture
+- This is the same interaction pattern proven in other RTS titles for editing an existing
+  waypoint after the fact (hover an existing waypoint, drag it, release); this game
+  applies the identical press-drag-release gesture at the moment of initial placement
+  instead, so the player gets the same precision in one continuous motion rather than a
+  separate place-then-edit step
+
+### Box Selection
+
+Double-press-and-drag (or a configurable single-drag, see Open Questions) over empty map
+space draws a selection rectangle; on release, every division dot whose position falls
+inside the rectangle is added to the current selection. Standard modifiers apply:
+`Shift + drag` adds to the existing selection rather than replacing it; `Ctrl + drag`
+removes the boxed divisions from the existing selection.
+
+Box selection is visually and input-wise distinct from Waypoint Drag Refinement above —
+the former only triggers when the drag starts over empty map space with no move mode
+active and no waypoint being placed; the latter only triggers while a waypoint is
+actively being placed. The two gestures cannot be issued simultaneously, so there is no
+ambiguity about which one a given drag means.
+
+**Interaction with control groups:** a box selection does not itself create or alter a
+saved control group (`0`–`9`, per the keybind scheme in `UI_UX_DESIGN.md` §9) — it only
+sets the current selection. A player who wants to save the result presses `Ctrl + [0-9]`
+afterward, exactly as with any other selection method.
+
+### Formation Move (Multi-Division Group Move)
+
+When two or more divisions are selected (via box selection or `Shift`-click) and a move
+order is issued to a single destination point, the divisions do **not** converge on that
+single point. They spread into a **formation** around it — the universal convention
+across the genre, chosen specifically because naive single-point convergence is a
+well-documented bad outcome (units overlapping uselessly at one spot) rather than a
+stylistic preference.
+
+**Shape and spacing:**
+- Divisions arrange in a **grid formation**: rows of divisions, a fixed number per row,
+  with the destination point at the formation's centre. A small selection (2–4 divisions)
+  resolves to a single row; larger selections wrap to additional rows behind it
+- **Spacing between adjacent divisions in the formation is derived from engagement
+  radius, not an arbitrary new constant.** Each division already has a composition-based
+  engagement radius (~30 map units for heavy armoured, ~50 for pure infantry — see
+  Division Representation on the Strategic Map). Formation spacing is set to **at least
+  the sum of the two divisions' engagement radii** at every adjacent pair, so that
+  divisions arriving in formation do not have overlapping engagement areas with each
+  other by default. This is what makes the spacing feel natural rather than arbitrary:
+  it's reusing a number the division already has for a different purpose (combat
+  initiation) rather than inventing a new "formation spacing" constant, and it has the
+  practical benefit of not accidentally creating friendly-fire-adjacent engagement
+  overlaps purely from how a group move resolved
+- Divisions with larger engagement radii (infantry-heavy) naturally claim more space in
+  the formation than divisions with smaller radii (armoured-heavy) — the formation is not
+  uniformly spaced, it reflects each division's actual footprint
+- **Slot assignment** (which specific division goes to which grid position) minimises
+  total travel distance using a cheap nearest-available-slot heuristic, not an optimal
+  assignment algorithm — the selection sizes in this game (a handful of divisions per
+  player, never RTS-scale unit counts) make the marginal optimality gain of a fully
+  optimal assignment not worth its higher computational cost
+
+**Consolidation exception — pre-existing stacks:** if two or more of the *selected*
+divisions are already stacked together (sharing a single province, per the existing
+Stack UI) before the move order is issued, that stack is treated as **one formation
+slot**, not unstacked into the spread. The group move spreads *stacks and unstacked
+divisions* into formation, never breaks an existing deliberate stack apart as a side
+effect of a group move. This preserves Stack UI's existing role as the explicit,
+opt-in tool for intentional stacking — a group move should never silently undo a stacking
+decision the player made on purpose, nor should it silently force two never-stacked
+divisions arriving in formation into an unintended stack at the destination, which is why
+formation spread is the default for everything that wasn't already a stack going in.
+
+---
+
 ### Waypoint Visualisation
 
 - Dotted line connecting current position → each waypoint in sequence
@@ -550,7 +679,7 @@ waypoints** highlighted with ghost dots. The player can:
 > placeholder and predates the full UI/UX design pass. The current, finalized keybind scheme
 > — including the rationale for every choice, the ergonomics-over-mnemonics principle, control
 > groups, camera bookmarks, and the map-mode/relationship-overlay keys — lives in
-> `UI_UX_DESIGN.md` §9, and is implemented in `InputMap` as part of **Phase 4.5 — UI
+> `UI_UX_DESIGN.md` §9, and is implemented in `InputMap` as part of **Phase 5 — UI
 > Foundation** in `DEV_PHASES.md`. Notably: Move is now bound to `Space` (not `M`), Retreat
 > is `C` (not `G`), Hold is `G` (not `H`), and panel hotkeys are `Q/E/T/Y` (Diplomacy moved
 > from `R` to `T`, since `R` is needed for Retreat's ergonomic position; Politics moved from
@@ -567,7 +696,7 @@ tooltips on all UI buttons ("Move [Space]", "Hold [G]").
 - `Shift + click` — add waypoint to chain (in move mode)
 
 **Implementation note:** All bindings defined in Godot's `InputMap` and remappable at
-runtime via the settings UI built in Phase 4.5. GDScript handles keyboard input cleanly
+runtime via the settings UI built in Phase 5. GDScript handles keyboard input cleanly
 through `InputMap`. A left-handed mirror preset ships as a second named default mapping,
 not a runtime-computed mirror.
 
@@ -1053,6 +1182,19 @@ number — it is the difference between losing one division and losing the front
   — balance between path quality and graph size)
 - Movement profile recomputation trigger debounce (avoid recomputing on every keystroke
   during template editing — trigger on save/confirm)
+- Box selection trigger gesture: double-press-and-drag vs. a plain single-drag over empty
+  space (confirmed: must not collide with Waypoint Drag Refinement or any other existing
+  drag gesture; exact trigger from playtesting and feel-testing against accidental
+  selection while panning)
+- Formation Move row width (how many divisions per row before wrapping to a new row
+  behind) and exact slot-assignment heuristic; confirmed nearest-available-slot is cheap
+  enough at this game's division counts, exact tie-breaking rule from playtesting
+- Waypoint Drag Refinement's live-preview throttle interval during an active drag
+  (confirmed: abstract-layer estimate only during drag, full-precision path computed once
+  on release; exact estimate refresh rate from playtesting and performance profiling)
+- Three-or-more-attacker flanking: confirmed the classification uses the maximum
+  pairwise angle among all attackers; exact UI treatment for showing all pairwise angles
+  (or just the winning pair) in the tactical combat panel from playtesting
 
 ---
 

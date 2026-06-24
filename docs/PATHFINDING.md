@@ -179,6 +179,58 @@ crossed when terrain is impassable — they are just not actively sought.
 
 ---
 
+## Hierarchical Layer (HPA*-style abstraction)
+
+**Problem this solves:** the unified graph (road nodes at ~750m spacing plus the 3-tier
+terrain grid at 7.5–22km spacing) gives the precision needed for combat-relevant terrain
+decisions, but a full bidirectional A* search across the *entire* graph for a long-distance
+move order is the source of the "pathfinding feels slow" problem on larger maps. Coarsening
+the base graph to fix this would trade away exactly the terrain precision that matters near
+combat. The fix is not to choose between fast-and-coarse or slow-and-precise — it's to add
+a second, abstract layer on top of the existing graph, which stays untouched.
+
+**Approach:** standard Hierarchical Pathfinding A* (HPA*). The base graph (every node and
+edge described above) is partitioned into clusters at pipeline time — provinces are the
+natural cluster unit for this game, since they're already a first-class concept in the map
+data, rather than an arbitrary geometric grid. For every cluster, the pipeline pre-computes
+and caches the optimal path cost between every pair of "border nodes" (nodes on the
+cluster's edge that connect to a neighbouring cluster). This produces a small abstract
+graph — one node per border crossing, not one node per terrain/road sample — on top of the
+full-detail graph.
+
+**Query-time behaviour:**
+1. Run a cheap search on the **abstract graph** first — cluster-to-cluster, using the
+   pre-cached border-crossing costs. This identifies which sequence of clusters the route
+   should pass through, without touching most of the full-detail graph at all.
+2. Run the existing full-precision bidirectional A* (unchanged, same two-phase routing and
+   string-pulling as already specified above) **only within the clusters the abstract path
+   actually crosses** — and always at full precision in the cluster containing the actual
+   start point and the cluster containing the actual goal point, since that's where
+   combat-relevant terrain precision matters most.
+3. Stitch the per-cluster detailed segments together at the border-crossing nodes the
+   abstract search already identified.
+
+**Why this resolves the speed/precision tradeoff rather than compromising between the two:**
+a short move within a single cluster barely touches the abstract layer and runs close to
+today's speed already (clusters are not large). A long move across many clusters becomes
+fast because the expensive part — searching the full-detail graph — only happens inside a
+handful of clusters near the path's start, end, and any clusters the abstract route
+genuinely passes through, instead of across the entire map's node count. No terrain detail
+is lost anywhere a player is actually making a tactical decision; the graph itself never
+changes.
+
+**Expected gain, from published results on the equivalent technique:** independent
+benchmarks of refined HPA*-style approaches report computation time reduced by over 95%
+compared to plain A* on large maps, with total path cost deviating from the true optimum by
+well under 1% — the abstraction cost is negligible relative to the speed gained.
+
+**Precompute cost:** the per-cluster border-crossing cache is generated once at pipeline
+time, alongside the existing waypoint graph generation step — no new runtime cost beyond
+the (much cheaper) two-stage query described above. Re-running the pipeline after any map
+edit regenerates the cache the same way it already regenerates the waypoint graph.
+
+---
+
 ## Dead Reckoning (`military_system.gd` lines 418–477)
 
 The client drives unit animation entirely from the validated waypoint list. No server
@@ -197,3 +249,40 @@ conversion:   DR_KM_PER_DEG = 111.0 km/deg
   leading waypoints; re-seed from server position if leading waypoint diverges (reroute)
 - Foreign units (other players) use the same DR loop — see `FOREIGN_UNIT_PATH_DR` flag in
   `military_system.gd` to toggle back to legacy lerp mode for performance testing
+
+---
+
+## Path Smoothing (client-side, cosmetic only)
+
+**Problem this solves:** the raw waypoint list (post string-pulling) is a polyline of
+straight-line segments. Dead reckoning faithfully animates a division along that polyline,
+which means the division's heading snaps sharply at every waypoint — visually jagged
+movement, especially at any waypoint where the route changes direction by a wide angle.
+This is a rendering problem, not a pathfinding problem: the *route* the waypoint list
+describes is correct and unchanged by anything in this section.
+
+**Approach:** a **centripetal Catmull-Rom spline** is fit through the waypoint list
+client-side, after string-pulling and before handing the list to the dead-reckoning
+animator. The spline passes exactly through every original waypoint (it does not
+approximate or skip any of them, unlike a Bézier curve) while replacing the straight-line
+segments between them with a smooth curve, so the division's heading changes continuously
+through a turn instead of snapping. The centripetal variant specifically (rather than the
+uniform variant) is required — the uniform variant can produce loops or self-intersections
+on paths with unevenly-spaced waypoints, which this game's waypoint lists routinely have
+(road nodes are densely spaced at ~750m, terrain nodes far sparser).
+
+**Terrain-safety constraint:** a spline fit through waypoints can cut a corner that the
+original A* route deliberately avoided (routing around a lake or impassable terrain
+feature). To prevent this, the spline's maximum deviation from the original straight-line
+polyline is clamped to a small bound (on the order of the base graph's road-node sampling
+distance, ~750m) — the curve is only ever allowed to round off a corner by an amount that
+cannot plausibly cut across terrain the route was already routed to avoid. If a deviation
+bound would be exceeded at any segment (a genuinely sharp, necessary turn — e.g. squeezing
+between two impassable features), that segment falls back to a straight line rather than
+forcing a smooth curve through terrain the pathfinder explicitly avoided.
+
+**Scope:** this is purely a client-side rendering step. It does not change which nodes
+dead reckoning's speed formula or server corrections operate against — the server and the
+authoritative waypoint list remain exactly as specified above; only the visual
+interpolation between consecutive waypoints changes from a straight line to a clamped
+spline segment.
