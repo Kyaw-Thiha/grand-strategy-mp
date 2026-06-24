@@ -2,6 +2,21 @@
 
 Session-based grand strategy multiplayer game with a Godot 4 client, a Colyseus game server, and a Hono API server.
 
+## First-Time Setup: Download Assets
+
+Large map assets (GeoJSONs, pipeline output) are not in git — they live in Cloudflare R2.
+Download them before opening the Godot client or running the map pipeline.
+
+```bash
+cp scripts/r2/.env.example scripts/r2/.env
+# fill in R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+./scripts/r2/download.sh
+```
+
+See `scripts/r2/README.md` for where to find credentials. Requires [rclone](https://rclone.org/install/).
+
+---
+
 ## Run Locally
 
 Run the game locally with three processes:
