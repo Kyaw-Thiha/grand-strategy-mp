@@ -1,0 +1,128 @@
+#!/bin/sh
+# Upload large gitignored assets to Cloudflare R2.
+#
+# Usage: ./tools/r2/upload.sh [--map <map_id>] [--include-dem] [--dry-run]
+#
+#   --map <map_id>   Map folder to sync (default: europe_1938_6)
+#   --include-dem    Also upload map/shared/dem/ (~22GB, slow)
+#   --dry-run        Preview what would be transferred without actually uploading
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CONF_FILE="$SCRIPT_DIR/rclone.conf"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+MAP_ID="europe_1938_6"
+INCLUDE_DEM=0
+DRY_RUN=""
+
+# --- Parse args ---
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --map)       MAP_ID="$2"; shift 2 ;;
+    --include-dem) INCLUDE_DEM=1; shift ;;
+    --dry-run)   DRY_RUN="--dry-run"; shift ;;
+    *) echo "Unknown argument: $1"; exit 1 ;;
+  esac
+done
+
+# --- Load .env ---
+if [ ! -f "$ENV_FILE" ]; then
+  echo "ERROR: $ENV_FILE not found. Copy $SCRIPT_DIR/.env.example and fill in credentials."
+  exit 1
+fi
+
+if [ ! -f "$CONF_FILE" ] || [ "$ENV_FILE" -nt "$CONF_FILE" ]; then
+  echo "rclone.conf missing or outdated — running setup..."
+  "$SCRIPT_DIR/setup.sh"
+fi
+
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+
+RCLONE="rclone --config $CONF_FILE"
+REMOTE="r2:${R2_BUCKET}"
+
+[ -n "$DRY_RUN" ] && echo "--- DRY RUN ---"
+echo "Bucket: $REMOTE"
+echo "Map:    $MAP_ID"
+echo ""
+
+# --- Sync map source GeoJSONs ---
+MAP_SRC="$REPO_ROOT/map/$MAP_ID"
+MAP_DEST="$REMOTE/map/$MAP_ID"
+
+if [ -d "$MAP_SRC" ]; then
+  echo "Uploading map/$MAP_ID/ ..."
+  $RCLONE sync "$MAP_SRC" "$MAP_DEST" \
+    --progress \
+    --transfers 8 \
+    $DRY_RUN
+  echo "Done: map/$MAP_ID/"
+else
+  echo "WARN: $MAP_SRC not found, skipping."
+fi
+
+# --- Sync client pipeline output ---
+# The client asset folder name is the map_id field from map.json, which may differ
+# from the source dir name (e.g. source dir "europe_1938_6" → map_id "western_europe_6").
+MAP_JSON="$REPO_ROOT/map/$MAP_ID/map.json"
+CLIENT_FOLDER="$MAP_ID"
+if [ -f "$MAP_JSON" ]; then
+  PARSED=$(grep -o '"map_id"[[:space:]]*:[[:space:]]*"[^"]*"' "$MAP_JSON" | grep -o '"[^"]*"$' | tr -d '"')
+  [ -n "$PARSED" ] && CLIENT_FOLDER="$PARSED"
+fi
+CLIENT_SRC="$REPO_ROOT/client/assets/data/$CLIENT_FOLDER"
+
+if [ -d "$CLIENT_SRC" ]; then
+  FOLDER_NAME="$(basename "$CLIENT_SRC")"
+  CLIENT_DEST="$REMOTE/client/assets/data/$FOLDER_NAME"
+  echo "Uploading client/assets/data/$FOLDER_NAME/ ..."
+  $RCLONE sync "$CLIENT_SRC" "$CLIENT_DEST" \
+    --progress \
+    --transfers 8 \
+    --exclude "*_backup/**" \
+    $DRY_RUN
+  echo "Done: client/assets/data/$FOLDER_NAME/"
+else
+  echo "WARN: client/assets/data/ folder for '$MAP_ID' not found, skipping."
+fi
+
+# --- Sync client non-data assets (fonts, icons, flags, audio, textures, etc.) ---
+# data/ and source/ are excluded — handled separately above or gitignored.
+# These are still tracked in git for now; this block is ready for when they grow large
+# and get moved out of git.
+ASSETS_SRC="$REPO_ROOT/client/assets"
+ASSETS_DEST="$REMOTE/client/assets"
+if [ -d "$ASSETS_SRC" ]; then
+  echo "Uploading client/assets/ (non-data) ..."
+  $RCLONE sync "$ASSETS_SRC" "$ASSETS_DEST" \
+    --progress \
+    --transfers 8 \
+    --exclude "data/**" \
+    --exclude "source/**" \
+    $DRY_RUN
+  echo "Done: client/assets/ (non-data)"
+fi
+
+# --- Optionally sync DEM tiles ---
+if [ "$INCLUDE_DEM" = "1" ]; then
+  DEM_SRC="$REPO_ROOT/map/shared/dem"
+  DEM_DEST="$REMOTE/map/shared/dem"
+  if [ -d "$DEM_SRC" ]; then
+    echo "Uploading map/shared/dem/ (~22GB, this will take a while) ..."
+    $RCLONE sync "$DEM_SRC" "$DEM_DEST" \
+      --progress \
+      --transfers 4 \
+      --exclude "*.aux.xml" \
+      $DRY_RUN
+    echo "Done: map/shared/dem/"
+  else
+    echo "WARN: $DEM_SRC not found, skipping."
+  fi
+fi
+
+echo ""
+echo "Upload complete."
