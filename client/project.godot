@@ -49,6 +49,7 @@ theme/custom_font="uid://b3t4ddnq56emc"
 
 [rendering]
 
+textures/canvas_textures/default_texture_filter=0
 rendering_device/driver.windows="d3d12"
 
 [steam]

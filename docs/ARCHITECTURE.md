@@ -1,7 +1,7 @@
 # Grand Strategy Multiplayer — Architecture Reference
 
 > Internal reference. Feed this file to Claude Code at the start of every coding session.
-> Last updated: May 2026.
+> Last updated: June 2026.
 
 ---
 
@@ -41,7 +41,7 @@ Session-based RTS grand strategy multiplayer. HoI4 depth, evening-friendly sessi
 | Framework | Hono + Bun (TypeScript) |
 | Hosting | Railway (same project as Colyseus, separate service) |
 | ORM | Drizzle ORM |
-| Role | Steam auth bridge, REST API for persistent data, internal Colyseus↔Supabase bridge |
+| Role | Steam auth bridge, REST API for persistent data, internal Colyseus↔Supabase bridge, lobby management |
 
 ### Persistence
 | Concern | Technology |
@@ -66,7 +66,8 @@ Godot client
 
 Hono (Railway)
   ├── Drizzle ORM ────────→ Supabase Postgres  — writes via service_role key
-  └── Steam Web API ──────→ api.steampowered.com — ticket verification
+  ├── Steam Web API ──────→ api.steampowered.com — ticket verification
+  └── LobbyStore ─────────→ In-memory           — active lobby state (not persisted)
 
 Colyseus (Railway)
   └── Internal HTTP ──────→ Hono /internal/*   — load templates on start, write results on end

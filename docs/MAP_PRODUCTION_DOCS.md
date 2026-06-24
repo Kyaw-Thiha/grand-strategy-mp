@@ -164,7 +164,28 @@ Finally, all roads are clipped to the province union so no segment extends outsi
 
 **Port deduplication:** The remaining ports (those not merged into a city) are deduplicated per province. Within each province, if two or more ports are within 0.3° of each other, only the one with the lowest port_id (earliest in the original Natural Earth selection) is kept. This removes redundant clusters like Rotterdam/Hook of Holland or Gdańsk/Gdynia that represent the same port complex.
 
-### 7. Client Asset Build (`tools/map_pipeline/pipeline.py`)
+### 7. R2 Asset Sync (`scripts/r2/`)
+
+Map GeoJSONs and pipeline output are gitignored (too large). They live in Cloudflare R2 and are
+synced with two scripts. See `scripts/r2/README.md` for credential setup.
+
+`rclone.conf` is auto-generated on first run — no manual setup step needed after filling in `.env`.
+
+```bash
+# New collaborator / fresh checkout — pull everything down
+./scripts/r2/download.sh
+
+# After editing map data or re-running the pipeline — push changes up
+./scripts/r2/upload.sh
+
+# DEM tiles only needed if regenerating the heightmap from scratch (~22GB)
+./scripts/r2/download.sh --include-dem
+./scripts/r2/upload.sh --include-dem
+```
+
+---
+
+### 8. Client Asset Build (`tools/map_pipeline/pipeline.py`)
 
 Converts the finished GeoJSONs into files Godot and the server actually consume.
 
