@@ -108,7 +108,7 @@ Don't render all available information permanently and unconditionally. Render t
 *always-relevant* layers ambiently, and reveal *situational* layers only when they're
 relevant to what the player is currently doing (a unit is selected, a hover is active,
 combat is about to start). This principle recurs throughout this spec — see also
-§5 (province quick-actions), §5 (bottom panel terrain strip), §7 (Tab attention-cycle).
+§5 (province quick-actions), §5 (bottom panel terrain strip), §8 (Tab attention-cycle).
 
 ### Why a single "show everything" map mode doesn't work
 
@@ -188,7 +188,7 @@ in the genre's own playerbase.
 **Switching mechanism:** single cycle key (backtick) steps forward through the three
 modes; Shift+backtick steps backward. Three dedicated keys were considered and rejected
 — a 3-state cycle is trivial to reason about and costs one key instead of three. See
-§8 for full keybind rationale.
+§9 for full keybind rationale.
 
 ### 4.1 Relationship-ring overlay (held key, Political mode only)
 
@@ -438,7 +438,7 @@ commit an unwanted placement.
 ### 6.4 Forward-compatibility note
 
 Hover-preview is mouse-first. If full keyboard-driven template building is pursued
-later (consistent with the broader keybind philosophy in §8), arrow-key highlight
+later (consistent with the broader keybind philosophy in §9), arrow-key highlight
 should trigger the same detail-preview update, with Enter/Space committing placement
 — not designed in this pass, flagged so it isn't precluded by the implementation.
 
@@ -457,9 +457,186 @@ not just a category abbreviation. Revisit once panel structure and the State
 2 / 6.1a interaction flow are confirmed working — don't invest in final art before
 the layout it sits inside has stabilised.
 
+### 6.6 Unit Profile — full detail view (info button target)
+
+The compact detail callout (§6.1, §6.1a) is deliberately small — it's designed to be
+glanced at while comparing units or recalling a placement, inside a screen the player
+might also be playing under some time pressure. It is **not** the right place to put
+everything a curious player might want to know about a unit. That fuller view is a
+separate, dedicated component: the **Unit Profile**.
+
+**Why this needs to be a separate view, not an expanded callout:**
+
+The Division Builder is the one screen in this entire game where the no-pause
+constraint does not apply — composition happens between matches or in a lobby, at
+the player's own pace. Every other UI decision in this document optimises for
+minimal friction because time always costs something in this game; the builder is
+the exception, and deserves a UI mode that reflects that — "chill," explorable,
+rewarding a player who wants to read deeply, without that depth ever being forced on
+a player who doesn't.
+
+Additionally — and this is the more important reason — **research changes are not
+always stat deltas.** Some research upgrades a number (Armour's Hard stat +12%).
+Others change a unit's *structure*: a new attack-pattern behaviour, an additional
+formation-bonus eligibility, or unlocking an entirely new unit type (e.g.
+Mechanised Infantry via the armour branch, per `TACTICAL_COMBAT.md`). An inline "+12%
+→" arrow can represent the first kind of change. It cannot represent the second kind
+at all. These need prose and, where useful, a diagram — which requires real space,
+not a corner of an already-small callout.
+
+**Trigger:** an info affordance on each unit (visible in the eligible list, and on
+the compact detail callout) — clicking it opens the Unit Profile, replacing or
+expanding the right column for as long as the player wants to stay there.
+
+**Contents, ordered by priority (quick glance still works; depth is available, not
+forced):**
+
+1. **Identity header** — name, and the unit's full visual. This slot is built
+   **renderer-agnostic from the start**: it shows whatever the unit's current skin
+   produces, whether that's the placeholder glyph, a future NATO-style silhouette, or
+   a paid 3D/illustrated cosmetic skin. This is also where a purchased cosmetic skin
+   is most worth showing off, since the player is deliberately looking, not glancing
+   mid-battle — a natural showcase moment for the cosmetic tier described in §2.
+2. **Current stats** — the same numbers as the compact callout, given proper room
+   rather than compressed.
+3. **Attack pattern, explained and shown** — plain-language description of the
+   unit's actual targeting behaviour (row / column / AOE / full-grid-priority /
+   recon-weighted-random, per `TACTICAL_COMBAT.md`'s archetypes) plus a small static
+   diagram reusing the **same overlay-shape visual language** specified for the
+   Tactical Combat Panel in §7 (column highlight for Armour, AOE rectangle for
+   Flamethrower, priority-number list for Sniper, etc.). Reusing that visual
+   vocabulary here means a player who studies a unit in the builder already
+   recognises its overlay shape later, live, in combat — and a player who never
+   opens this view still gets the same information for free in-combat via hover.
+4. **Research outlook** — structural changes get described as what they are, not
+   forced into a stat-delta format that doesn't fit them:
+   - Pure stat upgrades: shown as before/after value pairs.
+   - Structural changes (new targeting behaviour, new perk, a newly-unlocked unit
+     type): shown as their own labelled callout in plain language (e.g. "🔬 Combined
+     Arms Doctrine — unlocks Mechanised Infantry"), not squeezed into a numeric
+     delta.
+5. **Flavour / history blurb** — short, period-appropriate description, purely for
+   immersion. Lowest priority in the layout (bottom), easiest to ignore, never
+   competes with the functional sections above it for attention.
+
+**Reuse in the Tactical Combat Panel:** this same component — not a redesigned copy
+— is what opens when a player clicks a unit during live combat (§7.4). In that
+context a player under time pressure will naturally stop at section 2 or 3 and
+never scroll to the history blurb; a player studying their builder pre-match may
+read all five. One component serves both contexts because the *player's own
+urgency* determines how deep they go — the UI doesn't need to enforce brevity by
+cutting content, the way it must elsewhere in this document for genuinely
+time-pressured in-match panels.
+
 ---
 
-## 7. Notifications & Attention
+## 7. Tactical Combat Panel
+
+Source: `TACTICAL_COMBAT.md`'s already-specified content list for the panel opened
+via the combat button (HP/suppression bars, experience badges, formation bonus
+glow, row perk labels, attack pattern overlay, recon indicator, terrain modifier
+display, round timer) and the five-phase escalation system (Contact → Firefight →
+Intense → Decisive → Annihilation). This section designs the *visual language* for
+that already-specified content — the content list existed; how it reads to a player
+at a glance did not.
+
+### 7.1 Why this panel reuses the Division Builder's grid, not a new visual system
+
+The builder already establishes a 5×5 grid vocabulary (cell size, row labels, unit
+glyphs) that the player learns for free while composing templates pre-match. The
+combat panel reuses that vocabulary directly rather than inventing a second grid
+language: same cell size, same row labels, same unit glyphs. A player who has only
+ever used the builder should be able to read the combat grid on first sight.
+
+**Spatial arrangement:** two grids face each other — own grid on one side, enemy
+grid mirrored on the other, both R5 rows oriented toward the shared centreline. This
+visually replicates "two front lines meeting" rather than presenting both grids in
+the same orientation, which would obscure the row-5-faces-row-5 relationship that
+matters mechanically.
+
+### 7.2 Ambient state — visible without hovering anything
+
+Per the existing content spec, every cell already shows HP bar, suppression bar, and
+experience tier badge. Add one ambient layer not yet specified: **a soft highlight
+on whichever row/column/zone is the primary target this round**, shown collectively
+rather than per-unit — attacks resolve simultaneously across many units each round
+(`TACTICAL_COMBAT.md`), so a glance should communicate "this area is hot right now"
+without needing per-unit arrows cluttering every cell by default. Per-unit detail is
+reserved for hover (§7.3), consistent with the conditional-reveal principle used
+throughout this document (§3, §5.6, §5.7).
+
+### 7.3 Hover — attack pattern overlay, one shape per archetype
+
+Hovering a friendly unit overlays its actual targeting behaviour on the enemy grid,
+using a distinct shape per archetype so the *shape itself* teaches the rule, rather
+than requiring the player to read it in a tooltip:
+
+| Archetype | Overlay shown on hover |
+|---|---|
+| Infantry / MG | Highlight the entire frontmost-occupied enemy row |
+| Armour | Highlight own column from current row to enemy R5; fainter secondary highlight on the column it would shift to if its own column is empty (previews the flanking contingency before it happens) |
+| AT (infantry/gun) | Highlight own column; fainter highlight on the shift-target column if empty |
+| Sniper | Numbered priority markers (1, 2, 3…) on its actual current potential targets this round, not a generic full-grid highlight — this is the only way to make the priority-list rule (`TACTICAL_COMBAT.md`: snipers → flamethrowers → force recon → MG → AT gun → standard infantry fallback) visible rather than implicit |
+| Flamethrower | The literal 3-column × 2-row AOE rectangle, anchored exactly per the rule (1 row ahead, own column ± 1, clamped to grid edges) |
+| Artillery | A dot-density heatmap across the enemy grid — denser near currently-occupied cells, proportional to the division's accumulated recon value; sparse and scattered at zero recon |
+
+**Why the artillery heatmap matters more than it looks:** this is the clearest case
+of the stated goal — "so players can improve in the future" — being served by the
+visual itself rather than by rules text. A player who hovers their artillery and
+*sees* a sparse, scattered heatmap immediately understands "I need more recon" as a
+visceral, visual fact, without reading a paragraph explaining recon-weighting. The
+overlay is the lesson.
+
+### 7.4 Click — opens the Unit Profile (§6.6), not a separate component
+
+Clicking a unit (friendly always; enemy only within current visibility rules) opens
+the same **Unit Profile** component specified in §6.6 — not a new, combat-specific
+detail view. This is deliberate reuse: the player already knows where to look for
+"more detail" because it's the same place the builder taught them, and the
+component itself adapts naturally to how much time the player has to spend in it
+(see §6.6's closing paragraph on context-driven depth).
+
+### 7.5 Standing/ambient information — formation bonuses, row perks, terrain
+
+These represent decisions made before this round started (row placement, adjacency),
+not live combat events — so unlike the attack-pattern overlay, they render as
+persistent ambient state, not hover-gated:
+
+- **Row perk labels:** small, persistent label on each row's edge naming its active
+  bonus (e.g. "▲ Vanguard — +suppression dealt"), always visible — row choice is a
+  standing decision, not a momentary one, and deserves a standing label.
+- **Formation bonus glow:** persistent soft glow between synergised adjacent cells,
+  reusing the same visual treatment already specified for the Division Builder
+  (§6.1) — one consistent "this adjacency is active" language across both screens.
+- **Terrain / river modifiers:** a compact banner above both grids (e.g. "River
+  crossing — Major: −30% suppression resistance, 2 rounds remaining") rather than
+  buried in a per-unit tooltip, since these affect the whole engagement, not one
+  unit.
+
+### 7.6 Round phase — making escalation legible at a glance
+
+A five-segment horizontal progress strip above the grids, matching the existing
+phase names (Contact → Firefight → Intense → Decisive → Annihilation), with the
+current phase lit and a round timer countdown beneath it. The strip's visual
+intensity should escalate with the phase it represents — muted colour and a slow
+pulse at Contact, increasingly saturated (toward red) and faster pulse by
+Annihilation — so the *feel* of the strip reinforces the actual mechanical
+escalation (`TACTICAL_COMBAT.md`'s lethality ramp) rather than merely labelling it.
+A player should sense rising stakes before reading a single number.
+
+### 7.7 Flanking angle indicator
+
+Per `STRATEGIC_COMBAT.md`/`TACTICAL_COMBAT.md`, when a second attacker is present the
+panel must show the measured flanking angle and which bonus tier (standard
+90°–135°, deep/rear 135°–180°) is currently active. Render this as a simple angular
+wedge indicator near the affected division's grid edge, with the active tier's name
+shown directly on it — consistent with the rest of this panel's philosophy: name the
+mechanic in plain language at the point where it's currently relevant, rather than
+requiring a tooltip lookup.
+
+---
+
+## 8. Notifications & Attention
 
 - A `NotificationSystem` (already specified in `MODULES.md`) queues toasts for combat,
   diplomacy, economy, and supply events.
@@ -473,7 +650,7 @@ the layout it sits inside has stabilised.
 
 ---
 
-## 8. Keybind System
+## 9. Keybind System
 
 ### 7.1 Governing principles
 
@@ -485,7 +662,7 @@ the layout it sits inside has stabilised.
 3. **Shift is one consistent modifier grammar:** expand / queue / alternate-target —
    reused identically everywhere (waypoint chaining, control-group add, all-chat,
    map-mode-reverse) rather than meaning something different per key.
-4. **Escape is one recursive rule**, not a list of special cases (see §8.6).
+4. **Escape is one recursive rule**, not a list of special cases (see §9.6).
 5. Right hand stays on the mouse; all primary binds are left-hand reachable. Left-handed
    mirror preset ships as a first-class alternative, not an afterthought. All bindings
    remappable via Godot `InputMap`.
@@ -549,7 +726,7 @@ the layout it sits inside has stabilised.
 **System**
 | Key | Action |
 |---|---|
-| Escape | Context-sensitive back-out (see §8.6) |
+| Escape | Context-sensitive back-out (see §9.6) |
 
 ### 7.3 Why Space for Move, not M or F
 
@@ -582,7 +759,7 @@ transfer learning.
 
 An unbroken top-row run was considered (and is a clean teaching device: "it's the top
 row"). It was rejected because R collides with Retreat, which earns its slot on
-ergonomics grounds established in §8.4, and panel-switching is needed far less often
+ergonomics grounds established in §9.4, and panel-switching is needed far less often
 mid-combat than Retreat is. The very slightly less elegant Q/E/T/Y pattern is the
 correct trade: Retreat keeps the reach it needs when a player is under pressure;
 panels, switched much less frequently, can absorb the minor irregularity. Future
@@ -619,7 +796,7 @@ here as closed, not pending — no keys are reserved for it.
 
 ---
 
-## 9. Open Items / Future Work
+## 10. Open Items / Future Work
 
 - Politics and Espionage panels: reserved hotkey slots (U, I) exist; no UI content
   designed yet pending those systems landing (per `DEV_PHASES.md` Phase 12).

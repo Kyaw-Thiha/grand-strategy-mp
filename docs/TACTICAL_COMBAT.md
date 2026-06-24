@@ -181,6 +181,22 @@ exposing rear rows to subsequent rounds.
 
 **Recon infantry:** Identical pattern but contributes recon value each round.
 
+**Design intent — standard infantry as the cheap, disposable delay unit:** standard infantry's
+build cost is deliberately the lowest in the entire unit roster, by a wide margin. It is not
+designed to win engagements against a properly combined-arms force — its role is to make
+holding a wide or thin front economically trivial, so that a breakthrough against a screening
+line of standard infantry is never an automatic collapse of the whole front. Three existing
+mechanics already support this without further changes: the five-phase lethality escalation
+(Contact → Firefight → Intense → Decisive → Annihilation) means a weak division facing a
+stronger attacker absorbs only a soft version of the fight in the opening rounds, giving the
+defending player time to reinforce or retreat rather than losing the engagement immediately;
+the 20% HP incapacitation floor (the most forgiving floor of any unit category) means a
+mauled infantry-heavy division loses comparatively little permanently; and 60% experience
+retention on incapacitation means even a badly handled defensive screen keeps most of its
+accumulated value. The combined effect: fielding standard infantry across a wide defensive
+front should always be economically sound for any nation, regardless of how the rest of that
+nation's army is built, because the cost of doing so is trivial relative to total economy.
+
 ---
 
 ### Machine gun — horizontal attack, suppression specialist
@@ -670,79 +686,149 @@ dedicated anti-stealth units are present.
 
 ### How terrain is determined for combat
 
-**Defender's terrain is primary.** When combat initiates, the terrain modifiers (cover and
-elevation bonuses/penalties) are sampled at the **centre of the defending division's position**
-on the strategic map. The server reads the province's `terrain_elevation` and `terrain_cover`
-fields from `map_data.json` — pre-computed O(1) lookups, not per-pixel sampling at runtime.
+**Both divisions' terrain is sampled, not just the defender's.** When combat initiates, the
+server reads each division's own province `terrain_elevation` and `terrain_cover` fields from
+`map_data.json` — pre-computed O(1) lookups, not per-pixel sampling at runtime. This is a
+change from treating the defender's terrain as the sole input: elevation and cover are no
+longer combined into a single defender-bonus/attacker-penalty pair. Instead, each bonus type
+follows one of two distinct rules, depending on what it represents physically:
 
-**Defender receives:** terrain defense bonuses from the MAP_DATA_CONTRACT composable system
-(`defense_bonus = elevation_def + cover_def`).
+**Comparative bonuses (elevation) — cancel when both sides match, otherwise only the higher
+side benefits.** Elevation represents a genuinely *relative* advantage — shooting downhill at
+someone below you. It only means anything as a comparison between the two positions:
 
-**Attacker receives:** terrain attack penalty from the same composable system
-(`attack_penalty = elevation_atk + cover_atk`).
+```
+elevation_bonus[side] = elevation_atk_value[side.elevation]
+                        if side.elevation_tier > other_side.elevation_tier
+                        else 0
+```
 
-**Transition modifier:** The attacker's terrain is also checked to apply a secondary modifier
-to the attacker's penalty:
-- Attacker terrain tier **better** than defender (e.g. plains attacking into dense_forest):
-  full attacker penalty applied
-- Attacker terrain tier **same** as defender (e.g. both in forest): attacker penalty reduced
-  (~50% of standard penalty — attacker is not coming from worse conditions)
-- Attacker terrain tier **better** in elevation (e.g. hills attacking into flat):
-  attacker penalty further reduced (elevation advantage partially offsets defender terrain)
+If both divisions are at the same elevation tier, neither has a relative high-ground
+advantage — the bonus is zero for both, not just reduced. If the attacker holds hills and the
+defender is on flat ground, the **attacker** gets the elevation bonus — this is a genuine
+change from the previous model, where elevation only ever favoured the defender's terrain.
+Elevation advantage belongs to whichever side is physically higher, attacker or defender.
 
-Tier ordering for comparison: `flat < hills < mountains` for elevation;
+**Absolute bonuses (cover) — never cancel, both sides receive their own independently.** Cover
+represents concealment and physical obstruction, which is a property of where a given side is
+standing, not a comparison between the two sides. Two divisions both fighting from within
+dense forest both get real concealment from each other and from outside observation,
+simultaneously — there is no reason for matching cover to cancel either side's bonus:
+
+```
+cover_bonus[side] = cover_def_value[side.cover]   # always applied, independent of the other side
+```
+
+Tier ordering, still used for the river/transition logic below but no longer used to cancel
+cover bonuses against each other: `flat < hills < mountains` for elevation;
 `plains/steppe < shrubland < light_forest/urban < dense_forest < jungle/swamp` for cover.
 
-This is a 3-value lookup (better / same / worse), not a full combinatorial matrix.
+**What this changes concretely:** previously, only the defender's terrain mattered for cover
+and elevation, and the attacker's own terrain only modified the size of the attacker's
+*penalty* via a better/same/worse transition check. Now, both sides independently compute
+their own elevation bonus (comparative, can be zero for one or both sides) and their own cover
+bonus (absolute, never zero just because the other side shares it). An attacker fighting from
+their own patch of forest into a defender's open ground gets their own forest cover bonus —
+something the previous model could not represent at all.
+
+**Attack penalty stays attacker-specific and terrain-derived, unchanged in spirit:** the
+attacker still takes a movement/attack friction penalty derived from the *defender's* terrain
+group (`cover_atk[defender.cover]`), since attacking into difficult ground is still harder
+regardless of where the attacker is coming from. This is a friction cost, not a bonus, and
+friction costs are not subject to the comparative/absolute split above — they were never
+about who has the advantage, only about how hard the ground being attacked into is to assault.
+
+**Transition modifier on the attack penalty (unchanged):** the attacker's own terrain still
+checks against the defender's terrain tier to scale that penalty:
+- Attacker terrain tier **better** than defender's (e.g. plains attacking into dense_forest):
+  full attacker penalty applied
+- Attacker terrain tier **same** as defender's (e.g. both in forest): attacker penalty reduced
+  (~50% of standard penalty — attacker is not coming from worse conditions)
+- Attacker terrain tier **better** in elevation (e.g. hills attacking into flat): attacker
+  penalty further reduced (elevation advantage partially offsets the difficulty of the ground
+  being assaulted)
+
+This remains a 3-value lookup (better / same / worse) applied only to the attack-penalty
+friction cost — it does not interact with the comparative elevation bonus or the absolute
+cover bonus described above, which are computed independently for both sides.
 
 ### Unit-type terrain bonuses and restrictions
 
-These bonuses stack on top of the base composable modifiers from MAP_DATA_CONTRACT.
-Exact numeric values are refined in playtesting; the qualitative rules are confirmed.
+These bonuses stack on top of the base composable modifiers above. Exact numeric values are
+refined in playtesting; the qualitative rules are confirmed. Per the asymmetric model just
+established, **every bonus below applies to whichever side (attacker or defender) occupies
+that terrain** — these are no longer defender-only. Where a terrain group's primary bonus is
+elevation-derived (hills, mountains), it remains subject to the comparative cancel-on-match
+rule; where it is cover-derived (forest, urban, etc.), both sides receive it independently and
+it never cancels.
 
-**`plains` / `steppe`:**
-- Armour: +% flanking damage bonus, +% column shift speed (room to manoeuvre)
+**`plains` / `steppe`:** (cover-derived, absolute)
+- Armour: +% flanking damage bonus, +% column shift speed (room to manoeuvre) — applies to
+  whichever side's armour is on this terrain
 - Artillery: +% recon accumulation rate per round (clear sightlines)
 - Infantry: no cover bonus; −% suppression resistance (no concealment)
 
-**`light_forest`:**
+**`light_forest`:** (cover-derived, absolute)
 - Infantry: +% suppression resistance
 - AT gun (specialised): +% penetration vs armour (ambush angles)
 - Snipers: high stealth value
 - Armour: −% flanking damage (reduced manoeuvre room)
 
-**`dense_forest`:**
+**`dense_forest`:** (cover-derived, absolute)
 - Infantry, AT gun: bonuses stronger than light_forest
 - Armour: cannot use column shift flanking at all — fires only in own column
 - Armour: may not enter dense_forest off-road (strategic map movement restriction)
+- A future armour research branch may grant limited dense_forest passability to a
+  specialised variant as a doctrinal choice — not in the base game; tracked as an open
+  extension point, not a current rule
 
-**`jungle`:**
+**`jungle`:** (cover-derived, absolute)
 - Recon infantry: +% recon accumulation rate
 - Infantry: +% suppression resistance
 - Armour: impassable — cannot enter jungle even on road for tactical combat purposes
 - Artillery: −% damage (poor sightlines, recon accumulation impaired)
 
-**`urban`:**
-- Infantry: +% suppression resistance (street fighting cover)
+**`urban`:** (cover-derived, absolute — and deliberately the strongest infantry cover bonus
+in the game, retained as defender-favouring in spirit even under the symmetric model)
+- Infantry: +% suppression resistance (street fighting cover) — the largest infantry cover
+  bonus of any terrain group, intentionally. Urban terrain's whole identity is built around
+  rewarding whoever is dug into the city, which in practice is overwhelmingly the defender:
+  a defender's division is already sitting in the city at combat initiation, while an
+  attacker fighting *into* urban terrain has to physically close through streets the
+  defender already controls and has had time to prepare. The symmetric absolute-cover rule
+  does not weaken this — it means an attacker who themselves ends up fighting from within the
+  same city (a meeting battle resolving inside an urban province, or an attacker who
+  Repositions into the urban area) also gets the bonus, the same way a defender entering
+  forest mid-engagement would. This is correct: it rewards control of the urban terrain
+  itself, regardless of nominal attacker/defender label, exactly like a river crossing
+  rewards whoever has actually completed it rather than whoever was labelled attacker at
+  combat start. It does not make urban terrain attacker-favouring — an attacker still has to
+  fight through streets the defender already holds to get any benefit at all, and the
+  defender had it from round one without needing to manoeuvre for it.
 - Snipers: maximum stealth value, +1 priority target bonus
 - Armour: cannot use column shift flanking (streets force straight movement)
 
-**`hills`:**
-- Artillery: +% damage (elevation advantage)
-- Infantry: +% suppression resistance
+**`hills`:** (elevation-derived bonus, comparative; cover-adjacent bonuses below remain
+absolute)
+- Artillery: +% damage — this is the elevation advantage and follows the comparative rule:
+  applies only if the artillery's side holds a strictly higher elevation tier than the
+  opposing side; cancels if both sides are at the same elevation
+- Infantry: +% suppression resistance — this part is treated as a cover-adjacent absolute
+  bonus (broken ground, dug-in positions), not elevation, so it does not cancel on match
 - Armour: −% flanking damage
 
-**`mountains`:**
+**`mountains`:** (elevation-derived bonus, comparative, plus a hard movement restriction)
 - Infantry divisions only — armour, motorised, artillery divisions cannot enter off-road
 - Road-only access for all non-infantry division types
-- Infantry: strong suppression resistance bonus
+- Infantry: strong suppression resistance bonus, treated as absolute (dug-in mountain
+  positions), not subject to the elevation-cancel rule
 
 **`swamp` / `glacier` / `tundra`:**
 - No unit gains bonus
 - Armour: impassable off-road; road-only
 - All divisions: significant movement penalty (already in MAP_DATA_CONTRACT)
 
-**`desert`:**
+**`desert`:** (cover-derived, absolute)
 - Armour: +% mobility bonus (open ground)
 - Recon units: +% detection
 - Infantry: −% suppression resistance (no cover)
@@ -750,29 +836,71 @@ Exact numeric values are refined in playtesting; the qualitative rules are confi
 ### River crossing effects
 
 The server checks whether the line segment between the two division centre points intersects
-any river LineString in `rivers.geojson`. The check uses `river_size` from the river feature.
-This check is performed once at combat initiation — not every round.
+any river LineString in `rivers.geojson` at combat initiation. The check uses `river_size`
+from the river feature to set the penalty tier and the **cap** on how long that penalty can
+persist — but unlike most other terrain checks, river crossing status is **re-evaluated
+continuously during combat**, not snapshotted once. This is a deliberate exception to the
+"defender's terrain sampled at initiation" rule elsewhere in this document, made possible by
+(and made meaningful by) the Reposition movement state — see Reposition below.
 
-River crossing debuffs apply to the **attacker only**, during early rounds only:
+River crossing debuffs apply to the **attacker only**:
 
-| river_size | Suppression resistance penalty | HP damage penalty | Duration |
+| river_size | Suppression resistance penalty | HP damage penalty | Cap (rounds) |
 |---|---|---|---|
-| `minor` | −15% suppression resistance | −10% HP damage | Rounds 1–2 only |
-| `major` | −30% suppression resistance | −25% HP damage | Rounds 1–3 |
+| `minor` | −15% suppression resistance | −10% HP damage | 2 rounds max |
+| `major` | −30% suppression resistance | −25% HP damage | 3 rounds max |
 
-Penalty fades after the specified rounds — troops have completed the crossing and reformed.
-This is intentionally harsher than a flat static penalty: the crossing moment is the
-dangerous part, not the fighting once across.
+**The cap is a ceiling, not a fixed duration.** A division is considered "crossing" for as
+long as its current position remains on the opposite side of the river line from where it
+started the engagement. The penalty is removed the round the division's position crosses the
+river line — which can happen earlier than the cap if the attacker actively commits a
+Reposition order toward the far bank and the crossing distance is short, or can ride out the
+full cap if the attacker does nothing (the default, passive outcome — identical to what a
+player who never opens the combat panel already experiences) or if the defender's positioning
+maximises the crossing distance (see Reposition below).
+
+This is intentionally a skill lever, not a flat cost: a player who recognises the river
+penalty and actively repositions to close the crossing distance is rewarded with an earlier
+end to the debuff. A player who does nothing experiences exactly the documented cap as a
+worst case — nobody is ever penalised longer than the numbers above, only potentially less.
 
 The adjacency contract already encodes river crossings via `border_type: "river"` edges.
-The tactical combat system reads the river geometry directly for the crossing check.
+The tactical combat system reads the river geometry directly for the crossing check, and
+re-checks each engaged division's position against that line each round for the duration of
+the cap.
 
 ---
 
 ## Attacker and Defender Determination
 
 Combat initiates when two engagement area circles fully overlap. Attacker/defender status is
-determined automatically using a four-tier system — no player input required.
+determined automatically using a five-tier system — no player input required.
+
+### Tier 0 — War declared while engagement areas already overlap
+This is checked first, before any movement-based tier, and covers a case the movement tiers
+cannot resolve: two divisions sitting stationary and already overlapping while their nations
+are neutral toward each other, with war then declared between them. No movement triggered the
+overlap, so there is no movement vector to read.
+
+If two divisions' engagement areas are already overlapping at the instant a war state begins
+between their nations, **the nation that declared war is automatically the attacker.** The
+other nation is the **defender** and receives its terrain bonuses (including the river
+crossing penalty against the declaring nation, if applicable).
+
+This is evaluated once, at the instant war begins, and only applies to that instant. Any
+subsequent movement decision by either side — one issuing ADVANCE, one issuing HOLD, or both
+adjusting position — is evaluated normally through Tiers 1–3 from that point forward; Tier 0
+does not lock the assignment for the rest of the engagement, only for how it began.
+
+**Why this is the correct assignment, not Meeting Battle:** nothing physically changed at the
+moment war began — the only event that occurred is a diplomatic one, and the nation that chose
+to declare war is, causally, the side that converted a neutral standoff into a fight. A
+declaring nation always retains the option to manoeuvre its division away from a pre-existing
+overlap before declaring, and be evaluated normally afterward; Tier 0 only applies when a
+player chooses to declare while already nose-to-nose with a neutral division. A defending
+nation's forward positioning before any war exists is a real commitment with its own
+tradeoffs (reduced flexibility, exposure to being struck first elsewhere) — Tier 0 does not
+make forward deployment a free, costless bet on a future defender bonus.
 
 ### Tier 1 — Explicit orders (clearest case)
 If one division has an active ADVANCE order toward the enemy's province and the other has a
@@ -807,7 +935,8 @@ both sides). They also create a strategic incentive: reaching a province first a
 it converts a meeting battle into a proper defence with terrain bonuses.
 
 ### Tier 4 — Fallback tie-breaker
-Both divisions stationary, or vectors genuinely identical: the nation with fewer total
+Both divisions stationary, or vectors genuinely identical, with no war just declared between
+their nations (Tier 0 already covers the war-declaration case): the nation with fewer total
 province holdings at that moment is the **defender** (smaller nation assumed on the back
 foot). Rare edge case.
 
@@ -816,6 +945,77 @@ foot). Rare edge case.
 division's operational radius. Square engagement areas create axis-aligned geometric artifacts
 with diagonal rivers and irregular terrain borders. Circle radii vary by division type as
 established in STRATEGIC_COMBAT.md (armoured largest, defensive smallest).
+
+---
+
+## Movement During Combat: Reposition
+
+An engaged division is not frozen in place for the duration of combat. Two distinct
+active-movement options exist while engaged, deliberately kept far apart in speed so neither
+is confused for the other:
+
+- **Retreat** — full or boosted speed, available once Suppressed, exits the engagement.
+- **Reposition** — a new, slower movement option, available only while **below** the retreat
+  threshold (i.e. not yet Suppressed), that moves the division a short distance *within or
+  adjacent to* the current engagement without exiting combat.
+
+**Speed:** combat itself imposes a baseline speed reduction on any engaged division — roughly
+30% of normal off-road speed — representing the practical difficulty of manoeuvring while
+under fire. Reposition moves at a further fraction of that already-reduced speed (a
+deliberate crawl, slower than general in-combat movement capability), reflecting that
+deliberately repositioning toward better ground is harder than simply holding a position
+under the same fire. Exact constants are a playtesting question (see Open Questions); the
+relative ordering is fixed: Reposition speed < general in-combat speed < Retreat speed.
+
+**Availability:** Reposition is only available while the division's suppression is below the
+retreat threshold. A Suppressed division cannot Reposition — at that point Retreat is the only
+active-movement option. This boundary is intentional: without it, Reposition could function as
+a "soft retreat" that lets a player dodge the Suppressed state's consequences, undermining why
+that state exists.
+
+**Trigger — explicit and separate from ordinary move orders, never automatic.** Reposition
+does not happen as a side effect of any pre-existing order. If a division already had a move
+order queued before combat began, that order follows the existing Move Order Persistence rule
+(see STRATEGIC_COMBAT.md) — it is held and resumed automatically once the engagement ends, the
+same as it always has been. It does **not** retroactively become a Reposition attempt just
+because the division is now engaged. A player who wants in-combat repositioning must issue a
+**new, distinct command** while the division is already engaged — either a fresh Reposition
+order, or (UI detail, not yet finalised) a Move order specifically reissued after engagement
+has started, which the client/server distinguish from a pre-combat move order by the fact
+that it is issued *while* the COMBAT_STARTED state is already active on that division. This
+is a deliberate extra step, not an oversight: Reposition is a niche, high-skill tool intended
+for a player actively watching a specific engagement, not a default behaviour every division
+performs automatically just because it happens to have somewhere to go. A division with a
+queued pre-combat move order that gets pulled into an engagement does nothing unusual by
+default — it simply waits, exactly as today, until the fight resolves.
+
+**Scope:** Reposition is a terrain-seeking tool, not a disengagement tool. It is intended for
+moving toward better ground within or immediately adjacent to the current engagement — for
+example, a division caught on a road repositioning into nearby forest for the cover bonus, or
+an attacker pushing toward the far bank of a river it is currently crossing (see River
+crossing effects, above, and the riverbank positioning note below). It is not a general means
+of disengaging without paying Retreat's costs.
+
+**Terrain re-evaluation:** because Reposition can move a division across a terrain boundary
+mid-engagement, terrain modifiers for an engaged division are **not** purely a one-time
+snapshot taken at combat initiation for the duration of the fight — they are re-sampled as
+the division's position changes via Reposition (continuously for river-crossing status, as
+described above; on Reposition completion for cover/elevation terrain). Other terrain rules
+in this document (the defender-primary sampling rule, the attacker/defender transition
+modifier) are unaffected — Reposition changes *where* a division's terrain is sampled, not
+which sampling rules apply once it's there.
+
+**Riverbank positioning, restated precisely given Reposition's existence:** because an
+attacker's river-crossing penalty is capped, not fixed, and ends the round their position
+crosses the river line, a defender who sets up **well back from the riverbank** (rather than
+tight against it) forces an attacker who has physically crossed to still cover further ground
+before reaching the defender — keeping the attacker exposed to the river penalty, or to the
+general in-combat speed reduction while still vulnerable, for longer. A defender sitting tight
+against the bank shortens the attacker's effective crossing distance and lets a fast, well-
+microed attacker shed the river penalty and close the gap sooner. This is a genuine
+positional decision for the defender, not a fixed rule — it trades easier early access to the
+engagement (tight to the bank) against denying the attacker an early end to their penalty
+(set back from it).
 
 ---
 
@@ -922,6 +1122,20 @@ The panel can be closed at any time. Combat continues regardless.
   exact value from playtesting)
 - River crossing penalty exact values (minor: −15% suppression resistance, −10% HP damage;
   major: −30%, −25% — confirmed qualitatively, exact numbers from playtesting)
+- General in-combat movement speed reduction (target: roughly 30% of normal off-road speed —
+  confirmed qualitatively, exact value from playtesting)
+- Reposition speed specifically, as a further fraction of the general in-combat speed
+  (confirmed qualitatively slower than general in-combat movement, faster than zero, slower
+  than Retreat — exact value from playtesting)
+- Elevation comparative bonus magnitudes per terrain tier, now applied to whichever side
+  holds the higher tier rather than defender-only (values carry over from the existing
+  elevation_def table; confirm they still feel correct once attacker-side application is
+  possible)
+- Standard infantry build cost relative to every other unit type — confirmed qualitatively
+  as "lowest by a wide margin," exact resource cost vector from playtesting and balance
+  against the broader unit-economy build-cost model
+- Division count band per map size (target: roughly 5–15 per player, scaling with map size —
+  confirmed qualitatively, exact numbers per small/large map from playtesting)
 
 ---
 
