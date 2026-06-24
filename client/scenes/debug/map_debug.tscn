@@ -8,7 +8,7 @@
 [ext_resource type="Script" uid="uid://dfwuurc2gegdp" path="res://src/systems/military/military_system.gd" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/game/pause_menu.tscn" id="7"]
 [ext_resource type="Texture2D" uid="uid://cuvkcr4ohyy2h" path="res://assets/ui/setting-gear.png" id="8"]
-[ext_resource type="Script" uid="uid://c3mnf7bq2xk9p" path="res://src/systems/map/vision_system.gd" id="9"]
+[ext_resource type="Script" uid="uid://c3mnf7bq2xlap" path="res://src/systems/map/vision_system.gd" id="9"]
 
 [node name="MapDebug" type="Node" unique_id=693291787]
 script = ExtResource("1")
