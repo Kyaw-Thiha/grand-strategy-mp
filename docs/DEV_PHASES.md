@@ -230,15 +230,34 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Engagement area collision detection — circular areas, radius by division type;
       full overlap triggers COMBAT_STARTED
 - [ ] Attacker/defender determination at combat initiation:
-      Tier 1: explicit ADVANCE vs HOLD orders; Tier 2: movement vector angle vs intercept
-      line (<45° = attacker); Tier 3: both advancing = meeting battle (neither gets terrain
-      bonus); Tier 4: fewer province holdings = defender
-- [ ] Terrain modifiers applied at combat initiation — sample midpoint pixel for cover and
-      elevation; apply defender bonus + attacker penalty from composable modifiers;
-      apply transition modifier (attacker terrain tier vs midpoint tier)
-- [ ] River crossing check at combat initiation — line segment between division centres
-      intersects rivers.geojson → penalty applied to attacker for rounds 1-2 (minor) or
-      1-3 (major)
+      Tier 0: engagement areas already overlapping at the instant war is declared between
+      the two nations → war-declaring nation is the attacker, other nation is defender
+      (no movement involved); Tier 1: explicit ADVANCE vs HOLD orders; Tier 2: movement
+      vector angle vs intercept line (<45° = attacker); Tier 3: both advancing = meeting
+      battle (neither gets terrain bonus); Tier 4: fewer province holdings = defender
+      (only reached if Tier 0 does not apply)
+- [ ] Terrain modifiers applied at combat initiation — sample **both** divisions' positions
+      (not defender-only); elevation bonus is comparative (only the higher-tier side
+      receives it, cancels to zero for both if tiers match); cover bonus is absolute (both
+      sides receive their own cover bonus independently, never cancels on match); attacker's
+      movement/attack friction penalty remains derived from the defender's terrain group,
+      with the existing better/same/worse transition modifier applied to that penalty only
+- [ ] River crossing check — initial check at combat initiation (line segment between
+      division centres intersects rivers.geojson) sets penalty tier and a **cap** (2 rounds
+      minor, 3 rounds major), but status is **re-checked each round** for the duration of
+      the cap, not snapshotted once: penalty ends the round a division's position crosses
+      the river line, which can be earlier than the cap if Reposition closes the distance,
+      or can ride out the full cap if the division does not reposition
+- [ ] Reposition movement state — available to an engaged division only while below the
+      retreat suppression threshold (not yet Suppressed); moves a short distance within or
+      adjacent to the current engagement at a fraction of the general in-combat speed
+      (itself already reduced from normal off-road speed, ~30%); terrain (cover/elevation)
+      and river-crossing status re-sampled on Reposition completion / each round respectively;
+      distinct from and much slower than Retreat, which remains the only movement option
+      once Suppressed; **requires an explicit player command issued while COMBAT_STARTED is
+      already active on that division — never triggered automatically by a pre-existing or
+      newly-issued ordinary move order**, which always queues for execution after combat per
+      existing Move Order Persistence behaviour regardless of when it was issued
 - [ ] Observation area — divisions within observation radius appear as dots;
       movement path visible if within observation range
 - [ ] Scouting range (shorter inner circle within observation area):
@@ -423,12 +442,27 @@ Unit tests for movement profile computation and A* path validity.
 Move division → pathfinding finds road route automatically → manually draw off-road route
 through forest → armoured division cannot enter dense_forest → infantry division can.
 Bot division advances toward player → attacker/defender determined by movement vectors →
-terrain bonus applies to defender. Both advancing head-on → meeting battle icon appears,
-neither gets terrain bonus. Commit second division to already-engaged enemy → flanking
+terrain bonus applies to defender; attacker's own elevation checked too — if attacker holds
+higher elevation tier than defender, attacker receives the elevation bonus instead, and if
+both sides share the same elevation tier neither receives it, while each side's own cover
+bonus (e.g. forest) applies independently regardless of the other side's terrain or role.
+Both advancing head-on → meeting battle icon appears, neither gets terrain bonus. Two
+divisions already overlapping while neutral → war declared between their nations → declaring
+nation's division is the attacker, other division is the defender with terrain bonuses, with
+no movement having occurred. Commit second division to already-engaged enemy → flanking
 bonus applies. Stack two friendly divisions → first engages → hits suppression → rotates →
 second steps up → combat continues without physical retreat. Last stack division suppressed
 with no escape route → entire stack destroyed. Encircled armoured division → damage output
-decays over ticks → eventually deals zero damage.
+decays over ticks → eventually deals zero damage. Division with a move order already queued
+before combat begins → gets pulled into an engagement → does nothing unusual, order remains
+queued, executes automatically only after combat resolves — confirms ordinary move orders
+never auto-trigger Reposition. Division engaged but not yet Suppressed →
+issue Reposition order toward adjacent forest → division crawls at reduced speed → cover
+bonus applies once repositioned; division engaged and crossing a major river → river penalty
+active → Reposition toward far bank → penalty ends once position crosses the river line,
+before the 3-round cap, if the crossing completes early; division that does not reposition →
+rides out the full 3-round cap as before. Division reaches Suppressed state → Reposition no
+longer available, only Retreat.
 Engagement radii: pure infantry template has radius ~50; pure armoured has radius ~30;
 verify formula clamps correctly at both extremes. Enemy engagement area visible as
 faded circle — own unit moving toward enemy can see enemy's engagement area before
@@ -449,6 +483,166 @@ bonus flips to new owner immediately → previous owner’s unit influence persi
 their units are → frontline shifts but does not snap fully → province border unchanged.
 Friendly colour persists along roads still defended by retreating forces. Neutral observer
 sees colour wash shifting but not enemy division dots outside their observation radius.
+
+---
+
+## Phase 4.5 — UI Foundation
+
+**Goal:** Shared panel and input scaffolding exists before any panel content gets built.
+`HUDManager` and the finalized `InputMap` are real and working — pulled forward from Phase 11
+— so Phase 5 onward registers panels into a system that already enforces the rules in
+`UI_UX_DESIGN.md`, instead of each phase hand-rolling its own panel visibility logic and
+keybindings that need retrofitting later.
+
+**Why this phase exists:** `HUDManager` and `SettingsUI` keybind remapping were originally
+scheduled in Phase 11 — Polish, on the assumption that panel orchestration is a cosmetic
+finishing step. It isn't, for this game specifically. `UI_UX_DESIGN.md` specifies cross-cutting
+rules — same-hotkey-closes/different-hotkey-swaps panel behaviour, Tab's dual meaning
+(sub-tab cycle inside a panel vs. attention-cycle when none is open), Escape's recursive
+back-out state machine — that every later panel (`DivisionBuilder` and `TacticalGridUI` in
+Phase 5, Research in Phase 8, Air/Naval in Phase 9–10) needs to consume identically. If
+`HUDManager` doesn't exist until Phase 11, those five-plus panels each get built against no
+shared contract and need retrofitting once `HUDManager` finally arrives. Building the
+scaffolding once, here, removes that retrofit risk entirely.
+
+This is also the first phase with two panels designed to deliberately share a component:
+`TacticalGridUI` and `DivisionBuilder` both open the same Unit Profile view on a unit click
+(`UI_UX_DESIGN.md` §6.6, §7.4). That sharing needs a home before either panel is built, or
+one of them will build its own copy.
+
+**Why before Phase 5, not folded into it:** Phase 5's own goal is the tactical grid's combat
+logic and the auto-battler loop — `DivisionBuilder` and `TacticalGridUI` are explicitly listed
+Godot tasks inside it. Giving Phase 5 a clean, pre-existing panel/input substrate to build on
+keeps its own scope focused on grid logic rather than mixing in foundational UI plumbing.
+
+**Scope discipline:** this phase is infrastructure only — registry, orchestration rules,
+input bindings, reusable layout shells. It does **not** build any panel's actual content.
+Military/Economy/Diplomacy panel content, the Research tree, naval/air sub-tab content, and
+all map-mode rendering remain owned by the phases that already specify them. Nothing here
+should require redoing when those phases land.
+
+**Testing:** Headless Godot scene with mock panels registered into `HUDManager`, verifying
+open/close/swap rules and Tab/Escape state transitions before any real panel content exists.
+
+### Godot
+- [ ] `HUDManager` — implemented now per its existing `[MVP]` contract in `MODULES.md`
+      (panel registry, `show_panel`/`hide_panel`/`toggle_panel`/`close_all`,
+      `panel_opened`/`panel_closed` signals) — moved forward from Phase 11
+- [ ] Panel open/close orchestration rules enforced in `HUDManager`, per
+      `UI_UX_DESIGN.md` §5.5: pressing a panel's hotkey while it is already open closes it;
+      pressing a different panel's hotkey closes the current panel and opens the new one;
+      panels never stack
+- [ ] Tab dual-context handling: cycles sub-tabs within the currently open panel
+      (`UI_UX_DESIGN.md` §5.4) when a panel is open; cycles the `NotificationSystem` queue
+      (§8) when no panel is open. One key, two contexts, never ambiguous
+- [ ] Escape recursive state machine per `UI_UX_DESIGN.md` §9.6: cancel pending move-mode
+      waypoints → close open panel → close settings menu → open settings menu (only when
+      nothing else is open). Implemented as one recursive rule, not per-context special cases
+- [ ] Reusable two-column layout shell (fixed left content area / context-sensitive right
+      column that swaps by state) per `UI_UX_DESIGN.md` §6.1 — built generically so
+      `DivisionBuilder` and `TacticalGridUI` (Phase 5) both consume it rather than each
+      implementing their own grid-plus-context-panel layout
+- [ ] `UnitProfile` component scaffolded (empty/placeholder content is fine — Phase 5 fills
+      it in) per `UI_UX_DESIGN.md` §6.6, as a standalone reusable component rather than
+      built inside either `DivisionBuilder` or `TacticalGridUI` — both will open the same
+      instance on a unit click (§7.4)
+- [ ] Side-dock vs. full-center-overlay placement modes built as a property of the panel
+      shell, not per-panel custom code, per `UI_UX_DESIGN.md` §5.3
+- [ ] Bottom selection panel container with state-switching (friendly division / friendly
+      province / friendly stack / enemy division) per `UI_UX_DESIGN.md` §5.6 — container
+      and state-switching built now; per-state content (e.g. province build-queue inline
+      actions) filled in by the phase that owns that system
+- [ ] `InputMap` populated with the finalized keybind scheme from `UI_UX_DESIGN.md` §9 —
+      see full table below. This **replaces** the stale placeholder scheme previously
+      embedded in `STRATEGIC_COMBAT.md` (Q/E/R/F panels, M/H/G/X orders), which predated
+      this design pass and is now superseded
+- [ ] Left-handed mirror keymap shipped as a second named default mapping, not a
+      runtime-computed mirror — per `UI_UX_DESIGN.md` §9.1
+- [ ] Settings keybind remapping UI moved forward from Phase 11's `SettingsUI` — minimum
+      viable version only (list bindings, rebind, reset to default/left-handed preset,
+      persist to local config). Full audio/graphics settings remain in Phase 11; only the
+      keybind remapping piece moves here, since it depends on the same `InputMap` work
+- [ ] Reserved-but-unbound input actions registered now for future use, so later phases
+      extend rather than retrofit: `Z`/`V` (idle-division-select / engaged-division-cycle),
+      `U`/`I` (Politics / Espionage panels)
+
+### Finalized keybind scheme (implemented in `InputMap` this phase)
+
+Full rationale for every choice below is in `UI_UX_DESIGN.md` §9. This table supersedes
+the placeholder scheme previously documented in `STRATEGIC_COMBAT.md`'s "Default Hotkey
+Layout" section (Q/E/R/F panels, M/H/G/X orders) — that section predates this UI/UX design
+pass.
+
+**Camera & zoom**
+| Key | Action |
+|---|---|
+| W A S D | Pan camera |
+| Ctrl +/− | Zoom in/out |
+| F1–F8 | Jump to camera bookmark |
+| Ctrl + F1–F8 | Set camera bookmark at current position/zoom |
+
+**Unit orders** (active when division/stack selected)
+| Key | Action |
+|---|---|
+| Space | Move (enter move mode; click = waypoint; Shift+click = chain) |
+| G | Hold position |
+| C | Retreat |
+| X | Cancel orders |
+| Z | *(reserved)* select idle/unengaged divisions |
+| V | *(reserved)* cycle engaged/in-combat divisions |
+
+**Control groups**
+| Key | Action |
+|---|---|
+| 0–9 | Select group |
+| Double-tap 0–9 | Select group + snap camera to it |
+| Ctrl + 0–9 | Assign current selection to group |
+| Shift + 0–9 | Add current selection to group |
+
+**Panels**
+| Key | Panel |
+|---|---|
+| Q | Military (Land/Air/Naval sub-tabs) |
+| E | Economy / Trade |
+| T | Diplomacy |
+| Y | Research |
+| U, I | *(reserved)* Politics, Espionage |
+| Tab (panel open) | Cycle sub-tabs within current panel |
+| same key again | Close current panel |
+| different panel key | Close current, open new |
+
+**Map & navigation**
+| Key | Action |
+|---|---|
+| ` (backtick) | Cycle map mode forward (Political → Cover → Elevation) |
+| Shift + ` | Cycle map mode backward |
+| Alt (held) | Show relationship-ring overlay (self/ally/enemy/neutral) on Political mode |
+| Tab (no panel open) | Jump to next item needing attention (shared queue with `NotificationSystem`) |
+
+**Chat**
+| Key | Action |
+|---|---|
+| Enter | Chat — defaults to Allies if allied, else All |
+| Shift + Enter | Chat — All (explicit) |
+
+**System**
+| Key | Action |
+|---|---|
+| Escape | Context-sensitive back-out (see Escape state machine above) |
+
+No pause and no speed control exist in this game by design (`UI_UX_DESIGN.md` §9.7) —
+no keys are reserved for either.
+
+### Verification gate
+Two mock panels registered into `HUDManager` — pressing panel A's hotkey opens it; pressing
+A's hotkey again closes it; pressing B's hotkey while A is open closes A and opens B; panels
+never stack. With a panel open, Tab cycles its sub-tabs; with no panel open, Tab cycles a
+mock notification queue. Escape, with a mock move-mode pending, cancels it; pressed again
+with nothing pending, opens settings; pressed again, closes settings. Open `DivisionBuilder`
+mock and `TacticalGridUI` mock — both render inside the same two-column shell and both open
+the identical `UnitProfile` instance on a unit click. Open Settings → keybind list shows all
+current bindings → rebind one action → binding persists after restart → reset to left-handed
+preset → all bindings swap to the mirrored layout in one action.
 
 ---
 
@@ -961,13 +1155,16 @@ kept the JWT shape identical so this is a drop-in swap at the Hono layer.
 - [ ] Steam overlay integration (open store page, etc)
 
 ### Polish
-- [ ] `HUDManager` — panel show/hide orchestration, keyboard shortcuts
+- [ ] `HUDManager` — *(moved to Phase 4.5 — UI Foundation; built there so Phase 5 onward
+      has a working panel orchestration system from the start)*
 - [ ] `NotificationSystem` — full event coverage across land, air, and naval; toast queue
       and animation; naval response window notifications
 - [ ] `PostGameUI` — results screen, player rankings, stats delta display
 - [ ] `MainMenuUI` — final polish, news/changelog panel
 - [ ] `LobbyUI` — final polish, join code display, spectator option
-- [ ] `SettingsUI` — audio, graphics, keybinds, saved to local config
+- [ ] `SettingsUI` — audio, graphics settings, final polish *(keybind remapping MVP moved
+      to Phase 4.5 — UI Foundation; this phase adds audio/graphics and polishes the
+      keybind UI built there)*
 
 ### Verification gate
 Launch via Steam → authenticate with real Steam account → play full game with land, air, and

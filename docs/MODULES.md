@@ -448,9 +448,8 @@ OWNS: Current overlay mode enum, colour assignment cache.
 EXPOSES:
   signals: (none)
   methods:
-    set_overlay_mode(mode: String)   # "political" | "elevation" | "cover" | ...
-    highlight_province(province_id: String)   # darkens fill; transparent fills get dark tint
-    is_highlighted(province_id: String) -> bool
+    set_overlay_mode(mode: String)   # "political" | "terrain" | "supply" | ...
+    highlight_province(province_id: String, colour: Color)
     clear_highlights()
     refresh_province(province_id: String)
 CONSUMES:
@@ -716,6 +715,11 @@ FILE: src/systems/player/division_builder.gd
 ---
 
 ### HUDManager `[MVP]`
+
+> Implemented in **Phase 4.5 — UI Foundation** (`DEV_PHASES.md`), not Phase 11. Moved
+> forward so Phase 5 onward (`DivisionBuilder`, `TacticalGridUI`, and every later panel)
+> registers into a working orchestration system from the start, per the panel rules in
+> `UI_UX_DESIGN.md` §5.
 
 ```
 MODULE: HUDManager

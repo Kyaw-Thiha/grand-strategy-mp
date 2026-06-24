@@ -184,6 +184,36 @@ lock the player into either mode — friction teaches strategy.
 
 ## Division Representation on the Strategic Map
 
+### Design intent: few divisions, deep composition
+
+The strategic layer is deliberately designed around a **small number of divisions per
+player** (roughly 5–15 depending on map size, not the dozens-to-fifty-plus division counts
+seen in HoI4 or in micro-heavy RTS-adjacent wargames). This is a load-bearing design decision,
+not an incidental one, and it follows directly from where this game places its depth.
+
+**The genre's spectrum, and why this game sits where it does:** HoI4 places significant depth
+in managing a large number of divisions directly — a demanding but rewarding loop for players
+willing to invest the time. Steel Division 2 places depth in real-time micro of a smaller
+number of units, but its own playerbase's most persistent complaint is that this tips into
+what players call "micromanagement hell" — the skill ceiling becomes "manage more units
+faster than your opponent" rather than "make better strategic decisions," and even the
+developers' own stated philosophy (the game's balance should not *force* micromanagement,
+only reward it situationally) is widely felt to not fully hold in practice. Call of War sits
+at the opposite end — low division counts, low moment-to-moment micro, optimised for casual
+accessibility, but correspondingly shallow.
+
+**This game's answer:** depth lives inside each division's 25-cell composition (the auto-
+battler tactical grid, already designed so that players who never open the combat panel still
+get reasonable outcomes, while players who study composition extract a meaningful edge), not
+in the raw count of dots a player must click and route across the strategic map. Keeping
+division count low is therefore not a simplification made *despite* wanting depth — it is
+what makes the existing tactical-grid depth the dominant skill expression, rather than
+competing with a second, separate micro-heavy skill expression (managing many strategic-map
+dots) that would otherwise crowd it out, the same way Steel Division 2's real-time unit count
+crowds out its own otherwise-solid combined-arms mechanics for a large share of its
+playerbase. A 1–4 hour session does not have room for both a deep composition-building layer
+and a deep division-count-management layer to coexist without one undermining the other.
+
 ### Division dot and engagement areas
 
 Each division is represented as a dot on the strategic map with three concentric areas:
@@ -450,16 +480,27 @@ intermediate states.
 **Move orders survive engagement initiation.** A division with an active move order that
 gets pulled into combat does not lose its order. After the combat resolves (if the division
 did not retreat or get destroyed), it automatically resumes following the move order from
-its current position.
+its current position. **This is the default for any pre-existing move order, with no
+exception for combat:** a move order issued before engagement, or an ordinary move order
+issued during combat as described below, queues for execution after the fight and does not
+cause any movement while the division remains engaged.
 
 **Move orders can be issued during combat.** While a division is actively engaged, the
 player can issue a move order for it to execute after the combat concludes. The division
-queues the order and acts on it once the engagement ends.
+queues the order and acts on it once the engagement ends. This is still true after the
+introduction of Reposition (see TACTICAL_COMBAT.md — Movement During Combat): an ordinary
+move order, however and whenever issued, is always queue-for-after-combat behaviour. It is
+never automatically reinterpreted as a Reposition attempt. Reposition is a separate,
+explicitly-issued command available only while engaged and only below the retreat
+threshold — a player who wants in-combat movement must deliberately invoke it; nothing a
+division was doing or had queued before or during combat causes Reposition-style movement
+on its own.
 
 **Defender status is locked at combat initiation.** Issuing a move order to a defending
 division during combat does not reclassify it as an attacker. The attacker/defender
-determination (see four-tier system above) is fixed at the moment combat begins and does
-not change based on orders issued afterward. A defending division given a move order
+determination (see the five-tier system in TACTICAL_COMBAT.md, including Tier 0 for the
+war-declared-while-overlapping case) is fixed at the moment combat begins and does not
+change based on orders issued afterward. A defending division given a move order
 mid-combat is still a defender for all terrain bonus and suppression threshold purposes —
 it simply has a queued destination it will head to after the fight.
 
@@ -505,35 +546,30 @@ waypoints** highlighted with ghost dots. The player can:
 
 ### Default Hotkey Layout
 
+> **Superseded.** The scheme below (Q/E/R/F panels, M/H/G/X unit orders) was the original
+> placeholder and predates the full UI/UX design pass. The current, finalized keybind scheme
+> — including the rationale for every choice, the ergonomics-over-mnemonics principle, control
+> groups, camera bookmarks, and the map-mode/relationship-overlay keys — lives in
+> `UI_UX_DESIGN.md` §9, and is implemented in `InputMap` as part of **Phase 4.5 — UI
+> Foundation** in `DEV_PHASES.md`. Notably: Move is now bound to `Space` (not `M`), Retreat
+> is `C` (not `G`), Hold is `G` (not `H`), and panel hotkeys are `Q/E/T/Y` (Diplomacy moved
+> from `R` to `T`, since `R` is needed for Retreat's ergonomic position; Politics moved from
+> `F` to a reserved `U`). Treat the bullets below as historical context only — implement from
+> `UI_UX_DESIGN.md` §9, not from here.
+
 All bindings are remappable in settings. Stored in a local config file. Shown in
-tooltips on all UI buttons ("Move [M]", "Hold [H]").
+tooltips on all UI buttons ("Move [Space]", "Hold [G]").
 
 **Map navigation (unchanged):**
 - `W A S D` — map pan
 
-**Panel hotkeys (left hand):**
-- `Q` — Military panel
-- `E` — Economy / Trade panel
-- `R` — Diplomacy panel
-- `F` — Politics panel
-- `Tab` — toggle between last two open panels
-- `Escape` — close open panel / cancel current action
-
-**Unit order hotkeys (active when a division is selected):**
-- `M` — Move mode
-- `H` — Hold position
-- `G` — Retreat (fall back)
-- `X` — Cancel orders
-
 **Modifier:**
 - `Shift + click` — add waypoint to chain (in move mode)
 
-**Why M for move:** Q and E are panels; M is reachable left-hand without conflict and the
-mnemonic is obvious. Move is the most common unit order — it warrants a dedicated, easily
-memorable key.
-
 **Implementation note:** All bindings defined in Godot's `InputMap` and remappable at
-runtime via the settings UI. GDScript handles keyboard input cleanly through `InputMap`.
+runtime via the settings UI built in Phase 4.5. GDScript handles keyboard input cleanly
+through `InputMap`. A left-handed mirror preset ships as a second named default mapping,
+not a runtime-computed mirror.
 
 ---
 
