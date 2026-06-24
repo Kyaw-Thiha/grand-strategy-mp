@@ -1,5 +1,5 @@
-tools/r2/.env
-tools/r2/rclone.conf
+scripts/r2/.env
+scripts/r2/rclone.conf
 
 # Agent Fiels
 .ctx/*
