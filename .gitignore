@@ -1,0 +1,9 @@
+tools/r2/.env
+tools/r2/rclone.conf
+
+# Agent Fiels
+.ctx/*
+.agents/*
+.opencode/*
+skills-lock.json
+
