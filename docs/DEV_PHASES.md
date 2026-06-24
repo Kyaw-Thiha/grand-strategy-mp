@@ -215,7 +215,7 @@ Unit tests for movement profile computation and A* path validity.
 - See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
-- [ ] Division spawning at game start (from starting positions config per nation)
+- [x] Division spawning at game start (from starting positions config per nation)
 - [ ] Nation config loaded at game start from `nation_config` per nation per map;
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
@@ -223,19 +223,19 @@ Unit tests for movement profile computation and A* path validity.
       in Phase 10: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
       in `GameRoom.onCreate()`; `at_war` 6×6 matrix sent to all clients at game start;
       frontline and influence only activates between nations where `at_war == true`
-- [ ] Division type classification — three types only (no Defensive type):
+- [x] Division type classification — three types only (no Defensive type):
       armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
-- [ ] Engagement radius computed from template composition at spawn and on template change:
+- [x] Engagement radius computed from template composition at spawn and on template change:
       base 50 (infantry floor); subtract 5 per 10% armoured fraction above 15%;
       subtract 2 per 10% cavalry fraction; clamp to [30, 50] map units;
       recomputed same trigger as movement profile (template save / research upgrade)
-- [ ] Division movement profile — computed from template at spawn and on template change;
+- [x] Division movement profile — computed from template at spawn and on template change;
       33-value table (11 cover_combat × 3 elevation) using weighted formula:
       (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
       cached server-side for path validation
 - [ ] Division movement tick — advance toward player-set target waypoints each server tick;
       speed = road_level speed on roads; slowest-unit speed off-road from movement profile
-- [ ] Engagement area collision detection — circular areas, radius by division type;
+- [x] Engagement area collision detection — circular areas, radius by division type;
       full overlap triggers COMBAT_STARTED
 - [ ] Attacker/defender determination at combat initiation:
       Tier 0: engagement areas already overlapping at the instant war is declared between
@@ -279,61 +279,45 @@ Unit tests for movement profile computation and A* path validity.
             composition panel appears on hover
       - [ ] Stealth units not revealed by scouting unless anti-stealth level met
 - [ ] Move order persistence:
-      - [ ] Divisions with active move orders resume them after combat if not retreated
-      - [ ] Move orders can be issued during combat; queued for post-combat execution
+      - [x] Divisions with active move orders resume them after combat if not retreated
+      - [x] Move orders can be issued during combat; queued for post-combat execution
       - [ ] Defender status locked at combat initiation — move order given during
             combat does not reclassify defending division as attacker
-- [ ] Strategic combat resolution (simplified) — HP and suppression tracked at division
+- [x] Strategic combat resolution (simplified) — HP and suppression tracked at division
       level (no 5×5 grid yet); combat ticks apply attrition per round
 - [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
-- [ ] Auto-retreat for defenders when suppressed (base 60% threshold) + road open
-- [ ] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
+- [x] Auto-retreat for defenders when suppressed (base 60% threshold) + road open
+- [x] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
       before breaking; manual retreat always available at any suppression level;
       encirclement takes precedence (auto-retreat disabled when no escape route)
 - [ ] Meeting battle icon state — distinct from standard Engaged
 - [ ] Positional stack mechanics:
-      - [ ] Allied divisions at same position form ordered stack; player can reorder
-      - [ ] Only first division engages enemy; on suppression threshold → rotates to back
+      - [x] Allied divisions at same position form ordered stack; player can reorder
+      - [x] Only first division engages enemy; on suppression threshold → rotates to back
             of stack, second steps forward (no physical retreat until last division suppressed)
       - [ ] Supply priority: first division gets supply first; remainder get overflow
-      - [ ] Encirclement applies to whole stack — rotation does not help if surrounded
-- [ ] Three-tier supply/encirclement status system (checked each supply tick):
-      - [ ] Tier 1 — Out of Supply: supply connectivity check fails (<50% friendly
-            influence on waypoint path to any supply hub); debuffs: no HP recovery,
-            slow suppression threshold decay, reduced movement speed; clean retreat
-            still available; `OUT_OF_SUPPLY` event fires
-      - [ ] Tier 2 — Cut Off: no retreat path through ≥50% friendly-influenced
-            waypoints in any direction; all Tier 1 debuffs plus fighting withdrawal
-            on retreat (division takes HP damage proportional to enemy influence
-            density along escape path); `CUT_OFF` event fires
-      - [ ] Tier 3 — Encircled: 8-direction check from division centre — all 8
-            directions blocked by enemy division engagement area overlap OR ≥70%
-            enemy influence; retreat command disabled; all Tier 2 debuffs plus:
-            - Armoured units: damage output decays per tick → 0 after N ticks
-            - Infantry units: slower degradation than armour
-            - All units: suppression threshold lowered further per tick
-            `ENCIRCLED` event fires
-      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
-      - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
-            → destroyed (not retreated); experience and template lost permanently
-- [ ] Province capture — ownership transfers when defending division/stack is destroyed or
+      - [ ] Encirclement applies to whole stack, not per-division — rotation does not help
+            if the stack as a whole is surrounded; the encirclement check itself is Phase 7's
+            three-tier system, this item only confirms the stack-level rule once that system
+            exists
+- [x] Province capture — ownership transfers when defending division/stack is destroyed or
       retreated; city node must be physically occupied by capturing division
-- [ ] Angle-based flanking system:
-      - [ ] When a second (or further) enemy division's engagement area overlaps an
+- [x] Angle-based flanking system:
+      - [x] When a second (or further) enemy division's engagement area overlaps an
             already-engaged division, compute the angle at the defender between every
             pairwise combination of currently-attacking divisions' position vectors
             (dot product of each pair); with exactly two attackers this is one pair, with
             N attackers this is every pairwise combination among them
-      - [ ] Classification uses the **maximum** of all computed pairwise angles, looked up
+      - [x] Classification uses the **maximum** of all computed pairwise angles, looked up
             against the same thresholds regardless of attacker count
-      - [ ] < 90°: no flanking bonus — converging frontal assault only
-      - [ ] 90°–135°: standard flank attack bonus (% damage increase to non-primary attackers)
-      - [ ] 135°–180°: enhanced rear attack bonus (higher % damage increase)
-      - [ ] Angle classification locked at the moment each *new* division's engagement
+      - [x] < 90°: no flanking bonus — converging frontal assault only
+      - [x] 90°–135°: standard flank attack bonus (% damage increase to non-primary attackers)
+      - [x] 135°–180°: enhanced rear attack bonus (higher % damage increase)
+      - [x] Angle classification locked at the moment each *new* division's engagement
             area first overlaps — not recalculated mid-combat or on every tick; a third+
             division joining triggers one fresh evaluation considering all pairwise angles
             at that instant, which then holds until the next division joins or one departs
-      - [ ] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification, including
+      - [x] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification, including
             which pair of divisions produced the winning (maximum) angle
 - [ ] Dynamic frontline influence computation — **128×128 grid, per supply tick**:
       - [ ] `computeInfluenceGrid()` in `GameRoom.ts`: for each division, add
@@ -351,17 +335,21 @@ Unit tests for movement profile computation and A* path validity.
             `PROVINCE_CAPTURED`; next `FRONTLINE_UPDATE` reflects new ownership
       - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for algorithm design
       - [ ] `FRONTLINE_UPDATE` event replaces old per-province broadcast approach
-- [ ] Frontline supply connectivity check (separate from road graph supply):
-      - [ ] Trace backward from division position through waypoint graph to nearest supply hub
-      - [ ] Check each waypoint: if influence < 50% friendly, connection broken
-      - [ ] Division with broken connectivity enters out-of-supply state
-      - [ ] `SUPPLY_SEVERED_FRONTLINE` event when connectivity breaks
-      - [ ] `SUPPLY_RESTORED_FRONTLINE` event when connectivity resumes
 - [ ] `COMBAT_STARTED`, `COMBAT_RESULT`, `MEETING_BATTLE_STARTED`, `PROVINCE_CAPTURED`,
-      `UNIT_DESTROYED`, `STACK_ROTATION`, `DIVISION_ENCIRCLED`, `SUPPLY_SEVERED_FRONTLINE`,
-      `SUPPLY_RESTORED_FRONTLINE`, `FRONTLINE_UPDATED` events
-- [ ] Basic supply — divisions out of supply take increased attrition (simplified supply
-      model; full graph-based supply is Phase 7)
+      `UNIT_DESTROYED`, `STACK_ROTATION`, `FRONTLINE_UPDATED` events. Supply/encirclement
+      events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the full three-tier
+      system in Phase 7, not by this phase. (An earlier draft of this phase also named
+      `SUPPLY_SEVERED_FRONTLINE`/`SUPPLY_RESTORED_FRONTLINE` as separate events — these were
+      always describing the same influence-grid connectivity check as Tier 1's
+      `OUT_OF_SUPPLY`/`SUPPLY_RESTORED`, not a second distinct signal, so they are dropped
+      here rather than carried forward as a duplicate.)
+- [ ] Basic supply placeholder — **none needed.** Earlier drafts of this phase had a
+      simplified "out of supply = increased attrition" placeholder here, on the assumption
+      Phase 7 was far enough away to need a stand-in. It is not: Phase 7 directly follows
+      this phase and supersedes this entirely, so no placeholder model, no
+      frontline-connectivity duplicate of Phase 7's Tier 1 check, and no encirclement
+      stand-in are implemented here. Divisions simply have no supply mechanic at all until
+      Phase 7 — there is nothing to retrofit and no redundant code to delete later
 
 ### Godot
 - [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
@@ -539,16 +527,15 @@ minor drift during combat does not change the bonus tier.
 Frontline: advance division into contested province → province interior colour begins
 washing toward advancing nation’s predefined colour → recon unit advance does not shift
 colour. Both attacking and defending units contribute influence simultaneously → frontline
-sits where forces balance. Division takes HP damage → colour intensity fades. Enemy advance
-cuts through province influence chain → OUT_OF_SUPPLY fires → attrition begins; player
-pushes relief force → supply restored. No relief comes → CUT_OFF fires → retreat triggers
-fighting withdrawal (division takes damage while moving). Enemy divisions close all 8
-directions → ENCIRCLED fires → retreat disabled → armour damage decays per tick →
-division suppressed → destroyed (not retreated). Division captures city node → ownership
+sits where forces balance. Division takes HP damage → colour intensity fades. Division
+captures city node → ownership
 bonus flips to new owner immediately → previous owner’s unit influence persists where
 their units are → frontline shifts but does not snap fully → province border unchanged.
 Friendly colour persists along roads still defended by retreating forces. Neutral observer
 sees colour wash shifting but not enemy division dots outside their observation radius.
+(Supply/encirclement behaviour — out-of-supply attrition, cut-off fighting withdrawal,
+full encirclement and its armour-damage decay — is verified in Phase 7, where that system
+is actually implemented; nothing in this phase's gate exercises it.)
 
 ---
 
@@ -853,11 +840,33 @@ ensures it can be tested and tuned in isolation before the other layers depend o
 - [ ] Divisions draw supply from the segment they currently occupy
 - [ ] Segment cut detection — enemy unit physically occupying a node, or province capture
       breaking a supply path, reduces downstream throughput
-- [ ] Out-of-supply attrition — divisions below supply threshold take increased HP decay per
-      tick (rate set by playtesting)
-- [ ] Encirclement detection — no land escape route + no supply → division marked for
-      accelerated destruction
-- [ ] `SUPPLY_DISRUPTED`, `SUPPLY_RESTORED`, `DIVISION_ENCIRCLED` events
+- [ ] Three-tier supply/encirclement status system (checked each supply tick) — **moved
+      here from an earlier draft of Phase 4**, which only ever had a simplified placeholder;
+      this is the real system, not an upgrade of something already implemented:
+      - [ ] Tier 1 — Out of Supply: supply connectivity check fails (<50% friendly
+            influence on waypoint path to any supply hub); debuffs: no HP recovery,
+            slow suppression threshold decay, reduced movement speed; clean retreat
+            still available; `OUT_OF_SUPPLY` event fires
+      - [ ] Tier 2 — Cut Off: no retreat path through ≥50% friendly-influenced
+            waypoints in any direction; all Tier 1 debuffs plus fighting withdrawal
+            on retreat (division takes HP damage proportional to enemy influence
+            density along escape path); `CUT_OFF` event fires
+      - [ ] Tier 3 — Encircled: 8-direction check from division centre — all 8
+            directions blocked by enemy division engagement area overlap OR ≥70%
+            enemy influence; retreat command disabled; all Tier 2 debuffs plus:
+            - Armoured units: damage output decays per tick → 0 after N ticks
+            - Infantry units: slower degradation than armour
+            - All units: suppression threshold lowered further per tick
+            `ENCIRCLED` event fires
+      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
+      - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
+            → destroyed (not retreated); experience and template lost permanently
+      - [ ] Stack-level encirclement: the check applies to the whole stack at its shared
+            position, not per-division — rotation (Phase 4's stack mechanic) does not
+            protect a stack that is, as a whole, surrounded
+- [ ] `SUPPLY_DISRUPTED`, `SUPPLY_RESTORED`, `OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED` events
+      (an earlier draft also named `DIVISION_ENCIRCLED` separately — dropped here as a
+      duplicate of `ENCIRCLED`, the actual Tier 3 transition event)
 
 ### Hono
 - [ ] Supply hub building persisted via `/internal/game-end` in player results
@@ -865,8 +874,12 @@ ensures it can be tested and tuned in isolation before the other layers depend o
 ### Godot
 - [ ] `SupplySystem` — road segment throughput visualisation; truck sprites on active
       segments; dim/broken visual for disrupted segments
-- [ ] Supply status indicator on division icons — subtle colour shift when out of supply
-- [ ] `NotificationSystem` additions — supply disrupted, encircled warnings
+- [ ] Supply status indicator on division icons — subtle colour shift when out of supply;
+      distinct visual treatment per tier (Out of Supply / Cut Off / Encircled), not a single
+      generic "low supply" indicator, since the three tiers carry meaningfully different
+      player consequences and should read differently on the map at a glance
+- [ ] `NotificationSystem` additions — supply disrupted, cut off, encircled warnings (three
+      distinct notification types matching the three tiers, not one generic warning)
 
 ### Air interdiction integration
 - [ ] Colyseus logistics strike handler reduces segment throughput for N ticks
@@ -874,10 +887,23 @@ ensures it can be tested and tuned in isolation before the other layers depend o
       resolve against the supply graph correctly
 
 ### Verification gate
-Division advances beyond supply hub range → supply drops → attrition begins. Enemy cuts the
-supply road → supply stops immediately → attrition accelerates. Enemy fully encircles a
-division → division destroyed even at high HP. Air logistics strike dims a road segment and
-reduces downstream division supply for the correct duration.
+Division advances beyond supply hub range, connectivity check drops below 50% friendly
+influence → Tier 1 Out of Supply: HP recovery stops, movement speed reduced, retreat still
+clean → `OUT_OF_SUPPLY` fires. Player pushes a relief force restoring the influence chain →
+status returns to normal, `SUPPLY_RESTORED` fires. Enemy advance removes every retreat path
+through friendly-influenced ground → Tier 2 Cut Off: retreat now triggers a fighting
+withdrawal (HP damage proportional to enemy influence density along the escape path) rather
+than a clean retreat → `CUT_OFF` fires. Enemy closes all 8 directions around the division
+(engagement-area overlap or ≥70% enemy influence in every direction) → Tier 3 Encircled:
+retreat command disabled entirely, armoured units' damage output decays toward zero over
+several ticks, infantry degrades slower → `ENCIRCLED` fires. Status never jumps directly
+from normal to Tier 3 — confirm it always passes through Tier 1 and Tier 2 first. Stack of
+three divisions, fully encircled → confirm encirclement applies to the stack as a whole, not
+reset by Phase 4's stack-rotation mechanic. Last division in a Tier 3 stack hits its
+suppression threshold → destroyed outright (not retreated) → experience and template lost
+permanently. Air logistics strike dims a road segment and reduces downstream division supply
+for the correct duration, and can independently push a division from normal into Tier 1 if
+the strike cuts its only connection to a supply hub.
 
 ---
 
