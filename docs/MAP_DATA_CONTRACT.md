@@ -360,11 +360,16 @@ Each province contains exactly one city which is the capture point for ownership
     },
 
     "resources": {
-      "manpower": 40,
-      "steel":    0,
-      "oil":      0,
-      "fuel":     0,
-      "coal":     10
+      "money":     0,
+      "grain":     30,
+      "iron":      20,
+      "oil":       0,
+      "rubber":    0,
+      "nitrates":  0,
+      "tungsten":  0,
+      "chromium":  0,
+      "aluminium": 0,
+      "uranium":   0
     },
 
     "vp_value":     3,
@@ -404,8 +409,8 @@ multipliers from config to produce actual per-tick output.
 
 | Field | Type | Description |
 |---|---|---|
-| `population` | int 0–100 | Manpower pool and general economic weight |
-| `industry` | int 0–100 | Factory output multiplier, affected by bombing |
+| `population` | int 0–100 | Per-province population stock. Grows over the session (rate set by config, accelerated by Grain Farm / Infrastructure buildings — see ECONOMY_BUILDINGS.md). Manpower for unit recruitment is derived from this value, not tracked as a separate field — see RESOURCE_ECONOMY.md, Population and Manpower. Also feeds end-of-session VP weighting: effective VP contribution scales with `vp_value` × population reached, not `vp_value` alone. |
+| `industry` | int 0–100 | Multiplier layer on top of resource-extraction building output and local money production. Every extraction building produces its full base-tier output with zero industry allocated — industry is purely additive upside, fed by the national Industry Pool (see ECONOMY_BUILDINGS.md), not a precondition for baseline output. Affected by bombing. |
 | `infrastructure` | int 0–100 | Two roles: (1) economic growth multiplier for the province; (2) off-road movement speed modifier for divisions moving through or out of this province. High infra = faster local movement even off-road. Does NOT define road quality — that is the road network layer. |
 
 **Buildings**
@@ -413,28 +418,54 @@ multipliers from config to produce actual per-tick output.
 Starting state only. All values begin at 0 unless set during map authoring.
 Players build and upgrade during the game. Maximum level for all buildings is 5.
 
+This list covers the strategic-layer/military buildings defined directly in this
+contract. Civilian buildings (School, Hospital, Infrastructure perk tree, Warehouse/
+Depot, Shipyard, Town Hall) and resource extraction/processing buildings (one per
+resource in the Resources section below) are defined in full, including their research
+perk trees, in ECONOMY_BUILDINGS.md — not restated here. Both sets of buildings share
+this same `buildings` object and the same 0–5 level cap; ECONOMY_BUILDINGS.md does not
+introduce a second building-storage mechanism.
+
 | Building | Effect |
 |---|---|
 | `fort` | Increases defender strength and organisation recovery rate |
 | `port` | Enables naval access and coastal supply. Province must border base_water or strait |
 | `airbase` | Enables air unit operations from this province |
 | `supply_hub` | Generates supply flow outward into the road graph. Primary supply source |
-| `factory` | Increases industry output and unit production speed |
+| `factory` | Feeds the national Industry Pool (see ECONOMY_BUILDINGS.md) and increases unit production speed. Does not directly multiply any single province's resource output — industry is a national pool, not a per-province effect |
 
 **Resources**
 
-Envelope is fixed. String keys are TBD pending game design decisions on exact resource types.
-All values are 0–100 relative abundance scales.
+Envelope is fixed: ten keys, replacing the prior five-key placeholder
+(`manpower, steel, oil, fuel, coal`). All values are 0–100 relative abundance scales —
+the amount a province can extract before any building or industry multiplier is applied.
+Full mechanic definition for every resource (which of them are common-tier vs.
+restricted-tier, and each restricted resource's distinct mechanical shape — rate
+modifier, stat-table shift, or hard draw-block) is in RESOURCE_ECONOMY.md, not here.
+This contract only fixes the schema.
 
 ```json
 "resources": {
-  "manpower": 0,
-  "steel":    0,
-  "oil":      0,
-  "fuel":     0,
-  "coal":     0
+  "money":     0,
+  "grain":     0,
+  "iron":      0,
+  "oil":       0,
+  "rubber":    0,
+  "nitrates":  0,
+  "tungsten":  0,
+  "chromium":  0,
+  "aluminium": 0,
+  "uranium":   0
 }
 ```
+
+`money` at the province level represents passive local trade/tax abundance feeding
+national money income (boosted further by port-city trade activity — see
+RESOURCE_ECONOMY.md), not a province-level spendable balance. `grain` and `iron` are the
+common-tier resources every nation has meaningful baseline access to. The remaining
+seven are restricted-tier and are expected to be sparse/zero on most provinces by
+design — see RESOURCE_ECONOMY.md for how each one's scarcity is meant to feel distinct
+from the others.
 
 **Victory**
 
@@ -808,25 +839,48 @@ QGIS will enforce the schema on every new feature.
 | city_name | String(100) | Yes | |
 | city_lng | Real | Yes | |
 | city_lat | Real | Yes | |
-| population | Integer | Yes | 0–100 |
-| industry | Integer | Yes | 0–100 |
+| population | Integer | Yes | 0–100. Per-province population stock — see RESOURCE_ECONOMY.md |
+| industry | Integer | Yes | 0–100. Multiplier layer, not a spendable stock — see RESOURCE_ECONOMY.md |
 | infrastructure | Integer | Yes | 0–100 |
 | bld_fort | Integer | Yes | Default 0 |
 | bld_port | Integer | Yes | Default 0 |
 | bld_airbase | Integer | Yes | Default 0 |
 | bld_supply_hub | Integer | Yes | Default 0 |
 | bld_factory | Integer | Yes | Default 0 |
-| res_manpower | Integer | Yes | Default 0 |
-| res_steel | Integer | Yes | Default 0 |
+| bld_school | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
+| bld_hospital | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
+| bld_warehouse | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
+| bld_shipyard | Integer | Yes | Default 0. Requires bld_port > 0 in the same province — see ECONOMY_BUILDINGS.md |
+| bld_town_hall | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
+| bld_res_grain | Integer | Yes | Default 0. Grain Farm/Granary — see ECONOMY_BUILDINGS.md |
+| bld_res_iron | Integer | Yes | Default 0. Iron Mine |
+| bld_res_oil | Integer | Yes | Default 0. Oil Derrick (Offshore Platform tier unlocked by research, not a separate field) |
+| bld_res_rubber | Integer | Yes | Default 0. Rubber Plantation |
+| bld_res_nitrates | Integer | Yes | Default 0. Nitrate Works |
+| bld_res_tungsten | Integer | Yes | Default 0. Tungsten Mine |
+| bld_res_chromium | Integer | Yes | Default 0. Chromium Mine |
+| bld_res_aluminium | Integer | Yes | Default 0. Bauxite Mine + Refinery, tracked as one combined level — see ECONOMY_BUILDINGS.md |
+| bld_res_uranium | Integer | Yes | Default 0. Uranium Mine |
+| res_money | Integer | Yes | Default 0 |
+| res_grain | Integer | Yes | Default 0 |
+| res_iron | Integer | Yes | Default 0 |
 | res_oil | Integer | Yes | Default 0 |
-| res_fuel | Integer | Yes | Default 0 |
-| res_coal | Integer | Yes | Default 0 |
+| res_rubber | Integer | Yes | Default 0 |
+| res_nitrates | Integer | Yes | Default 0 |
+| res_tungsten | Integer | Yes | Default 0 |
+| res_chromium | Integer | Yes | Default 0 |
+| res_aluminium | Integer | Yes | Default 0 |
+| res_uranium | Integer | Yes | Default 0 |
 | vp_value | Integer | Yes | Default 0 |
 | is_objective | Boolean | Yes | Default false |
 | notes | String(500) | No | Stripped by pipeline |
 
 Buildings and resources are flat fields in QGIS (QGIS does not support nested JSON natively).
-The pipeline reassembles them into nested objects in the output JSON.
+The pipeline reassembles them into nested objects in the output JSON. Resource-extraction
+building fields (`bld_res_*`) are kept distinct from generic buildings (`bld_*`) and from
+the resource abundance fields (`res_*`) themselves — abundance is what a province *has*,
+the `bld_res_*` level is what's been *built* to extract it, and the two are independent
+(see RESOURCE_ECONOMY.md and ECONOMY_BUILDINGS.md for how they combine at runtime).
 
 ### Claude Code + QGIS MCP integration
 

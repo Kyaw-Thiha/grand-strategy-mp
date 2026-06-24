@@ -10,6 +10,12 @@
 > covered in a separate pass — see Out of Scope below. Combat mechanics referenced here
 > (incapacitation, experience retention, supply tiers) are defined in TACTICAL_COMBAT.md
 > and STRATEGIC_COMBAT.md and are not redefined here.
+> This document is built on top of RESOURCE_ECONOMY.md, which defines the resource
+> roster itself, each resource's distinct mechanic (oil's flow debuff, rubber/nitrate
+> attrition, tungsten's substitution, chromium/aluminium's hard draw-blocks, uranium's
+> research-bound identity), unit build cost vs. supply draw, population/manpower, and
+> the player-driven market. Every reference below to "the unit-economy design," "the
+> unit-supply layer," or similar now points to that document specifically.
 
 ---
 
@@ -241,8 +247,9 @@ population growth bonus present at base level, same status as School/Hospital.
   alone provides
 - T4: unlocks a perk where high Infrastructure level in a province slightly increases
   the province's `industry` value growth rate (per the population→industry relationship
-  established for the broader economy system) — Infrastructure indirectly helping the
-  whole province's economic ceiling rise faster over a session, not just its own output
+  defined in RESOURCE_ECONOMY.md, see "Industry — the Multiplier Layer") — Infrastructure
+  indirectly helping the whole province's economic ceiling rise faster over a session,
+  not just its own output
 
 No locked tiers on Infrastructure — all three paths are genuinely complementary
 (money, supply, population all reinforce a "developed province" identity rather than
@@ -300,9 +307,10 @@ and is consumed by naval blockade/interdiction. Requires a port in the same prov
 
 **Base effect:** increases the population-to-victory-point weighting conversion rate
 for its province specifically (a province's effective end-of-session VP contribution
-scales with base `vp_value` × population reached — Town Hall is the building that
-directly targets that multiplier). This is the concrete building target for a nation
-playing a development/turtle strategy rather than a conquest strategy.
+scales with base `vp_value` × population reached, per RESOURCE_ECONOMY.md's "Population
+and Manpower" — Town Hall is the building that directly targets that multiplier). This
+is the concrete building target for a nation playing a development/turtle strategy
+rather than a conquest strategy.
 
 **Complexity:** Standard (2 paths, 4 tiers)
 
@@ -369,7 +377,8 @@ nation needs reliable access to.
 ### Grain Farm / Granary
 
 **Base effect:** standard grain output scaling with level, and (per the population
-system) this building directly contributes to the province's population growth rate —
+mechanic defined in RESOURCE_ECONOMY.md, see "Population and Manpower") this building
+directly contributes to the province's population growth rate —
 not just a passive side-effect like the civilian buildings above, but Grain Farm's
 actual secondary identity.
 
@@ -405,9 +414,8 @@ actual secondary identity.
   allocation — a building-level reward for being sited in an already-developed province)
 
 **Path B — Efficiency (allocation-throttle specialization):**
-*This path exists specifically to soften the oil-allocation-priority mechanic
-established for the unit-economy layer — see the unit/resource economy design for the
-military/economy/balanced allocation toggle.*
+*This path exists specifically to soften the oil-allocation-priority mechanic defined
+in RESOURCE_ECONOMY.md (see "Oil" — the military/economy/balanced allocation toggle).*
 - T2: unlocks a perk reducing the civilian-economy throughput penalty incurred when the
   player throttles oil toward military priority — a derrick built this way keeps more
   of its output flowing to the civilian economy even under wartime allocation pressure
@@ -478,8 +486,8 @@ This ramp exists at base level regardless of research.
 
 **Path C — Efficiency (adjacent to Path A, consumption-side):**
 - T2: unlocks a perk reducing how fast nitrate stockpiles deplete from sustained
-  infantry/artillery ammunition expenditure specifically (the attrition mechanic
-  established for this resource at the unit-supply layer) — a building-level lever on
+  infantry/artillery ammunition expenditure specifically (the attrition mechanic defined
+  in RESOURCE_ECONOMY.md — see "Nitrates / Sulfur") — a building-level lever on
   the *consumption* side, distinct from every other resource building in this section,
   which only ever affect the *production* side
 
@@ -496,9 +504,9 @@ everywhere by design — tungsten deposits are genuinely rare.
 - T1/T2/T3: magnitude increases to base extraction
 
 No Reach or Efficiency path exists for Tungsten, and no synthetic alternative building
-exists. This is intentional, not an oversight: Tungsten's identity lives at the
-unit-supply layer as the substitution resource (scarcity downgrades AT/penetration
-tier rather than blocking production — see the unit-economy design). Giving it a
+exists. This is intentional, not an oversight: Tungsten's identity is defined in
+RESOURCE_ECONOMY.md (see "Tungsten") as the substitution resource — scarcity downgrades
+AT/penetration tier rather than blocking production. Giving it a
 synthetic escape valve here would undercut that identity by letting a building brute-
 force around the mechanic that makes Tungsten distinct. Keeping this building simple
 is a deliberate choice consistent with "not every building needs maximum richness."
@@ -516,9 +524,10 @@ Tungsten.**
 **Path A — Yield (the only axis):**
 - T1/T2/T3: magnitude increases to base extraction
 
-No synthetic path. Chromium's identity is the hard-gate premium resource (below a
-threshold, the nation's premium unit tier is locked out entirely) — that identity
-depends on chromium staying genuinely scarce and ungamble-around-able. A late capstone
+No synthetic path. Chromium's identity, defined in RESOURCE_ECONOMY.md (see "Chromium"),
+is the hard-gate premium resource (below a threshold, the nation's premium unit tier is
+locked out entirely) — that identity depends on chromium staying genuinely scarce and
+ungamble-around-able. A late capstone
 ("Alloy Reclamation," converting destroyed-armour wreckage into chromium, mirroring
 Iron's Reclamation path) is intentionally *not* offered here, because it would let a
 chromium-poor nation farm its way to parity simply by surviving battles — undermining
@@ -550,9 +559,9 @@ deliberately, so a player can specialize toward *which stage* they push.
   design.
 
 **Path C — Advanced Fabrication (Reach, capstone-only):**
-- T6 (locked, capstone): unlocks the high-end air-doctrine supply ceiling described in
-  the unit-economy design (Aluminium's role as the tech-multiplier resource gating
-  late-game air unit sustainment) — this is purely a research unlock, not a new
+- T6 (locked, capstone): unlocks the high-end air-doctrine supply ceiling defined in
+  RESOURCE_ECONOMY.md (see "Aluminium" — its role as the tech-gated ceiling resource
+  gating late-game air unit sustainment) — this is purely a research unlock, not a new
   building, keeping Aluminium's identity as "the resource whose ceiling is set by tech
   investment, not building investment" consistent at the top of its tree.
 
@@ -569,8 +578,9 @@ roster, by design.**
 **Path A — Yield (the only axis):**
 - T1/T2: magnitude increases to base extraction
 
-Uranium's entire strategic identity lives in the *unit/economy research tree*, not
-here — a nation that pours research investment into reaching uranium-tier technology
+Uranium's entire strategic identity is defined in RESOURCE_ECONOMY.md (see "Uranium" —
+including its non-nuclear research-currency-injection use case), not here — a nation
+that pours research investment into reaching uranium-tier technology
 can do so far earlier than any calendar-bound historical pace would suggest, precisely
 because nothing about the mine building gates that pace. This is the deliberate inverse
 of Tungsten/Chromium (where geography dominates and the building stays narrow because
@@ -607,6 +617,11 @@ the *resource* is meant to stay scarce) — here the building stays narrow becau
 ---
 
 ## Out of Scope for This Document
+
+**The resource roster, each resource's distinct mechanic, unit build cost vs. supply
+draw, population/manpower, and the player-driven market** — all defined in
+RESOURCE_ECONOMY.md, not here. This document assumes that foundation and only adds the
+building and research-tree layer on top of it.
 
 **Military buildings** (fort, supply hub, radar, command post, coastal battery,
 anti-air network, listening post) — placement model, command-post radius mechanics,
