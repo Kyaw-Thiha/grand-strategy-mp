@@ -5,6 +5,18 @@
 [ext_resource type="Texture2D" path="res://assets/flags/Flag_of_France.svg" id="3"]
 [ext_resource type="Texture2D" path="res://assets/ui/setting-gear.png" id="4"]
 [ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/military_panel.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/research_panel.tscn" id="9"]
+[ext_resource type="Script" path="res://src/ui/hud/friendly_division_panel.gd" id="12"]
+[ext_resource type="Script" path="res://src/ui/hud/friendly_province_panel.gd" id="13"]
+[ext_resource type="Script" path="res://src/ui/hud/enemy_division_panel.gd" id="14"]
+[ext_resource type="Script" path="res://src/ui/hud/friendly_stack_panel.gd" id="15"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_division_panel.tscn" id="16"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_stack_panel.tscn" id="19"]
 
 [node name="GameHUD" type="CanvasLayer"]
 layer = 2
@@ -19,7 +31,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
+mouse_filter = 1
 theme = ExtResource("5")
 
 [node name="TopBar" type="PanelContainer" parent="HUDRoot"]
@@ -114,7 +126,7 @@ layout_mode = 2
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
 text = "Q
-MIL"
+RES"
 
 [node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
@@ -125,14 +137,14 @@ ECO"
 [node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
-text = "T
-DIP"
+text = "R
+MIL"
 
 [node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
-text = "Y
-RES"
+text = "T
+DIP"
 
 [node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
@@ -193,7 +205,7 @@ grow_vertical = 2
 mouse_filter = 0
 color = Color(0, 0, 0, 0.55)
 
-[node name="CenterPanelAnchor" type="CenterContainer" parent="HUDRoot"]
+[node name="CenterPanelAnchor" type="Control" parent="HUDRoot"]
 unique_name_in_owner = true
 visible = false
 anchors_preset = 15
@@ -202,6 +214,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+use_clip_content = true
 
 [node name="ToastContainer" type="VBoxContainer" parent="HUDRoot"]
 unique_name_in_owner = true
@@ -212,3 +225,47 @@ offset_bottom = 400.0
 grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/separation = 4
+
+[node name="MilitaryPanel" parent="." instance=ExtResource("6")]
+visible = false
+
+[node name="EconomyPanel" parent="." instance=ExtResource("7")]
+visible = false
+
+[node name="DiplomacyPanel" parent="." instance=ExtResource("8")]
+visible = false
+
+[node name="ResearchPanel" parent="." instance=ExtResource("9")]
+visible = false
+
+[node name="FriendlyStackPanel" parent="." instance=ExtResource("19")]
+visible = false
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="FriendlyDivisionPanel" parent="." instance=ExtResource("16")]
+visible = false
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="FriendlyProvincePanel" parent="." instance=ExtResource("17")]
+visible = false
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="EnemyDivisionPanel" parent="." instance=ExtResource("18")]
+visible = false
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+grow_horizontal = 2
+grow_vertical = 0

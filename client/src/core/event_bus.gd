@@ -41,7 +41,15 @@ signal research_progress_changed(entry_id: String, progress: float)
 signal research_completed(entry_id: String, effects: Dictionary)
 signal research_rejected(entry_id: String, reason: String)
 
+# ── Selection (Phase 5c) ─────────────────────────────────────────────────────
+signal province_selected(province_id: String)
+signal province_deselected()
+signal stack_selected(division_ids: Array)  # placeholder for future multi-select
+signal move_mode_requested(division_id: String)
+
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)
 signal map_mode_changed(mode: String)   # "political" | "cover" | "elevation"
 signal settings_requested()
+signal move_mode_cancelled()
+signal notification_cycle_next()

@@ -1,0 +1,205 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/hud/military_panel.gd" id="1"]
+[ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="2"]
+
+[sub_resource type="StyleBoxFlat" id="SB_panel_accent"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.07, 0.05, 0.03, 0.96)
+border_width_left = 3
+border_color = Color(0.18, 0.44, 0.84, 1.0)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[node name="MilitaryPanel" type="PanelContainer"]
+custom_minimum_size = Vector2(360, 480)
+theme = ExtResource("2")
+theme_override_styles/panel = SubResource("SB_panel_accent")
+script = ExtResource("1")
+
+[node name="Margin" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="TabButtons" type="HBoxContainer" parent="Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+
+[node name="BtnLand" type="Button" parent="Margin/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+text = "Land"
+
+[node name="BtnAir" type="Button" parent="Margin/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Air"
+
+[node name="BtnNaval" type="Button" parent="Margin/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Naval"
+
+[node name="TabBar" type="TabContainer" parent="Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+tabs_visible = false
+current_tab = 0
+tab_alignment = 0
+theme_override_constants/side_margin = 0
+
+[node name="Land" type="VBoxContainer" parent="Margin/TabBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+tooltip_text = "Land units"
+
+[node name="Header" type="PanelContainer" parent="Margin/TabBar/Land"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HBox" type="HBoxContainer" parent="Margin/TabBar/Land/Header"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+
+[node name="AccentBar" type="ColorRect" parent="Margin/TabBar/Land/Header/HBox"]
+custom_minimum_size = Vector2(3, 20)
+layout_mode = 1
+size_flags_vertical = 4
+color = Color(0.18, 0.44, 0.84, 1.0)
+
+[node name="Title" type="Label" parent="Margin/TabBar/Land/Header/HBox"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_top = 0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 16
+text = "LAND UNITS"
+horizontal_alignment = 0
+
+[node name="Scroll" type="ScrollContainer" parent="Margin/TabBar/Land"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+
+[node name="ListContainer" type="VBoxContainer" parent="Margin/TabBar/Land/Scroll"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+
+[node name="Air" type="VBoxContainer" parent="Margin/TabBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+tooltip_text = "Air units (Phase 12)"
+
+[node name="HeaderAir" type="PanelContainer" parent="Margin/TabBar/Air"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HBoxAir" type="HBoxContainer" parent="Margin/TabBar/Air/HeaderAir"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+
+[node name="AccentBarAir" type="ColorRect" parent="Margin/TabBar/Air/HeaderAir/HBoxAir"]
+custom_minimum_size = Vector2(3, 20)
+layout_mode = 1
+size_flags_vertical = 4
+color = Color(0.18, 0.44, 0.84, 1.0)
+
+[node name="TitleAir" type="Label" parent="Margin/TabBar/Air/HeaderAir/HBoxAir"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_top = 0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 16
+text = "AIR UNITS"
+horizontal_alignment = 0
+
+[node name="PlaceholderAir" type="Label" parent="Margin/TabBar/Air"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "Air units — Phase 12"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Naval" type="VBoxContainer" parent="Margin/TabBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+tooltip_text = "Naval units (Phase 13)"
+
+[node name="HeaderNaval" type="PanelContainer" parent="Margin/TabBar/Naval"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HBoxNaval" type="HBoxContainer" parent="Margin/TabBar/Naval/HeaderNaval"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+
+[node name="AccentBarNaval" type="ColorRect" parent="Margin/TabBar/Naval/HeaderNaval/HBoxNaval"]
+custom_minimum_size = Vector2(3, 20)
+layout_mode = 1
+size_flags_vertical = 4
+color = Color(0.18, 0.44, 0.84, 1.0)
+
+[node name="TitleNaval" type="Label" parent="Margin/TabBar/Naval/HeaderNaval/HBoxNaval"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0
+anchor_right = 1.0
+anchor_top = 0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 16
+text = "NAVAL UNITS"
+horizontal_alignment = 0
+
+[node name="PlaceholderNaval" type="Label" parent="Margin/TabBar/Naval"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "Naval units — Phase 13"
+horizontal_alignment = 1
+vertical_alignment = 1

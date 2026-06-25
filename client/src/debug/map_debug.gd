@@ -7,6 +7,7 @@ extends Node
 const MAP_ID := "western_europe_6"
 #const FrontlineOverlay := preload("res://src/systems/frontline/frontline_overlay.gd")  # deferred
 
+
 var _nation_definitions_by_id: Dictionary = {}
 
 @onready var _map_loader: Node       = $MapLoader
@@ -17,8 +18,8 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
 @onready var _vision_system: Node    = $VisionSystem
-@onready var _pause_menu: CanvasLayer = $PauseMenu
-@onready var _game_hud: CanvasLayer = $GameHUD
+@onready var _pause_menu = $PauseMenu
+@onready var _game_hud   = $GameHUD
 
 
 func _ready() -> void:
@@ -47,40 +48,26 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# Forward key events to military system (M, H, X hotkeys)
-	if event is InputEventKey:
+		# Forward key events to military system (M, H, X hotkeys)
 		_military_system.handle_input(event)
 		return
+
+	# Mouse events — route through handle_mouse_input to support drag-select
+	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		var event_position: Vector2
+		if event is InputEventMouseButton:
+			event_position = (event as InputEventMouseButton).position
+		else:
+			event_position = (event as InputEventMouseMotion).position
+		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
+		if _military_system.handle_mouse_input(event, world_pos):
+			get_viewport().set_input_as_handled()
 
 
 func _input(event: InputEvent) -> void:
-	# Forward key events to military system (M, H, X, Escape hotkeys)
+	# Keys only — mouse is handled in _unhandled_input
 	if event is InputEventKey:
 		_military_system.handle_input(event)
-		return
-
-	if not event is InputEventMouseButton and not event is InputEventMouseMotion:
-		return
-
-	var event_position: Vector2
-	if event is InputEventMouseButton:
-		var mouse_button: InputEventMouseButton = event
-		event_position = mouse_button.position
-	else:
-		var mouse_motion: InputEventMouseMotion = event
-		event_position = mouse_motion.position
-
-	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
-
-	if event is InputEventMouseButton:
-		var mb: InputEventMouseButton = event
-		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			if _military_system.try_right_click_at_world(world_pos):
-				get_viewport().set_input_as_handled()
-			return
-
-	if _military_system.handle_mouse_input(event, world_pos):
-		get_viewport().set_input_as_handled()
 
 
 func _on_map_loaded(province_count: int) -> void:
@@ -90,7 +77,6 @@ func _on_map_loaded(province_count: int) -> void:
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)
 	_map_interaction.province_clicked.connect(_on_province_clicked)
-	_map_interaction.province_clicked.connect(func(_id: String) -> void: _military_system.deselect())
 	EventBus.division_selected.connect(func(_id: String) -> void:
 		_map_interaction.deselect()
 		_map_renderer.clear_highlights()
@@ -115,6 +101,9 @@ func _on_map_loaded(province_count: int) -> void:
 		_map_renderer.set_overlay_mode(mode)
 	)
 	EventBus.settings_requested.connect(_pause_menu.show_menu)
+	EventBus.move_mode_requested.connect(func(div_id: String) -> void:
+		_military_system.enter_move_mode(div_id)
+	)
 	_center_camera_on_selected_nation()
 
 
@@ -176,11 +165,14 @@ func _ensure_nation_definitions_loaded() -> void:
 
 
 func _on_province_clicked(province_id: String) -> void:
+	_military_system.deselect()
 	if _map_renderer.is_highlighted(province_id):
 		_map_renderer.clear_highlights()
+		# Already selected — deselect (emit province_deselected from deselect())
 	else:
 		_map_renderer.clear_highlights()
 		_map_renderer.highlight_province(province_id)
+		EventBus.province_selected.emit(province_id)
 
 
 

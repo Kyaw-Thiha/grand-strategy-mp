@@ -205,8 +205,8 @@ func handle_input(event: InputEvent) -> void:
 				for division_id: String in own_selected_for_retreat:
 					CommandQueue.submit("RETREAT", { "division_id": division_id })
 		KEY_ESCAPE:
-			_clear_pending()
-			deselect()
+				_clear_pending()
+				deselect()
 
 
 ## Handles mouse press, drag, and release for unit click/box selection and move clicks.
@@ -274,11 +274,21 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 		_select(clicked_id)
 		return true
 
-	# Click on empty map while something selected → deselect
-	if not _selected_division_ids.is_empty():
+	# Click on empty map while something selected → deselect (skip if in move mode)
+	if not _selected_division_ids.is_empty() and not _move_mode:
 		deselect()
 	return false
 
+## Called by EventBus.move_mode_requested when the Move button is clicked in a
+## bottom bar selection panel. Enables move mode for the specified division.
+func enter_move_mode(division_id: String) -> void:
+	if division_id == "" or not _is_own_unit(division_id):
+		return
+	_move_mode = true
+	_pending_milestones.clear()
+	_pending_chain.clear()
+	_update_ghost()
+	_set_icon_move_mode(division_id, true)
 
 ## Right-click: remove last milestone from chain if near a ghost dot, else do nothing.
 func try_right_click_at_world(world_pos: Vector2) -> bool:
@@ -975,6 +985,7 @@ func deselect() -> void:
 	_selected_division_id = ""
 	_selected_division_ids.clear()
 	EventBus.division_deselected.emit()
+	EventBus.province_deselected.emit()
 	EventBus.division_selection_changed.emit([])
 	_clear_pending()
 

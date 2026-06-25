@@ -578,6 +578,38 @@ should require redoing when those phases land.
 **Testing:** Headless Godot scene with mock panels registered into `HUDManager`, verifying
 open/close/swap rules and Tab/Escape state transitions before any real panel content exists.
 
+### ✅ Phase 5 — UI Foundation — IMPLEMENTED (June 2026)
+
+All Godot items below are implemented:
+
+- [x] `HUDManager` — panel registry, `show_panel`/`hide_panel`/`toggle_panel`/`close_all`,
+      `panel_opened`/`panel_closed` signals
+- [x] Panel open/close orchestration (per UI_UX_DESIGN.md §5.5)
+- [x] Tab dual-context (sub-tab cycle vs. notification cycle)
+- [x] Escape recursive state machine (per UI_UX_DESIGN.md §9.6)
+- [x] Reusable two-column layout shell (§6.1)
+- [x] `UnitProfile` scaffolded (§6.6)
+- [x] Side-dock vs. full-center overlay modes (§5.3)
+- [x] Bottom selection panel container — FriendlyDivision, FriendlyProvince,
+      FriendlyStack, EnemyDivision states (§5.6)
+- [x] `InputMap` with finalized keybind scheme (per UI_UX_DESIGN.md §9)
+- [x] Left-handed mirror preset (§9.1)
+- [x] Settings keybind remapping UI — list/rebind/reset, persisted to `user://keybinds.cfg`
+- [x] Reserved input actions: Z (idle-select), V (engaged-cycle), U (Politics), I (Espionage)
+
+Key files produced:
+- `src/ui/hud/hud_manager.gd` — panel orchestration
+- `src/ui/hud/game_hud.gd` — HUD root, dock buttons, bottom bar wiring, MapLoader integration
+- `src/ui/game/pause_menu.gd` — ESC handling, settings integration via `is_settings_open()`
+- `src/ui/settings/settings_keybind.gd` — rebind UI with close_callback hook
+- `src/core/keybind_manager.gd` — InputMap registry + config persistence
+- `src/core/keybind_presets.gd` — DEFAULT + LEFT_HANDED presets
+- `scenes/game/panels/friendly_division_panel.tscn|.gd`
+- `scenes/game/panels/friendly_province_panel.tscn|.gd`
+- `scenes/game/panels/enemy_division_panel.tscn|.gd`
+- `scenes/game/panels/friendly_stack_panel.tscn|.gd`
+- `scenes/game/settings_keybind.tscn`
+
 ### Godot
 - [ ] `HUDManager` — implemented now per its existing `[MVP]` contract in `MODULES.md`
       (panel registry, `show_panel`/`hide_panel`/`toggle_panel`/`close_all`,

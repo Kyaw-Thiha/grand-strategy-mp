@@ -737,15 +737,158 @@ EXPOSES:
     close_all()
 CONSUMES:
   signals:
-    SessionManager.session_started
-    SessionManager.session_ended
-    MilitarySystem.unit_selected
-    MapInteraction.province_clicked
+    EventBus.division_selected      # shows FriendlyDivisionPanel or EnemyDivisionPanel
+    EventBus.province_selected      # shows FriendlyProvincePanel
+    EventBus.division_deselected    # hides all bottom panels
+    EventBus.province_deselected    # hides all bottom panels
   reads: nothing
 FORBIDDEN FROM: game state mutation, game logic, network calls
 AUTOLOAD: no
 FILE: src/ui/hud/hud_manager.gd
 ```
+
+---
+
+### KeybindManager `[CORE]`
+
+> Implemented in **Phase 5 — UI Foundation** (`DEV_PHASES.md`). Autoload — registers
+> all InputMap actions at startup, applies saved remaps from disk, and provides
+> remap/preset/save/reset API for the settings UI.
+
+```
+MODULE: KeybindManager
+PURPOSE: Autoload — registers all InputMap actions at startup, applies saved
+         remaps from disk, and provides remap/preset/save/reset API for the
+         settings UI.
+OWNS: InputMap action registry state, keybind config file at user://keybinds.cfg.
+EXPOSES:
+  signals: (none)
+  methods:
+    remap_action(action: String, event: InputEvent)       # rebind + save
+    apply_preset(preset: Dictionary)                      # apply named preset
+    get_action_display_text(action: String) -> String     # "M" / "Ctrl+M"
+    save()                                                # write to config
+    reset_to_defaults()                                   # reset all to project defaults
+CONSUMES:
+  signals: (none)
+  reads: nothing
+FORBIDDEN FROM: game state mutation, game logic, network calls
+AUTOLOAD: yes
+FILE: src/core/keybind_manager.gd
+```
+
+---
+
+### KeybindPresets `[CORE]`
+
+> Implemented in **Phase 5 — UI Foundation** (`DEV_PHASES.md`). Static preset
+> definitions (DEFAULT, LEFT_HANDED) consumed by KeybindManager.apply_preset().
+> No instance — imported as a `const` preload.
+
+```
+MODULE: KeybindPresets
+PURPOSE: Static definition of keybind presets (DEFAULT, LEFT_HANDED) consumed
+         by KeybindManager.apply_preset(). No instance, pure data.
+OWNS: Preset dictionaries — DEFAULT and LEFT_HANDED variants.
+EXPOSES:
+  signals: (none)
+  constants:
+    ACTIONS: Dictionary  # action_name → { physical_keycode, ctrl, shift, alt, display }
+    DEFAULT: Dictionary  # full preset dict (mirrors project.godot defaults)
+    LEFT_HANDED: Dictionary  # QWER movement, swapped modifiers
+  methods: (none — static data only)
+CONSUMES: (none)
+FORBIDDEN FROM: state mutation, any runtime changes
+AUTOLOAD: no — imported as `const`
+FILE: src/core/keybind_presets.gd
+```
+
+---
+
+### SettingsKeybind `[MVP]`
+
+> Implemented in **Phase 5 — UI Foundation** (`DEV_PHASES.md`). Overlay panel for
+> rebinding keys. Procedurally builds action rows from KeybindPresets. Handles
+> capture-mode for new bindings and ESC to close with a parent-provided callback.
+
+```
+MODULE: SettingsKeybind
+PURPOSE: Overlay panel for rebinding keys. Procedurally builds action rows from
+         KeybindPresets.ACTIONS. Handles capture-mode for new bindings.
+OWNS: Shell UI nodes (_dim, _panel, _content_vbox), action button registry.
+EXPOSES:
+  signals: (none)
+  methods:
+    show_panel()      # populate + show
+    hide_panel()      # hide + fire close_callback if set
+  properties:
+    close_callback: Callable  # set by parent to hook ESC-close into parent menu
+CONSUMES:
+  signals: (none)
+  reads:
+    KeybindManager.get_action_display_text()
+    KeybindManager.remap_action()
+    KeybindPresets.ACTIONS
+FORBIDDEN FROM: game state mutation, network calls
+AUTOLOAD: no — instantiated as child of PauseMenu
+FILE: src/ui/settings/settings_keybind.gd
+SCENE: scenes/game/settings_keybind.tscn
+```
+
+---
+
+### PauseMenu `[MVP]`
+
+> Implemented in **Phase 5 — UI Foundation** (`DEV_PHASES.md`). Full-screen pause
+> overlay with Continue/Settings/Quit buttons. Handles ESC to close/return-to-game.
+> Integrates SettingsKeybind as a child panel with close_callback hook.
+
+```
+MODULE: PauseMenu
+PURPOSE: Full-screen pause overlay with Continue/Settings/Quit buttons.
+         Handles ESC to close/return-to-game. Integrates SettingsKeybind
+         as a child panel.
+OWNS: Pause menu visibility, _keybind_panel instance.
+EXPOSES:
+  signals: (none)
+  methods:
+    show_menu()            # show + grab focus on Continue
+    hide_menu()            # hide
+    toggle_menu()          # show/hide
+    is_settings_open() -> bool  # true when keybind subpanel is visible
+CONSUMES:
+  signals:
+    EventBus.settings_requested  # via button press
+  reads: nothing
+FORBIDDEN FROM: game state mutation, game logic, network calls
+AUTOLOAD: no — CanvasLayer in game_hud.tscn
+FILE: src/ui/game/pause_menu.gd
+SCENE: scenes/game/pause_menu.tscn
+```
+
+---
+
+### Bottom Selection Panel (4 states) — informational
+
+No formal module contract (container pattern, not a standalone module). Documents
+the 4 panel scripts and their selection behavior:
+
+| Script | Triggered by | Buttons / Content |
+|---|---|---|
+| `FriendlyDivisionPanel` | `EventBus.division_selected` when nation_id == my_nation | Move, Hold (disabled), Cancel; HP/suppression bars |
+| `EnemyDivisionPanel` | `EventBus.division_selected` when nation_id != my_nation | Intel badge, apparent composition (read-only) |
+| `FriendlyProvincePanel` | `EventBus.province_selected` | Province name + nation, Upgrade/Build Radar/Manage Prod. (visible only for owner) |
+| `FriendlyStackPanel` | Placeholder for future multi-select | — |
+
+All 4: centered at bottom via global_position math (no anchor manipulation),
+`mouse_filter = STOP` to prevent click fall-through to map layer,
+StyleBoxFlat border (4px all sides, golden color `Color(0.32, 0.22, 0.12)`).
+
+FILES:
+- `src/ui/hud/friendly_division_panel.gd` / `scenes/game/panels/friendly_division_panel.tscn`
+- `src/ui/hud/friendly_province_panel.gd` / `scenes/game/panels/friendly_province_panel.tscn`
+- `src/ui/hud/enemy_division_panel.gd` / `scenes/game/panels/enemy_division_panel.tscn`
+- `src/ui/hud/friendly_stack_panel.gd` / `scenes/game/panels/friendly_stack_panel.tscn`
 
 ---
 
