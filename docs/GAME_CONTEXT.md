@@ -93,9 +93,7 @@ grand-strategy/
 
 ## Current Development Phase
 
-Phase 1 — Auth + bare-bones connection (in progress)
-- Email auth (Steam placeholder), Supabase schema, Colyseus bare room, Godot auth + connect
-- Phase 2 (map pipeline) runs in parallel
+Phase 5 — UI Foundation (completed). Phase 6 — Tactical Grid (in progress).
 
 See `DEV_PHASES.md` for full roadmap and verification gates.
 
