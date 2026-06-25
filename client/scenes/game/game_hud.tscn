@@ -229,5 +229,3 @@ visible = false
 
 [node name="ResearchPanel" parent="." instance=ExtResource("9")]
 visible = false
-size_flags_horizontal = 3
-size_flags_vertical = 3
