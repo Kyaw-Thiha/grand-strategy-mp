@@ -21,6 +21,26 @@ const RECT_W := 22.0
 const RECT_H := 14.0
 const HP_BAR_H := 3.0
 const HP_BAR_Y := RECT_H * 0.5 + 3.0
+const SELECTION_RADIUS := RECT_W * 0.5 + 12.0
+const SELECTION_LINE_WIDTH := 5.0
+const SELECTION_INNER_LINE_WIDTH := 2.0
+const SELECTION_ANIMATION_DURATION := 0.1
+const SELECTION_ANIMATION_RADIUS_BOOST := 8.0
+const SELECTION_NORMAL_COLOR := Color(1.0, 0.78, 0.08, 0.96)
+const SELECTION_MOVE_COLOR := Color(0.05, 0.95, 1.0, 0.96)
+
+var _selection_animation_elapsed: float = SELECTION_ANIMATION_DURATION
+var _selection_color_elapsed: float = SELECTION_ANIMATION_DURATION
+var _selection_color_start: Color = SELECTION_NORMAL_COLOR
+var _selection_color_target: Color = SELECTION_NORMAL_COLOR
+var _selection_color_current: Color = SELECTION_NORMAL_COLOR
+
+
+## Disables per-frame work until the icon needs to play a selection animation.
+##
+## Returns: Nothing.
+func _ready() -> void:
+	set_process(false)
 
 
 func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float, scout_px: float) -> void:
@@ -50,12 +70,24 @@ func update_data(data: Dictionary) -> void:
 func set_selected(selected: bool) -> void:
 	if is_selected != selected:
 		is_selected = selected
+		if is_selected:
+			_selection_color_target = _get_selection_target_color()
+			_selection_color_start = _selection_color_target
+			_selection_color_current = _selection_color_target
+			_selection_color_elapsed = SELECTION_ANIMATION_DURATION
+			_selection_animation_elapsed = 0.0
+			set_process(true)
+		else:
+			_selection_animation_elapsed = SELECTION_ANIMATION_DURATION
+			_selection_color_elapsed = SELECTION_ANIMATION_DURATION
+			set_process(false)
 		queue_redraw()
 
 
 func set_move_mode(active: bool) -> void:
 	if is_move_mode != active:
 		is_move_mode = active
+		_start_selection_color_transition()
 		queue_redraw()
 
 
@@ -63,6 +95,75 @@ func set_moving(active: bool) -> void:
 	if is_moving != active:
 		is_moving = active
 		queue_redraw()
+
+
+## Advances the short selection pop animation and stops processing once it settles.
+##
+## Parameters:
+## - delta: Seconds elapsed since the previous rendered frame.
+##
+## Returns: Nothing.
+func _process(delta: float) -> void:
+	if not is_selected:
+		set_process(false)
+		return
+
+	var should_keep_processing: bool = false
+
+	if _selection_animation_elapsed < SELECTION_ANIMATION_DURATION:
+		_selection_animation_elapsed += delta
+		if _selection_animation_elapsed >= SELECTION_ANIMATION_DURATION:
+			_selection_animation_elapsed = SELECTION_ANIMATION_DURATION
+		else:
+			should_keep_processing = true
+
+	if _selection_color_elapsed < SELECTION_ANIMATION_DURATION:
+		_selection_color_elapsed += delta
+		if _selection_color_elapsed >= SELECTION_ANIMATION_DURATION:
+			_selection_color_elapsed = SELECTION_ANIMATION_DURATION
+			_selection_color_current = _selection_color_target
+		else:
+			should_keep_processing = true
+			var color_progress: float = _ease_out_cubic(_selection_color_elapsed / SELECTION_ANIMATION_DURATION)
+			_selection_color_current = _selection_color_start.lerp(_selection_color_target, color_progress)
+
+	set_process(should_keep_processing)
+
+	queue_redraw()
+
+
+## Starts a short selected-ring color transition when the selected unit changes mode.
+##
+## Returns: Nothing.
+func _start_selection_color_transition() -> void:
+	_selection_color_target = _get_selection_target_color()
+	if not is_selected:
+		_selection_color_start = _selection_color_target
+		_selection_color_current = _selection_color_target
+		_selection_color_elapsed = SELECTION_ANIMATION_DURATION
+		return
+
+	_selection_color_start = _selection_color_current
+	_selection_color_elapsed = 0.0
+	set_process(true)
+
+
+## Returns the high-contrast selection color for the current interaction mode.
+##
+## Returns: Cyan while move mode is active, otherwise amber.
+func _get_selection_target_color() -> Color:
+	return SELECTION_MOVE_COLOR if is_move_mode else SELECTION_NORMAL_COLOR
+
+
+## Applies a quick ease-out curve for snappy selection feedback.
+##
+## Parameters:
+## - value: Normalized animation progress from 0.0 to 1.0.
+##
+## Returns: Eased animation progress from 0.0 to 1.0.
+func _ease_out_cubic(value: float) -> float:
+	var clamped_value: float = clampf(value, 0.0, 1.0)
+	return 1.0 - pow(1.0 - clamped_value, 3.0)
 
 
 func _draw() -> void:
@@ -84,8 +185,19 @@ func _draw() -> void:
 
 	# Selection highlight — cyan ring in move mode, yellow ring otherwise
 	if is_selected:
-		var ring_color := Color(0.2, 1.0, 0.9, 0.95) if is_move_mode else Color(1.0, 0.9, 0.2, 0.9)
-		draw_arc(Vector2.ZERO, half_w + 5.0, 0.0, TAU, 24, ring_color, 2.5)
+		var animation_progress: float = clampf(_selection_animation_elapsed / SELECTION_ANIMATION_DURATION, 0.0, 1.0)
+		var animation_pop: float = 1.0 - animation_progress
+		var selection_radius: float = SELECTION_RADIUS + (SELECTION_ANIMATION_RADIUS_BOOST * animation_pop)
+		var selection_line_width: float = SELECTION_LINE_WIDTH + (2.0 * animation_pop)
+		var ring_color: Color = _selection_color_current
+		var halo_color: Color = Color(ring_color.r, ring_color.g, ring_color.b, 0.12 + (0.08 * animation_pop))
+		var backing_color: Color = Color(nation_color.r * 0.20, nation_color.g * 0.20, nation_color.b * 0.20, 0.92)
+		var outer_ring_color: Color = Color(ring_color.r, ring_color.g, ring_color.b, 0.88 + (0.12 * animation_pop))
+		var inner_ring_color: Color = Color(1.0, 1.0, 1.0, 0.65 + (0.25 * animation_pop))
+		draw_circle(Vector2.ZERO, selection_radius, halo_color)
+		draw_arc(Vector2.ZERO, selection_radius, 0.0, TAU, 48, backing_color, selection_line_width + 4.0)
+		draw_arc(Vector2.ZERO, selection_radius, 0.0, TAU, 48, outer_ring_color, selection_line_width)
+		draw_arc(Vector2.ZERO, selection_radius - 4.0, 0.0, TAU, 48, inner_ring_color, SELECTION_INNER_LINE_WIDTH)
 
 	# NATO rectangle fill
 	var rect := Rect2(-half_w, -half_h, RECT_W, RECT_H)
