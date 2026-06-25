@@ -72,29 +72,28 @@ size_flags_horizontal = 3
 toggle_mode = true
 text = "Economy"
 
-[node name="TabBar" type="TabContainer" parent="Margin"]
+[node name="Pages" type="Control" parent="Margin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-tabs_visible = false
-current_tab = 0
-tab_alignment = 0
-theme_override_constants/side_margin = 0
 
 # ── Infantry ──────────────────────────────────────────────────────────────
 
-[node name="Infantry" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Infantry" type="VBoxContainer" parent="Margin/Pages"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Infantry research"
 
-[node name="Header" type="PanelContainer" parent="Margin/TabBar/Infantry"]
+[node name="Header" type="PanelContainer" parent="Margin/Pages/Infantry"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBox" type="HBoxContainer" parent="Margin/TabBar/Infantry/Header"]
+[node name="HBox" type="HBoxContainer" parent="Margin/Pages/Infantry/Header"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -102,13 +101,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBar" type="ColorRect" parent="Margin/TabBar/Infantry/Header/HBox"]
+[node name="AccentBar" type="ColorRect" parent="Margin/Pages/Infantry/Header/HBox"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="Title" type="Label" parent="Margin/TabBar/Infantry/Header/HBox"]
+[node name="Title" type="Label" parent="Margin/Pages/Infantry/Header/HBox"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -121,7 +120,7 @@ theme_override_font_sizes/font_size = 18
 text = "INFANTRY"
 horizontal_alignment = 0
 
-[node name="PlaceholderInf" type="Label" parent="Margin/TabBar/Infantry"]
+[node name="PlaceholderInf" type="Label" parent="Margin/Pages/Infantry"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3
@@ -132,18 +131,22 @@ vertical_alignment = 1
 
 # ── Artillery ─────────────────────────────────────────────────────────────
 
-[node name="Artillery" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Artillery" type="VBoxContainer" parent="Margin/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Artillery research"
 
-[node name="HeaderArty" type="PanelContainer" parent="Margin/TabBar/Artillery"]
+[node name="HeaderArty" type="PanelContainer" parent="Margin/Pages/Artillery"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxArty" type="HBoxContainer" parent="Margin/TabBar/Artillery/HeaderArty"]
+[node name="HBoxArty" type="HBoxContainer" parent="Margin/Pages/Artillery/HeaderArty"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -151,13 +154,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBarArty" type="ColorRect" parent="Margin/TabBar/Artillery/HeaderArty/HBoxArty"]
+[node name="AccentBarArty" type="ColorRect" parent="Margin/Pages/Artillery/HeaderArty/HBoxArty"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="TitleArty" type="Label" parent="Margin/TabBar/Artillery/HeaderArty/HBoxArty"]
+[node name="TitleArty" type="Label" parent="Margin/Pages/Artillery/HeaderArty/HBoxArty"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -170,7 +173,7 @@ theme_override_font_sizes/font_size = 18
 text = "ARTILLERY"
 horizontal_alignment = 0
 
-[node name="PlaceholderArty" type="Label" parent="Margin/TabBar/Artillery"]
+[node name="PlaceholderArty" type="Label" parent="Margin/Pages/Artillery"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3
@@ -181,18 +184,22 @@ vertical_alignment = 1
 
 # ── Armoured ───────────────────────────────────────────────────────────────
 
-[node name="Armoured" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Armoured" type="VBoxContainer" parent="Margin/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Armoured units research"
 
-[node name="HeaderArm" type="PanelContainer" parent="Margin/TabBar/Armoured"]
+[node name="HeaderArm" type="PanelContainer" parent="Margin/Pages/Armoured"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxArm" type="HBoxContainer" parent="Margin/TabBar/Armoured/HeaderArm"]
+[node name="HBoxArm" type="HBoxContainer" parent="Margin/Pages/Armoured/HeaderArm"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -200,13 +207,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBarArm" type="ColorRect" parent="Margin/TabBar/Armoured/HeaderArm/HBoxArm"]
+[node name="AccentBarArm" type="ColorRect" parent="Margin/Pages/Armoured/HeaderArm/HBoxArm"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="TitleArm" type="Label" parent="Margin/TabBar/Armoured/HeaderArm/HBoxArm"]
+[node name="TitleArm" type="Label" parent="Margin/Pages/Armoured/HeaderArm/HBoxArm"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -219,7 +226,7 @@ theme_override_font_sizes/font_size = 18
 text = "ARMOURED"
 horizontal_alignment = 0
 
-[node name="PlaceholderArm" type="Label" parent="Margin/TabBar/Armoured"]
+[node name="PlaceholderArm" type="Label" parent="Margin/Pages/Armoured"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3
@@ -230,18 +237,22 @@ vertical_alignment = 1
 
 # ── Air ────────────────────────────────────────────────────────────────────
 
-[node name="Air" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Air" type="VBoxContainer" parent="Margin/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Air units research"
 
-[node name="HeaderAir" type="PanelContainer" parent="Margin/TabBar/Air"]
+[node name="HeaderAir" type="PanelContainer" parent="Margin/Pages/Air"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxAir" type="HBoxContainer" parent="Margin/TabBar/Air/HeaderAir"]
+[node name="HBoxAir" type="HBoxContainer" parent="Margin/Pages/Air/HeaderAir"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -249,13 +260,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBarAir" type="ColorRect" parent="Margin/TabBar/Air/HeaderAir/HBoxAir"]
+[node name="AccentBarAir" type="ColorRect" parent="Margin/Pages/Air/HeaderAir/HBoxAir"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="TitleAir" type="Label" parent="Margin/TabBar/Air/HeaderAir/HBoxAir"]
+[node name="TitleAir" type="Label" parent="Margin/Pages/Air/HeaderAir/HBoxAir"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -268,7 +279,7 @@ theme_override_font_sizes/font_size = 18
 text = "AIR"
 horizontal_alignment = 0
 
-[node name="PlaceholderAir" type="Label" parent="Margin/TabBar/Air"]
+[node name="PlaceholderAir" type="Label" parent="Margin/Pages/Air"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3
@@ -279,18 +290,22 @@ vertical_alignment = 1
 
 # ── Naval ──────────────────────────────────────────────────────────────────
 
-[node name="Naval" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Naval" type="VBoxContainer" parent="Margin/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Naval units research"
 
-[node name="HeaderNaval" type="PanelContainer" parent="Margin/TabBar/Naval"]
+[node name="HeaderNaval" type="PanelContainer" parent="Margin/Pages/Naval"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxNaval" type="HBoxContainer" parent="Margin/TabBar/Naval/HeaderNaval"]
+[node name="HBoxNaval" type="HBoxContainer" parent="Margin/Pages/Naval/HeaderNaval"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -298,13 +313,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBarNaval" type="ColorRect" parent="Margin/TabBar/Naval/HeaderNaval/HBoxNaval"]
+[node name="AccentBarNaval" type="ColorRect" parent="Margin/Pages/Naval/HeaderNaval/HBoxNaval"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="TitleNaval" type="Label" parent="Margin/TabBar/Naval/HeaderNaval/HBoxNaval"]
+[node name="TitleNaval" type="Label" parent="Margin/Pages/Naval/HeaderNaval/HBoxNaval"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -317,7 +332,7 @@ theme_override_font_sizes/font_size = 18
 text = "NAVAL"
 horizontal_alignment = 0
 
-[node name="PlaceholderNaval" type="Label" parent="Margin/TabBar/Naval"]
+[node name="PlaceholderNaval" type="Label" parent="Margin/Pages/Naval"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3
@@ -328,18 +343,22 @@ vertical_alignment = 1
 
 # ── Economy ────────────────────────────────────────────────────────────────
 
-[node name="Economy" type="VBoxContainer" parent="Margin/TabBar"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+[node name="Economy" type="VBoxContainer" parent="Margin/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 tooltip_text = "Economy research"
 
-[node name="HeaderEcon" type="PanelContainer" parent="Margin/TabBar/Economy"]
+[node name="HeaderEcon" type="PanelContainer" parent="Margin/Pages/Economy"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxEcon" type="HBoxContainer" parent="Margin/TabBar/Economy/HeaderEcon"]
+[node name="HBoxEcon" type="HBoxContainer" parent="Margin/Pages/Economy/HeaderEcon"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -347,13 +366,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 
-[node name="AccentBarEcon" type="ColorRect" parent="Margin/TabBar/Economy/HeaderEcon/HBoxEcon"]
+[node name="AccentBarEcon" type="ColorRect" parent="Margin/Pages/Economy/HeaderEcon/HBoxEcon"]
 custom_minimum_size = Vector2(4, 24)
 layout_mode = 1
 size_flags_vertical = 4
 color = Color(0.18, 0.62, 0.56, 1.0)
 
-[node name="TitleEcon" type="Label" parent="Margin/TabBar/Economy/HeaderEcon/HBoxEcon"]
+[node name="TitleEcon" type="Label" parent="Margin/Pages/Economy/HeaderEcon/HBoxEcon"]
 layout_mode = 1
 anchors_preset = 15
 anchor_left = 0
@@ -366,7 +385,7 @@ theme_override_font_sizes/font_size = 18
 text = "ECONOMY"
 horizontal_alignment = 0
 
-[node name="PlaceholderEcon" type="Label" parent="Margin/TabBar/Economy"]
+[node name="PlaceholderEcon" type="Label" parent="Margin/Pages/Economy"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_horizontal = 3

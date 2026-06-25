@@ -1,5 +1,7 @@
 extends CanvasLayer
 
+const _KeybindScene := preload("res://scenes/game/settings_keybind.tscn")
+
 @onready var _continue_button: Button = %ContinueButton
 @onready var _settings_button: Button = %SettingsButton
 @onready var _how_to_play_button: Button = %HowToPlayButton
@@ -7,12 +9,13 @@ extends CanvasLayer
 
 var _restore_clear_color: Color = Color.BLACK
 var _has_restore_clear_color: bool = false
+var _keybind_panel: Node = null
 
 
 func _ready() -> void:
 	hide_menu()
 	_continue_button.pressed.connect(hide_menu)
-	_settings_button.pressed.connect(_on_placeholder_button_pressed)
+	_settings_button.pressed.connect(_on_settings_pressed)
 	_how_to_play_button.pressed.connect(_on_placeholder_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 
@@ -51,9 +54,13 @@ func set_restore_clear_color(clear_color: Color) -> void:
 	_has_restore_clear_color = true
 
 
-## Handles placeholder menu buttons that intentionally do nothing for now.
-## Parameters: none.
-## Returns: nothing.
+func _on_settings_pressed() -> void:
+	if _keybind_panel == null:
+		_keybind_panel = _KeybindScene.instantiate()
+		add_child(_keybind_panel)
+	_keybind_panel.show_panel()
+
+
 func _on_placeholder_button_pressed() -> void:
 	pass
 
