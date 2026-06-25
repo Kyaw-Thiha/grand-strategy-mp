@@ -31,11 +31,19 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _diplomacy_panel: Control = $DiplomacyPanel
 @onready var _research_panel: Control = $ResearchPanel
 
+@onready var _friendly_div_panel: Control = $FriendlyDivisionPanel
+@onready var _friendly_prov_panel: Control = $FriendlyProvincePanel
+@onready var _friendly_stack_panel: Control = $FriendlyStackPanel
+@onready var _enemy_div_panel: Control = $EnemyDivisionPanel
+
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
 var _active_dock_btn: Button = null
+var _map_loader: Node = null
 
 
 func _ready() -> void:
+	# MapLoader is a sibling of GameHUD in the MapDebug scene tree
+	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
@@ -66,6 +74,16 @@ func _ready() -> void:
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
+
+	# Bottom selection bar — reactive to EventBus selection signals
+	EventBus.division_selected.connect(_on_division_selected)
+	EventBus.province_selected.connect(_on_province_selected)
+	EventBus.division_deselected.connect(_on_bottom_bar_deselected)
+	EventBus.province_deselected.connect(_on_bottom_bar_deselected)
+
+	# Center bottom panels horizontally and on resize
+	get_viewport().size_changed.connect(_on_viewport_size_changed)
+	_center_bottom_panels()
 
 
 func _make_dock_toggle(panel_name: String) -> Callable:
@@ -139,6 +157,114 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 func set_nation(nation_name: String, flag_texture: Texture2D) -> void:
 	_nation_label.text = nation_name
 	_flag_texture.texture = flag_texture
+
+
+## ── Bottom selection bar ───────────────────────────────────────────────────
+
+## Handles division selection — shows FriendlyDivisionPanel for own divisions,
+## EnemyDivisionPanel for enemy divisions. Hides other bottom panels.
+func _on_division_selected(div_id: String) -> void:
+	var data: Dictionary = GameState.get_division(div_id)
+	if data.is_empty():
+		return
+	_hide_all_bottom_panels()
+	var my_nation: String = GameState.get_my_nation_id()
+	if data.get("nation_id", "") == my_nation:
+		_friendly_div_panel.populate(div_id, data)
+		_friendly_div_panel.visible = true
+	else:
+		_enemy_div_panel.populate(div_id, data)
+		_enemy_div_panel.visible = true
+	_center_bottom_panels()
+
+
+## Recenter all bottom panels when the viewport is resized.
+func _on_viewport_size_changed() -> void:
+	_center_bottom_panels()
+
+
+## Centers all four bottom selection bar panels horizontally on screen.
+## Call on ready, on viewport resize, and after showing a panel.
+## Parameters: none.
+## Returns: nothing.
+func _center_bottom_panels() -> void:
+	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel]:
+		_center_panel_deferred(panel)
+
+
+## Centers a single bottom panel horizontally using global position + size math
+## (avoids anchor manipulation that can corrupt vertical anchors).
+## Parameters: panel — Control node with existing vertical anchors (anchor_top/bottom = 1.0).
+## Returns: nothing.
+func _center_panel_deferred(panel: Control) -> void:
+	if panel == null:
+		return
+	await get_tree().process_frame
+	_center_panel(panel)
+
+
+## Centers a single bottom panel horizontally on screen using pixel-space
+## positioning. Preserves existing vertical anchors (anchor_top/bottom = 1.0).
+## Parameters: panel — Control node.
+## Returns: nothing.
+func _center_panel(panel: Control) -> void:
+	if panel == null:
+		return
+	# Capture current height before resetting width
+	var panel_height: float = panel.size.y
+	# Force size update so combined_minimum_size reflects actual content width
+	panel.size = Vector2.ZERO
+	var natural_width: float = panel.get_combined_minimum_size().x
+	var vp_width: float = get_viewport().get_visible_rect().size.x
+	panel.size = Vector2(natural_width, panel_height)
+
+	# Compute horizontal center in viewport pixel space
+	var current_pos: Vector2 = panel.global_position
+	var vp_center_x: float = vp_width / 2.0
+	var panel_center_x: float = current_pos.x + (natural_width / 2.0)
+	var delta_x: float = vp_center_x - panel_center_x
+
+	# Move panel to centered position (keep vertical intact via global_position)
+	panel.global_position = Vector2(current_pos.x + delta_x, current_pos.y)
+
+
+## Handles province selection — shows FriendlyProvincePanel in bottom bar.
+func _on_province_selected(province_id: String) -> void:
+	_hide_all_bottom_panels()
+
+	# Try MapLoader first (has name, nation_id), fall back to GameState
+	var map_data: Dictionary = {}
+	if _map_loader != null:
+		map_data = _map_loader.get_province_data(province_id)
+	var game_data: Dictionary = GameState.provinces.get(province_id, {})
+
+	# Build the data dict: MapLoader gives us name + nation_id (which is owner_id)
+	# GameState may override with authoritative server state
+	var owner_id: String = game_data.get("owner_id", map_data.get("nation_id", "?"))
+	var prov_name: String = map_data.get("name", province_id)
+	var nation_display: String = owner_id.to_upper() if owner_id != "?" else "?"
+
+	var data: Dictionary = {
+		"name": prov_name,
+		"owner_id": owner_id,
+		"nation_display": nation_display,
+	}
+	_friendly_prov_panel.populate(province_id, data)
+	_friendly_prov_panel.visible = true
+	_center_bottom_panels()
+
+
+## Hides all bottom selection panels — triggered by division_deselected signal.
+func _on_bottom_bar_deselected() -> void:
+	_hide_all_bottom_panels()
+
+
+## Hides all four bottom bar panels. Called by selection handlers and deselect.
+func _hide_all_bottom_panels() -> void:
+	_friendly_div_panel.visible = false
+	_friendly_prov_panel.visible = false
+	_friendly_stack_panel.visible = false
+	_enemy_div_panel.visible = false
 
 
 ## Called each tick to update session timer display.

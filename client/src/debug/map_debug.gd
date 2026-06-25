@@ -48,8 +48,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# Forward key events to military system (M, H, X hotkeys)
-	if event is InputEventKey:
+		# Forward key events to military system (M, H, X hotkeys)
 		_military_system.handle_input(event)
 		return
 
@@ -59,6 +58,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not mb.pressed:
 		return
 
+	# Mouse events reach here ONLY if no GUI element consumed them.
+	# GUI elements with mouse_filter=STOP (like bottom panels) consume clicks
+	# before this handler fires, so button clicks will NOT fall through here.
 	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
 
 	if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -70,25 +72,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Forward key events to military system (M, H, X, Escape hotkeys)
+	# Keys don't bubble through GUI tree — handle directly.
+	# Mouse events are handled in _unhandled_input (after GUI tree).
 	if event is InputEventKey:
 		_military_system.handle_input(event)
-		return
-
-	if not event is InputEventMouseButton:
-		return
-	var mb := event as InputEventMouseButton
-	if not mb.pressed:
-		return
-
-	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
-
-	if mb.button_index == MOUSE_BUTTON_LEFT:
-		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
-			get_viewport().set_input_as_handled()
-	elif mb.button_index == MOUSE_BUTTON_RIGHT:
-		if _military_system.try_right_click_at_world(world_pos):
-			get_viewport().set_input_as_handled()
 
 
 func _on_map_loaded(province_count: int) -> void:
@@ -98,7 +85,6 @@ func _on_map_loaded(province_count: int) -> void:
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)
 	_map_interaction.province_clicked.connect(_on_province_clicked)
-	_map_interaction.province_clicked.connect(func(_id: String) -> void: _military_system.deselect())
 	EventBus.division_selected.connect(func(_id: String) -> void:
 		_map_interaction.deselect()
 		_map_renderer.clear_highlights()
@@ -123,6 +109,9 @@ func _on_map_loaded(province_count: int) -> void:
 		_map_renderer.set_overlay_mode(mode)
 	)
 	EventBus.settings_requested.connect(_pause_menu.show_menu)
+	EventBus.move_mode_requested.connect(func(div_id: String) -> void:
+		_military_system.enter_move_mode(div_id)
+	)
 	_center_camera_on_selected_nation()
 
 
@@ -184,11 +173,14 @@ func _ensure_nation_definitions_loaded() -> void:
 
 
 func _on_province_clicked(province_id: String) -> void:
+	_military_system.deselect()
 	if _map_renderer.is_highlighted(province_id):
 		_map_renderer.clear_highlights()
+		# Already selected — deselect (emit province_deselected from deselect())
 	else:
 		_map_renderer.clear_highlights()
 		_map_renderer.highlight_province(province_id)
+		EventBus.province_selected.emit(province_id)
 
 
 

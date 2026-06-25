@@ -165,11 +165,7 @@ func handle_input(event: InputEvent) -> void:
 				_shift_chain_started = true
 		KEY_M:
 			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
-				_move_mode = true
-				_pending_milestones.clear()
-				_pending_chain.clear()
-				_update_ghost()
-				_set_icon_move_mode(_selected_division_id, true)
+				enter_move_mode(_selected_division_id)
 		KEY_H:
 			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
 				_clear_pending()
@@ -183,8 +179,8 @@ func handle_input(event: InputEvent) -> void:
 				_clear_pending()
 				CommandQueue.submit("RETREAT", { "division_id": _selected_division_id })
 		KEY_ESCAPE:
-			_clear_pending()
-			deselect()
+				_clear_pending()
+				deselect()
 
 
 ## Left-click at a world-space position. Returns true if consumed (caller should mark event handled).
@@ -199,11 +195,20 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 		_select(clicked_id)
 		return true
 
-	# Click on empty map while something selected → deselect
-	if _selected_division_id != "":
-		deselect()
+	# Click on empty map → deselect to hide bottom panel (always safe to call)
+	deselect()
 	return false
 
+## Called by EventBus.move_mode_requested when the Move button is clicked in a
+## bottom bar selection panel. Enables move mode for the specified division.
+func enter_move_mode(division_id: String) -> void:
+	if division_id == "" or not _is_own_unit(division_id):
+		return
+	_move_mode = true
+	_pending_milestones.clear()
+	_pending_chain.clear()
+	_update_ghost()
+	_set_icon_move_mode(division_id, true)
 
 ## Right-click: remove last milestone from chain if near a ghost dot, else do nothing.
 func try_right_click_at_world(world_pos: Vector2) -> bool:
@@ -799,6 +804,7 @@ func deselect() -> void:
 		(_icons[_selected_division_id] as Node2D).set_selected(false)
 	_selected_division_id = ""
 	EventBus.division_deselected.emit()
+	EventBus.province_deselected.emit()
 	_clear_pending()
 
 
