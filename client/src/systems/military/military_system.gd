@@ -40,6 +40,7 @@ const DR_SNAP_DEG     := 0.0001  # waypoint snap threshold (matches server)
 
 var _map_loader: Node = null
 var _icon_layer: Node2D = null
+var _vision_system: Node = null
 
 var _icons: Dictionary = {}
 var _target_positions: Dictionary = {}
@@ -86,9 +87,10 @@ func get_icons() -> Dictionary:
 	return _icons
 
 
-func setup(map_loader: Node, icon_layer: Node2D) -> void:
+func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> void:
 	_map_loader = map_loader
 	_icon_layer = icon_layer
+	_vision_system = vision_system
 
 	# Build pathfinder from the loaded waypoint graph
 	_pathfinder = Pathfinder.new()
@@ -132,6 +134,9 @@ func _process(delta: float) -> void:
 			var target: Vector2 = _target_positions.get(div_id, icon.position)
 			if icon.position.distance_to(target) > 0.5:
 				icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
+		if _is_own_unit(div_id) and _vision_system != null \
+				and _vision_system.has_method("update_division_light_position"):
+			_vision_system.update_division_light_position(div_id, icon.position)
 		_update_division_visibility(div_id)
 
 	# Live ghost refresh while building a shift chain with a moving unit
@@ -1015,7 +1020,11 @@ func _is_division_visible_to_player(division_id: String) -> bool:
 	var icon: Node2D = _icons.get(division_id) as Node2D
 	if icon == null:
 		return false
-	return _is_world_position_in_visible_province(icon.position)
+	if _is_world_position_in_visible_province(icon.position):
+		return true
+	if _vision_system != null and _vision_system.has_method("is_world_position_visible_to_units"):
+		return _vision_system.is_world_position_visible_to_units(icon.position)
+	return false
 
 
 func _is_world_position_in_visible_province(world_position: Vector2) -> bool:

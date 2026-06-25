@@ -25,6 +25,9 @@ var _ocean_background: Polygon2D = null
 var _light_layer: Node2D = null
 var _light_texture: GradientTexture2D = null
 var _active_lights: Array[PointLight2D] = []
+var _owned_province_lights: Array[PointLight2D] = []
+var _unit_lights_by_division_id: Dictionary = {}
+var _unit_light_positions_by_division_id: Dictionary = {}
 
 
 ## Stores the map loader reference and creates visual child nodes.
@@ -43,9 +46,9 @@ func setup(map_loader: Node, _map_renderer: Node = null) -> void:
 ## - _province_count: unused, kept for consistency with the module pattern.
 ## Returns: nothing.
 func on_map_loaded(_province_count: int) -> void:
-	EventBus.division_added.connect(func(_id: String) -> void: refresh_visibility())
-	EventBus.division_updated.connect(func(_id: String) -> void: refresh_visibility())
-	EventBus.division_removed.connect(func(_id: String) -> void: refresh_visibility())
+	EventBus.division_added.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
+	EventBus.division_updated.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
+	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
 	EventBus.province_captured.connect(func(_pid: String, _owner: String) -> void: refresh_visibility())
 	EventBus.lobby_state_updated.connect(refresh_visibility)
 	refresh_visibility()
@@ -61,14 +64,29 @@ func refresh_visibility() -> void:
 	if not vision_enabled:
 		if _darkness_modulate != null:
 			_darkness_modulate.color = Color.WHITE
-		_clear_lights()
+		_clear_all_lights()
 		EventBus.vision_visibility_changed.emit({})
 		return
 
 	_darkness_modulate.color = DARKNESS_COLOR
 	_compute_visible_provinces()
 	EventBus.vision_visibility_changed.emit(_visible_provinces.duplicate())
-	_rebuild_lights()
+	_rebuild_owned_province_lights()
+	_sync_unit_lights()
+
+
+## Recomputes moving-unit visibility without rebuilding static owned-province lights.
+## Returns: nothing.
+func _refresh_dynamic_visibility() -> void:
+	if _map_loader == null:
+		return
+	if not vision_enabled:
+		refresh_visibility()
+		return
+
+	_compute_visible_provinces()
+	EventBus.vision_visibility_changed.emit(_visible_provinces.duplicate())
+	_sync_unit_lights()
 
 
 ## Returns whether the given province is currently in the local player's visible set.
@@ -77,6 +95,45 @@ func refresh_visibility() -> void:
 ## Returns: true when visible according to the latest refresh.
 func is_province_visible(province_id: String) -> bool:
 	return _visible_provinces.has(province_id)
+
+
+## Returns whether a world position is inside any friendly division's observation radius.
+## This is unit-detection data, separate from province-level terrain visibility.
+## Parameters:
+## - world_position: position to test in map world coordinates.
+## Returns: true when the position is directly visible to a friendly unit.
+func is_world_position_visible_to_units(world_position: Vector2) -> bool:
+	if not vision_enabled or _map_loader == null:
+		return true
+
+	var my_division_ids: Array = GameState.get_my_nation_divisions()
+	for div_id: String in my_division_ids:
+		var div: Dictionary = GameState.get_division(div_id)
+		var friendly_pos: Vector2 = _get_displayed_division_world_position(div_id, div)
+		var radius: float = _get_division_vision_radius(div)
+		if friendly_pos.distance_to(world_position) <= radius:
+			return true
+
+	return false
+
+
+## Updates one friendly division's reveal light to match the displayed icon position.
+## Parameters:
+## - division_id: division whose light should move.
+## - world_position: current displayed world-space position.
+## Returns: nothing.
+func update_division_light_position(division_id: String, world_position: Vector2) -> void:
+	if division_id.is_empty():
+		return
+	_unit_light_positions_by_division_id[division_id] = world_position
+	var light: PointLight2D = _unit_lights_by_division_id.get(division_id, null) as PointLight2D
+	if light == null:
+		return
+	var div: Dictionary = GameState.get_division(division_id)
+	if div.is_empty():
+		return
+	var radius: float = _get_division_vision_radius(div)
+	_configure_light(light, world_position, radius, UNIT_LIGHT_ENERGY, PointLight2D.BLEND_MODE_ADD)
 
 
 # ── visual layer setup ────────────────────────────────────────────────────────
@@ -157,17 +214,45 @@ func _compute_visible_provinces() -> void:
 	var my_division_ids: Array = GameState.get_my_nation_divisions()
 	for div_id: String in my_division_ids:
 		var div: Dictionary = GameState.get_division(div_id)
-		var lng: float = div.get("position_lng", 0.0)
-		var lat: float = div.get("position_lat", 0.0)
-		var obs: float = div.get("observation_radius", 100.0)
-		var div_world_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
-		var radius: float = maxf(obs * UNIT_VISION_RADIUS_MULTIPLIER, MIN_UNIT_LIGHT_RADIUS)
+		var div_world_pos: Vector2 = _get_displayed_division_world_position(div_id, div)
+		var radius: float = _get_division_vision_radius(div)
 
 		for province_id: String in _map_loader.get_all_province_ids():
 			if _visible_provinces.has(province_id):
 				continue
 			if div_world_pos.distance_to(_get_province_position(province_id)) <= radius:
 				_visible_provinces[province_id] = true
+
+
+## Returns a division's projected world position from its read-only GameState data.
+## Parameters:
+## - division_data: DivisionState dictionary mirrored from GameState.
+## Returns: projected world-space position.
+func _get_division_world_position(division_data: Dictionary) -> Vector2:
+	var lng: float = division_data.get("position_lng", 0.0)
+	var lat: float = division_data.get("position_lat", 0.0)
+	return _map_loader.project_lng_lat(lng, lat)
+
+
+## Returns the currently displayed position when MilitarySystem has provided one.
+## Parameters:
+## - division_id: division identifier.
+## - division_data: DivisionState dictionary mirrored from GameState.
+## Returns: displayed world-space position, or server-projected position as fallback.
+func _get_displayed_division_world_position(division_id: String, division_data: Dictionary) -> Vector2:
+	var displayed_position: Variant = _unit_light_positions_by_division_id.get(division_id)
+	if displayed_position is Vector2:
+		return displayed_position
+	return _get_division_world_position(division_data)
+
+
+## Returns a division's world-space observation radius using the shared vision constants.
+## Parameters:
+## - division_data: DivisionState dictionary mirrored from GameState.
+## Returns: radius in world pixels.
+func _get_division_vision_radius(division_data: Dictionary) -> float:
+	var observation_radius: float = division_data.get("observation_radius", 100.0)
+	return maxf(observation_radius * UNIT_VISION_RADIUS_MULTIPLIER, MIN_UNIT_LIGHT_RADIUS)
 
 
 ## Returns the owning nation id for a province, preferring live GameState over static map data.
@@ -216,17 +301,14 @@ func _compute_province_centroid(province_id: String) -> Vector2:
 
 # ── light management ──────────────────────────────────────────────────────────
 
-## Destroys all active PointLight2D nodes and creates fresh ones from visibility data.
-## Owned-province lights are added first (up to MAX_DYNAMIC_LIGHTS),
-## then unit lights consume remaining budget.
+## Rebuilds static owned-province lights from current ownership.
+## Unit lights are synced separately so moving units do not recreate every light.
 ## Returns: nothing.
-func _rebuild_lights() -> void:
-	_clear_lights()
-
+func _rebuild_owned_province_lights() -> void:
+	_clear_lights(_owned_province_lights)
 	var light_count: int = 0
 	var my_nation_id: String = GameState.get_my_nation_id()
 
-	# Owned-province lights — broader and calmer
 	if not my_nation_id.is_empty():
 		for province_id: String in _map_loader.get_all_province_ids():
 			if light_count >= MAX_DYNAMIC_LIGHTS:
@@ -241,19 +323,37 @@ func _rebuild_lights() -> void:
 			)
 			light_count += 1
 
-	# Division (unit) lights — tighter and brighter
+
+## Creates, updates, or removes keyed friendly division lights.
+## Parameters: none.
+## Returns: nothing.
+func _sync_unit_lights() -> void:
+	var remaining_light_budget: int = max(0, MAX_DYNAMIC_LIGHTS - _owned_province_lights.size())
+	var active_division_ids: Dictionary = {}
 	var my_division_ids: Array = GameState.get_my_nation_divisions()
+
 	for div_id: String in my_division_ids:
-		if light_count >= MAX_DYNAMIC_LIGHTS:
+		if active_division_ids.size() >= remaining_light_budget:
 			break
 		var div: Dictionary = GameState.get_division(div_id)
-		var lng: float = div.get("position_lng", 0.0)
-		var lat: float = div.get("position_lat", 0.0)
-		var obs: float = div.get("observation_radius", 100.0)
-		var pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
-		var radius: float = maxf(obs * UNIT_VISION_RADIUS_MULTIPLIER, MIN_UNIT_LIGHT_RADIUS)
-		_spawn_light(pos, radius, UNIT_LIGHT_ENERGY)
-		light_count += 1
+		var pos: Vector2 = _get_displayed_division_world_position(div_id, div)
+		var radius: float = _get_division_vision_radius(div)
+		var light: PointLight2D = _unit_lights_by_division_id.get(div_id, null) as PointLight2D
+		if light == null:
+			light = _spawn_light(pos, radius, UNIT_LIGHT_ENERGY)
+			_unit_lights_by_division_id[div_id] = light
+		else:
+			_configure_light(light, pos, radius, UNIT_LIGHT_ENERGY, PointLight2D.BLEND_MODE_ADD)
+		active_division_ids[div_id] = true
+
+	for div_id: String in _unit_lights_by_division_id.keys():
+		if active_division_ids.has(div_id):
+			continue
+		var stale_light: PointLight2D = _unit_lights_by_division_id.get(div_id, null) as PointLight2D
+		if stale_light != null:
+			stale_light.queue_free()
+		_unit_lights_by_division_id.erase(div_id)
+		_unit_light_positions_by_division_id.erase(div_id)
 
 
 ## Adds one PointLight2D to VisionLightLayer and records it for cleanup.
@@ -267,8 +367,26 @@ func _rebuild_lights() -> void:
 ##               PointLight2D.BLEND_MODE_ADD for unit scouting (additive glow into dark areas).
 ## Returns: nothing.
 func _spawn_light(world_pos: Vector2, radius: float, energy: float,
-		blend_mode: int = PointLight2D.BLEND_MODE_ADD) -> void:
-	var light := PointLight2D.new()
+		blend_mode: int = PointLight2D.BLEND_MODE_ADD) -> PointLight2D:
+	var light: PointLight2D = PointLight2D.new()
+	_configure_light(light, world_pos, radius, energy, blend_mode)
+	_light_layer.add_child(light)
+	_active_lights.append(light)
+	if blend_mode == PointLight2D.BLEND_MODE_MIX:
+		_owned_province_lights.append(light)
+	return light
+
+
+## Applies shared PointLight2D settings without recreating the node.
+## Parameters:
+## - light: light node to configure.
+## - world_pos: light position in world space.
+## - radius: desired light radius in world pixels.
+## - energy: light brightness.
+## - blend_mode: Godot 2D light blend mode.
+## Returns: nothing.
+func _configure_light(light: PointLight2D, world_pos: Vector2, radius: float, energy: float,
+		blend_mode: int) -> void:
 	light.position = world_pos
 	light.texture = _light_texture
 	light.texture_scale = radius / 128.0
@@ -276,13 +394,26 @@ func _spawn_light(world_pos: Vector2, radius: float, energy: float,
 	light.blend_mode = blend_mode
 	light.range_layer_min = -100
 	light.range_layer_max = 100
-	_light_layer.add_child(light)
-	_active_lights.append(light)
 
 
-## Frees all tracked PointLight2D nodes.
+## Frees every tracked PointLight2D node and clears all light lookup state.
 ## Returns: nothing.
-func _clear_lights() -> void:
+func _clear_all_lights() -> void:
 	for light: PointLight2D in _active_lights:
 		light.queue_free()
 	_active_lights.clear()
+	_owned_province_lights.clear()
+	_unit_lights_by_division_id.clear()
+	_unit_light_positions_by_division_id.clear()
+
+
+## Frees a specific tracked PointLight2D list.
+## Parameters:
+## - lights: tracked lights to free and remove from the active list.
+## Returns: nothing.
+func _clear_lights(lights: Array[PointLight2D]) -> void:
+	for light: PointLight2D in lights:
+		light.queue_free()
+	for light: PointLight2D in lights:
+		_active_lights.erase(light)
+	lights.clear()
