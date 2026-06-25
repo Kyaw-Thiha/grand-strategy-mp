@@ -25,8 +25,9 @@ var _camera: Camera2D = null
 var _move_speed: float = 0.0
 var _target_zoom: float = 1.0
 var _edge_scroll_enabled: bool = true
+var _player_input_enabled: bool = true
 var _map_loader: Node = null
-var _label_region_active := false  # true when zoom < threshold
+var _label_region_active: bool = false  # true when zoom < threshold
 var _map_bounds: Rect2 = Rect2()
 var _bounds_ready: bool = false
 
@@ -35,6 +36,8 @@ func setup(camera: Camera2D, map_loader: Node) -> void:
 	_camera = camera
 	_map_loader = map_loader
 	_target_zoom = camera.zoom.x
+	if not EventBus.pause_menu_blocking_changed.is_connected(_on_pause_menu_blocking_changed):
+		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
 
 
 func _process(delta: float) -> void:
@@ -48,15 +51,18 @@ func _process(delta: float) -> void:
 	_handle_movement(delta)
 	_camera.zoom = _camera.zoom.lerp(Vector2(_target_zoom, _target_zoom), ZOOM_SPEED * delta)
 	_clamp_position()
-	var now_in_label_region := _camera.zoom.x < NATION_LABEL_ZOOM_THRESHOLD
+	var now_in_label_region: bool = _camera.zoom.x < NATION_LABEL_ZOOM_THRESHOLD
 	if now_in_label_region != _label_region_active:
 		_label_region_active = now_in_label_region
 		zoom_changed.emit(_camera.zoom.x)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not _player_input_enabled:
+		return
+
 	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
+		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 				_target_zoom = clampf(_target_zoom + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM)
@@ -64,7 +70,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_target_zoom = clampf(_target_zoom - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM)
 
 	if event is InputEventKey:
-		var ke := event as InputEventKey
+		var ke: InputEventKey = event as InputEventKey
 		if ke.pressed and ke.ctrl_pressed:
 			if ke.keycode == KEY_EQUAL or ke.keycode == KEY_KP_ADD:
 				_target_zoom = clampf(_target_zoom + ZOOM_KB_STEP, MIN_ZOOM, MAX_ZOOM)
@@ -100,10 +106,24 @@ func enable_edge_scroll(enabled: bool) -> void:
 	_edge_scroll_enabled = enabled
 
 
+## Enables or disables player-driven camera controls without stopping camera updates.
+## Parameters:
+## - enabled: true when player keyboard, wheel, and edge scroll input should move the camera.
+## Returns: nothing.
+func set_player_input_enabled(enabled: bool) -> void:
+	_player_input_enabled = enabled
+	if not enabled:
+		_move_speed = 0.0
+
+
 # ── internal ──────────────────────────────────────────────────────────────────
 
 func _handle_movement(delta: float) -> void:
-	var wasd_dir := Vector2.ZERO
+	if not _player_input_enabled:
+		_move_speed = 0.0
+		return
+
+	var wasd_dir: Vector2 = Vector2.ZERO
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
 		wasd_dir.y -= 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
@@ -113,7 +133,7 @@ func _handle_movement(delta: float) -> void:
 	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
 		wasd_dir.x += 1.0
 
-	var wasd_active := wasd_dir != Vector2.ZERO
+	var wasd_active: bool = wasd_dir != Vector2.ZERO
 
 	if wasd_active:
 		if _move_speed == 0.0:
@@ -228,6 +248,14 @@ func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -
 func _clamp_position() -> void:
 	if not _bounds_ready:
 		return
-	var b := _map_bounds
+	var b: Rect2 = _map_bounds
 	_camera.position.x = clampf(_camera.position.x, b.position.x, b.end.x)
 	_camera.position.y = clampf(_camera.position.y, b.position.y, b.end.y)
+
+
+## Responds to pause menu input ownership changes.
+## Parameters:
+## - blocking: true when gameplay-facing player input should be ignored.
+## Returns: nothing.
+func _on_pause_menu_blocking_changed(blocking: bool) -> void:
+	set_player_input_enabled(not blocking)

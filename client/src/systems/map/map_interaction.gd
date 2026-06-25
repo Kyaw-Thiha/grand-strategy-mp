@@ -10,10 +10,13 @@ signal selection_cleared()
 var _map_loader: Node = null
 var _selected_id: String = ""
 var _hovered_id: String = ""
+var _player_input_enabled: bool = true
 
 
 func setup(map_loader: Node) -> void:
 	_map_loader = map_loader
+	if not EventBus.pause_menu_blocking_changed.is_connected(_on_pause_menu_blocking_changed):
+		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
 
 
 func on_map_loaded(_province_count: int) -> void:
@@ -36,18 +39,24 @@ func deselect() -> void:
 # ── signal handlers ───────────────────────────────────────────────────────────
 
 func _on_area_mouse_entered(pid: String) -> void:
+	if not _player_input_enabled:
+		return
 	_hovered_id = pid
 	province_hovered.emit(pid)
 
 
 func _on_area_mouse_exited(_pid: String) -> void:
+	if not _player_input_enabled:
+		return
 	_hovered_id = ""
 
 
 func _on_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int, pid: String) -> void:
+	if not _player_input_enabled:
+		return
 	if not event is InputEventMouseButton:
 		return
-	var mb := event as InputEventMouseButton
+	var mb: InputEventMouseButton = event as InputEventMouseButton
 	if not mb.pressed:
 		return
 
@@ -56,3 +65,21 @@ func _on_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int, p
 		province_clicked.emit(pid)
 	elif mb.button_index == MOUSE_BUTTON_RIGHT:
 		province_right_clicked.emit(pid)
+
+
+## Enables or disables player-driven province hover and click interaction.
+## Parameters:
+## - enabled: true when province Area2D events should update hover/selection.
+## Returns: nothing.
+func set_player_input_enabled(enabled: bool) -> void:
+	_player_input_enabled = enabled
+	if not enabled:
+		_hovered_id = ""
+
+
+## Responds to pause menu input ownership changes.
+## Parameters:
+## - blocking: true when province hover/click signals should be ignored.
+## Returns: nothing.
+func _on_pause_menu_blocking_changed(blocking: bool) -> void:
+	set_player_input_enabled(not blocking)

@@ -52,5 +52,6 @@ signal move_mode_requested(division_id: String)
 signal notification_requested(message: String, type: String)
 signal map_mode_changed(mode: String)   # "political" | "cover" | "elevation"
 signal settings_requested()
+signal pause_menu_blocking_changed(blocking: bool)
 signal move_mode_cancelled()
 signal notification_cycle_next()
