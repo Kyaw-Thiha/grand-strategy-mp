@@ -81,6 +81,7 @@ var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
 const CHAIN_REFRESH_INTERVAL_SEC := 1.0
 const CHAIN_REFRESH_MIN_MOVE_DEG := 0.02
+const GROUP_MOVE_SLOT_SPACING_DEG := 0.045
 
 
 func get_icons() -> Dictionary:
@@ -226,6 +227,13 @@ func handle_input(event: InputEvent) -> void:
 func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 	if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
+		if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
+			if not mouse_button.pressed:
+				return false
+			if try_right_click_at_world(world_pos):
+				return true
+			return _handle_right_click_move(world_pos, mouse_button.shift_pressed)
+
 		if mouse_button.button_index != MOUSE_BUTTON_LEFT:
 			return false
 
@@ -321,6 +329,62 @@ func try_right_click_at_world(world_pos: Vector2) -> bool:
 
 # ── Move mode helpers ─────────────────────────────────────────────────────────
 
+## Handles RTS-style right-click movement for currently selected own divisions.
+## Parameters:
+## - world_pos: clicked destination in map world coordinates.
+## - shift_held: whether the click should append to the single-unit waypoint chain.
+## Returns: true when the right click was consumed by movement.
+func _handle_right_click_move(world_pos: Vector2, shift_held: bool) -> bool:
+	var moving_division_ids: Array[String] = _get_own_selected_division_ids()
+	if moving_division_ids.is_empty():
+		return false
+	if _path_pending:
+		return true
+
+	var lng_lat: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+	if moving_division_ids.size() > 1:
+		_handle_group_move_click(lng_lat.x, lng_lat.y)
+		return true
+
+	_selected_division_id = moving_division_ids[0]
+	if shift_held:
+		_move_mode = true
+		_set_icon_move_mode(_selected_division_id, true)
+		_handle_move_click(lng_lat.x, lng_lat.y, true)
+	else:
+		_submit_direct_move_order(_selected_division_id, lng_lat.x, lng_lat.y)
+	return true
+
+
+## Computes and submits an immediate single-division move order.
+## Parameters:
+## - division_id: selected own division to move.
+## - target_lng: destination longitude.
+## - target_lat: destination latitude.
+## Returns: nothing.
+func _submit_direct_move_order(division_id: String, target_lng: float, target_lat: float) -> void:
+	if not _pathfinder.is_built():
+		push_warning("[MilitarySystem] Pathfinder not built — cannot route")
+		_clear_pending()
+		return
+	if not _is_own_unit(division_id):
+		return
+
+	_clear_pending()
+	var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
+	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
+	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
+	var movement_profile: Dictionary = _get_movement_profile(division_id)
+	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	if path.is_empty():
+		push_warning("[MilitarySystem] No path found for %s" % division_id)
+		return
+
+	var path_to_submit: Array[String] = []
+	for waypoint_id: Variant in path:
+		path_to_submit.append(str(waypoint_id))
+	_submit_move_order_for_division(division_id, path_to_submit)
+
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if not _pathfinder.is_built():
 		push_warning("[MilitarySystem] Pathfinder not built — cannot route")
@@ -396,18 +460,21 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		_clear_pending()
 		return
 
-	var group_center: Vector2 = _get_group_center_lng_lat(moving_division_ids)
-	for division_id: String in moving_division_ids:
+	for index: int in moving_division_ids.size():
+		var division_id: String = moving_division_ids[index]
 		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
-		var formation_offset: Vector2 = current_lng_lat - group_center
-		var destination_lng_lat: Vector2 = Vector2(target_lng, target_lat) + formation_offset
+		var destination_lng_lat: Vector2 = Vector2(target_lng, target_lat) \
+				+ _get_group_destination_offset(index, moving_division_ids.size())
 		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
 		var movement_profile: Dictionary = _get_movement_profile(division_id)
 		var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
 		if path.is_empty():
-			push_warning("[MilitarySystem] No group path found for %s" % division_id)
-			continue
+			goal_id = _pathfinder.find_nearest(target_lng, target_lat)
+			path = _pathfinder.find_path(start_id, goal_id, movement_profile)
+			if path.is_empty():
+				push_warning("[MilitarySystem] No group path found for %s" % division_id)
+				continue
 
 		var path_to_submit: Array[String] = []
 		for waypoint_id: Variant in path:
@@ -473,6 +540,24 @@ func _append_segment_to_chain(segment: Array, goal_id: String) -> void:
 func _compute_avoidance_multiplier(dist_deg: float) -> float:
 	var factor := clampf(dist_deg / OFFROAD_THRESHOLD_DEG, 0.0, 1.0)
 	return 1.0 + factor * (MAX_ROAD_MULTIPLIER - 1.0)
+
+
+## Returns a compact destination slot around the clicked group-move target.
+## Parameters:
+## - index: selected unit index.
+## - count: selected unit count.
+## Returns: longitude/latitude offset in degrees.
+func _get_group_destination_offset(index: int, count: int) -> Vector2:
+	if count <= 1:
+		return Vector2.ZERO
+
+	var columns: int = int(ceil(sqrt(float(count))))
+	var rows: int = int(ceil(float(count) / float(columns)))
+	var column: int = index % columns
+	var row: int = index / columns
+	var centered_column: float = float(column) - (float(columns - 1) * 0.5)
+	var centered_row: float = float(row) - (float(rows - 1) * 0.5)
+	return Vector2(centered_column, centered_row) * GROUP_MOVE_SLOT_SPACING_DEG
 
 
 func _refresh_chain_start() -> void:
