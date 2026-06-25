@@ -5,6 +5,10 @@
 [ext_resource type="Texture2D" path="res://assets/flags/Flag_of_France.svg" id="3"]
 [ext_resource type="Texture2D" path="res://assets/ui/setting-gear.png" id="4"]
 [ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/military_panel.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/research_panel.tscn" id="9"]
 
 [node name="GameHUD" type="CanvasLayer"]
 layer = 2
@@ -202,6 +206,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+use_clip_content = true
 
 [node name="ToastContainer" type="VBoxContainer" parent="HUDRoot"]
 unique_name_in_owner = true
@@ -212,3 +217,17 @@ offset_bottom = 400.0
 grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/separation = 4
+
+[node name="MilitaryPanel" parent="." instance=ExtResource("6")]
+visible = false
+
+[node name="EconomyPanel" parent="." instance=ExtResource("7")]
+visible = false
+
+[node name="DiplomacyPanel" parent="." instance=ExtResource("8")]
+visible = false
+
+[node name="ResearchPanel" parent="." instance=ExtResource("9")]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
