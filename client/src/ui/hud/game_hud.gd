@@ -1,3 +1,4 @@
+class_name GameHUD
 extends CanvasLayer
 ## Persistent in-game HUD: war-room frame + panel orchestrator.
 ## Owns the TopBar, LeftDockRail, anchor zones, and toast area.
@@ -9,7 +10,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var overlay_dim: ColorRect = %OverlayDim
 
 @onready var _side_panel_anchor: MarginContainer  = %SidePanelAnchor
-@onready var _center_panel_anchor: CenterContainer = %CenterPanelAnchor
+@onready var _center_panel_anchor: Control = %CenterPanelAnchor
 @onready var _toast_container: VBoxContainer       = %ToastContainer
 @onready var _nation_label: Label                  = %NationLabel
 @onready var _session_timer: Label                 = %SessionTimer

@@ -15,7 +15,7 @@ const _MOVE_MODE_ACTIVE := "move_mode"
 
 # Set by GameHUD._ready() via setup()
 var side_panel_anchor: MarginContainer
-var center_panel_anchor: CenterContainer
+var center_panel_anchor: Control
 var overlay_dim: ColorRect
 
 # panel_name → { node: Node, placement: PlacementMode, is_open: bool }
@@ -32,7 +32,7 @@ var _escape_state_stack: Array[String] = []
 
 func setup(
 		side: MarginContainer,
-		center: CenterContainer,
+		center: Control,
 		dim: ColorRect
 ) -> void:
 	side_panel_anchor = side
@@ -153,6 +153,8 @@ func show_panel(panel_name: String) -> void:
 		_previous_side_docked = ""
 		side_panel_anchor.show()
 	entry.node.show()
+	if placement == PlacementMode.FULL_CENTER:
+		_center_panel(entry.node as Control)
 	entry.is_open = true
 	_currently_open = panel_name
 	panel_opened.emit(panel_name)
@@ -230,6 +232,18 @@ func _toggle_by_shortcut(panel_name: String) -> void:
 		if _currently_open != "":
 			hide_panel(_currently_open)
 		show_panel(panel_name)
+
+
+func _center_panel(panel: Control) -> void:
+	if panel == null:
+		return
+	var psize: Vector2 = center_panel_anchor.size
+	var mysize: Vector2 = panel.get_combined_minimum_size()
+	panel.set_size(mysize)
+	panel.set_position(Vector2(
+		floor((psize.x - mysize.x) * 0.5),
+		floor((psize.y - mysize.y) * 0.5)
+	))
 
 
 func _any_docked_open() -> bool:

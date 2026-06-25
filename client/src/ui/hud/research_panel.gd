@@ -5,8 +5,6 @@ extends PanelContainer
 
 
 func _ready() -> void:
-	size_flags_horizontal = 0
-	size_flags_vertical = 0
 	_setup_tab_buttons()
 
 

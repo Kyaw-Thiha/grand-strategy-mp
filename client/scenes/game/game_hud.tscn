@@ -197,7 +197,7 @@ grow_vertical = 2
 mouse_filter = 0
 color = Color(0, 0, 0, 0.55)
 
-[node name="CenterPanelAnchor" type="CenterContainer" parent="HUDRoot"]
+[node name="CenterPanelAnchor" type="Control" parent="HUDRoot"]
 unique_name_in_owner = true
 visible = false
 anchors_preset = 15

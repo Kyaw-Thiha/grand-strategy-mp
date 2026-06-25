@@ -36,7 +36,8 @@ func _build_shell() -> void:
 	_dim = ColorRect.new()
 	_dim.color = Color(0, 0, 0, 0.6)
 	_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_dim.gui_input.connect(_on_dim_input)
 	add_child(_dim)
 
 	var center := CenterContainer.new()
@@ -155,11 +156,11 @@ func _build_action_rows() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Input capture
+# Input capture + Escape handling
 # ---------------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
-	if _capturing_action == "" or not visible:
+	if not visible:
 		return
 	if not (event is InputEventKey):
 		return
@@ -167,8 +168,14 @@ func _input(event: InputEvent) -> void:
 	if not key.pressed or key.echo:
 		return
 	if key.physical_keycode == KEY_ESCAPE:
-		_cancel_capture()
+		if _capturing_action != "":
+			_cancel_capture()
+		else:
+			hide_panel()
 		get_viewport().set_input_as_handled()
+		return
+	# Key-capture flow — only when actively waiting for a new binding
+	if _capturing_action == "":
 		return
 	var ev: InputEventKey = key.duplicate() as InputEventKey
 	ev.pressed = false
@@ -176,6 +183,21 @@ func _input(event: InputEvent) -> void:
 	_action_buttons[_capturing_action].text = KeybindManager.get_action_display_text(_capturing_action)
 	_cancel_capture()
 	get_viewport().set_input_as_handled()
+
+
+func _on_dim_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	var mb: InputEventMouseButton = event as InputEventMouseButton
+	# Eat all scroll wheel events over the dim area so camera_system doesn't zoom
+	if mb.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+			MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+		get_viewport().set_input_as_handled()
+		return
+	# Left click outside the panel = close
+	if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+		get_viewport().set_input_as_handled()
+		hide_panel()
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ extends Node
 const MAP_ID := "western_europe_6"
 #const FrontlineOverlay := preload("res://src/systems/frontline/frontline_overlay.gd")  # deferred
 
+
 var _nation_definitions_by_id: Dictionary = {}
 
 @onready var _map_loader: Node       = $MapLoader
@@ -17,8 +18,8 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
 @onready var _vision_system: Node    = $VisionSystem
-@onready var _pause_menu: CanvasLayer = $PauseMenu
-@onready var _game_hud: CanvasLayer = $GameHUD
+@onready var _pause_menu = $PauseMenu
+@onready var _game_hud   = $GameHUD
 
 
 func _ready() -> void:
