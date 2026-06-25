@@ -25,6 +25,7 @@ var _currently_open: String = ""
 var _shortcut_map: Dictionary = {}
 # Previously-open side-docked panel — saved before a FULL_CENTER panel opens, restored on close
 var _previous_side_docked: String = ""
+var _player_input_blocked: bool = false
 
 # Escape state machine
 var _escape_state_stack: Array[String] = []
@@ -38,9 +39,14 @@ func setup(
 	side_panel_anchor = side
 	center_panel_anchor = center
 	overlay_dim = dim
+	if not EventBus.pause_menu_blocking_changed.is_connected(_on_pause_menu_blocking_changed):
+		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
 
 
 func _input(event: InputEvent) -> void:
+	if _player_input_blocked:
+		return
+
 	if not (event is InputEventKey):
 		return
 	var key: InputEventKey = event as InputEventKey
@@ -82,6 +88,14 @@ func _handle_escape() -> void:
 
 	if EventBus.settings_requested.get_connections().size() > 0:
 		EventBus.settings_requested.emit()
+
+
+## Responds to pause menu input ownership changes.
+## Parameters:
+## - blocking: true when HUD keyboard shortcuts should be ignored.
+## Returns: nothing.
+func _on_pause_menu_blocking_changed(blocking: bool) -> void:
+	_player_input_blocked = blocking
 
 
 func set_move_mode_active(active: bool) -> void:

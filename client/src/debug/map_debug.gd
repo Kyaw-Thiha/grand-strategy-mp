@@ -65,6 +65,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _pause_menu.visible:
+		return
+
 	# Keys only — mouse is handled in _unhandled_input
 	if event is InputEventKey:
 		_military_system.handle_input(event)
