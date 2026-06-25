@@ -10,6 +10,7 @@ var engagement_radius_px: float = 60.0
 var observation_radius_px: float = 45.0
 var scouting_radius_px: float = 60.0
 var is_selected: bool = false
+var is_selection_previewed: bool = false
 var is_moving: bool = false
 var is_move_mode: bool = false
 var supply_status: String = "normal"
@@ -71,6 +72,8 @@ func set_selected(selected: bool) -> void:
 	if is_selected != selected:
 		is_selected = selected
 		if is_selected:
+			is_selection_previewed = false
+		if is_selected:
 			_selection_color_target = _get_selection_target_color()
 			_selection_color_start = _selection_color_target
 			_selection_color_current = _selection_color_target
@@ -81,6 +84,12 @@ func set_selected(selected: bool) -> void:
 			_selection_animation_elapsed = SELECTION_ANIMATION_DURATION
 			_selection_color_elapsed = SELECTION_ANIMATION_DURATION
 			set_process(false)
+		queue_redraw()
+
+
+func set_selection_preview(active: bool) -> void:
+	if is_selection_previewed != active:
+		is_selection_previewed = active
 		queue_redraw()
 
 
@@ -182,6 +191,13 @@ func _draw() -> void:
 	# Encirclement ring — most prominent supply indicator, drawn before selection ring
 	if supply_status == "encircled":
 		draw_arc(Vector2.ZERO, half_w + 8.0, 0.0, TAU, 32, Color(0.90, 0.10, 0.10, 0.90), 2.5)
+
+	# Drag-box preview — neutral grey halo for units that would be selected on release.
+	if is_selection_previewed and not is_selected:
+		var preview_radius: float = SELECTION_RADIUS
+		draw_circle(Vector2.ZERO, preview_radius, Color(0.72, 0.72, 0.72, 0.13))
+		draw_arc(Vector2.ZERO, preview_radius, 0.0, TAU, 48, Color(0.82, 0.82, 0.82, 0.82), 4.0)
+		draw_arc(Vector2.ZERO, preview_radius - 4.0, 0.0, TAU, 48, Color(0.20, 0.20, 0.20, 0.75), 2.0)
 
 	# Selection highlight — cyan ring in move mode, yellow ring otherwise
 	if is_selected:

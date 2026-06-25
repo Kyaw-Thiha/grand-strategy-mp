@@ -25,6 +25,7 @@ const ENGAGEMENT_RADIUS_PX := 18.0
 const OBSERVATION_RADIUS_PX := 45.0
 const SCOUTING_RADIUS_PX := 60.0
 const HIT_THRESHOLD_PX := 20.0
+const DRAG_SELECT_THRESHOLD_PX := 6.0
 ## Distance threshold (deg) at which road avoidance reaches maximum strength (~1500m).
 const OFFROAD_THRESHOLD_DEG := 0.014
 ## Maximum road cost multiplier applied when player is deep off-road.
@@ -44,7 +45,13 @@ var _icons: Dictionary = {}
 var _target_positions: Dictionary = {}
 
 var _selected_division_id: String = ""
+var _selected_division_ids: Array[String] = []
+var _selection_preview_division_ids: Array[String] = []
 var _move_mode: bool = false
+var _drag_select_pressed: bool = false
+var _drag_select_active: bool = false
+var _drag_select_start_screen: Vector2 = Vector2.ZERO
+var _drag_select_current_screen: Vector2 = Vector2.ZERO
 
 # Waypoint chain being built (shift+click milestones — each is one milestone waypoint ID)
 var _pending_milestones: Array[String] = []
@@ -53,6 +60,8 @@ var _pending_chain: Array[String] = []
 
 var _pathfinder: RefCounted = null
 var _ghost_overlay: Node2D = null
+var _selection_canvas_layer: CanvasLayer = null
+var _selection_box_overlay: Control = null
 var _route_overlays: Dictionary = {}   # div_id → MoveOrderOverlay node
 
 var _path_thread: Thread = null
@@ -88,6 +97,12 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	# Ghost overlay for the pending route being built (shift+click chain preview)
 	_ghost_overlay = MoveOrderOverlay.new()
 	_icon_layer.add_child(_ghost_overlay)
+
+	_selection_canvas_layer = CanvasLayer.new()
+	_selection_canvas_layer.layer = 1
+	add_child(_selection_canvas_layer)
+	_selection_box_overlay = SelectionBoxOverlay.new()
+	_selection_canvas_layer.add_child(_selection_box_overlay)
 
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
@@ -164,34 +179,94 @@ func handle_input(event: InputEvent) -> void:
 				_pending_auto_submit = false
 				_shift_chain_started = true
 		KEY_M:
-			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
+			var own_selected_for_move: Array[String] = _get_own_selected_division_ids()
+			if not own_selected_for_move.is_empty():
 				_move_mode = true
 				_pending_milestones.clear()
 				_pending_chain.clear()
 				_update_ghost()
-				_set_icon_move_mode(_selected_division_id, true)
+				_set_selected_icons_move_mode(true)
 		KEY_H:
-			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
+			var own_selected_for_hold: Array[String] = _get_own_selected_division_ids()
+			if not own_selected_for_hold.is_empty():
 				_clear_pending()
-				CommandQueue.submit("HOLD", { "division_id": _selected_division_id })
+				for division_id: String in own_selected_for_hold:
+					CommandQueue.submit("HOLD", { "division_id": division_id })
 		KEY_X:
-			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
+			var own_selected_for_stop: Array[String] = _get_own_selected_division_ids()
+			if not own_selected_for_stop.is_empty():
 				_clear_pending()
-				CommandQueue.submit("HOLD", { "division_id": _selected_division_id })
+				for division_id: String in own_selected_for_stop:
+					CommandQueue.submit("HOLD", { "division_id": division_id })
 		KEY_G:
-			if _selected_division_id != "" and _is_own_unit(_selected_division_id):
+			var own_selected_for_retreat: Array[String] = _get_own_selected_division_ids()
+			if not own_selected_for_retreat.is_empty():
 				_clear_pending()
-				CommandQueue.submit("RETREAT", { "division_id": _selected_division_id })
+				for division_id: String in own_selected_for_retreat:
+					CommandQueue.submit("RETREAT", { "division_id": division_id })
 		KEY_ESCAPE:
 			_clear_pending()
 			deselect()
 
 
+## Handles mouse press, drag, and release for unit click/box selection and move clicks.
+## Parameters:
+## - event: mouse button or mouse motion event from the map scene.
+## - world_pos: event position transformed into map world coordinates.
+## Returns: true when the military system consumed the mouse event.
+func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
+	if event is InputEventMouseButton:
+		var mouse_button: InputEventMouseButton = event
+		if mouse_button.button_index != MOUSE_BUTTON_LEFT:
+			return false
+
+		if mouse_button.pressed:
+			if _move_mode and not _selected_division_ids.is_empty():
+				return try_click_at_world(world_pos, mouse_button.shift_pressed)
+			_drag_select_pressed = true
+			_drag_select_active = false
+			_drag_select_start_screen = mouse_button.position
+			_drag_select_current_screen = mouse_button.position
+			_clear_selection_preview()
+			_update_selection_box_overlay()
+			return false
+
+		if not _drag_select_pressed:
+			return false
+
+		_drag_select_current_screen = mouse_button.position
+		if _drag_select_active:
+			_commit_selection(_selection_preview_division_ids)
+			_reset_drag_selection()
+			return true
+
+		_reset_drag_selection()
+		return try_click_at_world(world_pos, mouse_button.shift_pressed)
+
+	if event is InputEventMouseMotion:
+		if not _drag_select_pressed:
+			return false
+		var mouse_motion: InputEventMouseMotion = event
+		_drag_select_current_screen = mouse_motion.position
+		if not _drag_select_active \
+				and _drag_select_start_screen.distance_to(_drag_select_current_screen) >= DRAG_SELECT_THRESHOLD_PX:
+			_drag_select_active = true
+		if _drag_select_active:
+			_update_drag_selection_preview()
+			_update_selection_box_overlay()
+			return true
+
+	return false
+
+
 ## Left-click at a world-space position. Returns true if consumed (caller should mark event handled).
 func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
-	if _move_mode and _selected_division_id != "":
+	if _move_mode and not _selected_division_ids.is_empty():
 		var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
-		_handle_move_click(ll.x, ll.y, shift_held)
+		if _selected_division_ids.size() == 1:
+			_handle_move_click(ll.x, ll.y, shift_held)
+		else:
+			_handle_group_move_click(ll.x, ll.y)
 		return true
 
 	var clicked_id := find_division_at_world(world_pos)
@@ -200,7 +275,7 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 		return true
 
 	# Click on empty map while something selected → deselect
-	if _selected_division_id != "":
+	if not _selected_division_ids.is_empty():
 		deselect()
 	return false
 
@@ -284,6 +359,43 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult)
 		call_deferred("_on_segment_ready", segment, goal_id, shift_held, division_id_snapshot)
 	)
+
+
+## Computes and submits one formation-preserving route per selected unit.
+## Parameters:
+## - target_lng: clicked destination longitude used as the group center.
+## - target_lat: clicked destination latitude used as the group center.
+## Returns: Nothing.
+func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
+	if not _pathfinder.is_built():
+		push_warning("[MilitarySystem] Pathfinder not built — cannot route group")
+		_move_mode = false
+		return
+
+	var moving_division_ids: Array[String] = _get_own_selected_division_ids()
+	if moving_division_ids.is_empty():
+		_clear_pending()
+		return
+
+	var group_center: Vector2 = _get_group_center_lng_lat(moving_division_ids)
+	for division_id: String in moving_division_ids:
+		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
+		var formation_offset: Vector2 = current_lng_lat - group_center
+		var destination_lng_lat: Vector2 = Vector2(target_lng, target_lat) + formation_offset
+		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
+		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
+		var movement_profile: Dictionary = _get_movement_profile(division_id)
+		var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		if path.is_empty():
+			push_warning("[MilitarySystem] No group path found for %s" % division_id)
+			continue
+
+		var path_to_submit: Array[String] = []
+		for waypoint_id: Variant in path:
+			path_to_submit.append(str(waypoint_id))
+		_submit_move_order_for_division(division_id, path_to_submit)
+
+	_clear_pending()
 
 
 func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, division_id_snapshot: String) -> void:
@@ -541,6 +653,24 @@ func _submit_pending() -> void:
 
 	var chain_snapshot: Array = chain_to_submit
 
+	_submit_move_order_for_division(div_id, chain_snapshot)
+
+	_clear_pending()
+
+
+## Submits a move order and seeds client-local dead reckoning for immediate feedback.
+## Parameters:
+## - div_id: division receiving the order.
+## - waypoint_ids: ordered waypoint ids for the server command and local route.
+## Returns: Nothing.
+func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> void:
+	if waypoint_ids.is_empty():
+		return
+	if not _is_own_unit(div_id):
+		return
+
+	var chain_snapshot: Array = waypoint_ids.duplicate()
+
 	CommandQueue.submit("SUBMIT_MOVE_ORDER", {
 		"division_id": div_id,
 		"waypoints": chain_snapshot,
@@ -572,11 +702,9 @@ func _submit_pending() -> void:
 
 	_update_division_route(div_id)
 
-	_clear_pending()
-
 
 func _clear_pending() -> void:
-	_set_icon_move_mode(_selected_division_id, false)
+	_set_selected_icons_move_mode(false)
 	_pending_milestones.clear()
 	_pending_chain.clear()
 	_move_mode = false
@@ -593,6 +721,50 @@ func _set_icon_move_mode(division_id: String, active: bool) -> void:
 	var icon = _icons.get(division_id)
 	if icon != null:
 		(icon as Node2D).set_move_mode(active)
+
+
+func _set_selected_icons_move_mode(active: bool) -> void:
+	for division_id: String in _selected_division_ids:
+		_set_icon_move_mode(division_id, active)
+
+
+func _get_own_selected_division_ids() -> Array[String]:
+	var result: Array[String] = []
+	for division_id: String in _selected_division_ids:
+		if _is_own_unit(division_id):
+			result.append(division_id)
+	return result
+
+
+func _get_movement_profile(division_id: String) -> Dictionary:
+	var div_data: Dictionary = GameState.get_division(division_id)
+	var movement_profile: Dictionary = {}
+	var profile_json: String = div_data.get("movement_profile_json", "")
+	if not profile_json.is_empty():
+		var parsed: Variant = JSON.parse_string(profile_json)
+		if parsed is Dictionary:
+			movement_profile = parsed
+	return movement_profile
+
+
+func _get_division_lng_lat(division_id: String) -> Vector2:
+	if _dr_pos_deg.has(division_id):
+		return _dr_pos_deg[division_id]
+
+	var div_data: Dictionary = GameState.get_division(division_id)
+	return Vector2(
+			float(div_data.get("position_lng", 0.0)),
+			float(div_data.get("position_lat", 0.0)))
+
+
+func _get_group_center_lng_lat(division_ids: Array[String]) -> Vector2:
+	if division_ids.is_empty():
+		return Vector2.ZERO
+
+	var sum: Vector2 = Vector2.ZERO
+	for division_id: String in division_ids:
+		sum += _get_division_lng_lat(division_id)
+	return sum / float(division_ids.size())
 
 
 func _get_ghost_positions() -> Array[Vector2]:
@@ -778,28 +950,127 @@ func _on_division_removed(division_id: String) -> void:
 	_dr_pos_deg.erase(division_id)
 	_dr_order.erase(division_id)
 	_dr_profiles.erase(division_id)
-	if _selected_division_id == division_id:
-		deselect()
+	if _selected_division_ids.has(division_id):
+		_selected_division_ids.erase(division_id)
+		_selection_preview_division_ids.erase(division_id)
+		_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
+		_emit_selection_changed()
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
 
 func _select(division_id: String) -> void:
-	if _selected_division_id != "" and _icons.has(_selected_division_id):
-		(_icons[_selected_division_id] as Node2D).set_selected(false)
-	_selected_division_id = division_id
-	if _icons.has(division_id):
-		(_icons[division_id] as Node2D).set_selected(true)
-	EventBus.division_selected.emit(division_id)
+	var new_selection: Array[String] = []
+	new_selection.append(division_id)
+	_commit_selection(new_selection)
 	_clear_pending()
 
 
 func deselect() -> void:
-	if _selected_division_id != "" and _icons.has(_selected_division_id):
-		(_icons[_selected_division_id] as Node2D).set_selected(false)
+	for division_id: String in _selected_division_ids:
+		if _icons.has(division_id):
+			(_icons[division_id] as Node2D).set_selected(false)
+			(_icons[division_id] as Node2D).set_move_mode(false)
+	_clear_selection_preview()
 	_selected_division_id = ""
+	_selected_division_ids.clear()
 	EventBus.division_deselected.emit()
+	EventBus.division_selection_changed.emit([])
 	_clear_pending()
+
+
+func _commit_selection(division_ids: Array[String]) -> void:
+	for old_division_id: String in _selected_division_ids:
+		if _icons.has(old_division_id):
+			(_icons[old_division_id] as Node2D).set_selected(false)
+			(_icons[old_division_id] as Node2D).set_move_mode(false)
+
+	_selected_division_ids.clear()
+	for division_id: String in division_ids:
+		if division_id.is_empty() or not _icons.has(division_id):
+			continue
+		if not _is_own_unit(division_id):
+			continue
+		if _selected_division_ids.has(division_id):
+			continue
+		_selected_division_ids.append(division_id)
+
+	_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
+	for selected_id: String in _selected_division_ids:
+		(_icons[selected_id] as Node2D).set_selected(true)
+
+	_clear_selection_preview()
+	_emit_selection_changed()
+
+
+func _emit_selection_changed() -> void:
+	if _selected_division_ids.is_empty():
+		EventBus.division_deselected.emit()
+	else:
+		EventBus.division_selected.emit(_selected_division_id)
+	EventBus.division_selection_changed.emit(_selected_division_ids.duplicate())
+
+
+func _reset_drag_selection() -> void:
+	_drag_select_pressed = false
+	_drag_select_active = false
+	_drag_select_start_screen = Vector2.ZERO
+	_drag_select_current_screen = Vector2.ZERO
+	_clear_selection_preview()
+	_update_selection_box_overlay()
+
+
+func _update_drag_selection_preview() -> void:
+	var selection_rect: Rect2 = _get_drag_selection_rect()
+	var preview_ids: Array[String] = []
+	var canvas_transform: Transform2D = get_viewport().get_canvas_transform()
+	for division_id: String in _icons:
+		if not _is_own_unit(division_id):
+			continue
+		var icon: Node2D = _icons[division_id]
+		var screen_position: Vector2 = canvas_transform * icon.global_position
+		if selection_rect.has_point(screen_position):
+			preview_ids.append(division_id)
+	_set_selection_preview(preview_ids)
+
+
+func _set_selection_preview(division_ids: Array[String]) -> void:
+	for old_division_id: String in _selection_preview_division_ids:
+		if _icons.has(old_division_id):
+			(_icons[old_division_id] as Node2D).set_selection_preview(false)
+
+	_selection_preview_division_ids.clear()
+	for division_id: String in division_ids:
+		if not _icons.has(division_id):
+			continue
+		_selection_preview_division_ids.append(division_id)
+		(_icons[division_id] as Node2D).set_selection_preview(true)
+
+
+func _clear_selection_preview() -> void:
+	for division_id: String in _selection_preview_division_ids:
+		if _icons.has(division_id):
+			(_icons[division_id] as Node2D).set_selection_preview(false)
+	_selection_preview_division_ids.clear()
+
+
+func _get_drag_selection_rect() -> Rect2:
+	var top_left: Vector2 = Vector2(
+			minf(_drag_select_start_screen.x, _drag_select_current_screen.x),
+			minf(_drag_select_start_screen.y, _drag_select_current_screen.y))
+	var bottom_right: Vector2 = Vector2(
+			maxf(_drag_select_start_screen.x, _drag_select_current_screen.x),
+			maxf(_drag_select_start_screen.y, _drag_select_current_screen.y))
+	return Rect2(top_left, bottom_right - top_left)
+
+
+func _update_selection_box_overlay() -> void:
+	if _selection_box_overlay == null:
+		return
+	if _drag_select_active:
+		_selection_box_overlay.set_selection_rect(_get_drag_selection_rect(), true)
+	else:
+		_selection_box_overlay.set_selection_rect(Rect2(), false)
 
 
 func find_division_at_world(world_pos: Vector2) -> String:
@@ -812,3 +1083,30 @@ func find_division_at_world(world_pos: Vector2) -> String:
 			best_dist = d
 			best_id = div_id
 	return best_id
+
+
+class SelectionBoxOverlay:
+	extends Control
+
+	var _selection_rect: Rect2 = Rect2()
+	var _is_active: bool = false
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	## Updates the screen-space rectangle used for drag selection feedback.
+	## Parameters:
+	## - selection_rect: viewport-space rectangle to draw.
+	## - active: whether the drag-selection box should be visible.
+	## Returns: Nothing.
+	func set_selection_rect(selection_rect: Rect2, active: bool) -> void:
+		_selection_rect = selection_rect
+		_is_active = active
+		queue_redraw()
+
+	func _draw() -> void:
+		if not _is_active:
+			return
+		draw_rect(_selection_rect, Color(0.75, 0.78, 0.82, 0.16), true)
+		draw_rect(_selection_rect, Color(0.82, 0.86, 0.92, 0.85), false, 1.5)

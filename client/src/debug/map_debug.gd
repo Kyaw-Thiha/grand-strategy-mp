@@ -52,21 +52,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		_military_system.handle_input(event)
 		return
 
-	if not event is InputEventMouseButton:
-		return
-	var mb := event as InputEventMouseButton
-	if not mb.pressed:
-		return
-
-	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
-
-	if mb.button_index == MOUSE_BUTTON_LEFT:
-		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
-			get_viewport().set_input_as_handled()
-	elif mb.button_index == MOUSE_BUTTON_RIGHT:
-		if _military_system.try_right_click_at_world(world_pos):
-			get_viewport().set_input_as_handled()
-
 
 func _input(event: InputEvent) -> void:
 	# Forward key events to military system (M, H, X, Escape hotkeys)
@@ -74,20 +59,28 @@ func _input(event: InputEvent) -> void:
 		_military_system.handle_input(event)
 		return
 
-	if not event is InputEventMouseButton:
-		return
-	var mb := event as InputEventMouseButton
-	if not mb.pressed:
+	if not event is InputEventMouseButton and not event is InputEventMouseMotion:
 		return
 
-	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
+	var event_position: Vector2
+	if event is InputEventMouseButton:
+		var mouse_button: InputEventMouseButton = event
+		event_position = mouse_button.position
+	else:
+		var mouse_motion: InputEventMouseMotion = event
+		event_position = mouse_motion.position
 
-	if mb.button_index == MOUSE_BUTTON_LEFT:
-		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
-			get_viewport().set_input_as_handled()
-	elif mb.button_index == MOUSE_BUTTON_RIGHT:
-		if _military_system.try_right_click_at_world(world_pos):
-			get_viewport().set_input_as_handled()
+	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
+
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			if _military_system.try_right_click_at_world(world_pos):
+				get_viewport().set_input_as_handled()
+			return
+
+	if _military_system.handle_mouse_input(event, world_pos):
+		get_viewport().set_input_as_handled()
 
 
 func _on_map_loaded(province_count: int) -> void:
