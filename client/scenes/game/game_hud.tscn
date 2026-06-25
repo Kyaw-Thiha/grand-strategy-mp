@@ -118,7 +118,7 @@ layout_mode = 2
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
 text = "Q
-MIL"
+RES"
 
 [node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
@@ -129,14 +129,14 @@ ECO"
 [node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
-text = "T
-DIP"
+text = "R
+MIL"
 
 [node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(72, 72)
-text = "Y
-RES"
+text = "T
+DIP"
 
 [node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2

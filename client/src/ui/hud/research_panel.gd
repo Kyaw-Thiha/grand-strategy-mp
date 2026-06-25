@@ -5,6 +5,9 @@ extends PanelContainer
 
 func _ready() -> void:
 	_setup_tab_buttons()
+	var tc: TabContainer = get_node_or_null("Margin/TabBar") as TabContainer
+	if tc != null:
+		tc.current_tab = 0
 
 
 func _setup_tab_buttons() -> void:

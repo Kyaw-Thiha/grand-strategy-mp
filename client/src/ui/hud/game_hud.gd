@@ -45,10 +45,10 @@ func _ready() -> void:
 	overlay_dim.gui_input.connect(_on_overlay_clicked)
 
 	# Wire dock buttons to panel toggles
-	_dock_btn_q.pressed.connect(_make_dock_toggle("military"))
+	_dock_btn_q.pressed.connect(_make_dock_toggle("research"))
 	_dock_btn_e.pressed.connect(_make_dock_toggle("economy"))
-	_dock_btn_t.pressed.connect(_make_dock_toggle("diplomacy"))
-	_dock_btn_y.pressed.connect(_make_dock_toggle("research"))
+	_dock_btn_t.pressed.connect(_make_dock_toggle("military"))
+	_dock_btn_y.pressed.connect(_make_dock_toggle("diplomacy"))
 
 	# HUDManager signals for dock button visual state
 	hud_manager.panel_opened.connect(_on_panel_opened)
@@ -61,10 +61,10 @@ func _ready() -> void:
 	hud_manager.register_panel("diplomacy", _diplomacy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.FULL_CENTER)
 
-	hud_manager.set_panel_shortcut("military", KEY_Q)
-	hud_manager.set_panel_shortcut("economy", KEY_E)
+	hud_manager.set_panel_shortcut("research",  KEY_Q)
+	hud_manager.set_panel_shortcut("economy",   KEY_E)
+	hud_manager.set_panel_shortcut("military",  KEY_R)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
-	hud_manager.set_panel_shortcut("research", KEY_Y)
 
 
 func _make_dock_toggle(panel_name: String) -> Callable:
@@ -85,10 +85,10 @@ func _on_panel_closed(panel_name: String) -> void:
 
 func _get_dock_button_for_panel(panel_name: String) -> Button:
 	match panel_name:
-		"military":   return _dock_btn_q
-		"economy":    return _dock_btn_e
-		"diplomacy":  return _dock_btn_t
-		"research":   return _dock_btn_y
+		"research":  return _dock_btn_q
+		"economy":   return _dock_btn_e
+		"military":  return _dock_btn_t
+		"diplomacy": return _dock_btn_y
 	return null
 
 
