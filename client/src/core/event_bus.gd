@@ -42,3 +42,5 @@ signal research_rejected(entry_id: String, reason: String)
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)
+signal map_mode_changed(mode: String)   # "political" | "cover" | "elevation"
+signal settings_requested()

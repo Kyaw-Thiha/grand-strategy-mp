@@ -1,9 +1,11 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://src/ui/game/pause_menu.gd" id="1"]
+[ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="2"]
 
 [node name="PauseMenu" type="CanvasLayer"]
 visible = false
+layer = 10
 script = ExtResource("1")
 
 [node name="DimOverlay" type="ColorRect" parent="."]
@@ -22,6 +24,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+theme = ExtResource("2")
 
 [node name="Panel" type="PanelContainer" parent="Center"]
 custom_minimum_size = Vector2(320, 280)
