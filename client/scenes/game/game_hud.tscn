@@ -1,31 +1,53 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://bafvbna6oqbcy"]
 
-[ext_resource type="Script" path="res://src/ui/hud/game_hud.gd" id="1"]
-[ext_resource type="Script" path="res://src/ui/hud/hud_manager.gd" id="2"]
-[ext_resource type="Texture2D" path="res://assets/flags/Flag_of_France.svg" id="3"]
-[ext_resource type="Texture2D" path="res://assets/ui/setting-gear.png" id="4"]
-[ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="5"]
+[ext_resource type="Script" uid="uid://ibr7jbpdlul6" path="res://src/ui/hud/game_hud.gd" id="1"]
+[ext_resource type="Script" uid="uid://d3okhav5y0046" path="res://src/ui/hud/hud_manager.gd" id="2"]
+[ext_resource type="Texture2D" uid="uid://btft1pe8psold" path="res://assets/flags/Flag_of_France.svg" id="3"]
+[ext_resource type="Texture2D" uid="uid://daj134w7wb1te" path="res://assets/icons/gear-solid-full.svg" id="4"]
+[ext_resource type="Theme" uid="uid://bxm46dfawg64w" path="res://assets/themes/hud_dark.tres" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/military_panel.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/research_panel.tscn" id="9"]
-[ext_resource type="Script" path="res://src/ui/hud/friendly_division_panel.gd" id="12"]
-[ext_resource type="Script" path="res://src/ui/hud/friendly_province_panel.gd" id="13"]
-[ext_resource type="Script" path="res://src/ui/hud/enemy_division_panel.gd" id="14"]
-[ext_resource type="Script" path="res://src/ui/hud/friendly_stack_panel.gd" id="15"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_division_panel.tscn" id="16"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_stack_panel.tscn" id="19"]
+[ext_resource type="Texture2D" path="res://assets/icons/hand-fist-solid-full.svg" id="20_handfist"]
+[ext_resource type="Texture2D" path="res://assets/icons/cubes-stacked-solid-full.svg" id="21_cubes"]
+[ext_resource type="Texture2D" path="res://assets/icons/scale-balanced-solid-full.svg" id="22_scale"]
+[ext_resource type="Texture2D" path="res://assets/icons/person-military-rifle-solid-full.svg" id="23_military"]
+[ext_resource type="Texture2D" path="res://assets/icons/handshake-solid-full.svg" id="24_handshake"]
+[ext_resource type="Texture2D" path="res://assets/icons/landmark-dome-solid-full.svg" id="25_landmark"]
+[ext_resource type="Texture2D" path="res://assets/icons/mountain-solid-full.svg" id="26_mountain"]
+[ext_resource type="Texture2D" path="res://assets/icons/clock-solid-full.svg" id="27_clock"]
+[ext_resource type="Texture2D" path="res://assets/icons/industry-solid-full.svg" id="28_industry"]
+[ext_resource type="Texture2D" path="res://assets/icons/oil-well-solid-full.svg" id="29_oilwell"]
+[ext_resource type="Texture2D" path="res://assets/icons/fire-solid-full.svg" id="30_fire"]
+[ext_resource type="Texture2D" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
 
-[node name="GameHUD" type="CanvasLayer"]
+[sub_resource type="Shader" id="Shader_icon_tint"]
+code = "shader_type canvas_item;
+
+uniform vec4 icon_color : source_color = vec4(0.96, 0.78, 0.38, 1.0);
+
+void fragment() {
+	vec4 tex = texture(TEXTURE, UV);
+	COLOR = vec4(icon_color.rgb, tex.a * icon_color.a * COLOR.a);
+}"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_icon_tint"]
+shader = SubResource("Shader_icon_tint")
+
+[node name="GameHUD" type="CanvasLayer" unique_id=925665196]
 layer = 2
 script = ExtResource("1")
 
-[node name="HUDManager" type="Node" parent="."]
+[node name="HUDManager" type="Node" parent="." unique_id=772669162]
 script = ExtResource("2")
 
-[node name="HUDRoot" type="Control" parent="."]
+[node name="HUDRoot" type="Control" parent="." unique_id=1497475432]
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -34,190 +56,508 @@ grow_vertical = 2
 mouse_filter = 1
 theme = ExtResource("5")
 
-[node name="TopBar" type="PanelContainer" parent="HUDRoot"]
-anchors_preset = 10
+[node name="TopBar" type="PanelContainer" parent="HUDRoot" unique_id=564437848]
+layout_mode = 0
 anchor_right = 1.0
 offset_bottom = 64.0
 grow_horizontal = 2
 
-[node name="HBox" type="HBoxContainer" parent="HUDRoot/TopBar"]
+[node name="HBox" type="HBoxContainer" parent="HUDRoot/TopBar" unique_id=1351551587]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="NationBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+[node name="NationBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox" unique_id=597330920]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="FlagTexture" type="TextureRect" parent="HUDRoot/TopBar/HBox/NationBlock"]
+[node name="FlagTexture" type="TextureRect" parent="HUDRoot/TopBar/HBox/NationBlock" unique_id=859952923]
 unique_name_in_owner = true
-layout_mode = 2
 custom_minimum_size = Vector2(84, 52)
+layout_mode = 2
 size_flags_horizontal = 0
 size_flags_vertical = 4
+texture = ExtResource("3")
 expand_mode = 1
 stretch_mode = 5
-texture = ExtResource("3")
 
-[node name="NationLabel" type="Label" parent="HUDRoot/TopBar/HBox/NationBlock"]
+[node name="NationLabel" type="Label" parent="HUDRoot/TopBar/HBox/NationBlock" unique_id=217218198]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "REPUBLIC OF ALDERAC"
 
-[node name="SpacerLeft" type="Control" parent="HUDRoot/TopBar/HBox"]
+[node name="SpacerLeft" type="Control" parent="HUDRoot/TopBar/HBox" unique_id=834515807]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ResourceBar" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+[node name="ResourceBar" type="HBoxContainer" parent="HUDRoot/TopBar/HBox" unique_id=1917032429]
 layout_mode = 2
 theme_override_constants/separation = 24
 
-[node name="ManpowerLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="ManpowerItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("20_handfist")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ManpowerLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem" unique_id=269059706]
 layout_mode = 2
 text = "MANPOWER --"
 
-[node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="SteelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("28_industry")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=1587312851]
 layout_mode = 2
 text = "STEEL --"
 
-[node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("29_oilwell")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=641530814]
 layout_mode = 2
 text = "OIL --"
 
-[node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="FuelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("30_fire")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=1213706026]
 layout_mode = 2
 text = "FUEL --"
 
-[node name="SpacerRight" type="Control" parent="HUDRoot/TopBar/HBox"]
+[node name="SpacerRight" type="Control" parent="HUDRoot/TopBar/HBox" unique_id=128137147]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="RightBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+[node name="RightBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox" unique_id=562750440]
 layout_mode = 2
-alignment = 1
 theme_override_constants/separation = 8
+alignment = 1
 
-[node name="SessionTimer" type="Label" parent="HUDRoot/TopBar/HBox/RightBlock"]
+[node name="SessionIcon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("27_clock")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="SessionTimer" type="Label" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=436346241]
 unique_name_in_owner = true
 layout_mode = 2
-vertical_alignment = 1
 text = "SESSION --:--:--"
+vertical_alignment = 1
 
-[node name="RightSep" type="VSeparator" parent="HUDRoot/TopBar/HBox/RightBlock"]
+[node name="RightSep" type="VSeparator" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=2051491216]
 layout_mode = 2
 
-[node name="SettingsButton" type="Button" parent="HUDRoot/TopBar/HBox/RightBlock"]
+[node name="SettingsButton" type="Button" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=1360996790]
 unique_name_in_owner = true
-layout_mode = 2
 custom_minimum_size = Vector2(36, 36)
-icon = ExtResource("4")
-expand_icon = true
+layout_mode = 2
+text = ""
 
-[node name="LeftDockRail" type="PanelContainer" parent="HUDRoot"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock/SettingsButton"]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -9.0
+offset_top = -9.0
+offset_right = 9.0
+offset_bottom = 9.0
+grow_horizontal = 2
+grow_vertical = 2
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("4")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="LeftDockRail" type="PanelContainer" parent="HUDRoot" unique_id=975917011]
+layout_mode = 0
+anchor_bottom = 1.0
 offset_top = 64.0
 offset_right = 80.0
-anchor_bottom = 1.0
 grow_vertical = 2
 
-[node name="VBox" type="VBoxContainer" parent="HUDRoot/LeftDockRail"]
+[node name="VBox" type="VBoxContainer" parent="HUDRoot/LeftDockRail" unique_id=204162851]
 layout_mode = 2
 
-[node name="DockButton_Q" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
+[node name="DockButton_Q" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1139935493]
 custom_minimum_size = Vector2(72, 72)
-text = "Q
-RES"
-
-[node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(72, 72)
-text = "E
-ECO"
+text = ""
 
-[node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(72, 72)
-text = "R
-MIL"
-
-[node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(72, 72)
-text = "T
-DIP"
-
-[node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
-
-[node name="DockButton_U" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(72, 72)
-disabled = true
-text = "U"
-
-[node name="DockButton_I" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(72, 72)
-disabled = true
-text = "I"
-
-[node name="MapModeTabs" type="PanelContainer" parent="HUDRoot"]
-offset_left = 80.0
-offset_top = 64.0
-
-[node name="MapModeBar" type="HBoxContainer" parent="HUDRoot/MapModeTabs"]
-layout_mode = 2
-
-[node name="BtnMapPolitical" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "POLITICAL"
-tooltip_text = "Political map mode"
-
-[node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "COVER"
-tooltip_text = "Cover map mode"
-
-[node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "ELEVATION"
-tooltip_text = "Elevation map mode"
-
-[node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot"]
-unique_name_in_owner = true
-visible = false
-offset_left = 80.0
-offset_top = 64.0
-anchor_bottom = 1.0
-grow_vertical = 2
-
-[node name="OverlayDim" type="ColorRect" parent="HUDRoot"]
-unique_name_in_owner = true
-visible = false
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q"]
+layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
-color = Color(0, 0, 0, 0.55)
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
 
-[node name="CenterPanelAnchor" type="Control" parent="HUDRoot"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("21_cubes")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Q"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "RES"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1172553113]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_E"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("22_scale")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "E"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "ECO"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=2130558185]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("23_military")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "R"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "MIL"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=745190073]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("24_handshake")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "T"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "DIP"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox" unique_id=2041318522]
+layout_mode = 2
+
+[node name="DockButton_U" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=955641273]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+disabled = true
+text = "U"
+
+[node name="DockButton_I" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=337243024]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+disabled = true
+text = "I"
+
+[node name="MapModeTabs" type="PanelContainer" parent="HUDRoot" unique_id=220020208]
+layout_mode = 0
+offset_left = 80.0
+offset_top = 64.0
+
+[node name="MapModeBar" type="HBoxContainer" parent="HUDRoot/MapModeTabs" unique_id=860492767]
+layout_mode = 2
+
+[node name="BtnMapPolitical" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=176207158]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 58)
+layout_mode = 2
+tooltip_text = "Political map mode"
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("25_landmark")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "POLITICAL"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=574808356]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 58)
+layout_mode = 2
+tooltip_text = "Cover map mode"
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("31_rug")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "COVER"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=2046348814]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 58)
+layout_mode = 2
+tooltip_text = "Elevation map mode"
+text = ""
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content"]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("26_mountain")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "ELEVATION"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot" unique_id=573809543]
 unique_name_in_owner = true
 visible = false
-anchors_preset = 15
+layout_mode = 0
+anchor_bottom = 1.0
+offset_left = 80.0
+offset_top = 64.0
+grow_vertical = 2
+
+[node name="OverlayDim" type="ColorRect" parent="HUDRoot" unique_id=483503542]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.55)
+
+[node name="CenterPanelAnchor" type="Control" parent="HUDRoot" unique_id=1572377101]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-use_clip_content = true
 
-[node name="ToastContainer" type="VBoxContainer" parent="HUDRoot"]
+[node name="ToastContainer" type="VBoxContainer" parent="HUDRoot" unique_id=1721872768]
 unique_name_in_owner = true
+layout_mode = 0
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -320.0
@@ -226,44 +566,48 @@ grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/separation = 4
 
-[node name="MilitaryPanel" parent="." instance=ExtResource("6")]
+[node name="MilitaryPanel" parent="." unique_id=2101988822 instance=ExtResource("6")]
 visible = false
 
-[node name="EconomyPanel" parent="." instance=ExtResource("7")]
+[node name="EconomyPanel" parent="." unique_id=1554449830 instance=ExtResource("7")]
 visible = false
 
-[node name="DiplomacyPanel" parent="." instance=ExtResource("8")]
+[node name="DiplomacyPanel" parent="." unique_id=403663427 instance=ExtResource("8")]
 visible = false
 
-[node name="ResearchPanel" parent="." instance=ExtResource("9")]
+[node name="ResearchPanel" parent="." unique_id=1521783562 instance=ExtResource("9")]
 visible = false
 
-[node name="FriendlyStackPanel" parent="." instance=ExtResource("19")]
+[node name="FriendlyStackPanel" parent="." unique_id=1506711193 instance=ExtResource("19")]
 visible = false
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_top = -160.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="FriendlyDivisionPanel" parent="." instance=ExtResource("16")]
+[node name="FriendlyDivisionPanel" parent="." unique_id=1960894442 instance=ExtResource("16")]
 visible = false
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_top = -160.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="FriendlyProvincePanel" parent="." instance=ExtResource("17")]
+[node name="FriendlyProvincePanel" parent="." unique_id=1527656262 instance=ExtResource("17")]
 visible = false
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_top = -160.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="EnemyDivisionPanel" parent="." instance=ExtResource("18")]
+[node name="EnemyDivisionPanel" parent="." unique_id=247769611 instance=ExtResource("18")]
 visible = false
+anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_top = -160.0
