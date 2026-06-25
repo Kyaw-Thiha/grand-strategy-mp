@@ -36,3 +36,5 @@ signal diplo_resolved(proposal_id: String, accepted: bool)
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)
+signal map_mode_changed(mode: String)   # "political" | "cover" | "elevation"
+signal settings_requested()

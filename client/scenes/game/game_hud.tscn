@@ -1,0 +1,214 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/hud/game_hud.gd" id="1"]
+[ext_resource type="Script" path="res://src/ui/hud/hud_manager.gd" id="2"]
+[ext_resource type="Texture2D" path="res://assets/flags/Flag_of_France.svg" id="3"]
+[ext_resource type="Texture2D" path="res://assets/ui/setting-gear.png" id="4"]
+[ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="5"]
+
+[node name="GameHUD" type="CanvasLayer"]
+layer = 2
+script = ExtResource("1")
+
+[node name="HUDManager" type="Node" parent="."]
+script = ExtResource("2")
+
+[node name="HUDRoot" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("5")
+
+[node name="TopBar" type="PanelContainer" parent="HUDRoot"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 64.0
+grow_horizontal = 2
+
+[node name="HBox" type="HBoxContainer" parent="HUDRoot/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NationBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FlagTexture" type="TextureRect" parent="HUDRoot/TopBar/HBox/NationBlock"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(84, 52)
+size_flags_horizontal = 0
+size_flags_vertical = 4
+expand_mode = 1
+stretch_mode = 5
+texture = ExtResource("3")
+
+[node name="NationLabel" type="Label" parent="HUDRoot/TopBar/HBox/NationBlock"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "REPUBLIC OF ALDERAC"
+
+[node name="SpacerLeft" type="Control" parent="HUDRoot/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ResourceBar" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="ManpowerLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+text = "MANPOWER --"
+
+[node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+text = "STEEL --"
+
+[node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+text = "OIL --"
+
+[node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+layout_mode = 2
+text = "FUEL --"
+
+[node name="SpacerRight" type="Control" parent="HUDRoot/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RightBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="SessionTimer" type="Label" parent="HUDRoot/TopBar/HBox/RightBlock"]
+unique_name_in_owner = true
+layout_mode = 2
+vertical_alignment = 1
+text = "SESSION --:--:--"
+
+[node name="RightSep" type="VSeparator" parent="HUDRoot/TopBar/HBox/RightBlock"]
+layout_mode = 2
+
+[node name="SettingsButton" type="Button" parent="HUDRoot/TopBar/HBox/RightBlock"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(36, 36)
+icon = ExtResource("4")
+expand_icon = true
+
+[node name="LeftDockRail" type="PanelContainer" parent="HUDRoot"]
+offset_top = 64.0
+offset_right = 80.0
+anchor_bottom = 1.0
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="HUDRoot/LeftDockRail"]
+layout_mode = 2
+
+[node name="DockButton_Q" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+text = "Q
+MIL"
+
+[node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+text = "E
+ECO"
+
+[node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+text = "T
+DIP"
+
+[node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+text = "Y
+RES"
+
+[node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+
+[node name="DockButton_U" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+disabled = true
+text = "U"
+
+[node name="DockButton_I" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(72, 72)
+disabled = true
+text = "I"
+
+[node name="MapModeTabs" type="PanelContainer" parent="HUDRoot"]
+offset_left = 80.0
+offset_top = 64.0
+
+[node name="MapModeBar" type="HBoxContainer" parent="HUDRoot/MapModeTabs"]
+layout_mode = 2
+
+[node name="BtnMapPolitical" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "POLITICAL"
+tooltip_text = "Political map mode"
+
+[node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "COVER"
+tooltip_text = "Cover map mode"
+
+[node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "ELEVATION"
+tooltip_text = "Elevation map mode"
+
+[node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot"]
+unique_name_in_owner = true
+visible = false
+offset_left = 80.0
+offset_top = 64.0
+anchor_bottom = 1.0
+grow_vertical = 2
+
+[node name="OverlayDim" type="ColorRect" parent="HUDRoot"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 0.55)
+
+[node name="CenterPanelAnchor" type="CenterContainer" parent="HUDRoot"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ToastContainer" type="VBoxContainer" parent="HUDRoot"]
+unique_name_in_owner = true
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -320.0
+offset_bottom = 400.0
+grow_horizontal = 0
+mouse_filter = 2
+theme_override_constants/separation = 4
