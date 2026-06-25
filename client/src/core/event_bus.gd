@@ -7,6 +7,7 @@ extends Node
 signal province_changed(province_id: String)
 signal province_captured(province_id: String, new_owner_id: String)
 signal frontline_updated(province_id: String, nation_shares: Dictionary)
+signal vision_visibility_changed(visible_provinces: Dictionary)
 
 # ── Military ─────────────────────────────────────────────────────────────────
 signal unit_changed(unit_id: String)
