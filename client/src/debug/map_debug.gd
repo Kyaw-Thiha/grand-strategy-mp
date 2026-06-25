@@ -52,28 +52,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		_military_system.handle_input(event)
 		return
 
-	if not event is InputEventMouseButton:
-		return
-	var mb := event as InputEventMouseButton
-	if not mb.pressed:
-		return
-
-	# Mouse events reach here ONLY if no GUI element consumed them.
-	# GUI elements with mouse_filter=STOP (like bottom panels) consume clicks
-	# before this handler fires, so button clicks will NOT fall through here.
-	var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * mb.position
-
-	if mb.button_index == MOUSE_BUTTON_LEFT:
-		if _military_system.try_click_at_world(world_pos, mb.shift_pressed):
-			get_viewport().set_input_as_handled()
-	elif mb.button_index == MOUSE_BUTTON_RIGHT:
-		if _military_system.try_right_click_at_world(world_pos):
+	# Mouse events — route through handle_mouse_input to support drag-select
+	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		var event_position: Vector2
+		if event is InputEventMouseButton:
+			event_position = (event as InputEventMouseButton).position
+		else:
+			event_position = (event as InputEventMouseMotion).position
+		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
+		if _military_system.handle_mouse_input(event, world_pos):
 			get_viewport().set_input_as_handled()
 
 
 func _input(event: InputEvent) -> void:
-	# Keys don't bubble through GUI tree — handle directly.
-	# Mouse events are handled in _unhandled_input (after GUI tree).
+	# Keys only — mouse is handled in _unhandled_input
 	if event is InputEventKey:
 		_military_system.handle_input(event)
 

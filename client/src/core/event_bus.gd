@@ -22,6 +22,7 @@ signal division_updated(division_id: String)
 signal division_removed(division_id: String)
 signal division_selected(division_id: String)
 signal division_deselected()
+signal division_selection_changed(division_ids: Array[String])
 
 # ── Players / session ────────────────────────────────────────────────────────
 signal player_changed(user_id: String)
