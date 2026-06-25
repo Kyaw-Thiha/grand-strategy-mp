@@ -1,0 +1,598 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/systems/research/research_tree_view.gd" id="1"]
+[ext_resource type="Script" path="res://src/systems/research/research_system.gd" id="2"]
+[ext_resource type="Script" path="res://src/systems/research/research_entry_card.gd" id="3"]
+[ext_resource type="FontFile" path="res://assets/fonts/Beholden/Beholden-Bold.ttf" id="4"]
+
+[node name="ResearchTree" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+script = ExtResource("1")
+
+[node name="ResearchSystem" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2")
+
+[node name="DimOverlay" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0.62)
+
+[node name="OuterMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 42
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 42
+
+[node name="Panel" type="PanelContainer" parent="OuterMargin"]
+layout_mode = 2
+
+[node name="ContentMargin" type="MarginContainer" parent="OuterMargin/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 20
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="TitleRow" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 28
+text = "Research"
+
+[node name="CloseButton" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Close"
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Click an available entry to start or resume research."
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ResearchGrid" type="GridContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+columns = 3
+theme_override_constants/h_separation = 14
+theme_override_constants/v_separation = 12
+
+[node name="InfantryHeader" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Infantry"
+horizontal_alignment = 1
+
+[node name="TankHeader" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Tank"
+horizontal_alignment = 1
+
+[node name="AirHeader" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Air"
+horizontal_alignment = 1
+
+[node name="InfantryBasicTraining" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "infantry_basic_training"
+column_name = "Infantry"
+row = 0
+title = "Basic Infantry Training"
+description = "Increase infantry damage by 5."
+science_value = 4
+effects = {
+"unlock": "infantry_training_1"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Basic Infantry Training"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase infantry damage by 5."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 4"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="TankLightChassis" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "tank_light_chassis"
+column_name = "Tank"
+row = 0
+title = "Light Tank Chassis"
+description = "Increase tank armor by 8."
+science_value = 4
+effects = {
+"unlock": "light_tank_chassis"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Light Tank Chassis"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase tank armor by 8."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 4"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="AirBasicAirframes" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "air_basic_airframes"
+column_name = "Air"
+row = 0
+title = "Basic Airframes"
+description = "Increase aircraft speed by 6."
+science_value = 4
+effects = {
+"unlock": "basic_airframes"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Basic Airframes"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase aircraft speed by 6."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 4"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="InfantrySupportWeapons" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "infantry_support_weapons"
+column_name = "Infantry"
+row = 1
+title = "Support Weapons"
+description = "Increase infantry attack by 10 when defending cities."
+science_value = 6
+effects = {
+"infantry_soft_attack": 0.08
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Support Weapons"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase infantry attack by 10 when defending cities."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 6"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="TankRadioCoordination" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "tank_radio_coordination"
+column_name = "Tank"
+row = 1
+title = "Radio Coordination"
+description = "Increase tank navigation speed by 10 in plains terrain."
+science_value = 6
+effects = {
+"armor_coordination": 0.1
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Radio Coordination"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase tank navigation speed by 10 in plains terrain."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 6"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="AirGroundObservers" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "air_ground_observers"
+column_name = "Air"
+row = 1
+title = "Ground Observers"
+description = "Increase air detection range by 12."
+science_value = 6
+effects = {
+"air_detection": 0.1
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Ground Observers"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase air detection range by 12."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 6"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="InfantryEliteDoctrine" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "infantry_elite_doctrine"
+column_name = "Infantry"
+row = 2
+title = "Elite Infantry Doctrine"
+description = "Increase infantry health by 15."
+science_value = 8
+exclusive_group = "tier_three_doctrine"
+effects = {
+"doctrine": "elite_infantry"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Elite Infantry Doctrine"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase infantry health by 15."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 8"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="TankBreakthroughDoctrine" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "tank_breakthrough_doctrine"
+column_name = "Tank"
+row = 2
+title = "Breakthrough Doctrine"
+description = "Increase tank breakthrough by 20."
+science_value = 8
+exclusive_group = "tier_three_doctrine"
+effects = {
+"doctrine": "armor_breakthrough"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Breakthrough Doctrine"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase tank breakthrough by 20."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 8"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2
+
+[node name="AirSuperiorityDoctrine" type="PanelContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid"]
+custom_minimum_size = Vector2(230, 148)
+layout_mode = 2
+script = ExtResource("3")
+entry_id = "air_superiority_doctrine"
+column_name = "Air"
+row = 2
+title = "Air Superiority Doctrine"
+description = "Increase aircraft damage by 10 during air superiority missions."
+science_value = 8
+exclusive_group = "tier_three_doctrine"
+effects = {
+"doctrine": "air_superiority"
+}
+
+[node name="Margin" type="MarginContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("4")
+theme_override_font_sizes/font_size = 20
+text = "Air Superiority Doctrine"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Increase aircraft damage by 10 during air superiority missions."
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Research points: 8"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2

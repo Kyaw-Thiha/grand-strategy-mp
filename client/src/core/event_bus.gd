@@ -34,5 +34,11 @@ signal relation_changed(from_id: String, to_id: String)
 signal diplo_proposal_received(proposal: Dictionary)
 signal diplo_resolved(proposal_id: String, accepted: bool)
 
+# ── Research ─────────────────────────────────────────────────────────────────
+signal research_started(entry_id: String)
+signal research_progress_changed(entry_id: String, progress: float)
+signal research_completed(entry_id: String, effects: Dictionary)
+signal research_rejected(entry_id: String, reason: String)
+
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)
