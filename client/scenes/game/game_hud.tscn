@@ -8,7 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/game/panels/military_panel.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
-[ext_resource type="PackedScene" path="res://scenes/game/panels/research_panel.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/systems/research/research_tree.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_division_panel.tscn" id="16"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
@@ -25,6 +25,7 @@
 [ext_resource type="Texture2D" path="res://assets/icons/oil-well-solid-full.svg" id="29_oilwell"]
 [ext_resource type="Texture2D" path="res://assets/icons/fire-solid-full.svg" id="30_fire"]
 [ext_resource type="Texture2D" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
+[ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -401,8 +402,55 @@ layout_mode = 2
 [node name="DockButton_U" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=955641273]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
-disabled = true
+text = ""
+
+[node name="ResearchProgressFill" type="ColorRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_U"]
+visible = false
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+color = Color(0.84, 0.58, 0.16, 0.28)
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_U"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_U/Content"]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+material = SubResource("ShaderMaterial_icon_tint")
+texture = ExtResource("32_atom")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.91, 0.87, 0.78, 1)
+mouse_filter = 2
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_U/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
 text = "U"
+horizontal_alignment = 1
+mouse_filter = 2
+
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_U/Content"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "RESe"
+horizontal_alignment = 1
+mouse_filter = 2
 
 [node name="DockButton_I" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=337243024]
 custom_minimum_size = Vector2(72, 72)

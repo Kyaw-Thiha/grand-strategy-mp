@@ -238,6 +238,15 @@ func _center_panel(panel: Control) -> void:
 	if panel == null:
 		return
 	var psize: Vector2 = center_panel_anchor.size
+	if (
+			is_equal_approx(panel.anchor_left, 0.0)
+			and is_equal_approx(panel.anchor_top, 0.0)
+			and is_equal_approx(panel.anchor_right, 1.0)
+			and is_equal_approx(panel.anchor_bottom, 1.0)
+	):
+		panel.set_position(Vector2.ZERO)
+		panel.set_size(psize)
+		return
 	var mysize: Vector2 = panel.get_combined_minimum_size()
 	panel.set_size(mysize)
 	panel.set_position(Vector2(
