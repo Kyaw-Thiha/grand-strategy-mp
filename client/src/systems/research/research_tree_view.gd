@@ -1,6 +1,8 @@
 extends Control
 ## Uses inspector-authored research cards and delegates runtime state to ResearchSystem.
 
+signal close_requested()
+
 const ResearchEntryCardScript: GDScript = preload("res://src/systems/research/research_entry_card.gd")
 
 @onready var _research_system: Variant = %ResearchSystem
@@ -16,7 +18,7 @@ var _entry_cards: Array[Variant] = []
 func _ready() -> void:
 	_collect_entry_cards(self)
 	_research_system.entries_changed.connect(_refresh_tree)
-	_close_button.pressed.connect(func() -> void: visible = false)
+	_close_button.pressed.connect(_request_close)
 	for card: Variant in _entry_cards:
 		card.entry_pressed.connect(_on_entry_pressed)
 
@@ -41,7 +43,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_ESCAPE:
-			visible = false
+			_request_close()
+
+
+## Requests the owning HUD to close this tree through its panel manager.
+## Parameters: none.
+## Returns: nothing.
+func _request_close() -> void:
+	close_requested.emit()
 
 
 func _collect_entry_cards(node: Node) -> void:

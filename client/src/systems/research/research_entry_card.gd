@@ -136,16 +136,16 @@ func _apply_state_style(state: String, is_active: bool) -> void:
 	style.border_width_bottom = 1
 
 	if state == STATE_RESEARCHED:
-		style.bg_color = Color(0.22, 0.28, 0.22, 0.96)
-		style.border_color = Color(0.48, 0.72, 0.48)
+		style.bg_color = Color(0.12, 0.16, 0.10, 0.96)
+		style.border_color = Color(0.42, 0.62, 0.32)
 		modulate = Color.WHITE
 	elif state == STATE_AVAILABLE:
-		style.bg_color = Color(0.13, 0.13, 0.15, 0.96)
-		style.border_color = Color(0.84, 0.68, 0.30) if is_active else Color(0.42, 0.39, 0.28)
+		style.bg_color = Color(0.12, 0.08, 0.05, 0.96)
+		style.border_color = Color(0.84, 0.68, 0.30) if is_active else Color(0.42, 0.30, 0.16)
 		modulate = Color.WHITE
 	else:
-		style.bg_color = Color(0.04, 0.04, 0.05, 0.96)
-		style.border_color = Color(0.12, 0.12, 0.14)
-		modulate = Color(0.62, 0.62, 0.62, 1.0)
+		style.bg_color = Color(0.08, 0.06, 0.04, 0.72)
+		style.border_color = Color(0.22, 0.16, 0.09, 0.65)
+		modulate = Color(0.66, 0.60, 0.50, 1.0)
 
 	add_theme_stylebox_override("panel", style)

@@ -3,115 +3,7 @@
 [ext_resource type="Script" uid="uid://ddhcx77ea8mt5" path="res://src/systems/research/research_tree_view.gd" id="1"]
 [ext_resource type="Script" uid="uid://cur26uct7771r" path="res://src/systems/research/research_system.gd" id="2"]
 [ext_resource type="Script" uid="uid://c1ef13gwwaefp" path="res://src/systems/research/research_entry_card.gd" id="3"]
-[ext_resource type="FontFile" uid="uid://el0etta2i8fp" path="res://assets/fonts/Beholden/Beholden-Bold.ttf" id="4"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gqeek"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_g34mc"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_agle7"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_n4r51"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_22srr"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hbfl7"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_n2ilm"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_lwe23"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_yrq1f"]
-bg_color = Color(0.04, 0.04, 0.05, 0.96)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.12, 0.12, 0.14, 1)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
+[ext_resource type="Theme" uid="uid://bxm46dfawg64w" path="res://assets/themes/hud_dark.tres" id="4"]
 
 [node name="ResearchTree" type="Control" unique_id=2018616258]
 layout_mode = 3
@@ -121,6 +13,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
+theme = ExtResource("4")
 
 [node name="ResearchSystem" type="Node" parent="." unique_id=316314170]
 unique_name_in_owner = true
@@ -219,7 +112,6 @@ horizontal_alignment = 1
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_gqeek")
 script = ExtResource("3")
 entry_id = "infantry_basic_training"
 column_name = "Infantry"
@@ -243,7 +135,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryBasicTraining/Margin/Layout" unique_id=461688618]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Basic Infantry Training"
 autowrap_mode = 3
@@ -274,7 +165,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_g34mc")
 script = ExtResource("3")
 entry_id = "tank_light_chassis"
 column_name = "Tank"
@@ -298,7 +188,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankLightChassis/Margin/Layout" unique_id=730130860]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Light Tank Chassis"
 autowrap_mode = 3
@@ -329,7 +218,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_agle7")
 script = ExtResource("3")
 entry_id = "air_basic_airframes"
 column_name = "Air"
@@ -353,7 +241,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirBasicAirframes/Margin/Layout" unique_id=1544683495]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Basic Airframes"
 autowrap_mode = 3
@@ -384,7 +271,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_n4r51")
 script = ExtResource("3")
 entry_id = "infantry_support_weapons"
 column_name = "Infantry"
@@ -409,7 +295,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantrySupportWeapons/Margin/Layout" unique_id=513235372]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Support Weapons"
 autowrap_mode = 3
@@ -440,7 +325,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_22srr")
 script = ExtResource("3")
 entry_id = "tank_radio_coordination"
 column_name = "Tank"
@@ -465,7 +349,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankRadioCoordination/Margin/Layout" unique_id=1692346017]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Radio Coordination"
 autowrap_mode = 3
@@ -496,7 +379,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_hbfl7")
 script = ExtResource("3")
 entry_id = "air_ground_observers"
 column_name = "Air"
@@ -521,7 +403,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirGroundObservers/Margin/Layout" unique_id=731296486]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Ground Observers"
 autowrap_mode = 3
@@ -552,7 +433,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_n2ilm")
 script = ExtResource("3")
 entry_id = "infantry_elite_doctrine"
 column_name = "Infantry"
@@ -578,7 +458,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/InfantryEliteDoctrine/Margin/Layout" unique_id=390614486]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Elite Infantry Doctrine"
 autowrap_mode = 3
@@ -609,7 +488,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_lwe23")
 script = ExtResource("3")
 entry_id = "tank_breakthrough_doctrine"
 column_name = "Tank"
@@ -635,7 +513,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/TankBreakthroughDoctrine/Margin/Layout" unique_id=1118241436]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Breakthrough Doctrine"
 autowrap_mode = 3
@@ -666,7 +543,6 @@ horizontal_alignment = 2
 modulate = Color(0.62, 0.62, 0.62, 1)
 custom_minimum_size = Vector2(230, 148)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_yrq1f")
 script = ExtResource("3")
 entry_id = "air_superiority_doctrine"
 column_name = "Air"
@@ -692,7 +568,6 @@ theme_override_constants/separation = 6
 
 [node name="TitleLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll/ResearchGrid/AirSuperiorityDoctrine/Margin/Layout" unique_id=2106407268]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("4")
 theme_override_font_sizes/font_size = 20
 text = "Air Superiority Doctrine"
 autowrap_mode = 3
