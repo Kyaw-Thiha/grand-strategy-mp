@@ -43,6 +43,8 @@ var _icon_layer: Node2D = null
 
 var _icons: Dictionary = {}
 var _target_positions: Dictionary = {}
+var _visible_provinces: Dictionary = {}
+var _vision_filter_enabled: bool = false
 
 var _selected_division_id: String = ""
 var _selected_division_ids: Array[String] = []
@@ -107,6 +109,7 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_removed.connect(_on_division_removed)
+	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
 
 	# Surface SUBMIT_MOVE_ORDER rejections in the console
 	CommandQueue.command_rejected.connect(func(type: String, reason: String) -> void:
@@ -129,6 +132,7 @@ func _process(delta: float) -> void:
 			var target: Vector2 = _target_positions.get(div_id, icon.position)
 			if icon.position.distance_to(target) > 0.5:
 				icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
+		_update_division_visibility(div_id)
 
 	# Live ghost refresh while building a shift chain with a moving unit
 	if _move_mode and _shift_chain_started and not _pending_milestones.is_empty() and not _path_pending:
@@ -586,6 +590,7 @@ func _advance_dr(div_id: String, delta: float) -> void:
 			var done_icon := _icons[div_id] as Node2D
 			done_icon.position = _target_positions[div_id]
 			done_icon.set_moving(false)
+			_update_division_visibility(div_id)
 			return
 		if dist > 0.0:
 			var leftover: float = delta * maxf(1.0 - dist / maxf(advance, 1e-9), 0.0)
@@ -599,6 +604,7 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	moving_icon.position = _map_loader.project_lng_lat(
 			_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
 	moving_icon.queue_redraw()
+	_update_division_visibility(div_id)
 
 
 func _recompute_chain() -> void:
@@ -882,6 +888,7 @@ func _on_division_added(division_id: String) -> void:
 	var route: Node2D = MoveOrderOverlay.new()
 	_icon_layer.add_child(route)
 	_route_overlays[division_id] = route
+	_update_division_visibility(division_id)
 
 
 func _on_division_updated(division_id: String) -> void:
@@ -907,6 +914,7 @@ func _on_division_updated(division_id: String) -> void:
 		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
 		(icon as Node2D).set_moving(false)
 		_update_division_route(division_id)
+		_update_division_visibility(division_id)
 		return
 
 	# Cache movement profile once (doesn't change during a session).
@@ -945,6 +953,7 @@ func _on_division_updated(division_id: String) -> void:
 			_dr_order[division_id] = str_order
 
 	_update_division_route(division_id)
+	_update_division_visibility(division_id)
 
 
 func _on_division_removed(division_id: String) -> void:
@@ -965,6 +974,72 @@ func _on_division_removed(division_id: String) -> void:
 		_selection_preview_division_ids.erase(division_id)
 		_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
 		_emit_selection_changed()
+
+
+func _on_vision_visibility_changed(visible_provinces: Dictionary) -> void:
+	_visible_provinces = visible_provinces.duplicate()
+	_vision_filter_enabled = not _visible_provinces.is_empty()
+	for division_id: String in _icons:
+		_update_division_visibility(division_id)
+
+
+func _update_division_visibility(division_id: String) -> void:
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if icon == null:
+		return
+
+	var should_show: bool = _is_division_visible_to_player(division_id)
+	icon.visible = should_show
+
+	var route: Node2D = _route_overlays.get(division_id) as Node2D
+	if route != null:
+		route.visible = should_show
+
+	if not should_show:
+		if _selected_division_ids.has(division_id):
+			_selected_division_ids.erase(division_id)
+			_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
+			_emit_selection_changed()
+		if _selection_preview_division_ids.has(division_id):
+			_selection_preview_division_ids.erase(division_id)
+			if icon.has_method("set_selection_preview"):
+				icon.set_selection_preview(false)
+
+
+func _is_division_visible_to_player(division_id: String) -> bool:
+	if _is_own_unit(division_id):
+		return true
+	if not _vision_filter_enabled:
+		return true
+
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if icon == null:
+		return false
+	return _is_world_position_in_visible_province(icon.position)
+
+
+func _is_world_position_in_visible_province(world_position: Vector2) -> bool:
+	if _map_loader == null:
+		return true
+	for province_id: String in _visible_provinces:
+		if _is_world_position_in_province(world_position, province_id):
+			return true
+	return false
+
+
+func _is_world_position_in_province(world_position: Vector2, province_id: String) -> bool:
+	var province_node: Node2D = _map_loader.get_province_node(province_id)
+	if province_node == null:
+		return false
+	for child: Node in province_node.get_children():
+		if not child is Polygon2D:
+			continue
+		var polygon_node: Polygon2D = child
+		if not (polygon_node.name == "Fill" or polygon_node.name.begins_with("FillPart")):
+			continue
+		if Geometry2D.is_point_in_polygon(world_position, polygon_node.polygon):
+			return true
+	return false
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
@@ -1088,6 +1163,8 @@ func find_division_at_world(world_pos: Vector2) -> String:
 	var best_id := ""
 	var best_dist := HIT_THRESHOLD_PX
 	for div_id: String in _icons:
+		if not _is_division_visible_to_player(div_id):
+			continue
 		var icon: Node2D = _icons[div_id]
 		var d: float = icon.position.distance_to(world_pos)
 		if d < best_dist:

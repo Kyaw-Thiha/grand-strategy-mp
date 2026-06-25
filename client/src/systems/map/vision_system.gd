@@ -5,7 +5,7 @@ extends Node
 ## Owns: visible province set (display state only), DarknessLayer, VisionLightLayer.
 ## Never writes to GameState.
 
-const DARKNESS_COLOR: Color = Color(0.02, 0.025, 0.035, 1.0)
+const DARKNESS_COLOR: Color = Color(0.34, 0.36, 0.42, 1.0)
 const OCEAN_COLOR: Color = Color(0.20, 0.50, 0.80)
 const OWNED_PROVINCE_LIGHT_ENERGY: float = 1.0
 const UNIT_LIGHT_ENERGY: float = 0.85
@@ -62,10 +62,12 @@ func refresh_visibility() -> void:
 		if _darkness_modulate != null:
 			_darkness_modulate.color = Color.WHITE
 		_clear_lights()
+		EventBus.vision_visibility_changed.emit({})
 		return
 
 	_darkness_modulate.color = DARKNESS_COLOR
 	_compute_visible_provinces()
+	EventBus.vision_visibility_changed.emit(_visible_provinces.duplicate())
 	_rebuild_lights()
 
 
