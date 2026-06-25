@@ -23,7 +23,6 @@ var _animation_tween: Tween = null
 var _is_closing: bool = false
 var _is_blocking_player_input: bool = false
 
-
 func _ready() -> void:
 	visible = false
 	_apply_closed_visual_state()

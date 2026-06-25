@@ -73,6 +73,58 @@ bg_color = Color(0.07, 0.05, 0.03, 0.96)
 border_width_right = 1
 border_color = Color(0.28, 0.18, 0.1, 1)
 
+[sub_resource type="StyleBoxFlat" id="SB_line_edit_normal"]
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.05, 0.035, 0.025, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.28, 0.18, 0.1, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[sub_resource type="StyleBoxFlat" id="SB_line_edit_focus"]
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.08, 0.055, 0.035, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.68, 0.5, 0.27, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[sub_resource type="StyleBoxFlat" id="SB_line_edit_read_only"]
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.05, 0.035, 0.025, 0.55)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.16, 0.09, 0.55)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[sub_resource type="StyleBoxLine" id="SB_separator"]
+color = Color(0.32, 0.22, 0.12, 1)
+thickness = 1
+
 [resource]
 Button/colors/font_color = Color(0.91, 0.87, 0.78, 1)
 Button/colors/font_disabled_color = Color(0.45, 0.38, 0.28, 1)
@@ -84,5 +136,17 @@ Button/styles/focus = SubResource("SB_btn_normal")
 Button/styles/hover = SubResource("SB_btn_hover")
 Button/styles/normal = SubResource("SB_btn_normal")
 Button/styles/pressed = SubResource("SB_btn_pressed")
+HSeparator/styles/separator = SubResource("SB_separator")
 Label/colors/font_color = Color(0.91, 0.87, 0.78, 1)
+LineEdit/colors/caret_color = Color(1, 0.96, 0.84, 1)
+LineEdit/colors/clear_button_color = Color(0.91, 0.87, 0.78, 0.75)
+LineEdit/colors/clear_button_color_pressed = Color(1, 0.96, 0.84, 1)
+LineEdit/colors/font_color = Color(0.91, 0.87, 0.78, 1)
+LineEdit/colors/font_placeholder_color = Color(0.58, 0.5, 0.38, 0.85)
+LineEdit/colors/font_readonly_color = Color(0.58, 0.5, 0.38, 0.85)
+LineEdit/colors/font_selected_color = Color(0.05, 0.035, 0.025, 1)
+LineEdit/colors/selection_color = Color(0.7, 0.52, 0.28, 0.9)
+LineEdit/styles/focus = SubResource("SB_line_edit_focus")
+LineEdit/styles/normal = SubResource("SB_line_edit_normal")
+LineEdit/styles/read_only = SubResource("SB_line_edit_read_only")
 PanelContainer/styles/panel = SubResource("SB_panel")
