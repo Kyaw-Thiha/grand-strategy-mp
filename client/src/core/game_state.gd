@@ -26,8 +26,6 @@ var frontline: Dictionary = {}
 var relations: Dictionary = {}
 # proposals: { proposal_id → { from_id, to_id, stance, resolved } }
 var proposals: Dictionary = {}
-# stacks: { stack_id → Array[division_id] ordered by stack_position }
-var stacks: Dictionary = {}
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -79,20 +77,10 @@ func _apply_division_updates(data: Dictionary) -> void:
 		var existing: Dictionary = divisions[div_id]
 		for key: String in div_data:
 			existing[key] = div_data[key]
-		# Store reposition_order if present
-		if "reposition_order" in div_data:
-			existing["reposition_order"] = div_data["reposition_order"]
-		# Clear meeting battle flag when combat ends
-		var combat_state: String = div_data.get("combat_state", "")
-		if combat_state in ["idle", "retreating"]:
-			existing.erase("is_meeting_battle")
 		EventBus.division_updated.emit(div_id)
 
 
 ## Called by SessionManager when server sends UNIT_DESTROYED.
-## Sets combat_state to "destroyed" immediately, then removes the division
-## from GameState after a 1.5s delay so the client can display a brief
-## destroyed animation before cleanup.
 func _apply_unit_destroyed(data: Dictionary) -> void:
 	var div_id: String = data.get("division_id", "")
 	var nation_id: String = data.get("nation_id", "")
@@ -102,11 +90,6 @@ func _apply_unit_destroyed(data: Dictionary) -> void:
 		divisions[div_id]["combat_state"] = "destroyed"
 	EventBus.unit_destroyed.emit(div_id, nation_id)
 	EventBus.division_updated.emit(div_id)
-	# Show destroyed icon briefly then clean up
-	get_tree().create_timer(1.5).timeout.connect(func():
-		divisions.erase(div_id)
-		EventBus.division_removed.emit(div_id)
-	)
 
 
 ## Called by SessionManager when server sends FRONTLINE_UPDATED.
@@ -130,45 +113,6 @@ func _apply_province_captured(data: Dictionary) -> void:
 	provinces[province_id]["owner_id"]  = new_owner
 	provinces[province_id]["nation_id"] = new_owner
 	EventBus.province_captured.emit(province_id, new_owner)
-
-
-## Called by SessionManager when server sends COMBAT_STARTED.
-## Stores is_meeting_battle on the involved divisions for icon rendering.
-func _apply_combat_started(data: Dictionary) -> void:
-	var is_meeting: bool = data.get("is_meeting_battle", false)
-	for div_id: String in [data.get("division_a", ""), data.get("division_b", "")]:
-		if divisions.has(div_id):
-			divisions[div_id]["is_meeting_battle"] = is_meeting
-
-
-## Called by SessionManager when server sends STACK_FORMED.
-func _apply_stack_formed(data: Dictionary) -> void:
-	var sid: String = data.get("stack_id", "")
-	var divs: Array = data.get("divisions", [])
-	if sid.is_empty():
-		return
-	stacks[sid] = divs.duplicate()
-	EventBus.stack_formed.emit(sid, divs)
-
-
-## Called by SessionManager when server sends STACK_ROTATION.
-func _apply_stack_rotation(data: Dictionary) -> void:
-	var sid: String = data.get("stack_id", "")
-	var rotated: String = data.get("rotated_back", "")
-	var new_front: String = data.get("new_front", "")
-	if sid.is_empty():
-		return
-	if stacks.has(sid):
-		stacks[sid].erase(rotated)
-		stacks[sid].append(rotated)
-	EventBus.stack_rotated.emit(sid, rotated, new_front)
-
-
-## Called by SessionManager when server sends STACK_DISSOLVED.
-func _apply_stack_dissolved(data: Dictionary) -> void:
-	var sid: String = data.get("stack_id", "")
-	stacks.erase(sid)
-	EventBus.stack_dissolved.emit(sid)
 
 
 # ── Getters ──────────────────────────────────────────────────────────────────

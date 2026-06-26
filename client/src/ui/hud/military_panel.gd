@@ -1,6 +1,6 @@
 extends PanelContainer
 ## Military panel — side-docked, with Land/Air/Naval sub-tabs.
-## Land tab lists the player's land divisions from GameState, grouped by stack.
+## Land tab lists the player's land divisions from GameState.
 ## Air and Naval tabs are placeholders for Phase 12/13.
 
 signal division_clicked(division_id: String)
@@ -73,42 +73,11 @@ func _refresh_land_list() -> void:
 		child.queue_free()
 
 	var div_ids: Array = GameState.get_my_nation_divisions()
-	# Separate stacked vs solo divisions
-	var stacks_map: Dictionary = {}  # stack_id → Array[{div_id, div_data}]
-	var solo: Array = []
 	for div_id: String in div_ids:
 		var div_data: Dictionary = GameState.get_division(div_id)
 		if div_data.is_empty():
 			continue
-		if div_data.get("combat_state", "") == "destroyed":
-			continue
-		var sid: String = div_data.get("stack_id", "")
-		if sid.is_empty():
-			solo.append({ "id": div_id, "data": div_data })
-		else:
-			if not stacks_map.has(sid):
-				stacks_map[sid] = []
-			stacks_map[sid].append({ "id": div_id, "data": div_data })
-
-	# Render stacked groups first (sorted by stack_position, front first)
-	for sid: String in stacks_map:
-		var members: Array = stacks_map[sid]
-		members.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			return int(a.data.get("stack_position", 0)) < int(b.data.get("stack_position", 0))
-		)
-		# Group label
-		var group_lbl: Label = Label.new()
-		group_lbl.text = "Stack (%d)" % members.size()
-		group_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.2, 1))
-		group_lbl.add_theme_font_size_override("font_size", 11)
-		list_container.add_child(group_lbl)
-		for member: Dictionary in members:
-			var item: Button = _make_division_item(member.id, member.data)
-			list_container.add_child(item)
-
-	# Then render solo divisions
-	for entry: Dictionary in solo:
-		var item: Button = _make_division_item(entry.id, entry.data)
+		var item: Button = _make_division_item(div_id, div_data)
 		list_container.add_child(item)
 
 

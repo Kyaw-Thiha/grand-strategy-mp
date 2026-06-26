@@ -90,17 +90,6 @@ const COVER_MOD: Record<string, [number, number]> = {
   wetland:             [0.10, 0.10],
 };
 
-// ─── River crossing penalty constants ────────────────────────────────────────
-
-const RIVER_PENALTY_MINOR   = 0.70;
-const RIVER_PENALTY_MOD     = 0.55;
-const RIVER_PENALTY_MAJOR   = 0.40;
-const RIVER_PENALTY_MAP: Record<string, number> = {
-  minor:    RIVER_PENALTY_MINOR,
-  moderate: RIVER_PENALTY_MOD,
-  major:    RIVER_PENALTY_MAJOR,
-};
-
 // ─── Internal types ─────────────────────────────────────────────────────────
 
 interface ProvinceInfo {
@@ -120,8 +109,6 @@ interface ActivePair {
   round: number;
   is_primary_attacker: boolean;              // false for meeting battles; first attacker on this defender = true
   flank_class: "none" | "flank" | "rear";   // engagement-wide classification; "none" for primary/meeting
-  river_crossing: string;                    // "" | "minor" | "moderate" | "major"
-  river_side_attacker: string;               // division_id of crossing side ("" for meeting battle)
 }
 
 // ─── CombatSystem ────────────────────────────────────────────────────────────
@@ -260,16 +247,7 @@ export class CombatSystem {
 
             const midLng = (a.position_lng + b.position_lng) / 2;
             const midLat = (a.position_lat + b.position_lat) / 2;
-            let { atk, def } = this._terrainModifiers(midLng, midLat);
-
-            // River crossing check: if the attacker crosses a river to reach the defender
-            const riverSize = this.movementSystem.checkRiverCrossing(
-              a.position_lng, a.position_lat,
-              b.position_lng, b.position_lat,
-            );
-            if (riverSize && !is_meeting) {
-              atk = RIVER_PENALTY_MAP[riverSize] ?? 1.0;
-            }
+            const { atk, def } = this._terrainModifiers(midLng, midLat);
 
             // Primary = first attacker to engage this specific defender
             const isPrimary = is_meeting || !Array.from(this.activePairs.values())
@@ -284,8 +262,6 @@ export class CombatSystem {
               round: 0,
               is_primary_attacker: isPrimary,
               flank_class: "none",
-              river_crossing: riverSize,
-              river_side_attacker: riverSize && !is_meeting ? attacker_id : "",
             };
             this.activePairs.set(key, pair);
 
@@ -427,20 +403,8 @@ export class CombatSystem {
       if (divA.combat_state === "destroyed" || divA.combat_state === "retreating") continue;
       if (divB.combat_state === "destroyed" || divB.combat_state === "retreating") continue;
 
-      // Re-check river crossing each round (reposition may have changed positions)
-      this._updateRiverCrossing(pair, divA, divB);
-
       this._applyDamage(divA, divB, pair, state, changed, broadcast);
       pair.round++;
-      broadcast("COMBAT_RESULT", {
-        division_a:    divA.division_id,
-        division_b:    divB.division_id,
-        round:         pair.round,
-        hp_a:          divA.hp,
-        hp_b:          divB.hp,
-        suppression_a: divA.suppression,
-        suppression_b: divB.suppression,
-      });
     }
   }
 
@@ -507,14 +471,14 @@ export class CombatSystem {
     };
 
     if (pair.is_meeting) {
-      this._checkAutoRetreatOrRotate(divA, DEFENDER_SUPPRESS_THRESHOLD, enemies(divA), state, changed, broadcast);
-      this._checkAutoRetreatOrRotate(divB, DEFENDER_SUPPRESS_THRESHOLD, enemies(divB), state, changed, broadcast);
+      this._checkAutoRetreatOrRotate(divA, DEFENDER_SUPPRESS_THRESHOLD, enemies(divA), state, broadcast);
+      this._checkAutoRetreatOrRotate(divB, DEFENDER_SUPPRESS_THRESHOLD, enemies(divB), state, broadcast);
     } else {
       const defender = divA.division_id === pair.defender_id ? divA : divB;
       const attacker = divA.division_id === pair.attacker_id ? divA : divB;
 
-      this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, changed, broadcast);
-      this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, changed, broadcast);
+      this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, broadcast);
+      this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, broadcast);
     }
   }
 
@@ -544,29 +508,16 @@ export class CombatSystem {
       const divB = state.divisions.get(idB);
       if (!divA || !divB) { toRemove.push(key); continue; }
 
-      const distKm      = this._distKm(divA.position_lng, divA.position_lat, divB.position_lng, divB.position_lat);
-      const softThreshold = divA.engagement_radius + divB.engagement_radius; // engagement circle edge
-      const hardThreshold = softThreshold * 1.2;                              // 20% disengagement hysteresis
+      const distKm    = this._distKm(divA.position_lng, divA.position_lat, divB.position_lng, divB.position_lat);
+      const threshold = (divA.engagement_radius + divB.engagement_radius) * 1.2; // 20% hysteresis
 
-      if (distKm > softThreshold && distKm <= hardThreshold) {
-        // In the buffer zone: past the engagement edge but not yet disengaging.
-        // Block further reposition — the division cannot repos beyond the circle.
-        if (divA.reposition_order.length > 0 || divB.reposition_order.length > 0) {
-          divA.reposition_order.splice(0, divA.reposition_order.length);
-          divB.reposition_order.splice(0, divB.reposition_order.length);
-          changed.add(divA.division_id);
-          changed.add(divB.division_id);
-        }
-      }
-
-      if (distKm > hardThreshold) {
+      if (distKm > threshold) {
         // Disengage both
         for (const div of [divA, divB]) {
           if (div.combat_state === "engaged" || div.combat_state === "suppressed") {
             div.combat_state  = "idle";
             div.attacker_role = "";
             div.engaged_with.splice(0, div.engaged_with.length);
-            div.reposition_order.splice(0, div.reposition_order.length);
             changed.add(div.division_id);
           }
         }
@@ -653,7 +604,6 @@ export class CombatSystem {
       if (div.hp <= 0 && div.combat_state !== "destroyed") {
         div.combat_state = "destroyed";
         div.move_order.splice(0, div.move_order.length);
-        div.reposition_order.splice(0, div.reposition_order.length);
         div.engaged_with.splice(0, div.engaged_with.length);
 
         // Remove any active pairs involving this division
@@ -672,17 +622,6 @@ export class CombatSystem {
       }
     }
 
-    // Clear reposition_order on opponents of destroyed divisions
-    for (const key of pairsToRemove) {
-      const [idA, idB] = key.split("|");
-      for (const oppId of [idA, idB]) {
-        const opp = state.divisions.get(oppId);
-        if (opp && opp.combat_state !== "destroyed") {
-          opp.reposition_order.splice(0, opp.reposition_order.length);
-        }
-      }
-    }
-
     for (const key of pairsToRemove) this.activePairs.delete(key);
   }
 
@@ -691,29 +630,16 @@ export class CombatSystem {
   // ---------------------------------------------------------------------------
 
   /** Public — called by GameRoom for manual RETREAT commands. */
-  initiateRetreat(
-    div:       DivisionState,
-    enemies:   DivisionState[],
-    state:     GameRoomState,
-    changed:   Set<string>,
-    broadcast: (type: string, msg: unknown) => void,
-  ): void {
-    this._initiateRetreat(div, enemies, state, changed, broadcast);
+  initiateRetreat(div: DivisionState, enemies: DivisionState[]): void {
+    this._initiateRetreat(div, enemies);
   }
 
-  private _initiateRetreat(
-    div:       DivisionState,
-    enemies:   DivisionState[],
-    state:     GameRoomState,
-    changed:   Set<string>,
-    broadcast: (type: string, msg: unknown) => void,
-  ): void {
+  private _initiateRetreat(div: DivisionState, enemies: DivisionState[]): void {
     if (div.combat_state === "retreating" || div.combat_state === "destroyed") return;
 
     div.combat_state = "retreating";
     div.engaged_with.splice(0, div.engaged_with.length);
     div.attacker_role = "";
-    div.reposition_order.splice(0, div.reposition_order.length);
 
     // Compute enemy centroid
     let centroidLng = 0;
@@ -749,45 +675,15 @@ export class CombatSystem {
       retreatLat = div.position_lat + (dy / len) * retreatDeg;
     }
 
-    // Collect opponent IDs before deleting pairs, then reset after
-    const opponentIds: string[] = [];
+    // Remove all active pairs involving this division
     const pairsToRemove: string[] = [];
     for (const [key] of this.activePairs) {
       const [idA, idB] = key.split("|");
       if (idA === div.division_id || idB === div.division_id) {
         pairsToRemove.push(key);
-        opponentIds.push(idA === div.division_id ? idB : idA);
       }
     }
     for (const key of pairsToRemove) this.activePairs.delete(key);
-
-    // Reset each opponent that is no longer in any remaining active pair.
-    // Don't reset opponents that are already suppressed — they will retreat on their own
-    // on the next tick (clearing their engaged_with would break their retreat flow).
-    for (const opponentId of opponentIds) {
-      const stillEngaged = Array.from(this.activePairs.keys())
-        .some(k => k.startsWith(opponentId + "|") || k.endsWith("|" + opponentId));
-      if (stillEngaged) continue;
-
-      const opponent = state.divisions.get(opponentId);
-      if (!opponent) continue;
-      if (opponent.combat_state === "engaged") {
-        opponent.combat_state  = "idle";
-        opponent.attacker_role = "";
-        opponent.engaged_with.splice(0, opponent.engaged_with.length);
-        opponent.reposition_order.splice(0, opponent.reposition_order.length);
-        changed.add(opponentId);
-        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id });
-      } else if (opponent.combat_state === "suppressed") {
-        // Suppressed opponent will retreat naturally on the next tick.
-        // Broadcast COMBAT_ENDED now so the client knows, but don't reset
-        // the opponent — its engaged_with is needed for retreat direction.
-        opponent.reposition_order.splice(0, opponent.reposition_order.length);
-        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id });
-      }
-      // Opponents in "suppressed" state will retreat on their own next tick;
-      // don't interfere — their retreat direction depends on engaged_with.
-    }
 
     // Find nearest waypoint and set as retreat target
     const waypoint = this.movementSystem.getNearestWaypoint(retreatLng, retreatLat);
@@ -801,19 +697,6 @@ export class CombatSystem {
   // ---------------------------------------------------------------------------
   // _terrainModifiers
   // ---------------------------------------------------------------------------
-
-  private _updateRiverCrossing(pair: ActivePair, a: DivisionState, b: DivisionState): void {
-    if (pair.is_meeting) return;
-    const riverSize = this.movementSystem.checkRiverCrossing(
-      a.position_lng, a.position_lat,
-      b.position_lng, b.position_lat,
-    );
-    pair.river_crossing = riverSize;
-    pair.river_side_attacker = riverSize ? pair.attacker_id : "";
-    if (riverSize) {
-      pair.terrain_mult_atk = RIVER_PENALTY_MAP[riverSize] ?? 1.0;
-    }
-  }
 
   private _terrainModifiers(midLng: number, midLat: number): { atk: number; def: number } {
     const prov = this._nearestProvince(midLng, midLat);
@@ -865,7 +748,6 @@ export class CombatSystem {
     threshold: number,
     enemies:   DivisionState[],
     state:     GameRoomState,
-    changed:   Set<string>,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
     if (div.suppression < threshold) return;
@@ -883,7 +765,7 @@ export class CombatSystem {
     // Already suppressed — now initiate retreat or stack rotation.
     if (!div.stack_id) {
       // Not stacked — normal auto-retreat
-      this._initiateRetreat(div, enemies, state, changed, broadcast);
+      this._initiateRetreat(div, enemies);
       return;
     }
 
@@ -894,7 +776,7 @@ export class CombatSystem {
 
     if (stackMembers.length <= 1) {
       // Solo stack member — just retreat
-      this._initiateRetreat(div, enemies, state, changed, broadcast);
+      this._initiateRetreat(div, enemies);
       return;
     }
 
@@ -902,7 +784,7 @@ export class CombatSystem {
 
     if (div.stack_position === maxPos) {
       // Last member hits threshold — actual retreat for the whole stack front
-      this._initiateRetreat(div, enemies, state, changed, broadcast);
+      this._initiateRetreat(div, enemies);
       return;
     }
 

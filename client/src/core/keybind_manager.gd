@@ -133,7 +133,6 @@ func _register_all_actions() -> void:
 	_reg("unit_hold",           _key(KEY_G))
 	_reg("unit_retreat",        _key(KEY_C))
 	_reg("unit_cancel",         _key(KEY_X))
-	_reg("unit_reposition",     _key(KEY_B))
 	_reg("unit_idle_select",    null)   # reserved, unbound
 	_reg("unit_cycle_engaged",  null)   # reserved, unbound
 	# Control groups

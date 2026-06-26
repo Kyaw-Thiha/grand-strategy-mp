@@ -33,7 +33,6 @@ export class DivisionState extends Schema {
   @type("number") engagement_radius: number = 50;   // km, computed from template
   @type("string") movement_profile_json: string = "{}"; // 33-value terrain cost table
   @type(["string"]) move_order = new ArraySchema<string>(); // ordered waypoint IDs
-  @type(["string"]) reposition_order = new ArraySchema<string>(); // in-combat reposition path
   @type("string") stack_id: string = "";
   @type("number") stack_position: number = 0;   // 0 = front of stack
   @type("string") attacker_role: string = "";   // "attacker"|"defender"|"meeting"|""
