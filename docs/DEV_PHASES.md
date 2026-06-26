@@ -219,10 +219,9 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Nation config loaded at game start from `nation_config` per nation per map;
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
-- [ ] `STARTING_WARS` array in `nations.ts` — DEV ONLY, replace with real diplomacy
-      in Phase 10: `[['germany','france'], ['germany','uk']]`; loaded into `war_matrix`
-      in `GameRoom.onCreate()`; `at_war` 6×6 matrix sent to all clients at game start;
-      frontline and influence only activates between nations where `at_war == true`
+- [x] `_initRelations()` in `GameRoom.ts` — initializes all 6 playable nations ("germany",
+      "france", "united_kingdom", "spain", "algeria", "italy") as `stance: "war"` with
+      each other at game start. Replaced by real diplomacy in Phase 10.
 - [x] Division type classification — three types only (no Defensive type):
       armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
 - [x] Engagement radius computed from template composition at spawn and on template change:
@@ -290,7 +289,17 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
       before breaking; manual retreat always available at any suppression level;
       encirclement takes precedence (auto-retreat disabled when no escape route)
-- [ ] Meeting battle icon state — distinct from standard Engaged
+- [x] Meeting battle icon state — distinct from standard Engaged (purple border + inward arrows)
+- [x] Combat cleanup: surviving opponent reset to "idle" after enemy retreats; `COMBAT_ENDED` event
+      broadcast with winner_id and retreated_id; `is_meeting_battle` flag cleared on combat end
+- [x] Territory-based movement restriction: waypoint→nation mapping via point-in-polygon against
+      map_data.json; move orders trimmed at first neutral-territory waypoint; outright rejection
+      when first waypoint is neutral; retreat targets avoid neutral territory via
+      `getNearestNonNeutralWaypoint()`
+- [x] Combat state label: "STATE · IDLE/ENGAGED/SUPPRESSED/RETREATING" displayed in the bottom
+      selection panel's IdentityBlock, updated live via `division_updated` events
+- [x] Live HP/suppression panel: friendly_division_panel re-reads division data on
+      `division_updated` events, updating HP bar and suppression bar without re-creating buttons
 - [ ] Positional stack mechanics:
       - [x] Allied divisions at same position form ordered stack; player can reorder
       - [x] Only first division engages enemy; on suppression threshold → rotates to back
@@ -335,14 +344,10 @@ Unit tests for movement profile computation and A* path validity.
             `PROVINCE_CAPTURED`; next `FRONTLINE_UPDATE` reflects new ownership
       - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for algorithm design
       - [ ] `FRONTLINE_UPDATE` event replaces old per-province broadcast approach
-- [ ] `COMBAT_STARTED`, `COMBAT_RESULT`, `MEETING_BATTLE_STARTED`, `PROVINCE_CAPTURED`,
-      `UNIT_DESTROYED`, `STACK_ROTATION`, `FRONTLINE_UPDATED` events. Supply/encirclement
-      events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the full three-tier
-      system in Phase 7, not by this phase. (An earlier draft of this phase also named
-      `SUPPLY_SEVERED_FRONTLINE`/`SUPPLY_RESTORED_FRONTLINE` as separate events — these were
-      always describing the same influence-grid connectivity check as Tier 1's
-      `OUT_OF_SUPPLY`/`SUPPLY_RESTORED`, not a second distinct signal, so they are dropped
-      here rather than carried forward as a duplicate.)
+- [x] `COMBAT_STARTED`, `COMBAT_RESULT`, `COMBAT_ENDED`, `PROVINCE_CAPTURED`,
+      `UNIT_DESTROYED`, `STACK_FORMED`, `STACK_ROTATION`, `STACK_DISSOLVED` events broadcast.
+      Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the
+      full three-tier system in Phase 7, not by this phase. `FRONTLINE_UPDATED` deferred to Phse 7.
 - [ ] Basic supply placeholder — **none needed.** Earlier drafts of this phase had a
       simplified "out of supply = increased attrition" placeholder here, on the assumption
       Phase 7 was far enough away to need a stand-in. It is not: Phase 7 directly follows
@@ -374,7 +379,9 @@ Unit tests for movement profile computation and A* path validity.
       clamp would be exceeded (see `docs/PATHFINDING.md` — Path Smoothing)
 - [ ] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
       edges; server validates smoothed path (not raw A* path)
-- [ ] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display
+- [x] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display,
+      meeting battle icon (purple border + inward arrows), stack count badge, dead reckoning
+      movement, ghost overlay, multi-waypoint chain building, drag-box selection
 - [ ] Engagement area rendering:
       - [ ] Own engagement area: solid circle, radius from composition-based formula
       - [ ] Enemy engagement areas: faded/dashed circle — visible to all players;
@@ -389,7 +396,7 @@ Unit tests for movement profile computation and A* path validity.
       - [ ] Encircled (Tier 3): red ring around division dot (most dominant indicator)
       - [ ] Flank attack (90°–135°): diagonal arrow on flanking division dot
       - [ ] Rear attack (135°–180°): double diagonal arrow on flanking division dot
-      - [ ] Meeting battle: distinct head-on combat icon (not standard crossed swords)
+      - [x] Meeting battle: purple border + inward arrows on division icon (instead of standard amber)
       - [x] Retreating: retreat arrow on dot pointing direction of withdrawal
       - [ ] Redeploying: dot greyed out with gear/refresh symbol
 - [ ] Tactical combat pop-up button on combat icon (crossed-swords symbol):

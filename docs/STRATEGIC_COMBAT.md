@@ -533,6 +533,65 @@ it simply has a queued destination it will head to after the fight.
 
 ---
 
+## Territory Movement Restriction
+
+### Design: neutral territory blocks movement
+
+Units cannot move into territory belonging to nations they are not at war with or allied to.
+Neutral waypoints are stripped from move orders; if the very first waypoint is neutral, the
+order is rejected entirely. Retreat paths also avoid neutral territory.
+
+This applies to both player-issued move orders and auto-generated retreat paths.
+
+### Initialization: war matrix at game start
+
+All 6 playable nations (germany, france, united_kingdom, spain, algeria, italy) are
+initialised with `stance: "war"` against each other at game start via `_initRelations()`
+in `GameRoom.ts`. Non-playable nations (belgium, netherlands, switzerland, etc.) are
+never added to the relations map — they default to "neutral" stance.
+
+This is a dev convenience; real diplomacy replaces this in Phase 10.
+
+### Waypoint → nation mapping
+
+At game start, `MovementSystem.loadMapData(mapId)` reads `map_data.json` and runs
+point-in-polygon (ray casting) for every waypoint node against every province's polygon
+rings. A bounding-box pre-filter reduces the number of full polygon checks. The resulting
+`waypointNation: Map<string, string>` maps each waypoint ID to its owning nation ID.
+Unmapped waypoints (sea, no province) default to "not neutral" (allowed).
+
+### Move order trimming in `handleSubmitMoveOrder()`
+
+After `validateMoveOrder()` passes (all waypoint IDs exist), the server calls
+`movementSystem.trimToAllowedTerritory()` which iterates the waypoint array and stops
+at the first neutral-territory waypoint:
+
+```
+if (isNeutralFor(wpId, divNationId, relations)) break;
+allowed.push(wpId);
+```
+
+The allowed prefix replaces the original path. If the prefix is empty (first waypoint
+is neutral), the server sends `MOVE_ORDER_REJECTED` with reason `"neutral_territory"`.
+
+### Retreat avoidance
+
+`_initiateRetreat()` uses `movementSystem.getNearestNonNeutralWaypoint()` instead of
+`getNearestWaypoint()`, ensuring the retreat target is not in neutral territory. Falls
+back to the original `getNearestWaypoint()` if all waypoints are neutral (should not
+occur in a populated map).
+
+### `COMBAT_ENDED` event
+
+Broadcast when one division retreats and the surviving opponent is reset. Payload:
+```json
+{ "winner_id": string, "retreated_id": string }
+```
+The client handler clears `is_meeting_battle` on both divisions and emits
+`division_updated` for the winner so the panel and icon update immediately.
+
+---
+
 ## Movement UX and Hotkeys
 
 ### Move Order Flow
@@ -699,6 +758,14 @@ tooltips on all UI buttons ("Move [Space]", "Hold [G]").
 runtime via the settings UI built in Phase 5. GDScript handles keyboard input cleanly
 through `InputMap`. A left-handed mirror preset ships as a second named default mapping,
 not a runtime-computed mirror.
+
+### Combat State Label (Bottom Selection Panel)
+
+The friendly division bottom panel displays the current combat state as a label in the
+IdentityBlock: `STATE · IDLE`, `STATE · ENGAGED`, `STATE · SUPPRESSED`, `STATE · RETREATING`.
+Updated live via `division_updated` EventBus signals (the same mechanism that keeps
+HP and suppression bars current). Located at `friendly_division_panel.tscn#CombatStateLabel`,
+font_size 11, matching the existing "TEMPLATE · INFANTRY" style.
 
 ---
 
