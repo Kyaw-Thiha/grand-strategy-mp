@@ -97,14 +97,14 @@ moves harder (the flanking division clips the enemy's engagement area too early)
 
 **Engagement radius formula (composition-based, tunable):**
 ```
-base_radius        = 50  # infantry floor (map units)
+base_radius        = 25  # infantry floor (km)
 armoured_fraction  = armoured_cells / total_filled_cells
 cavalry_fraction   = cavalry_cells  / total_filled_cells
 
 radius = base_radius
-       - (max(0, armoured_fraction - 0.15) / 0.10) * 5   # -5 per 10% armour above 15%
-       - (cavalry_fraction / 0.10) * 2                    # -2 per 10% cavalry
-radius = clamp(radius, 30, 50)                            # floor 30, ceiling 50
+       - (max(0, armoured_fraction - 0.15) / 0.10) * 0.5   # -0.5 km per 10% armour above 15%
+       - (cavalry_fraction / 0.10) * 0.25                   # -0.25 km per 10% cavalry
+radius = clamp(radius, 22, 25)                              # floor 22, ceiling 25
 ```
 
 Approximate results:
@@ -265,8 +265,8 @@ Each division is represented as a dot on the strategic map with three concentric
 
 **Engagement area (composition-based radius, circular):**
 - Radius computed from template composition at save time (see Division Movement Profile
-  section for the formula). Infantry division: ~50 map units. Armoured division: ~30
-  map units. Smaller armoured radius gives the player precise control over when the
+  section for the formula). Infantry division: ~25 km. Armoured division: ~22 km.
+  Smaller armoured radius gives the player precise control over when the
   division commits — avoiding accidental engagements mid-flanking-manoeuvre
 - **Visible to both own and enemy players** — own engagement area shown as a solid
   circle; enemy engagement areas shown as a faded/dashed circle. This is essential
@@ -1173,9 +1173,9 @@ number — it is the difference between losing one division and losing the front
   encirclement pressure)
 - Division type classification thresholds (confirmed: armoured >= 40%, motorised
   15–39%; no Defensive type; exact boundary values from playtesting)
-- Engagement radius formula constants (confirmed: base 50 infantry, -5 per 10%
-  armoured above 15%, -2 per 10% cavalry, clamp [30, 50]; exact values from
-  playtesting — particularly the floor of 30 and ceiling of 50)
+- Engagement radius formula constants (current: base 25 km infantry, -0.5 km per 10%
+  armoured above 15%, -0.25 km per 10% cavalry, clamp [22, 25]; values subject to
+  playtesting — particularly the floor and ceiling)
 - Flanking angle bonus percentages (standard flank bonus % and enhanced rear
   attack bonus % — qualitatively confirmed, exact values from playtesting)
 - Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
