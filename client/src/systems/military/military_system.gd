@@ -179,7 +179,7 @@ func handle_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key := event as InputEventKey
-		if key.echo:
+	if key.echo:
 		return
 
 	if not key.pressed:
@@ -225,7 +225,7 @@ func handle_input(event: InputEvent) -> void:
 				for division_id: String in own_selected_for_retreat:
 					CommandQueue.submit("RETREAT", { "division_id": division_id })
 		KEY_B:
-					if _selected_division_id != "":
+			if _selected_division_id != "":
 				EventBus.reposition_mode_requested.emit(_selected_division_id)
 		KEY_ESCAPE:
 			if _reposition_mode:
@@ -241,7 +241,7 @@ func handle_input(event: InputEvent) -> void:
 ## - world_pos: event position transformed into map world coordinates.
 ## Returns: true when the military system consumed the mouse event.
 func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
-		if event is InputEventMouseButton:
+	if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
 		if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
 			if not mouse_button.pressed:
@@ -254,7 +254,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			return false
 
 		if mouse_button.pressed:
-					if (_move_mode or _reposition_mode) and not _selected_division_ids.is_empty():
+			if (_move_mode or _reposition_mode) and not _selected_division_ids.is_empty():
 				return try_click_at_world(world_pos, mouse_button.shift_pressed)
 			_drag_select_pressed = true
 			_drag_select_active = false
@@ -264,7 +264,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			_update_selection_box_overlay()
 			return false
 
-				if not _drag_select_pressed:
+		if not _drag_select_pressed:
 			return false
 
 		_drag_select_current_screen = mouse_button.position
@@ -274,7 +274,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			return true
 
 		_reset_drag_selection()
-				return try_click_at_world(world_pos, mouse_button.shift_pressed)
+		return try_click_at_world(world_pos, mouse_button.shift_pressed)
 
 	if event is InputEventMouseMotion:
 		if not _drag_select_pressed:
@@ -296,7 +296,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 	if _reposition_mode and _reposition_div_id != "":
 		_reposition_mode = false
-				var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+		var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
 		_submit_reposition_order(_reposition_div_id, ll.x, ll.y)
 		return true
 
@@ -321,8 +321,8 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 ## Called by EventBus.reposition_mode_requested when the Reposition button is
 ## clicked in the bottom bar or B is pressed. Enables reposition mode.
 func _enter_reposition_mode(div_id: String) -> void:
-		if div_id == "" or not _is_own_unit(div_id):
-				return
+	if div_id == "" or not _is_own_unit(div_id):
+		return
 	_reposition_mode = true
 	_reposition_div_id = div_id
 	_move_mode = false
@@ -847,7 +847,7 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> voi
 
 
 func _submit_reposition_order(div_id: String, target_lng: float, target_lat: float) -> void:
-		if not _pathfinder.is_built():
+	if not _pathfinder.is_built():
 		push_warning("[MilitarySystem] Pathfinder not built — cannot route reposition")
 		return
 	if not _is_own_unit(div_id):
@@ -881,7 +881,7 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 			max_repos_km = remaining_km
 
 	if max_repos_km == INF or max_repos_km <= 0.0:
-				_clear_pending()
+		_clear_pending()
 		return
 
 	# Compute path, then truncate at engagement boundary.
@@ -923,7 +923,7 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 		_clear_pending()
 		return
 
-		CommandQueue.submit("REPOSITION", {
+	CommandQueue.submit("REPOSITION", {
 		"division_id": div_id,
 		"waypoints": path_to_submit,
 	})
