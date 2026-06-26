@@ -26,7 +26,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _dock_btn_t: Button = $HUDRoot/LeftDockRail/VBox/DockButton_T
 @onready var _dock_btn_y: Button = $HUDRoot/LeftDockRail/VBox/DockButton_Y
 @onready var _dock_btn_u: Button = $HUDRoot/LeftDockRail/VBox/DockButton_U
-@onready var _research_progress_fill: ColorRect = $HUDRoot/LeftDockRail/VBox/DockButton_U/ResearchProgressFill
+@onready var _research_progress_fill: ColorRect = $HUDRoot/LeftDockRail/VBox/DockButton_Q/ResearchProgressFill
 
 @onready var _military_panel: Control = $MilitaryPanel
 @onready var _economy_panel: Control = $EconomyPanel
@@ -56,10 +56,10 @@ func _ready() -> void:
 	overlay_dim.gui_input.connect(_on_overlay_clicked)
 
 	# Wire dock buttons to panel toggles
+	_dock_btn_q.pressed.connect(_make_dock_toggle("research"))
 	_dock_btn_e.pressed.connect(_make_dock_toggle("economy"))
 	_dock_btn_t.pressed.connect(_make_dock_toggle("military"))
 	_dock_btn_y.pressed.connect(_make_dock_toggle("diplomacy"))
-	_dock_btn_u.pressed.connect(_make_dock_toggle("research"))
 	if _research_panel.has_signal("close_requested"):
 		_research_panel.connect("close_requested", _on_research_panel_close_requested)
 
@@ -77,7 +77,7 @@ func _ready() -> void:
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
-	hud_manager.set_panel_shortcut("research",  KEY_U)
+	hud_manager.set_panel_shortcut("research",  KEY_Q)
 
 	# Bottom selection bar — reactive to EventBus selection signals
 	EventBus.division_selected.connect(_on_division_selected)
@@ -115,7 +115,7 @@ func _get_dock_button_for_panel(panel_name: String) -> Button:
 		"economy":   return _dock_btn_e
 		"military":  return _dock_btn_t
 		"diplomacy": return _dock_btn_y
-		"research":  return _dock_btn_u
+		"research":  return _dock_btn_q
 	return null
 
 
@@ -152,7 +152,7 @@ func _on_research_completed(_entry_id: String, _effects: Dictionary) -> void:
 	_set_research_progress_fill(0.0)
 
 
-## Sets the RESe dock button progress overlay height using a normalized ratio.
+## Sets the research dock button progress overlay height using a normalized ratio.
 ## Parameters:
 ## - progress_ratio: normalized progress from 0.0 to 1.0.
 ## Returns: nothing.
@@ -160,9 +160,9 @@ func _set_research_progress_fill(progress_ratio: float) -> void:
 	if _research_progress_fill == null:
 		return
 	var normalized_progress: float = clampf(progress_ratio, 0.0, 1.0)
-	var button_height: float = _dock_btn_u.size.y
+	var button_height: float = _dock_btn_q.size.y
 	if button_height <= 0.0:
-		button_height = _dock_btn_u.get_combined_minimum_size().y
+		button_height = _dock_btn_q.get_combined_minimum_size().y
 	var fill_height: float = floor(button_height * normalized_progress)
 	_research_progress_fill.visible = fill_height > 0.0
 	_research_progress_fill.offset_left = 0.0
