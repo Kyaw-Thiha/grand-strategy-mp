@@ -189,7 +189,7 @@ mechanics — cell layers are rendering only.
 
 **Tactical combat terrain query:**
 When tactical combat initiates, the server samples the **defender's province** for terrain
-modifiers using the O(1) province-level fields. No per-pixel sampling occurs at runtime.
+modifiers using the O(1) province-level fields. Combat samples terrain per-pixel at sub-province resolution at each tick, reading against the cover/elevation raster at the division's live position.
 
 ```
 defender_terrain = provinces[defender_province_id].terrain_elevation
