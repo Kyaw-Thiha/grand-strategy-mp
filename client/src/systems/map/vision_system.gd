@@ -13,6 +13,8 @@ const OWNED_PROVINCE_LIGHT_RADIUS: float = 400.0
 const UNIT_VISION_RADIUS_MULTIPLIER: float = 1.0
 const MIN_UNIT_LIGHT_RADIUS: float = 90.0
 const MAX_DYNAMIC_LIGHTS: int = 128
+const MAX_OWNED_PROVINCE_LIGHTS: int = 96
+const DYNAMIC_VISIBILITY_REFRESH_INTERVAL_SEC: float = 0.25
 
 @export var vision_enabled: bool = true
 
@@ -28,6 +30,8 @@ var _active_lights: Array[PointLight2D] = []
 var _owned_province_lights: Array[PointLight2D] = []
 var _unit_lights_by_division_id: Dictionary = {}
 var _unit_light_positions_by_division_id: Dictionary = {}
+var _unit_visibility_dirty: bool = false
+var _dynamic_visibility_refresh_elapsed: float = 0.0
 
 
 ## Stores the map loader reference and creates visual child nodes.
@@ -40,6 +44,18 @@ func setup(map_loader: Node, _map_renderer: Node = null) -> void:
 	_build_visual_layer()
 
 
+func _process(delta: float) -> void:
+	if not _unit_visibility_dirty:
+		return
+	_dynamic_visibility_refresh_elapsed += delta
+	if _dynamic_visibility_refresh_elapsed < DYNAMIC_VISIBILITY_REFRESH_INTERVAL_SEC:
+		return
+
+	_dynamic_visibility_refresh_elapsed = 0.0
+	_unit_visibility_dirty = false
+	_refresh_dynamic_visibility()
+
+
 ## Connects EventBus signals and runs the first visibility pass.
 ## Call this from map_debug._on_map_loaded() after debug state has been injected.
 ## Parameters:
@@ -47,7 +63,7 @@ func setup(map_loader: Node, _map_renderer: Node = null) -> void:
 ## Returns: nothing.
 func on_map_loaded(_province_count: int) -> void:
 	EventBus.division_added.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
-	EventBus.division_updated.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
+	EventBus.division_updated.connect(func(_id: String) -> void: _mark_unit_visibility_dirty())
 	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
 	EventBus.province_captured.connect(func(_pid: String, _owner: String) -> void: refresh_visibility())
 	EventBus.lobby_state_updated.connect(refresh_visibility)
@@ -87,6 +103,13 @@ func _refresh_dynamic_visibility() -> void:
 	_compute_visible_provinces()
 	EventBus.vision_visibility_changed.emit(_visible_provinces.duplicate())
 	_sync_unit_lights()
+
+
+## Marks movement-driven visibility data for a throttled refresh.
+## Parameters: none.
+## Returns: nothing.
+func _mark_unit_visibility_dirty() -> void:
+	_unit_visibility_dirty = true
 
 
 ## Returns whether the given province is currently in the local player's visible set.
@@ -311,7 +334,7 @@ func _rebuild_owned_province_lights() -> void:
 
 	if not my_nation_id.is_empty():
 		for province_id: String in _map_loader.get_all_province_ids():
-			if light_count >= MAX_DYNAMIC_LIGHTS:
+			if light_count >= MAX_OWNED_PROVINCE_LIGHTS:
 				break
 			if _get_province_nation_id(province_id) != my_nation_id:
 				continue
