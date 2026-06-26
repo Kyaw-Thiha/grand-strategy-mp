@@ -37,6 +37,7 @@ const DR_ROAD_KMH     := 60.0
 const DR_OFFROAD_KMH  := 20.0
 const DR_KM_PER_DEG   := 111.0
 const DR_SNAP_DEG     := 0.0001  # waypoint snap threshold (matches server)
+const REPOSITION_SPEED := 0.30   # matches server's REPOSITION_SPEED
 
 var _map_loader: Node = null
 var _icon_layer: Node2D = null
@@ -51,6 +52,8 @@ var _selected_division_id: String = ""
 var _selected_division_ids: Array[String] = []
 var _selection_preview_division_ids: Array[String] = []
 var _move_mode: bool = false
+var _reposition_mode: bool = false
+var _reposition_div_id: String = ""
 var _drag_select_pressed: bool = false
 var _drag_select_active: bool = false
 var _drag_select_start_screen: Vector2 = Vector2.ZERO
@@ -76,6 +79,7 @@ var _shift_chain_started: bool = false      # true once the user has made at lea
 var _dr_pos_deg: Dictionary = {}   # div_id -> Vector2(lng, lat) — local simulated position
 var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local waypoint queue
 var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
+var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0 normal, 0.30 repos)
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -112,12 +116,18 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_removed.connect(_on_division_removed)
+	EventBus.stack_formed.connect(_on_stack_formed)
+	EventBus.stack_rotated.connect(_on_stack_rotated)
+	EventBus.stack_dissolved.connect(_on_stack_dissolved)
 	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
+	EventBus.reposition_mode_requested.connect(_enter_reposition_mode)
 
-	# Surface SUBMIT_MOVE_ORDER rejections in the console
+	# Surface SUBMIT_MOVE_ORDER and REPOSITION rejections in the console
 	CommandQueue.command_rejected.connect(func(type: String, reason: String) -> void:
 		if type == "SUBMIT_MOVE_ORDER":
 			push_warning("[MilitarySystem] move rejected: " + reason)
+		elif type == "REPOSITION":
+			push_warning("[MilitarySystem] reposition rejected: " + reason)
 	)
 
 	# Catch-up: create icons for divisions that arrived before setup() ran
@@ -169,7 +179,7 @@ func handle_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key := event as InputEventKey
-	if key.echo:
+		if key.echo:
 		return
 
 	if not key.pressed:
@@ -214,7 +224,13 @@ func handle_input(event: InputEvent) -> void:
 				_clear_pending()
 				for division_id: String in own_selected_for_retreat:
 					CommandQueue.submit("RETREAT", { "division_id": division_id })
+		KEY_B:
+					if _selected_division_id != "":
+				EventBus.reposition_mode_requested.emit(_selected_division_id)
 		KEY_ESCAPE:
+			if _reposition_mode:
+				_clear_pending()
+			else:
 				_clear_pending()
 				deselect()
 
@@ -225,7 +241,7 @@ func handle_input(event: InputEvent) -> void:
 ## - world_pos: event position transformed into map world coordinates.
 ## Returns: true when the military system consumed the mouse event.
 func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
-	if event is InputEventMouseButton:
+		if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
 		if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
 			if not mouse_button.pressed:
@@ -238,7 +254,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			return false
 
 		if mouse_button.pressed:
-			if _move_mode and not _selected_division_ids.is_empty():
+					if (_move_mode or _reposition_mode) and not _selected_division_ids.is_empty():
 				return try_click_at_world(world_pos, mouse_button.shift_pressed)
 			_drag_select_pressed = true
 			_drag_select_active = false
@@ -248,7 +264,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			_update_selection_box_overlay()
 			return false
 
-		if not _drag_select_pressed:
+				if not _drag_select_pressed:
 			return false
 
 		_drag_select_current_screen = mouse_button.position
@@ -258,7 +274,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			return true
 
 		_reset_drag_selection()
-		return try_click_at_world(world_pos, mouse_button.shift_pressed)
+				return try_click_at_world(world_pos, mouse_button.shift_pressed)
 
 	if event is InputEventMouseMotion:
 		if not _drag_select_pressed:
@@ -278,6 +294,12 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 
 ## Left-click at a world-space position. Returns true if consumed (caller should mark event handled).
 func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
+	if _reposition_mode and _reposition_div_id != "":
+		_reposition_mode = false
+				var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+		_submit_reposition_order(_reposition_div_id, ll.x, ll.y)
+		return true
+
 	if _move_mode and not _selected_division_ids.is_empty():
 		var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
 		if _selected_division_ids.size() == 1:
@@ -295,6 +317,19 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 	if not _selected_division_ids.is_empty() and not _move_mode:
 		deselect()
 	return false
+
+## Called by EventBus.reposition_mode_requested when the Reposition button is
+## clicked in the bottom bar or B is pressed. Enables reposition mode.
+func _enter_reposition_mode(div_id: String) -> void:
+		if div_id == "" or not _is_own_unit(div_id):
+				return
+	_reposition_mode = true
+	_reposition_div_id = div_id
+	_move_mode = false
+	_pending_milestones.clear()
+	_pending_chain.clear()
+	_update_ghost()
+	_set_icon_move_mode(div_id, true)
 
 ## Called by EventBus.move_mode_requested when the Move button is clicked in a
 ## bottom bar selection panel. Enables move mode for the specified division.
@@ -661,6 +696,8 @@ func _advance_dr(div_id: String, delta: float) -> void:
 			return  # impassable — wait for server to reroute
 		kmh = DR_OFFROAD_KMH / cost
 
+	# Apply speed multiplier (1.0 for normal movement, 0.30 for reposition)
+	kmh *= _dr_speed_mult.get(div_id, 1.0)
 	var speed_degs: float = (kmh / DR_KM_PER_DEG) * float(GameState.game_speed)
 	var advance: float = speed_degs * delta
 
@@ -809,11 +846,98 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> voi
 	_update_division_route(div_id)
 
 
+func _submit_reposition_order(div_id: String, target_lng: float, target_lat: float) -> void:
+		if not _pathfinder.is_built():
+		push_warning("[MilitarySystem] Pathfinder not built — cannot route reposition")
+		return
+	if not _is_own_unit(div_id):
+		return
+
+	var div_data: Dictionary = GameState.get_division(div_id)
+	var own_radius: float = float(div_data.get("engagement_radius", 25.0))
+	var engaged_with: Array = div_data.get("engaged_with", [])
+
+	# Use SERVER position for distance calculations (not DR position, which may be stale).
+	# DR position is still used for pathfinding below.
+	var server_lng: float = float(div_data.get("position_lng", 0.0))
+	var server_lat: float = float(div_data.get("position_lat", 0.0))
+
+	# Compute max repos distance from engagement boundary with all engaged enemies.
+	# The repos must stay within (own_radius + enemy_radius) of each enemy.
+	var max_repos_km: float = INF
+	for enemy_id: Variant in engaged_with:
+		var enemy_data: Dictionary = GameState.get_division(str(enemy_id))
+		if enemy_data.is_empty():
+			continue
+		var enemy_lng: float = float(enemy_data.get("position_lng", 0.0))
+		var enemy_lat: float = float(enemy_data.get("position_lat", 0.0))
+		var enemy_radius: float = float(enemy_data.get("engagement_radius", 25.0))
+		var combined_radius: float = own_radius + enemy_radius
+		var dx: float = enemy_lng - server_lng
+		var dy: float = enemy_lat - server_lat
+		var current_dist_km: float = sqrt(dx * dx + dy * dy) * DR_KM_PER_DEG
+		var remaining_km: float = combined_radius - current_dist_km
+		if remaining_km < max_repos_km:
+			max_repos_km = remaining_km
+
+	if max_repos_km == INF or max_repos_km <= 0.0:
+				_clear_pending()
+		return
+
+	# Compute path, then truncate at engagement boundary.
+	# Use DR position for pathfinding accuracy (it tracks live movement).
+	var current_lng_lat: Vector2 = _get_division_lng_lat(div_id)
+	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
+	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
+	var movement_profile: Dictionary = _get_movement_profile(div_id)
+	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	if path.is_empty():
+		push_warning("[MilitarySystem] No reposition path found for %s" % div_id)
+		_clear_pending()
+		return
+
+	# Walk through path waypoints, truncate at engagement boundary.
+	# Start distance accumulation from SERVER position (authoritative), not DR position.
+	var path_to_submit: Array[String] = []
+	var accum_km: float = 0.0
+	var prev_lng: float = server_lng
+	var prev_lat: float = server_lat
+	for waypoint_id: Variant in path:
+		var wp_id: String = str(waypoint_id)
+		var node: Dictionary = _pathfinder.get_node(wp_id)
+		if node.is_empty():
+			continue
+		var node_lng: float = float(node["lng"])
+		var node_lat: float = float(node["lat"])
+		var seg_dx: float = node_lng - prev_lng
+		var seg_dy: float = node_lat - prev_lat
+		accum_km += sqrt(seg_dx * seg_dx + seg_dy * seg_dy) * DR_KM_PER_DEG
+		if accum_km > max_repos_km:
+			break
+		path_to_submit.append(wp_id)
+		prev_lng = node_lng
+		prev_lat = node_lat
+
+	if path_to_submit.is_empty():
+		push_warning("[MilitarySystem] Reposition path all beyond engagement boundary")
+		_clear_pending()
+		return
+
+		CommandQueue.submit("REPOSITION", {
+		"division_id": div_id,
+		"waypoints": path_to_submit,
+	})
+
+	_clear_pending()
+
+
 func _clear_pending() -> void:
 	_set_selected_icons_move_mode(false)
 	_pending_milestones.clear()
 	_pending_chain.clear()
 	_move_mode = false
+	_reposition_mode = false
+	_reposition_div_id = ""
 	_path_pending = false
 	_pending_auto_submit = false
 	_submit_on_thread_complete = false
@@ -900,7 +1024,9 @@ func _update_ghost() -> void:
 		return
 
 	var color := Color.WHITE
-	if _selected_division_id != "":
+	if _reposition_mode and _reposition_div_id != "":
+		color = Color.CYAN
+	elif _selected_division_id != "":
 		var data: Dictionary = GameState.get_division(_selected_division_id)
 		color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 
@@ -918,7 +1044,8 @@ func _update_division_route(division_id: String) -> void:
 		return
 
 	var div_data: Dictionary = GameState.get_division(division_id)
-	var color: Color = NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
+	var is_repos: bool = _dr_speed_mult.has(division_id)
+	var color: Color = Color.CYAN if is_repos else NATION_COLORS.get(div_data.get("nation_id", ""), NEUTRAL_COLOR)
 	var no_milestones: Array[Vector2] = []
 	var icon: Node2D = _icons.get(division_id) as Node2D
 
@@ -931,7 +1058,10 @@ func _update_division_route(division_id: String) -> void:
 			if not node.is_empty():
 				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
 		route.start_node = icon
-		route.set_path(positions, no_milestones, color.darkened(0.25))
+		if is_repos:
+			route.set_path(positions, no_milestones, color)
+		else:
+			route.set_path(positions, no_milestones, color.darkened(0.25))
 		return
 
 	# No local DR — draw from server move_order (foreign unit or stopped/arrived).
@@ -993,17 +1123,42 @@ func _on_division_updated(division_id: String) -> void:
 
 	icon.update_data(data)
 
+	icon.is_meeting_battle = data.get("is_meeting_battle", false)
+	icon.queue_redraw()
+
 	var server_lng := float(data.get("position_lng", 0.0))
 	var server_lat := float(data.get("position_lat", 0.0))
 
 	var order: Array = data.get("move_order", [])
+	var repos_order: Array = data.get("reposition_order", [])
 	var combat_state_val: String = data.get("combat_state", "idle")
+
+	# Engaged division with active reposition order — seed DR at 30% speed for smooth movement
+	if repos_order.size() > 0 and combat_state_val in ["engaged", "suppressed"]:
+		if not _dr_pos_deg.has(division_id):
+			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+		if not _dr_profiles.has(division_id):
+			var pj: String = data.get("movement_profile_json", "")
+			if not pj.is_empty():
+				var parsed: Variant = JSON.parse_string(pj)
+				if parsed is Dictionary:
+					_dr_profiles[division_id] = parsed
+		var str_repos: Array[String] = []
+		for wp: Variant in repos_order:
+			str_repos.append(str(wp))
+		_dr_order[division_id] = str_repos
+		_dr_speed_mult[division_id] = REPOSITION_SPEED
+		(icon as Node2D).set_moving(true)
+		_update_division_route(division_id)
+		_update_division_visibility(division_id)
+		return
 
 	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
 		# Division stopped or locked in combat — freeze at server-authoritative position.
 		_dr_pos_deg.erase(division_id)
 		_dr_order.erase(division_id)
 		_dr_profiles.erase(division_id)
+		_dr_speed_mult.erase(division_id)
 		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
 		(icon as Node2D).set_moving(false)
 		_update_division_route(division_id)
@@ -1062,11 +1217,34 @@ func _on_division_removed(division_id: String) -> void:
 	_dr_pos_deg.erase(division_id)
 	_dr_order.erase(division_id)
 	_dr_profiles.erase(division_id)
+	_dr_speed_mult.erase(division_id)
 	if _selected_division_ids.has(division_id):
 		_selected_division_ids.erase(division_id)
 		_selection_preview_division_ids.erase(division_id)
 		_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
 		_emit_selection_changed()
+
+
+func _on_stack_formed(stack_id: String, division_ids: Array) -> void:
+	for div_id in division_ids:
+		var icon = _icons.get(div_id)
+		if icon:
+			icon.stack_count = division_ids.size()
+			icon.queue_redraw()
+
+
+func _on_stack_rotated(_stack_id: String, _rotated_back: String, _new_front: String) -> void:
+	pass  # stack_count unchanged; visual reorder handled by stack_position in DIVISION_UPDATES
+
+
+func _on_stack_dissolved(stack_id: String) -> void:
+	for div_id: String in GameState.divisions:
+		var div_data: Dictionary = GameState.get_division(div_id)
+		if div_data.get("stack_id", "") == stack_id:
+			var icon = _icons.get(div_id)
+			if icon:
+				icon.stack_count = 0
+				icon.queue_redraw()
 
 
 func _on_vision_visibility_changed(visible_provinces: Dictionary) -> void:
