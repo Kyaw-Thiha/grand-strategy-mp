@@ -164,7 +164,10 @@ func show_panel(panel_name: String) -> void:
 		overlay_dim.show()
 		center_panel_anchor.show()
 	else:
+		if _currently_open != "" and _registry[_currently_open].placement == PlacementMode.FULL_CENTER:
+			hide_panel(_currently_open)
 		_previous_side_docked = ""
+		_hide_other_side_docked_panels(panel_name)
 		side_panel_anchor.show()
 	entry.node.show()
 	if placement == PlacementMode.FULL_CENTER:
@@ -243,9 +246,23 @@ func _toggle_by_shortcut(panel_name: String) -> void:
 	if entry.is_open:
 		hide_panel(panel_name)
 	else:
-		if _currently_open != "":
-			hide_panel(_currently_open)
 		show_panel(panel_name)
+
+
+func _hide_other_side_docked_panels(panel_name_to_keep: String) -> void:
+	for panel_name: String in _registry.keys():
+		if panel_name == panel_name_to_keep:
+			continue
+		var entry: Dictionary = _registry[panel_name]
+		if not entry.is_open:
+			continue
+		if entry.placement != PlacementMode.SIDE_DOCKED:
+			continue
+		entry.node.hide()
+		entry.is_open = false
+		if _currently_open == panel_name:
+			_currently_open = ""
+		panel_closed.emit(panel_name)
 
 
 func _center_panel(panel: Control) -> void:

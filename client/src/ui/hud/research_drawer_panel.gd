@@ -2,6 +2,7 @@ extends PanelContainer
 ## Side-docked research drawer listing currently runnable research entries.
 
 signal full_tree_requested()
+signal close_requested()
 
 const CARD_BG: Color = Color(0.12, 0.08, 0.05, 0.96)
 const CARD_BG_ACTIVE: Color = Color(0.16, 0.12, 0.06, 0.98)
@@ -9,6 +10,7 @@ const CARD_BORDER: Color = Color(0.42, 0.30, 0.16, 1.0)
 const CARD_BORDER_ACTIVE: Color = Color(0.84, 0.68, 0.30, 1.0)
 
 @onready var _full_tree_button: Button = %FullTreeButton
+@onready var _close_button: Button = %CloseButton
 @onready var _entry_list: VBoxContainer = %EntryList
 @onready var _empty_label: Label = %EmptyLabel
 
@@ -17,6 +19,7 @@ var _research_system: Node = null
 
 func _ready() -> void:
 	_full_tree_button.pressed.connect(func() -> void: full_tree_requested.emit())
+	_close_button.pressed.connect(func() -> void: close_requested.emit())
 
 
 ## Injects the shared research system owned by the full tree scene.
