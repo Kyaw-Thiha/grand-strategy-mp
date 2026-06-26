@@ -192,9 +192,16 @@ func _draw() -> void:
 	# Observation soft field — inner filled disc; overlaps center to create a gradient effect
 	draw_circle(Vector2.ZERO, observation_radius_px, Color(1.0, 1.0, 1.0, 0.18))
 
-	# Engagement circle
-	var eng_color := Color(nation_color.r, nation_color.g, nation_color.b, 0.5)
-	draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 48, eng_color, 1.5)
+	# Engagement circle — color and weight reflect combat state
+	match combat_state:
+		"engaged":
+			draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 64, Color(1.0, 0.65, 0.1, 0.70), 2.5)
+		"suppressed":
+			draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 64, Color(0.9, 0.15, 0.15, 0.80), 2.5)
+		"retreating":
+			draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 64, Color(0.9, 0.45, 0.1, 0.50), 1.5)
+		_:
+			draw_arc(Vector2.ZERO, engagement_radius_px, 0.0, TAU, 48, Color(nation_color.r, nation_color.g, nation_color.b, 0.20), 1.0)
 
 	# Encirclement ring — most prominent supply indicator, drawn before selection ring
 	if supply_status == "encircled":
@@ -228,12 +235,17 @@ func _draw() -> void:
 	draw_rect(rect, nation_color)
 	draw_rect(rect, Color(0.05, 0.05, 0.05), false, 1.5)
 
-	# Combat state border overlay — amber when engaged, red when suppressed
+	# Combat state border overlay
 	match combat_state:
 		"engaged":
 			draw_rect(rect, Color(1.0, 0.65, 0.1, 0.80), false, 2.5)
 		"suppressed":
 			draw_rect(rect, Color(0.9, 0.15, 0.15, 0.90), false, 2.5)
+		"retreating":
+			draw_rect(rect, Color(0.9, 0.45, 0.1, 0.85), false, 2.0)
+		"destroyed":
+			draw_rect(rect, Color(0.25, 0.25, 0.25, 0.85), false, 2.0)
+			draw_line(rect.position, rect.end, Color(0.25, 0.25, 0.25, 0.85), 1.5)
 
 	# Infantry cross symbol (two lines inside the rectangle)
 	var cross_color := Color(0.0, 0.0, 0.0, 0.8)

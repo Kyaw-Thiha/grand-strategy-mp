@@ -667,9 +667,9 @@ export class CombatSystem {
     if (len === 0) {
       // Directly on centroid — pick arbitrary direction
       retreatLng = div.position_lng;
-      retreatLat = div.position_lat + (20 / KM_PER_DEG);
+      retreatLat = div.position_lat + (50 / KM_PER_DEG);
     } else {
-      const retreatKm    = 20;
+      const retreatKm    = 50;
       const retreatDeg   = retreatKm / KM_PER_DEG;
       retreatLng = div.position_lng + (dx / len) * retreatDeg;
       retreatLat = div.position_lat + (dy / len) * retreatDeg;

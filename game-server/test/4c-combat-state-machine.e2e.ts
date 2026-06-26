@@ -276,8 +276,8 @@ async function testC_manualRetreatCommand(): Promise<void> {
 
 async function main() {
   console.log("Phase 4C — Combat State Machine e2e tests");
-  console.log("  Front-line pair: germany_div_05 (Saarbrücken) vs france_div_05 (Metz)");
-  console.log("  Auto-engage: ~92 km apart, within 100 km engagement range\n");
+  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
+  console.log("  Auto-engage: ~37 km apart, within 50 km engagement range\n");
 
   await testA_suppressedStateBeforeRetreat();
   await testB_suppressedDealsNoDamage();

@@ -1,8 +1,8 @@
 /**
  * Phase 4C end-to-end: engagement, combat, auto-retreat, province capture.
  *
- * germany_div_05 (Saarbrücken, 6.995°E 49.237°N) and france_div_05 (Metz, 6.175°E 49.123°N)
- * spawn ~92 km apart — within the 100 km engagement range (50+50) — so combat starts
+ * germany_div_05 (Sarreguemines, 6.500°E 49.190°N) and france_div_05 (Metz, 6.175°E 49.123°N)
+ * spawn ~37 km apart — within the 50 km engagement range (25+25) — so combat starts
  * automatically on the first game tick without any move orders needed.
  *
  * Tests:
@@ -85,8 +85,8 @@ function sleep(ms: number): Promise<void> {
 
 async function main() {
   console.log("Phase 4C — engagement, combat, auto-retreat, province capture\n");
-  console.log("  Front-line pair: germany_div_05 (Saarbrücken) vs france_div_05 (Metz)");
-  console.log("  Spawn distance: ~92 km — within engagement range (50+50=100 km)\n");
+  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
+  console.log("  Spawn distance: ~37 km — within engagement range (25+25=50 km)\n");
 
   // 1. Register + login
   console.log("1. Registering and logging in...");
@@ -153,8 +153,8 @@ async function main() {
   const distKm = Math.sqrt(dx * dx + dy * dy) * 111;
   console.log(`   germany_div_05: (${germDiv!.position_lng.toFixed(3)}, ${germDiv!.position_lat.toFixed(3)})`);
   console.log(`   france_div_05:  (${frDiv!.position_lng.toFixed(3)},  ${frDiv!.position_lat.toFixed(3)})`);
-  console.log(`   Spawn distance: ${distKm.toFixed(1)} km (engagement triggers at ≤ 100 km)`);
-  assert(distKm <= 100, `Divisions too far apart to engage: ${distKm.toFixed(1)} km`);
+  console.log(`   Spawn distance: ${distKm.toFixed(1)} km (engagement triggers at ≤ 50 km)`);
+  assert(distKm <= 50, `Divisions too far apart to engage: ${distKm.toFixed(1)} km`);
 
   // 4. Test: COMBAT_STARTED fires automatically (no move orders needed)
   console.log("\n4. Test: COMBAT_STARTED fires automatically...");

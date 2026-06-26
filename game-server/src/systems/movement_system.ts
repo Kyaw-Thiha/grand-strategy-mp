@@ -128,7 +128,7 @@ export class MovementSystem {
 
     for (const division of state.divisions.values()) {
       if (division.move_order.length === 0) continue;
-      if (division.combat_state === "engaged") continue;
+      if (division.combat_state === "engaged" || division.combat_state === "suppressed") continue;
 
       this._advanceDivision(division, speedMult);
     }
@@ -228,15 +228,15 @@ export class MovementSystem {
 
   computeEngagementRadius(template: TemplateCell[]): number {
     const total = template.length;
-    if (total === 0) return 50;
+    if (total === 0) return 25;
     const armoured = template.filter(c => ARMOURED_UNIT_TYPES.has(c.unit_type)).length;
     const cavalry = template.filter(c => CAVALRY_UNIT_TYPES.has(c.unit_type)).length;
     const armouredFrac = armoured / total;
     const cavalryFrac = cavalry / total;
-    let radius = 50;
-    radius -= (Math.max(0, armouredFrac - 0.15) / 0.10) * 1;
-    radius -= (cavalryFrac / 0.10) * 0.5;
-    return Math.max(45, Math.min(50, radius));
+    let radius = 25;
+    radius -= (Math.max(0, armouredFrac - 0.15) / 0.10) * 0.5;
+    radius -= (cavalryFrac / 0.10) * 0.25;
+    return Math.max(22, Math.min(25, radius));
   }
 
   computeObservationRadius(_template: TemplateCell[]): number {
