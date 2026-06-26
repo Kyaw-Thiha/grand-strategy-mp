@@ -26,6 +26,7 @@
 [ext_resource type="Texture2D" uid="uid://b2woe672s0anm" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
 [ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
 [ext_resource type="PackedScene" uid="uid://cbuwtcevrakg0" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
+[ext_resource type="Script" path="res://src/ui/hud/notification_feed.gd" id="34_notification_feed"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -553,13 +554,17 @@ mouse_filter = 2
 [node name="ToastContainer" type="VBoxContainer" parent="HUDRoot" unique_id=1721872768]
 unique_name_in_owner = true
 layout_mode = 0
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -320.0
-offset_bottom = 400.0
-grow_horizontal = 0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 92.0
+offset_top = -456.0
+offset_right = 420.0
+offset_bottom = -176.0
+grow_vertical = 0
 mouse_filter = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 6
+alignment = 2
+script = ExtResource("34_notification_feed")
 
 [node name="MilitaryPanel" parent="." unique_id=2101988822 instance=ExtResource("6")]
 visible = false

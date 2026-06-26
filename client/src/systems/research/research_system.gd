@@ -309,6 +309,9 @@ func _emit_research_progress(entry_id: String) -> void:
 func _emit_research_completed(entry_id: String, effects: Dictionary) -> void:
 	if has_node("/root/EventBus"):
 		EventBus.research_completed.emit(entry_id, effects)
+		var entry: Dictionary = get_entry(entry_id)
+		var title: String = entry.get("title", entry_id)
+		EventBus.notification_requested.emit("Research complete: " + title, "research")
 
 
 func _emit_research_rejected(entry_id: String, reason: String) -> void:
