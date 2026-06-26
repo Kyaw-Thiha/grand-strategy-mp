@@ -63,6 +63,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
     this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
+    this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
     this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
     if (process.env.DEV_MODE === "true") {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
@@ -253,6 +254,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (!nation || nation.nation_id !== division.nation_id) return;
 
     division.move_order.splice(0, division.move_order.length);
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(division)] });
   }
 
   private handleRetreat(client: Client, msg: { division_id?: string }) {
@@ -283,6 +285,46 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       }
     }
     this.broadcast("DIVISION_UPDATES", { divisions: serializedDivs });
+  }
+
+  private handleReposition(client: Client, msg: { division_id?: string; waypoints?: string[] }) {
+    if (this.state.phase !== "running") return;
+    const divisionId = msg.division_id ?? "";
+    const waypoints  = msg.waypoints ?? [];
+    const division = this.state.divisions.get(divisionId);
+    if (!division) { client.send("ERROR", { message: `Unknown division: ${divisionId}` }); return; }
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation || nation.nation_id !== division.nation_id) {
+      client.send("ERROR", { message: "Not your division" }); return;
+    }
+
+    if (division.combat_state !== "engaged" && division.combat_state !== "suppressed") {
+      client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "not_in_combat" }); return;
+    }
+
+    if (!this.movementSystem.validateMoveOrder(waypoints)) {
+      client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "invalid_waypoints" }); return;
+    }
+
+    // Check engagement boundary: reject repos if already past the edge of any engaged enemy
+    for (const enemyId of division.engaged_with) {
+      const enemy = this.state.divisions.get(enemyId);
+      if (!enemy) continue;
+      const dx = division.position_lng - enemy.position_lng;
+      const dy = division.position_lat - enemy.position_lat;
+      const dist = Math.sqrt(dx * dx + dy * dy) * 111;
+      if (dist > division.engagement_radius + enemy.engagement_radius) {
+        client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "at_engagement_edge" }); return;
+      }
+    }
+
+    division.reposition_order.splice(0, division.reposition_order.length);
+    for (const wpId of waypoints) division.reposition_order.push(wpId);
+
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(division)] });
   }
 
   private handleReorderStack(client: Client, msg: { stack_id?: string; new_order?: string[] }) {
@@ -480,6 +522,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       observation_radius: div.observation_radius,
       engagement_radius: div.engagement_radius,
       move_order: [...div.move_order],
+      reposition_order: [...div.reposition_order],
       stack_id: div.stack_id,
       stack_position: div.stack_position,
       attacker_role: div.attacker_role,

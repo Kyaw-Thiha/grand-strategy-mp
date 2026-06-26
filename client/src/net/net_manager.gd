@@ -66,9 +66,11 @@ func send_command(type: String, payload: Dictionary) -> void:
 		return
 	# Format: [PROTO_ROOM_DATA, msgpack(type), msgpack(payload)]
 	var packet := PackedByteArray([PROTO_ROOM_DATA])
-	packet.append_array(MsgPack.encode(type))
+	var type_encoded: PackedByteArray = MsgPack.encode(type)
+	packet.append_array(type_encoded)
 	if not payload.is_empty():
-		packet.append_array(MsgPack.encode(payload))
+		var payload_encoded: PackedByteArray = MsgPack.encode(payload)
+		packet.append_array(payload_encoded)
 	_socket.send(packet)
 
 

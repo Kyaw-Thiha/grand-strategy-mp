@@ -14,6 +14,7 @@ var _btn_move: Button
 var _btn_hold: Button
 var _btn_retreat: Button
 var _btn_cancel: Button
+var _btn_reposition: Button
 var _combat_state_label: Label
 
 var _current_div_id: String = ""
@@ -33,6 +34,7 @@ func _ready() -> void:
 	_btn_hold = get_node_or_null("Margin/HBox/ActionsBlock/Row1/BtnHold")
 	_btn_retreat = get_node_or_null("Margin/HBox/ActionsBlock/Row2/BtnRetreat")
 	_btn_cancel = get_node_or_null("Margin/HBox/ActionsBlock/Row2/BtnCancel")
+	_btn_reposition = get_node_or_null("Margin/HBox/ActionsBlock/Row3/BtnReposition")
 	_combat_state_label = get_node_or_null("Margin/HBox/IdentityBlock/CombatStateLabel")
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_deselected.connect(func() -> void: _current_div_id = "")
@@ -57,6 +59,8 @@ func populate(div_id: String, data: Dictionary) -> void:
 	var in_combat: bool = combat_state in ["engaged", "suppressed"]
 	if _btn_retreat != null:
 		_btn_retreat.visible = in_combat
+	if _btn_reposition != null:
+		_btn_reposition.visible = in_combat
 
 	_rewire_buttons(div_id)
 
@@ -79,6 +83,10 @@ func _refresh_stats(data: Dictionary) -> void:
 	var combat_state: String = data.get("combat_state", "idle")
 	if _combat_state_label != null:
 		_combat_state_label.text = "STATE · %s" % combat_state.to_upper()
+	if _btn_retreat != null:
+		_btn_retreat.visible = combat_state in ["engaged", "suppressed"]
+	if _btn_reposition != null:
+		_btn_reposition.visible = combat_state in ["engaged", "suppressed"]
 
 
 func _on_division_updated(div_id: String) -> void:
@@ -95,7 +103,7 @@ func _rewire_buttons(div_id: String) -> void:
 		return
 
 	# Disconnect all previously connected handlers before re-wiring
-	for btn: Button in [_btn_move, _btn_hold, _btn_retreat, _btn_cancel]:
+	for btn: Button in [_btn_move, _btn_hold, _btn_retreat, _btn_cancel, _btn_reposition]:
 		if btn == null:
 			continue
 		if btn.pressed.get_connections().size() > 0:
@@ -115,6 +123,11 @@ func _rewire_buttons(div_id: String) -> void:
 	if _btn_retreat != null:
 		_btn_retreat.pressed.connect(func() -> void:
 			CommandQueue.submit("RETREAT", { "division_id": div_id })
+		)
+
+	if _btn_reposition != null:
+		_btn_reposition.pressed.connect(func() -> void:
+			EventBus.reposition_mode_requested.emit(div_id)
 		)
 
 	_btn_cancel.pressed.connect(func() -> void:

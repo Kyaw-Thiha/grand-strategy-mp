@@ -79,6 +79,9 @@ func _apply_division_updates(data: Dictionary) -> void:
 		var existing: Dictionary = divisions[div_id]
 		for key: String in div_data:
 			existing[key] = div_data[key]
+		# Store reposition_order if present
+		if "reposition_order" in div_data:
+			existing["reposition_order"] = div_data["reposition_order"]
 		# Clear meeting battle flag when combat ends
 		var combat_state: String = div_data.get("combat_state", "")
 		if combat_state in ["idle", "retreating"]:

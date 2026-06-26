@@ -50,6 +50,7 @@ signal province_selected(province_id: String)
 signal province_deselected()
 signal stack_selected(division_ids: Array)  # placeholder for future multi-select
 signal move_mode_requested(division_id: String)
+signal reposition_mode_requested(div_id: String)
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)

@@ -12,6 +12,10 @@ const KM_PER_DEG_LAT = 111.0;
 const ROAD_SPEED_KMH = 60;
 const OFFROAD_SPEED_KMH = 20;
 
+// Reposition constants
+const REPOSITION_MAX_KM   = 12;
+const REPOSITION_SPEED    = 0.30; // 30% of normal movement speed
+
 // Units considered "armoured" for type classification and engagement radius.
 const ARMOURED_UNIT_TYPES = new Set(["light_tank", "heavy_tank", "medium_tank"]);
 const CAVALRY_UNIT_TYPES = new Set(["cavalry"]);
@@ -49,6 +53,8 @@ export class MovementSystem {
   private profileCache: Map<string, Record<string, number>> = new Map();
   // waypointId → nationId for territory checks (built by loadMapData)
   private waypointNation: Map<string, string> = new Map();
+  // River segments collected from waypoint edges for combat crossing checks
+  private riverSegments: Array<{ x1: number; y1: number; x2: number; y2: number; size: string }> = [];
 
   loadWaypoints(mapId: string): void {
     const __dir = dirname(fileURLToPath(import.meta.url));
@@ -76,6 +82,14 @@ export class MovementSystem {
       this.graph.adjacency.get(edge.to)?.push(edge.from);
       this.edgeSet.add(`${edge.from}|${edge.to}`);
       this.edgeSet.add(`${edge.to}|${edge.from}`);
+      // Collect river segments for combat river crossing checks
+      if (edge.river_size) {
+        const fromNode = this.graph.nodes.get(edge.from);
+        const toNode   = this.graph.nodes.get(edge.to);
+        if (fromNode && toNode) {
+          this.riverSegments.push({ x1: fromNode.lng, y1: fromNode.lat, x2: toNode.lng, y2: toNode.lat, size: edge.river_size });
+        }
+      }
     }
 
     for (const rc of raw.road_connections) {
@@ -101,6 +115,13 @@ export class MovementSystem {
         this.graph.adjacency.get(edge.to)?.push(edge.from);
         this.edgeSet.add(`${edge.from}|${edge.to}`);
         this.edgeSet.add(`${edge.to}|${edge.from}`);
+        if (edge.river_size) {
+          const fromNode = this.graph.nodes.get(edge.from);
+          const toNode   = this.graph.nodes.get(edge.to);
+          if (fromNode && toNode) {
+            this.riverSegments.push({ x1: fromNode.lng, y1: fromNode.lat, x2: toNode.lng, y2: toNode.lat, size: edge.river_size });
+          }
+        }
       }
       console.log(`[MovementSystem] merged terrain grid: ${tRaw.nodes.length} nodes, ${tRaw.edges.length} edges`);
     }
@@ -222,6 +243,46 @@ export class MovementSystem {
     return allowed;
   }
 
+  checkRiverCrossing(lng1: number, lat1: number, lng2: number, lat2: number): string {
+    for (const seg of this.riverSegments) {
+      if (this._segmentsIntersect(lng1, lat1, lng2, lat2, seg.x1, seg.y1, seg.x2, seg.y2)) {
+        return seg.size;
+      }
+    }
+    return "";
+  }
+
+  private _segmentsIntersect(
+    ax: number, ay: number, bx: number, by: number,
+    cx: number, cy: number, dx: number, dy: number,
+  ): boolean {
+    const d1x = bx - ax, d1y = by - ay;
+    const d2x = dx - cx, d2y = dy - cy;
+    const cross = d1x * d2y - d1y * d2x;
+    if (Math.abs(cross) < 1e-10) return false;
+    const t = ((cx - ax) * d2y - (cy - ay) * d2x) / cross;
+    const u = ((cx - ax) * d1y - (cy - ay) * d1x) / cross;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  }
+
+  calculatePathDistance(waypointIds: string[], startLng: number, startLat: number): number {
+    let totalKm = 0;
+    let prevLng = startLng;
+    let prevLat = startLat;
+    for (const id of waypointIds) {
+      const node = this.graph.nodes.get(id);
+      if (!node) continue;
+      totalKm += this._distKm(prevLng, prevLat, node.lng, node.lat);
+      prevLng = node.lng;
+      prevLat = node.lat;
+    }
+    return totalKm;
+  }
+
+  private _distKm(aLng: number, aLat: number, bLng: number, bLat: number): number {
+    return Math.sqrt((aLng - bLng) ** 2 + (aLat - bLat) ** 2) * KM_PER_DEG_LAT;
+  }
+
   /** Like getNearestWaypoint but filters out waypoints in neutral territory. */
   getNearestNonNeutralWaypoint(
     lng: number,
@@ -249,6 +310,23 @@ export class MovementSystem {
       if (division.combat_state === "engaged" || division.combat_state === "suppressed") continue;
 
       this._advanceDivision(division, speedMult);
+    }
+
+    // Secondary loop: process reposition movement for engaged/suppressed divisions
+    {
+      let reposCount = 0;
+      for (const division of state.divisions.values()) {
+        if (division.reposition_order.length === 0) continue;
+        reposCount++;
+        if (division.combat_state !== "engaged" && division.combat_state !== "suppressed") {
+          continue;
+        }
+        this._advanceReposition(division, speedMult);
+      }
+      if (reposCount === 0) {
+        // Log a few divisions' repos_order state for debugging
+        // No engaged divisions with repos orders — normal
+      }
     }
   }
 
@@ -303,6 +381,63 @@ export class MovementSystem {
         const leftoverMult = speedMult * (1.0 - distDeg / advanceDeg);
         if (leftoverMult > 1e-4) {
           this._advanceDivision(division, leftoverMult);
+        }
+      }
+    } else {
+      const ratio = advanceDeg / distDeg;
+      division.position_lng += dx * ratio;
+      division.position_lat += dy * ratio;
+    }
+  }
+
+  private _advanceReposition(division: DivisionState, speedMult: number): void {
+    const nextId = division.reposition_order[0];
+    const nextNode = this.graph.nodes.get(nextId);
+    if (!nextNode) {
+      division.reposition_order.splice(0, 1);
+      return;
+    }
+
+    const dx = nextNode.lng - division.position_lng;
+    const dy = nextNode.lat - division.position_lat;
+    const distDeg = Math.sqrt(dx * dx + dy * dy);
+
+    if (distDeg < 0.0001) {
+      division.position_lng = nextNode.lng;
+      division.position_lat = nextNode.lat;
+      division.reposition_order.splice(0, 1);
+      if (division.reposition_order.length > 0) {
+        this._advanceReposition(division, speedMult);
+      }
+      return;
+    }
+
+    // Speed calculation matches _advanceDivision but multiplied by REPOSITION_SPEED (0.30)
+    const onRoad = this.graph.road_node_ids.has(nextId);
+    let kmh: number;
+    if (onRoad) {
+      kmh = ROAD_SPEED_KMH;
+    } else {
+      const profile = this._getProfile(division);
+      const terrainKey = `${nextNode.cover_combat}_${nextNode.elevation}`;
+      const cost = profile[terrainKey] ?? Infinity;
+      if (!isFinite(cost)) {
+        division.reposition_order.splice(0, 1);
+        return;
+      }
+      kmh = OFFROAD_SPEED_KMH / cost;
+    }
+    // 30% of normal movement speed, multiplied by game speed
+    const advanceDeg = ((kmh * REPOSITION_SPEED) / KM_PER_DEG_LAT) * speedMult;
+
+    if (advanceDeg >= distDeg) {
+      division.position_lng = nextNode.lng;
+      division.position_lat = nextNode.lat;
+      division.reposition_order.splice(0, 1);
+      if (division.reposition_order.length > 0 && advanceDeg > 0) {
+        const leftoverMult = speedMult * (1.0 - distDeg / advanceDeg);
+        if (leftoverMult > 1e-4) {
+          this._advanceReposition(division, leftoverMult);
         }
       }
     } else {
