@@ -249,22 +249,36 @@ Unit tests for movement profile computation and A* path validity.
       sides receive their own cover bonus independently, never cancels on match); attacker's
       movement/attack friction penalty remains derived from the defender's terrain group,
       with the existing better/same/worse transition modifier applied to that penalty only
-- [ ] River crossing check — initial check at combat initiation (line segment between
-      division centres intersects rivers.geojson) sets penalty tier and a **cap** (2 rounds
-      minor, 3 rounds major), but status is **re-checked each round** for the duration of
-      the cap, not snapshotted once: penalty ends the round a division's position crosses
-      the river line, which can be earlier than the cap if Reposition closes the distance,
-      or can ride out the full cap if the division does not reposition
-- [ ] Reposition movement state — available to an engaged division only while below the
-      retreat suppression threshold (not yet Suppressed); moves a short distance within or
-      adjacent to the current engagement at a fraction of the general in-combat speed
-      (itself already reduced from normal off-road speed, ~30%); terrain (cover/elevation)
-      and river-crossing status re-sampled on Reposition completion / each round respectively;
-      distinct from and much slower than Retreat, which remains the only movement option
-      once Suppressed; **requires an explicit player command issued while COMBAT_STARTED is
-      already active on that division — never triggered automatically by a pre-existing or
-      newly-issued ordinary move order**, which always queues for execution after combat per
-      existing Move Order Persistence behaviour regardless of when it was issued
+- [x] River crossing check — initial check at combat initiation (line segment between
+      division centres intersects rivers.geojson) sets penalty tier and re-checks each round;
+      penalty applied via `terrain_mult_atk` on the crossing side's ActivePair
+- [x] Reposition movement state — moves at 30% normal speed via `reposition_order`
+      (separate from `move_order`), capped at engagement-boundary distance `(Ra + Rb) - current_distance`;
+      implemented server-side with `_advanceReposition()` in movement_system tick, client-side with
+      reposition mode (B key / button), cyan ghost path, and DR at 30% speed for visual smoothness
+      - [x] `reposition_order` field on DivisionState (ArraySchema)
+      - [x] `REPOSITION` server handler with validation (ownership, combat state, waypoint validity)
+      - [x] Reposition movement processing in `movement_system.ts::tick()` secondary loop
+      - [x] River crossing penalty applied at engagement creation and re-checked each round
+      - [x] `reposition_order` cleared on all combat-end paths (retreat, destroy, disengage)
+      - [x] Hold broadcast fix: `handleHold()` broadcasts `DIVISION_UPDATES` after clearing `move_order`
+      - [x] Reposition button (Row3/BtnReposition) in `friendly_division_panel.tscn`
+      - [x] `unit_reposition` keybind (B), button label shows `[B]`
+      - [x] Reposition mode: `_enter_reposition_mode()`, map click → path compute → `REPOSITION` command
+      - [x] Client-side ghost path truncation at engagement boundary (waypoint graph distance)
+      - [x] Server-side repos rejection at engagement edge (`Ra + Rb` check in `handleReposition`)
+      - [x] Client-side DR speed multiplier (0.30) for smooth reposition visuals
+      - [ ] **Known issues (deferred — needs dedicated fix pass):**
+            - **Path winding:** Ghost path is truncated at the engagement circle edge, but winding
+              waypoint paths (roads/terrain) consume distance faster than straight-line, making
+              visible lateral movement less than expected. Fix: compute direct engagement-zone
+              endpoint and show a straight-line ghost rather than a full routed path.
+            - **Boundary slip through repeated clicks:** Multiple consecutive reposition clicks can
+              accumulate past `Ra + Rb` because each click is validated against current distance,
+              and the server's `_checkDisengagement` only fires at the `1.2 × (Ra + Rb)` hysteresis
+              threshold. Fix: harden server-side `handleReposition` to reject repos when division
+              distance to ANY engaged enemy exceeds `Ra + Rb`, accounting for DR position staleness
+              and tick timing.
 - [ ] Observation area — divisions within observation radius appear as dots;
       movement path visible if within observation range
 - [ ] Scouting range (shorter inner circle within observation area):
