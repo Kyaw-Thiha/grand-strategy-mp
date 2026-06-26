@@ -112,6 +112,9 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.division_added.connect(_on_division_added)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_removed.connect(_on_division_removed)
+	EventBus.stack_formed.connect(_on_stack_formed)
+	EventBus.stack_rotated.connect(_on_stack_rotated)
+	EventBus.stack_dissolved.connect(_on_stack_dissolved)
 	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
 
 	# Surface SUBMIT_MOVE_ORDER rejections in the console
@@ -993,6 +996,9 @@ func _on_division_updated(division_id: String) -> void:
 
 	icon.update_data(data)
 
+	icon.is_meeting_battle = data.get("is_meeting_battle", false)
+	icon.queue_redraw()
+
 	var server_lng := float(data.get("position_lng", 0.0))
 	var server_lat := float(data.get("position_lat", 0.0))
 
@@ -1067,6 +1073,28 @@ func _on_division_removed(division_id: String) -> void:
 		_selection_preview_division_ids.erase(division_id)
 		_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
 		_emit_selection_changed()
+
+
+func _on_stack_formed(stack_id: String, division_ids: Array) -> void:
+	for div_id in division_ids:
+		var icon = _icons.get(div_id)
+		if icon:
+			icon.stack_count = division_ids.size()
+			icon.queue_redraw()
+
+
+func _on_stack_rotated(_stack_id: String, _rotated_back: String, _new_front: String) -> void:
+	pass  # stack_count unchanged; visual reorder handled by stack_position in DIVISION_UPDATES
+
+
+func _on_stack_dissolved(stack_id: String) -> void:
+	for div_id: String in GameState.divisions:
+		var div_data: Dictionary = GameState.get_division(div_id)
+		if div_data.get("stack_id", "") == stack_id:
+			var icon = _icons.get(div_id)
+			if icon:
+				icon.stack_count = 0
+				icon.queue_redraw()
 
 
 func _on_vision_visibility_changed(visible_provinces: Dictionary) -> void:

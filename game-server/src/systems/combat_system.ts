@@ -405,6 +405,15 @@ export class CombatSystem {
 
       this._applyDamage(divA, divB, pair, state, changed, broadcast);
       pair.round++;
+      broadcast("COMBAT_RESULT", {
+        division_a:    divA.division_id,
+        division_b:    divB.division_id,
+        round:         pair.round,
+        hp_a:          divA.hp,
+        hp_b:          divB.hp,
+        suppression_a: divA.suppression,
+        suppression_b: divB.suppression,
+      });
     }
   }
 
