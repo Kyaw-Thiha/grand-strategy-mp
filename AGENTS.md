@@ -52,11 +52,16 @@ grand-strategy-mp/
 - **Inline comments for navigation.** Use short, tactical comments within functions — not just at the top as doc strings — to help readers follow the logic flow.
 - **Strict type annotations in GDScript.** Always use explicit `var name: Type` or `func f() -> Type` annotations. Never rely on type inference (`:=`) for values that return `Variant` (e.g., `Dictionary.get()`, `get_node()`, `JSON.parse_string()`).
 
-## Testing
+## Verification
+Before marking any task complete:
+- Run `npm test` and confirm all pass
+- Run `npm run typecheck`
+- For UI changes, describe what you'd check manually since there's no visual test suite
 
+## Testing
 - **Server logic (combat math, economy tick, diplomacy):** Unit tests in TypeScript — feed state in, assert output. No clients, no WebSocket.
 - **Multiplayer flows (from Phase 3):** Bot clients — headless Colyseus clients running scripted action sequences. One script per scenario. Run them as regression tests.
-- **Single-player Godot:** `Debug → Run Multiple Instances` for ad-hoc smoke testing.
+- **Single-player Godot:** `Debug → Run Multiple Instances` for ad-hoc smoke testing. You have the godot mcp, so you can run the project yourself, and then read the logs to verify if everything is okay or not.
 
 ## Authorship
 
