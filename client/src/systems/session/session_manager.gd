@@ -46,17 +46,39 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			GameState._apply_division_updates(data)
 
 		"COMBAT_STARTED":
+			GameState._apply_combat_started(data)
 			EventBus.combat_started.emit(
 				data.get("division_a", ""),
 				data.get("division_b", ""),
 				data.get("is_meeting_battle", false)
 			)
 
+		"COMBAT_ENDED":
+			var winner_id: String = data.get("winner_id", "")
+			var retreated_id: String = data.get("retreated_id", "")
+			for div_id: String in [winner_id, retreated_id]:
+				if GameState.divisions.has(div_id):
+					GameState.divisions[div_id]["is_meeting_battle"] = false
+			if not winner_id.is_empty():
+				EventBus.division_updated.emit(winner_id)
+
+		"COMBAT_RESULT":
+			pass  # reserved for future tactical panel use
+
 		"UNIT_DESTROYED":
 			GameState._apply_unit_destroyed(data)
 
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
+
+		"STACK_FORMED":
+			GameState._apply_stack_formed(data)
+
+		"STACK_ROTATION":
+			GameState._apply_stack_rotation(data)
+
+		"STACK_DISSOLVED":
+			GameState._apply_stack_dissolved(data)
 
 		"FLANK_ATTACK":
 			EventBus.flank_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
