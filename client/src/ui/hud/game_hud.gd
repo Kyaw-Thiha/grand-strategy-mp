@@ -61,6 +61,10 @@ func _ready() -> void:
 	_dock_btn_e.pressed.connect(_make_dock_toggle("economy"))
 	_dock_btn_t.pressed.connect(_make_dock_toggle("military"))
 	_dock_btn_y.pressed.connect(_make_dock_toggle("diplomacy"))
+	_connect_side_drawer_close("research", _research_panel)
+	_connect_side_drawer_close("economy", _economy_panel)
+	_connect_side_drawer_close("military", _military_panel)
+	_connect_side_drawer_close("diplomacy", _diplomacy_panel)
 	if _research_tree_panel.has_signal("close_requested"):
 		_research_tree_panel.connect("close_requested", _on_research_tree_close_requested)
 	if _research_panel.has_signal("full_tree_requested"):
@@ -103,6 +107,19 @@ func _ready() -> void:
 func _make_dock_toggle(panel_name: String) -> Callable:
 	return func() -> void:
 		hud_manager.toggle_panel(panel_name)
+
+
+## Connects a side drawer close signal to HUDManager so drawer state stays centralized.
+## Parameters:
+## - panel_name: registered HUDManager panel name.
+## - panel_node: side drawer control that may expose close_requested.
+## Returns: nothing.
+func _connect_side_drawer_close(panel_name: String, panel_node: Control) -> void:
+	if panel_node == null or not panel_node.has_signal("close_requested"):
+		return
+	panel_node.connect("close_requested", func() -> void:
+		hud_manager.hide_panel(panel_name)
+	)
 
 
 func _on_panel_opened(panel_name: String) -> void:

@@ -21,13 +21,16 @@ func _ready() -> void:
 
 	var mock_a := Control.new()
 	var mock_b := Control.new()
+	var mock_c := Control.new()
 
 	mgr.register_panel("mock_a", mock_a, HUDManagerScript.PlacementMode.SIDE_DOCKED)
 	mgr.register_panel("mock_b", mock_b, HUDManagerScript.PlacementMode.FULL_CENTER)
+	mgr.register_panel("mock_c", mock_c, HUDManagerScript.PlacementMode.SIDE_DOCKED)
 
 	# --- initial state ---
 	_check(not mgr.is_panel_open("mock_a"), "mock_a initially closed")
 	_check(not mgr.is_panel_open("mock_b"), "mock_b initially closed")
+	_check(not mgr.is_panel_open("mock_c"), "mock_c initially closed")
 	_check(mgr.get_open_panel() == "", "get_open_panel empty initially")
 
 	# --- show_panel ---
@@ -50,6 +53,14 @@ func _ready() -> void:
 	_check(mgr.is_panel_open("mock_a"), "toggle opens mock_a")
 	mgr.toggle_panel("mock_a")
 	_check(not mgr.is_panel_open("mock_a"), "toggle closes mock_a")
+
+	# --- side-docked placement: mutually exclusive ---
+	mgr.show_panel("mock_a")
+	mgr.show_panel("mock_c")
+	_check(not mgr.is_panel_open("mock_a"), "side panel switch closes previous side panel")
+	_check(mgr.is_panel_open("mock_c"), "side panel switch opens requested side panel")
+	_check(not mock_a.visible, "previous side panel node hidden")
+	_check(mock_c.visible, "requested side panel node visible")
 
 	# --- FULL_CENTER placement: overlay dim ---
 	mgr.show_panel("mock_b")

@@ -13,20 +13,19 @@
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_stack_panel.tscn" id="19"]
-[ext_resource type="Texture2D" path="res://assets/icons/hand-fist-solid-full.svg" id="20_handfist"]
-[ext_resource type="Texture2D" path="res://assets/icons/cubes-stacked-solid-full.svg" id="21_cubes"]
-[ext_resource type="Texture2D" path="res://assets/icons/scale-balanced-solid-full.svg" id="22_scale"]
-[ext_resource type="Texture2D" path="res://assets/icons/person-military-rifle-solid-full.svg" id="23_military"]
-[ext_resource type="Texture2D" path="res://assets/icons/handshake-solid-full.svg" id="24_handshake"]
-[ext_resource type="Texture2D" path="res://assets/icons/landmark-dome-solid-full.svg" id="25_landmark"]
-[ext_resource type="Texture2D" path="res://assets/icons/mountain-solid-full.svg" id="26_mountain"]
-[ext_resource type="Texture2D" path="res://assets/icons/clock-solid-full.svg" id="27_clock"]
-[ext_resource type="Texture2D" path="res://assets/icons/industry-solid-full.svg" id="28_industry"]
-[ext_resource type="Texture2D" path="res://assets/icons/oil-well-solid-full.svg" id="29_oilwell"]
-[ext_resource type="Texture2D" path="res://assets/icons/fire-solid-full.svg" id="30_fire"]
-[ext_resource type="Texture2D" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
+[ext_resource type="Texture2D" uid="uid://0e1htr2kalm5" path="res://assets/icons/hand-fist-solid-full.svg" id="20_handfist"]
+[ext_resource type="Texture2D" uid="uid://b8kgyra31hcqg" path="res://assets/icons/scale-balanced-solid-full.svg" id="22_scale"]
+[ext_resource type="Texture2D" uid="uid://bax6tp2sx5tpf" path="res://assets/icons/person-military-rifle-solid-full.svg" id="23_military"]
+[ext_resource type="Texture2D" uid="uid://c2c6gh68p1opk" path="res://assets/icons/handshake-solid-full.svg" id="24_handshake"]
+[ext_resource type="Texture2D" uid="uid://crfpyv2l52xlv" path="res://assets/icons/landmark-dome-solid-full.svg" id="25_landmark"]
+[ext_resource type="Texture2D" uid="uid://dk75ce1aoyngk" path="res://assets/icons/mountain-solid-full.svg" id="26_mountain"]
+[ext_resource type="Texture2D" uid="uid://clmlknqc3xfob" path="res://assets/icons/clock-solid-full.svg" id="27_clock"]
+[ext_resource type="Texture2D" uid="uid://b0witl0gkondw" path="res://assets/icons/industry-solid-full.svg" id="28_industry"]
+[ext_resource type="Texture2D" uid="uid://cujvmf6pjo6tr" path="res://assets/icons/oil-well-solid-full.svg" id="29_oilwell"]
+[ext_resource type="Texture2D" uid="uid://btsmr7avvnwk6" path="res://assets/icons/fire-solid-full.svg" id="30_fire"]
+[ext_resource type="Texture2D" uid="uid://b2woe672s0anm" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
 [ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
-[ext_resource type="PackedScene" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
+[ext_resource type="PackedScene" uid="uid://cbuwtcevrakg0" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -40,6 +39,7 @@ void fragment() {
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_icon_tint"]
 shader = SubResource("Shader_icon_tint")
+shader_parameter/icon_color = Color(0.96, 0.78, 0.38, 1)
 
 [node name="GameHUD" type="CanvasLayer" unique_id=925665196]
 layer = 2
@@ -96,73 +96,73 @@ size_flags_horizontal = 3
 layout_mode = 2
 theme_override_constants/separation = 24
 
-[node name="ManpowerItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="ManpowerItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1469709022]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem" unique_id=1300477848]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("20_handfist")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="ManpowerLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem" unique_id=269059706]
 layout_mode = 2
 text = "MANPOWER --"
 
-[node name="SteelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="SteelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=486653409]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=645306079]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("28_industry")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=1587312851]
 layout_mode = 2
 text = "STEEL --"
 
-[node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1129771256]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=590765351]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("29_oilwell")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=641530814]
 layout_mode = 2
 text = "OIL --"
 
-[node name="FuelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar"]
+[node name="FuelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=667355371]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=691358137]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("30_fire")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=1213706026]
 layout_mode = 2
@@ -177,15 +177,15 @@ layout_mode = 2
 theme_override_constants/separation = 8
 alignment = 1
 
-[node name="SessionIcon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock"]
+[node name="SessionIcon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=1879648984]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("27_clock")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="SessionTimer" type="Label" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=436346241]
 unique_name_in_owner = true
@@ -200,9 +200,10 @@ layout_mode = 2
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 36)
 layout_mode = 2
-text = ""
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock/SettingsButton"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock/SettingsButton" unique_id=2017944142]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(18, 18)
 layout_mode = 1
 anchors_preset = 8
@@ -216,12 +217,10 @@ offset_right = 9.0
 offset_bottom = 9.0
 grow_horizontal = 2
 grow_vertical = 2
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("4")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
 [node name="LeftDockRail" type="PanelContainer" parent="HUDRoot" unique_id=975917011]
 layout_mode = 0
@@ -236,9 +235,8 @@ layout_mode = 2
 [node name="DockButton_Q" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1139935493]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
-text = ""
 
-[node name="ResearchProgressFill" type="ColorRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q"]
+[node name="ResearchProgressFill" type="ColorRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q" unique_id=1153555421]
 visible = false
 layout_mode = 1
 anchors_preset = 12
@@ -250,164 +248,153 @@ grow_vertical = 0
 mouse_filter = 2
 color = Color(0.84, 0.58, 0.16, 0.28)
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q" unique_id=1113813062]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content" unique_id=1613003855]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("32_atom")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content" unique_id=202513730]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Q"
 horizontal_alignment = 1
-mouse_filter = 2
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content"]
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content" unique_id=947820051]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "RES"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1172553113]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_E"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_E" unique_id=284731823]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content" unique_id=2102945620]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("22_scale")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content" unique_id=1335359540]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "E"
 horizontal_alignment = 1
-mouse_filter = 2
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content"]
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content" unique_id=1991431313]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "ECO"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=2130558185]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T" unique_id=2073718966]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1016136817]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("23_military")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1801052734]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "R"
 horizontal_alignment = 1
-mouse_filter = 2
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content"]
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1212662659]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "MIL"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=745190073]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y" unique_id=1071195379]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content" unique_id=218171440]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("24_handshake")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content" unique_id=1220224655]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "T"
 horizontal_alignment = 1
-mouse_filter = 2
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content"]
+[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content" unique_id=1566262875]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "DIP"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox" unique_id=2041318522]
 layout_mode = 2
@@ -437,108 +424,102 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 58)
 layout_mode = 2
 tooltip_text = "Political map mode"
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical" unique_id=759560892]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content" unique_id=1345141962]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(22, 22)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("25_landmark")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content" unique_id=1690125850]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "POLITICAL"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=574808356]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(104, 58)
 layout_mode = 2
 tooltip_text = "Cover map mode"
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover" unique_id=1286011148]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content" unique_id=1878298566]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(22, 22)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("31_rug")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content" unique_id=2060761078]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "COVER"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=2046348814]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 58)
 layout_mode = 2
 tooltip_text = "Elevation map mode"
-text = ""
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation"]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation" unique_id=982271855]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-alignment = 1
 mouse_filter = 2
 theme_override_constants/separation = 2
+alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content"]
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=1185570590]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(22, 22)
 layout_mode = 2
 size_flags_horizontal = 4
-material = SubResource("ShaderMaterial_icon_tint")
+mouse_filter = 2
 texture = ExtResource("26_mountain")
 expand_mode = 1
 stretch_mode = 5
-modulate = Color(0.91, 0.87, 0.78, 1)
-mouse_filter = 2
 
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content"]
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=133091782]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "ELEVATION"
 horizontal_alignment = 1
-mouse_filter = 2
 
 [node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot" unique_id=573809543]
 unique_name_in_owner = true
@@ -590,7 +571,6 @@ visible = false
 visible = false
 
 [node name="ResearchPanel" parent="." unique_id=1521783562 instance=ExtResource("9")]
-visible = false
 
 [node name="ResearchTreePanel" parent="." unique_id=1128497234 instance=ExtResource("33_research_tree")]
 visible = false

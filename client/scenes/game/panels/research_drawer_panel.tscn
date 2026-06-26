@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://src/ui/hud/research_drawer_panel.gd" id="1"]
 [ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="2"]
+[ext_resource type="Texture2D" uid="uid://br70146pt0tl6" path="res://assets/icons/xmark-solid-full.svg" id="3_xmark"]
 
 [sub_resource type="StyleBoxFlat" id="SB_panel_accent"]
 content_margin_left = 0.0
@@ -15,6 +16,20 @@ corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
+
+[sub_resource type="Shader" id="Shader_icon_tint"]
+code = "shader_type canvas_item;
+
+uniform vec4 icon_color : source_color = vec4(0.96, 0.78, 0.38, 1.0);
+
+void fragment() {
+	vec4 tex = texture(TEXTURE, UV);
+	COLOR = vec4(icon_color.rgb, tex.a * icon_color.a * COLOR.a);
+}"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_icon_tint"]
+shader = SubResource("Shader_icon_tint")
+shader_parameter/icon_color = Color(0.96, 0.78, 0.38, 1)
 
 [node name="ResearchDrawerPanel" type="PanelContainer"]
 custom_minimum_size = Vector2(380, 540)
@@ -53,23 +68,54 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Full Tree"
 
-[node name="Hint" type="Label" parent="Margin/VBox"]
+[node name="CloseButton" type="Button" parent="Margin/VBox/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+tooltip_text = "Close"
+
+[node name="Icon" type="TextureRect" parent="Margin/VBox/Header/CloseButton"]
+material = SubResource("ShaderMaterial_icon_tint")
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -7.0
+offset_top = -7.0
+offset_right = 7.0
+offset_bottom = 7.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("3_xmark")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ContentBody" type="VBoxContainer" parent="Margin/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="Hint" type="Label" parent="Margin/VBox/ContentBody"]
 layout_mode = 2
 text = "Available research"
 modulate = Color(0.82, 0.74, 0.58, 1)
 
-[node name="Scroll" type="ScrollContainer" parent="Margin/VBox"]
+[node name="Scroll" type="ScrollContainer" parent="Margin/VBox/ContentBody"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="EntryList" type="VBoxContainer" parent="Margin/VBox/Scroll"]
+[node name="EntryList" type="VBoxContainer" parent="Margin/VBox/ContentBody/Scroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="EmptyLabel" type="Label" parent="Margin/VBox"]
+[node name="EmptyLabel" type="Label" parent="Margin/VBox/ContentBody"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "No available research."
