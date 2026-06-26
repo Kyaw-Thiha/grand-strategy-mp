@@ -1191,8 +1191,14 @@ func _on_division_updated(division_id: String) -> void:
 		var cur_order: Array = _dr_order[division_id]
 		var cur_lead: String = cur_order[0] if not cur_order.is_empty() else ""
 		var new_lead: String = str_order[0] if not str_order.is_empty() else ""
-		if cur_lead != new_lead:
-			# Leading waypoint changed — path re-routed mid-move.
+		var consumed_wp: String = str(data.get("consumed_waypoint_id", ""))
+		if consumed_wp != "" and consumed_wp == cur_lead:
+			# Server consumed the waypoint that DR was heading toward — pop it locally
+			# without re-seeding position, preventing the position snap / movement jerk.
+			if not cur_order.is_empty():
+				_dr_order[division_id] = cur_order.slice(1)
+		elif cur_lead != new_lead:
+			# Leading waypoint changed and it was NOT just consumed — genuine reroute.
 			# Re-seed from server position so all clients track the new path.
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
 			_dr_order[division_id] = str_order
