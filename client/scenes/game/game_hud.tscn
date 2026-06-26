@@ -8,7 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/game/panels/military_panel.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
-[ext_resource type="PackedScene" path="res://scenes/systems/research/research_tree.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/research_drawer_panel.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_division_panel.tscn" id="16"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
@@ -26,6 +26,7 @@
 [ext_resource type="Texture2D" path="res://assets/icons/fire-solid-full.svg" id="30_fire"]
 [ext_resource type="Texture2D" path="res://assets/icons/rug-solid-full.svg" id="31_rug"]
 [ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
+[ext_resource type="PackedScene" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -589,6 +590,9 @@ visible = false
 visible = false
 
 [node name="ResearchPanel" parent="." unique_id=1521783562 instance=ExtResource("9")]
+visible = false
+
+[node name="ResearchTreePanel" parent="." unique_id=1128497234 instance=ExtResource("33_research_tree")]
 visible = false
 
 [node name="FriendlyStackPanel" parent="." unique_id=1506711193 instance=ExtResource("19")]

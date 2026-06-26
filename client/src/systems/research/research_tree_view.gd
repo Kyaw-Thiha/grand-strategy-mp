@@ -53,6 +53,32 @@ func _request_close() -> void:
 	close_requested.emit()
 
 
+## Returns the research system owned by this tree scene.
+## Parameters: none.
+## Returns: ResearchSystem node used by this tree.
+func get_research_system() -> Node:
+	return _research_system
+
+
+## Returns authored research definitions collected from this tree scene.
+## Parameters: none.
+## Returns: array of research definition dictionaries.
+func get_research_definitions() -> Array[Dictionary]:
+	var definitions: Array[Dictionary] = []
+	for card: Variant in _entry_cards:
+		var definition: Dictionary = card.get_definition()
+		if not String(definition.get("id", "")).is_empty():
+			definitions.append(definition)
+	return definitions
+
+
+## Refreshes tree cards from the shared research system.
+## Parameters: none.
+## Returns: nothing.
+func refresh_from_research_system() -> void:
+	_refresh_tree()
+
+
 func _collect_entry_cards(node: Node) -> void:
 	for child: Node in node.get_children():
 		if child.get_script() == ResearchEntryCardScript:
