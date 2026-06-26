@@ -32,6 +32,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _economy_panel: Control = $EconomyPanel
 @onready var _diplomacy_panel: Control = $DiplomacyPanel
 @onready var _research_panel: Control = $ResearchPanel
+@onready var _research_tree_panel: Control = $ResearchTreePanel
 
 @onready var _friendly_div_panel: Control = $FriendlyDivisionPanel
 @onready var _friendly_prov_panel: Control = $FriendlyProvincePanel
@@ -60,8 +61,12 @@ func _ready() -> void:
 	_dock_btn_e.pressed.connect(_make_dock_toggle("economy"))
 	_dock_btn_t.pressed.connect(_make_dock_toggle("military"))
 	_dock_btn_y.pressed.connect(_make_dock_toggle("diplomacy"))
-	if _research_panel.has_signal("close_requested"):
-		_research_panel.connect("close_requested", _on_research_panel_close_requested)
+	if _research_tree_panel.has_signal("close_requested"):
+		_research_tree_panel.connect("close_requested", _on_research_tree_close_requested)
+	if _research_panel.has_signal("full_tree_requested"):
+		_research_panel.connect("full_tree_requested", _on_research_full_tree_requested)
+	if _research_tree_panel.has_method("get_research_system") and _research_panel.has_method("setup"):
+		_research_panel.setup(_research_tree_panel.get_research_system())
 
 	# HUDManager signals for dock button visual state
 	hud_manager.panel_opened.connect(_on_panel_opened)
@@ -72,7 +77,8 @@ func _ready() -> void:
 	hud_manager.register_panel("military", _military_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("economy", _economy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("diplomacy", _diplomacy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
-	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.FULL_CENTER)
+	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.SIDE_DOCKED)
+	hud_manager.register_panel("research_tree", _research_tree_panel, HUDManager.PlacementMode.FULL_CENTER)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
@@ -116,14 +122,22 @@ func _get_dock_button_for_panel(panel_name: String) -> Button:
 		"military":  return _dock_btn_t
 		"diplomacy": return _dock_btn_y
 		"research":  return _dock_btn_q
+		"research_tree": return _dock_btn_q
 	return null
 
 
-## Closes the research panel through HUDManager so overlay and dock state stay in sync.
+## Closes the full research tree through HUDManager so overlay and dock state stay in sync.
 ## Parameters: none.
 ## Returns: nothing.
-func _on_research_panel_close_requested() -> void:
-	hud_manager.hide_panel("research")
+func _on_research_tree_close_requested() -> void:
+	hud_manager.hide_panel("research_tree")
+
+
+## Opens the full research tree from the side drawer.
+## Parameters: none.
+## Returns: nothing.
+func _on_research_full_tree_requested() -> void:
+	hud_manager.show_panel("research_tree")
 
 
 ## Resets the dock progress fill when a new research entry starts.
