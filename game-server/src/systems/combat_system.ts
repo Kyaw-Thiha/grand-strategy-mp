@@ -480,14 +480,14 @@ export class CombatSystem {
     };
 
     if (pair.is_meeting) {
-      this._checkAutoRetreatOrRotate(divA, DEFENDER_SUPPRESS_THRESHOLD, enemies(divA), state, broadcast);
-      this._checkAutoRetreatOrRotate(divB, DEFENDER_SUPPRESS_THRESHOLD, enemies(divB), state, broadcast);
+      this._checkAutoRetreatOrRotate(divA, DEFENDER_SUPPRESS_THRESHOLD, enemies(divA), state, changed, broadcast);
+      this._checkAutoRetreatOrRotate(divB, DEFENDER_SUPPRESS_THRESHOLD, enemies(divB), state, changed, broadcast);
     } else {
       const defender = divA.division_id === pair.defender_id ? divA : divB;
       const attacker = divA.division_id === pair.attacker_id ? divA : divB;
 
-      this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, broadcast);
-      this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, broadcast);
+      this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, changed, broadcast);
+      this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, changed, broadcast);
     }
   }
 
@@ -639,11 +639,23 @@ export class CombatSystem {
   // ---------------------------------------------------------------------------
 
   /** Public — called by GameRoom for manual RETREAT commands. */
-  initiateRetreat(div: DivisionState, enemies: DivisionState[]): void {
-    this._initiateRetreat(div, enemies);
+  initiateRetreat(
+    div:       DivisionState,
+    enemies:   DivisionState[],
+    state:     GameRoomState,
+    changed:   Set<string>,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    this._initiateRetreat(div, enemies, state, changed, broadcast);
   }
 
-  private _initiateRetreat(div: DivisionState, enemies: DivisionState[]): void {
+  private _initiateRetreat(
+    div:       DivisionState,
+    enemies:   DivisionState[],
+    state:     GameRoomState,
+    changed:   Set<string>,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
     if (div.combat_state === "retreating" || div.combat_state === "destroyed") return;
 
     div.combat_state = "retreating";
@@ -684,15 +696,38 @@ export class CombatSystem {
       retreatLat = div.position_lat + (dy / len) * retreatDeg;
     }
 
-    // Remove all active pairs involving this division
+    // Collect opponent IDs before deleting pairs, then reset after
+    const opponentIds: string[] = [];
     const pairsToRemove: string[] = [];
     for (const [key] of this.activePairs) {
       const [idA, idB] = key.split("|");
       if (idA === div.division_id || idB === div.division_id) {
         pairsToRemove.push(key);
+        opponentIds.push(idA === div.division_id ? idB : idA);
       }
     }
     for (const key of pairsToRemove) this.activePairs.delete(key);
+
+    // Reset each opponent that is no longer in any remaining active pair.
+    // Don't reset opponents that are already suppressed — they will retreat on their own
+    // on the next tick (clearing their engaged_with would break their retreat flow).
+    for (const opponentId of opponentIds) {
+      const stillEngaged = Array.from(this.activePairs.keys())
+        .some(k => k.startsWith(opponentId + "|") || k.endsWith("|" + opponentId));
+      if (stillEngaged) continue;
+
+      const opponent = state.divisions.get(opponentId);
+      if (!opponent) continue;
+      if (opponent.combat_state === "engaged") {
+        opponent.combat_state  = "idle";
+        opponent.attacker_role = "";
+        opponent.engaged_with.splice(0, opponent.engaged_with.length);
+        changed.add(opponentId);
+        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id });
+      }
+      // Opponents in "suppressed" state will retreat on their own next tick;
+      // don't interfere — their retreat direction depends on engaged_with.
+    }
 
     // Find nearest waypoint and set as retreat target
     const waypoint = this.movementSystem.getNearestWaypoint(retreatLng, retreatLat);
@@ -757,6 +792,7 @@ export class CombatSystem {
     threshold: number,
     enemies:   DivisionState[],
     state:     GameRoomState,
+    changed:   Set<string>,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
     if (div.suppression < threshold) return;
@@ -774,7 +810,7 @@ export class CombatSystem {
     // Already suppressed — now initiate retreat or stack rotation.
     if (!div.stack_id) {
       // Not stacked — normal auto-retreat
-      this._initiateRetreat(div, enemies);
+      this._initiateRetreat(div, enemies, state, changed, broadcast);
       return;
     }
 
@@ -785,7 +821,7 @@ export class CombatSystem {
 
     if (stackMembers.length <= 1) {
       // Solo stack member — just retreat
-      this._initiateRetreat(div, enemies);
+      this._initiateRetreat(div, enemies, state, changed, broadcast);
       return;
     }
 
@@ -793,7 +829,7 @@ export class CombatSystem {
 
     if (div.stack_position === maxPos) {
       // Last member hits threshold — actual retreat for the whole stack front
-      this._initiateRetreat(div, enemies);
+      this._initiateRetreat(div, enemies, state, changed, broadcast);
       return;
     }
 

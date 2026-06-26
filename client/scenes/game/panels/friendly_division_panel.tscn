@@ -69,6 +69,11 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "TEMPLATE · —"
 
+[node name="CombatStateLabel" type="Label" parent="Margin/HBox/IdentityBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "STATE · IDLE"
+
 [node name="BarsBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
 size_flags_horizontal = 3

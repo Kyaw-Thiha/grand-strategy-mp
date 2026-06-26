@@ -53,6 +53,15 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 				data.get("is_meeting_battle", false)
 			)
 
+		"COMBAT_ENDED":
+			var winner_id: String = data.get("winner_id", "")
+			var retreated_id: String = data.get("retreated_id", "")
+			for div_id: String in [winner_id, retreated_id]:
+				if GameState.divisions.has(div_id):
+					GameState.divisions[div_id]["is_meeting_battle"] = false
+			if not winner_id.is_empty():
+				EventBus.division_updated.emit(winner_id)
+
 		"COMBAT_RESULT":
 			pass  # reserved for future tactical panel use
 

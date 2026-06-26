@@ -3,7 +3,7 @@ import { jwtVerify } from "jose";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState } from "./schema/GameRoomState.js";
+import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem } from "../systems/combat_system.js";
@@ -225,9 +225,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       return;
     }
 
-    // Replace existing move order
+    // Trim path at first neutral-territory waypoint
+    const allowedWaypoints = this.movementSystem.trimToAllowedTerritory(
+      waypoints, division.nation_id, this.state.relations,
+    );
+    if (allowedWaypoints.length === 0) {
+      client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "neutral_territory" });
+      return;
+    }
+
+    // Replace existing move order with the allowed prefix (may be shorter than requested)
     division.move_order.splice(0, division.move_order.length);
-    for (const wpId of waypoints) {
+    for (const wpId of allowedWaypoints) {
       division.move_order.push(wpId);
     }
   }
@@ -262,8 +271,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const e = this.state.divisions.get(eid);
       if (e) enemies.push(e);
     }
-    this.combatSystem.initiateRetreat(division, enemies);
-    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(division)] });
+    const changed = new Set<string>();
+    this.combatSystem.initiateRetreat(division, enemies, this.state, changed, (type, msg) => this.broadcast(type, msg));
+
+    // Broadcast updates for both the retreating division and any reset opponents
+    const serializedDivs: unknown[] = [this.serializeDivision(division)];
+    for (const divId of changed) {
+      if (divId !== division.division_id) {
+        const opponent = this.state.divisions.get(divId);
+        if (opponent) serializedDivs.push(this.serializeDivision(opponent));
+      }
+    }
+    this.broadcast("DIVISION_UPDATES", { divisions: serializedDivs });
   }
 
   private handleReorderStack(client: Client, msg: { stack_id?: string; new_order?: string[] }) {
@@ -318,10 +337,12 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     // Load waypoints for movement and map data for combat + supply
     this.movementSystem.loadWaypoints(this.state.map_id);
+    this.movementSystem.loadMapData(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
     this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
+    this._initRelations();
 
     // Spawn all divisions
     this.spawnDivisions();
@@ -513,6 +534,21 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       console.log(`[GameRoom] initialized ${this.state.provinces.size} provinces`);
     } catch {
       console.warn(`[GameRoom] could not load map_data.json for province init`);
+    }
+  }
+
+  /** Populate state.relations: all 6 playable nations at war with each other. */
+  private _initRelations(): void {
+    const playerNations = ["germany", "france", "united_kingdom", "spain", "algeria", "italy"];
+    for (let i = 0; i < playerNations.length; i++) {
+      for (let j = i + 1; j < playerNations.length; j++) {
+        const key = `${playerNations[i]}|${playerNations[j]}`;
+        const rel = new RelationState();
+        rel.from_id = playerNations[i];
+        rel.to_id   = playerNations[j];
+        rel.stance  = "war";
+        this.state.relations.set(key, rel);
+      }
     }
   }
 
