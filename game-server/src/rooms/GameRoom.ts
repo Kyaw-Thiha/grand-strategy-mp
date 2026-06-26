@@ -263,6 +263,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (e) enemies.push(e);
     }
     this.combatSystem.initiateRetreat(division, enemies);
+    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(division)] });
   }
 
   private handleReorderStack(client: Client, msg: { stack_id?: string; new_order?: string[] }) {

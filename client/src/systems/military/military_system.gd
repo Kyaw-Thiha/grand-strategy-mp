@@ -21,7 +21,7 @@ const ENFORCE_OWNERSHIP := true
 
 const LERP_SPEED := 3.5
 const SNAP_THRESHOLD := 150.0
-const ENGAGEMENT_RADIUS_PX := 18.0
+const ENGAGEMENT_RADIUS_KM := 25.0
 const OBSERVATION_RADIUS_PX := 45.0
 const SCOUTING_RADIUS_PX := 60.0
 const HIT_THRESHOLD_PX := 20.0
@@ -208,7 +208,7 @@ func handle_input(event: InputEvent) -> void:
 				_clear_pending()
 				for division_id: String in own_selected_for_stop:
 					CommandQueue.submit("HOLD", { "division_id": division_id })
-		KEY_G:
+		KEY_C:
 			var own_selected_for_retreat: Array[String] = _get_own_selected_division_ids()
 			if not own_selected_for_retreat.is_empty():
 				_clear_pending()
@@ -964,11 +964,13 @@ func _on_division_added(division_id: String) -> void:
 
 	var icon: Node2D = DIVISION_ICON_SCENE.instantiate()
 	var color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
-	icon.setup(data, color, ENGAGEMENT_RADIUS_PX, OBSERVATION_RADIUS_PX, SCOUTING_RADIUS_PX)
 
 	var lng: float = float(data.get("position_lng", 0.0))
 	var lat: float = float(data.get("position_lat", 0.0))
 	var screen_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
+	var edge_pos: Vector2 = _map_loader.project_lng_lat(lng, lat + ENGAGEMENT_RADIUS_KM / 111.0)
+	var eng_px: float = screen_pos.distance_to(edge_pos)
+	icon.setup(data, color, eng_px, OBSERVATION_RADIUS_PX, SCOUTING_RADIUS_PX)
 	icon.position = screen_pos
 	_target_positions[division_id] = screen_pos
 
@@ -995,9 +997,10 @@ func _on_division_updated(division_id: String) -> void:
 	var server_lat := float(data.get("position_lat", 0.0))
 
 	var order: Array = data.get("move_order", [])
+	var combat_state_val: String = data.get("combat_state", "idle")
 
-	if order.is_empty():
-		# Division stopped — clear DR, snap icon to server position.
+	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
+		# Division stopped or locked in combat — freeze at server-authoritative position.
 		_dr_pos_deg.erase(division_id)
 		_dr_order.erase(division_id)
 		_dr_profiles.erase(division_id)

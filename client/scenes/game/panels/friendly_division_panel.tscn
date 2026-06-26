@@ -157,6 +157,13 @@ text = "Hold"
 layout_mode = 2
 theme_override_constants/separation = 6
 
+[node name="BtnRetreat" type="Button" parent="Margin/HBox/ActionsBlock/Row2"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 36)
+text = "Retreat [C]"
+visible = false
+
 [node name="BtnCancel" type="Button" parent="Margin/HBox/ActionsBlock/Row2"]
 layout_mode = 2
 size_flags_horizontal = 3

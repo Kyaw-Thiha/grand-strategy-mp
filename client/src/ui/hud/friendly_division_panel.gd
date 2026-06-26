@@ -12,6 +12,7 @@ var _supp_pct: Label
 var _supp_bar: ProgressBar
 var _btn_move: Button
 var _btn_hold: Button
+var _btn_retreat: Button
 var _btn_cancel: Button
 
 var _current_div_id: String = ""
@@ -29,6 +30,7 @@ func _ready() -> void:
 	_supp_bar = get_node_or_null("Margin/HBox/BarsBlock/SuppGroup/SuppBar")
 	_btn_move = get_node_or_null("Margin/HBox/ActionsBlock/Row1/BtnMove")
 	_btn_hold = get_node_or_null("Margin/HBox/ActionsBlock/Row1/BtnHold")
+	_btn_retreat = get_node_or_null("Margin/HBox/ActionsBlock/Row2/BtnRetreat")
 	_btn_cancel = get_node_or_null("Margin/HBox/ActionsBlock/Row2/BtnCancel")
 
 
@@ -58,6 +60,12 @@ func populate(div_id: String, data: Dictionary) -> void:
 	if _supp_bar != null:
 		_supp_bar.value = supp / 100.0
 
+	# Show Retreat button only when the division is actively in combat
+	var combat_state: String = data.get("combat_state", "idle")
+	var in_combat: bool = combat_state in ["engaged", "suppressed"]
+	if _btn_retreat != null:
+		_btn_retreat.visible = in_combat
+
 	_rewire_buttons(div_id)
 
 
@@ -65,19 +73,29 @@ func _rewire_buttons(div_id: String) -> void:
 	if _btn_move == null or _btn_cancel == null:
 		return
 
-	if _btn_move.pressed.get_connections().size() > 0:
-		for conn: Dictionary in _btn_move.pressed.get_connections():
-			_btn_move.pressed.disconnect(conn["callable"])
-	if _btn_cancel.pressed.get_connections().size() > 0:
-		for conn: Dictionary in _btn_cancel.pressed.get_connections():
-			_btn_cancel.pressed.disconnect(conn["callable"])
+	# Disconnect all previously connected handlers before re-wiring
+	for btn: Button in [_btn_move, _btn_hold, _btn_retreat, _btn_cancel]:
+		if btn == null:
+			continue
+		if btn.pressed.get_connections().size() > 0:
+			for conn: Dictionary in btn.pressed.get_connections():
+				btn.pressed.disconnect(conn["callable"])
 
 	_btn_move.pressed.connect(func() -> void:
 		EventBus.move_mode_requested.emit(div_id)
 	)
+
+	if _btn_hold != null:
+		_btn_hold.disabled = false
+		_btn_hold.pressed.connect(func() -> void:
+			CommandQueue.submit("HOLD", { "division_id": div_id })
+		)
+
+	if _btn_retreat != null:
+		_btn_retreat.pressed.connect(func() -> void:
+			CommandQueue.submit("RETREAT", { "division_id": div_id })
+		)
+
 	_btn_cancel.pressed.connect(func() -> void:
 		EventBus.division_deselected.emit()
 	)
-
-	if _btn_hold != null:
-		_btn_hold.disabled = true

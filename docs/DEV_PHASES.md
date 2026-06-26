@@ -285,7 +285,7 @@ Unit tests for movement profile computation and A* path validity.
             combat does not reclassify defending division as attacker
 - [x] Strategic combat resolution (simplified) — HP and suppression tracked at division
       level (no 5×5 grid yet); combat ticks apply attrition per round
-- [ ] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
+- [x] Combat states: Engaged → Suppressed → Retreat → Destroyed (full state machine)
 - [x] Auto-retreat for defenders when suppressed (base 60% threshold) + road open
 - [x] Auto-retreat for attackers at higher threshold (base 80%) — attackers hold longer
       before breaking; manual retreat always available at any suppression level;
@@ -390,7 +390,7 @@ Unit tests for movement profile computation and A* path validity.
       - [ ] Flank attack (90°–135°): diagonal arrow on flanking division dot
       - [ ] Rear attack (135°–180°): double diagonal arrow on flanking division dot
       - [ ] Meeting battle: distinct head-on combat icon (not standard crossed swords)
-      - [ ] Retreating: retreat arrow on dot pointing direction of withdrawal
+      - [x] Retreating: retreat arrow on dot pointing direction of withdrawal
       - [ ] Redeploying: dot greyed out with gear/refresh symbol
 - [ ] Tactical combat pop-up button on combat icon (crossed-swords symbol):
       opens 5×5 vs 5×5 grid panel with HP/suppression bars, experience badges,
