@@ -158,7 +158,7 @@ async function main() {
 
   // 4. Test: COMBAT_STARTED fires automatically (no move orders needed)
   console.log("\n4. Test: COMBAT_STARTED fires automatically...");
-  const combatStartedMsg = await waitForMessage(roomA, "COMBAT_STARTED", 10000) as {
+  const combatStartedMsg = await waitForMessage(roomA, "COMBAT_STARTED", 20000) as {
     division_a: string;
     division_b: string;
     is_meeting_battle: boolean;

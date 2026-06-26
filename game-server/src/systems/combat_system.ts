@@ -173,6 +173,7 @@ export class CombatSystem {
     this._dissolveInvalidStacks(state, changed, broadcast);
     this._detectStacks(state, changed, broadcast);
     if (tickCount > COMBAT_GRACE_TICKS) {
+      this._checkRetreatCompletion(state, changed);
       this._detectEngagements(state, changed, broadcast);
     }
     this._resolveCombat(state, changed, broadcast);
@@ -200,7 +201,16 @@ export class CombatSystem {
 
         // Skip same-nation, destroyed
         if (a.nation_id === b.nation_id) continue;
-        if (a.combat_state === "destroyed" || b.combat_state === "destroyed") continue;
+        if (
+        a.combat_state === "destroyed" ||
+        a.combat_state === "retreating" ||
+        a.combat_state === "suppressed"
+      ) continue;
+      if (
+        b.combat_state === "destroyed" ||
+        b.combat_state === "retreating" ||
+        b.combat_state === "suppressed"
+      ) continue;
 
         // Only the stack front (position 0) can initiate combat on behalf of the stack
         if (a.stack_id && a.stack_position !== 0) continue;
@@ -431,8 +441,9 @@ export class CombatSystem {
       return dmg;
     };
 
-    const damageByA = computeDamage(divA, divB);
-    const damageByB = computeDamage(divB, divA);
+    // Suppressed divisions cannot attack — they are pinned and deal zero outgoing damage
+    const damageByA = divA.combat_state === "suppressed" ? 0 : computeDamage(divA, divB);
+    const damageByB = divB.combat_state === "suppressed" ? 0 : computeDamage(divB, divA);
 
     if (this._resolveCombatTickCount % 10 === 0) {
       console.log(`[Combat] DAMAGE: ${divA.division_id}(hp=${divA.hp.toFixed(1)}) ↔ ${divB.division_id}(hp=${divB.hp.toFixed(1)})`);
@@ -472,6 +483,19 @@ export class CombatSystem {
   }
 
   // ---------------------------------------------------------------------------
+  // _checkRetreatCompletion — transitions retreating → idle when move order empties
+  // ---------------------------------------------------------------------------
+
+  private _checkRetreatCompletion(state: GameRoomState, changed: Set<string>): void {
+    for (const [, div] of state.divisions) {
+      if (div.combat_state === "retreating" && div.move_order.length === 0) {
+        div.combat_state = "idle";
+        changed.add(div.division_id);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // _checkDisengagement
   // ---------------------------------------------------------------------------
 
@@ -490,7 +514,7 @@ export class CombatSystem {
       if (distKm > threshold) {
         // Disengage both
         for (const div of [divA, divB]) {
-          if (div.combat_state === "engaged") {
+          if (div.combat_state === "engaged" || div.combat_state === "suppressed") {
             div.combat_state  = "idle";
             div.attacker_role = "";
             div.engaged_with.splice(0, div.engaged_with.length);
@@ -524,7 +548,6 @@ export class CombatSystem {
 
         // Must be physically inside the province polygon
         if (!this._inProvince(div.position_lng, div.position_lat, prov)) continue;
-        console.log(`[Capture] ${div.division_id} inside ${province_id}`);
 
         // Capture is contested only if an enemy is physically at the city (within CONTEST_RADIUS_KM).
         // Using engagement_radius (50 km) was too strict — any frontline unit blocked every nearby city.
@@ -562,7 +585,7 @@ export class CombatSystem {
       } else if (div.combat_state === "idle") {
         div.suppression = Math.max(0, div.suppression - SUPPRESS_DECAY_IDLE);
       }
-      // "engaged" divisions do NOT decay suppression
+      // "engaged" and "suppressed" divisions do NOT decay suppression
     }
   }
 
@@ -732,6 +755,14 @@ export class CombatSystem {
     // Encircled divisions cannot retreat — they are trapped
     if (div.supply_status === "encircled") return;
 
+    // First time threshold is crossed: mark as "suppressed" for one tick so the
+    // client can display the intermediate state before the retreat fires.
+    if (div.combat_state === "engaged") {
+      div.combat_state = "suppressed";
+      return;
+    }
+
+    // Already suppressed — now initiate retreat or stack rotation.
     if (!div.stack_id) {
       // Not stacked — normal auto-retreat
       this._initiateRetreat(div, enemies);

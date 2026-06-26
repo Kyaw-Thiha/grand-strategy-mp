@@ -228,15 +228,15 @@ export class MovementSystem {
 
   computeEngagementRadius(template: TemplateCell[]): number {
     const total = template.length;
-    if (total === 0) return 8;
+    if (total === 0) return 50;
     const armoured = template.filter(c => ARMOURED_UNIT_TYPES.has(c.unit_type)).length;
     const cavalry = template.filter(c => CAVALRY_UNIT_TYPES.has(c.unit_type)).length;
     const armouredFrac = armoured / total;
     const cavalryFrac = cavalry / total;
-    let radius = 8;
+    let radius = 50;
     radius -= (Math.max(0, armouredFrac - 0.15) / 0.10) * 1;
     radius -= (cavalryFrac / 0.10) * 0.5;
-    return Math.max(5, Math.min(8, radius));
+    return Math.max(45, Math.min(50, radius));
   }
 
   computeObservationRadius(_template: TemplateCell[]): number {
