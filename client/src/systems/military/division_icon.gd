@@ -15,10 +15,8 @@ var is_moving: bool = false
 var is_move_mode: bool = false
 var supply_status: String = "normal"
 var combat_state: String = "idle"
-var is_meeting_battle: bool = false
 var stack_id: String = ""
 var stack_position: int = -1  # -1 = not in a stack
-var stack_count: int = 0
 
 # NATO rectangle dimensions in pixels
 const RECT_W := 22.0
@@ -55,7 +53,6 @@ func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float, scout_p
 	observation_radius_px = obs_px
 	scouting_radius_px = scout_px
 	combat_state = data.get("combat_state", "idle")
-	is_meeting_battle = data.get("is_meeting_battle", false)
 	# Suppress movement arrow while locked in combat — unit is not free to move
 	is_moving = (data.get("move_order", []) as Array).size() > 0 \
 		and combat_state not in ["engaged", "suppressed"]
@@ -76,8 +73,6 @@ func update_data(data: Dictionary) -> void:
 	if data.has("stack_id"):
 		stack_id = data["stack_id"]
 		stack_position = int(data.get("stack_position", 0)) if stack_id != "" else -1
-	if data.has("is_meeting_battle"):
-		is_meeting_battle = data["is_meeting_battle"]
 	queue_redraw()
 
 
@@ -243,12 +238,7 @@ func _draw() -> void:
 	# Combat state border overlay
 	match combat_state:
 		"engaged":
-			var border_color: Color = Color(0.85, 0.2, 0.85, 0.85) if is_meeting_battle \
-			                          else Color(1.0, 0.65, 0.1, 0.80)
-			draw_rect(rect, border_color, false, 2.5)
-			if is_meeting_battle:
-				draw_line(Vector2(0, rect.position.y), Vector2(0, rect.position.y + 5), border_color, 2.0)
-				draw_line(Vector2(0, rect.end.y),      Vector2(0, rect.end.y - 5),      border_color, 2.0)
+			draw_rect(rect, Color(1.0, 0.65, 0.1, 0.80), false, 2.5)
 		"suppressed":
 			draw_rect(rect, Color(0.9, 0.15, 0.15, 0.90), false, 2.5)
 		"retreating":
@@ -260,13 +250,6 @@ func _draw() -> void:
 	# Infantry cross symbol (two lines inside the rectangle)
 	var cross_color := Color(0.0, 0.0, 0.0, 0.8)
 	draw_line(Vector2(-half_w + 2, 0.0), Vector2(half_w - 2, 0.0), cross_color, 1.0)
-
-	# Stack count badge — white circle with number in top-right corner
-	if stack_count > 1:
-		var badge_center := Vector2(rect.end.x - 5, rect.position.y + 5)
-		draw_circle(badge_center, 5.5, Color(1, 1, 1, 0.9))
-		draw_string(ThemeDB.fallback_font, badge_center + Vector2(-3, 4),
-			str(stack_count), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0, 0, 0, 1))
 
 	# Stack FRONT badge — gold strip on top edge when this division leads the stack
 	if stack_position == 0 and stack_id != "":

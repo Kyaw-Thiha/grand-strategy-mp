@@ -21,9 +21,6 @@ signal rear_attack(flanker_id: String, defender_id: String)
 signal division_added(division_id: String)
 signal division_updated(division_id: String)
 signal division_removed(division_id: String)
-signal stack_formed(stack_id: String, division_ids: Array)
-signal stack_rotated(stack_id: String, rotated_back: String, new_front: String)
-signal stack_dissolved(stack_id: String)
 signal division_selected(division_id: String)
 signal division_deselected()
 signal division_selection_changed(division_ids: Array[String])
@@ -50,7 +47,6 @@ signal province_selected(province_id: String)
 signal province_deselected()
 signal stack_selected(division_ids: Array)  # placeholder for future multi-select
 signal move_mode_requested(division_id: String)
-signal reposition_mode_requested(div_id: String)
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 signal notification_requested(message: String, type: String)

@@ -23,7 +23,7 @@ corner_radius_bottom_left = 2
 custom_minimum_size = Vector2(0, 160)
 size_flags_horizontal = 3
 size_flags_vertical = 3
-mouse_filter = 2
+mouse_filter = 1
 theme = ExtResource("2")
 theme_override_styles/panel = SubResource("SB_panel_accent")
 script = ExtResource("1")
@@ -68,11 +68,6 @@ text = "—"
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "TEMPLATE · —"
-
-[node name="CombatStateLabel" type="Label" parent="Margin/HBox/IdentityBlock"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "STATE · IDLE"
 
 [node name="BarsBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
@@ -156,7 +151,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 36)
 disabled = true
-text = "Hold [G]"
+text = "Hold"
 
 [node name="Row2" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]
 layout_mode = 2
@@ -174,17 +169,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 36)
 text = "Cancel"
-
-[node name="Row3" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="BtnReposition" type="Button" parent="Margin/HBox/ActionsBlock/Row3"]
-layout_mode = 2
-size_flags_horizontal = 3
-custom_minimum_size = Vector2(0, 36)
-text = "Reposition [B]"
-visible = false
 
 [node name="Spacer" type="Control" parent="Margin/HBox"]
 layout_mode = 2
