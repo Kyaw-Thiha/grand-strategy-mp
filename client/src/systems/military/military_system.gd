@@ -208,7 +208,7 @@ func handle_input(event: InputEvent) -> void:
 				_clear_pending()
 				for division_id: String in own_selected_for_stop:
 					CommandQueue.submit("HOLD", { "division_id": division_id })
-		KEY_G:
+		KEY_C:
 			var own_selected_for_retreat: Array[String] = _get_own_selected_division_ids()
 			if not own_selected_for_retreat.is_empty():
 				_clear_pending()
@@ -995,9 +995,10 @@ func _on_division_updated(division_id: String) -> void:
 	var server_lat := float(data.get("position_lat", 0.0))
 
 	var order: Array = data.get("move_order", [])
+	var combat_state_val: String = data.get("combat_state", "idle")
 
-	if order.is_empty():
-		# Division stopped — clear DR, snap icon to server position.
+	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
+		# Division stopped or locked in combat — freeze at server-authoritative position.
 		_dr_pos_deg.erase(division_id)
 		_dr_order.erase(division_id)
 		_dr_profiles.erase(division_id)

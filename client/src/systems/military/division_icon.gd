@@ -14,6 +14,7 @@ var is_selection_previewed: bool = false
 var is_moving: bool = false
 var is_move_mode: bool = false
 var supply_status: String = "normal"
+var combat_state: String = "idle"
 var stack_id: String = ""
 var stack_position: int = -1  # -1 = not in a stack
 
@@ -51,7 +52,10 @@ func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float, scout_p
 	engagement_radius_px = eng_px
 	observation_radius_px = obs_px
 	scouting_radius_px = scout_px
-	is_moving = (data.get("move_order", []) as Array).size() > 0
+	combat_state = data.get("combat_state", "idle")
+	# Suppress movement arrow while locked in combat — unit is not free to move
+	is_moving = (data.get("move_order", []) as Array).size() > 0 \
+		and combat_state not in ["engaged", "suppressed"]
 	supply_status = data.get("supply_status", "normal")
 	stack_id = data.get("stack_id", "")
 	stack_position = int(data.get("stack_position", -1)) if stack_id != "" else -1
@@ -60,6 +64,10 @@ func setup(data: Dictionary, color: Color, eng_px: float, obs_px: float, scout_p
 
 func update_data(data: Dictionary) -> void:
 	hp = float(data.get("hp", hp))
+	if data.has("combat_state"):
+		combat_state = data["combat_state"]
+		is_moving = (data.get("move_order", []) as Array).size() > 0 \
+			and combat_state not in ["engaged", "suppressed"]
 	if data.has("supply_status"):
 		supply_status = data["supply_status"]
 	if data.has("stack_id"):
@@ -220,6 +228,13 @@ func _draw() -> void:
 	draw_rect(rect, nation_color)
 	draw_rect(rect, Color(0.05, 0.05, 0.05), false, 1.5)
 
+	# Combat state border overlay — amber when engaged, red when suppressed
+	match combat_state:
+		"engaged":
+			draw_rect(rect, Color(1.0, 0.65, 0.1, 0.80), false, 2.5)
+		"suppressed":
+			draw_rect(rect, Color(0.9, 0.15, 0.15, 0.90), false, 2.5)
+
 	# Infantry cross symbol (two lines inside the rectangle)
 	var cross_color := Color(0.0, 0.0, 0.0, 0.8)
 	draw_line(Vector2(-half_w + 2, 0.0), Vector2(half_w - 2, 0.0), cross_color, 1.0)
@@ -255,9 +270,11 @@ func _draw() -> void:
 			draw_line(Vector2(cx - 2, cy - 2), Vector2(cx + 2, cy + 2), Color(1, 1, 1, 0.9), 1.0)
 			draw_line(Vector2(cx + 2, cy - 2), Vector2(cx - 2, cy + 2), Color(1, 1, 1, 0.9), 1.0)
 
-	# Movement indicator: small arrow below supply area when moving
+	# Movement indicator: small arrow below supply area when moving.
+	# Orange-red when retreating from combat, white otherwise.
 	var arrow_y := indicator_y + 6.0
 	if is_moving:
-		draw_line(Vector2(0, arrow_y), Vector2(0, arrow_y + 6), Color(1, 1, 1, 0.7), 1.5)
-		draw_line(Vector2(-2, arrow_y + 4), Vector2(0, arrow_y + 7), Color(1, 1, 1, 0.7), 1.5)
-		draw_line(Vector2(2, arrow_y + 4), Vector2(0, arrow_y + 7), Color(1, 1, 1, 0.7), 1.5)
+		var arrow_color: Color = Color(0.9, 0.35, 0.1, 0.9) if combat_state == "retreating" else Color(1, 1, 1, 0.7)
+		draw_line(Vector2(0, arrow_y), Vector2(0, arrow_y + 6), arrow_color, 1.5)
+		draw_line(Vector2(-2, arrow_y + 4), Vector2(0, arrow_y + 7), arrow_color, 1.5)
+		draw_line(Vector2(2, arrow_y + 4), Vector2(0, arrow_y + 7), arrow_color, 1.5)
