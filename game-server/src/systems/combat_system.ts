@@ -12,7 +12,9 @@ const KM_PER_DEG = 111.0;
 
 // Engagement detection is skipped for this many ticks so players can issue starting
 // orders before border divisions auto-engage each other.
-const COMBAT_GRACE_TICKS = 10;
+let COMBAT_GRACE_TICKS = 10;
+
+export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
 // Raw outgoing damage per combat tick at full HP, before all modifiers
 const BASE_ATTRITION = 2.5;
@@ -27,6 +29,27 @@ const TYPE_MULT: Record<string, number> = {
   motorised: 1.2,
   infantry:  1.0,
 };
+
+// ── Round system constants ────────────────────────────────────────────────────
+let ROUND_TICKS = 20; // 20s per round at 1 tick/s; mutable for testing
+
+export function setRoundTicksForTesting(n: number): void { ROUND_TICKS = n; }
+
+// Phase index 0 = Round 1 (Contact), index 4 = Round 5+ (Annihilation, clamped)
+const LETHALITY_PHASES: ReadonlyArray<{ name: string; multiplier: number }> = [
+  { name: "contact",      multiplier: 0.5  },   // Round 1
+  { name: "firefight",    multiplier: 0.75 },   // Round 2
+  { name: "intense",      multiplier: 1.0  },   // Round 3
+  { name: "decisive",     multiplier: 1.5  },   // Round 4
+  { name: "annihilation", multiplier: 2.0  },   // Round 5+
+];
+
+// Units that bypass the lethality ramp — deal full damage (multiplier=1.0) every round.
+const FORCE_RECON_UNIT_TYPES = new Set<string>([
+  "recon_infantry",
+  "commando",
+  "sniper",
+]);
 
 // Suppression level at which a defender (or meeting-battle participant) auto-retreats
 const DEFENDER_SUPPRESS_THRESHOLD = 60;
@@ -122,6 +145,10 @@ interface ActivePair {
   flank_class: "none" | "flank" | "rear";   // engagement-wide classification; "none" for primary/meeting
   river_crossing: string;                    // "" | "minor" | "moderate" | "major"
   river_side_attacker: string;               // division_id of crossing side ("" for meeting battle)
+  engagement_id: string;                     // stable ID for this combat instance, generated once on creation
+  round_tick_counter: number;                // ticks elapsed since last round resolved; resets each round
+  lethality_phase: string;                   // current phase name
+  lethality_multiplier: number;              // current damage multiplier
 }
 
 // ─── CombatSystem ────────────────────────────────────────────────────────────
@@ -286,6 +313,10 @@ export class CombatSystem {
               flank_class: "none",
               river_crossing: riverSize,
               river_side_attacker: riverSize && !is_meeting ? attacker_id : "",
+              engagement_id:       `${a.division_id}_vs_${b.division_id}_${Date.now()}`,
+              round_tick_counter:  0,
+              lethality_phase:     LETHALITY_PHASES[0].name,
+              lethality_multiplier: LETHALITY_PHASES[0].multiplier,
             };
             this.activePairs.set(key, pair);
 
@@ -427,20 +458,48 @@ export class CombatSystem {
       if (divA.combat_state === "destroyed" || divA.combat_state === "retreating") continue;
       if (divB.combat_state === "destroyed" || divB.combat_state === "retreating") continue;
 
-      // Re-check river crossing each round (reposition may have changed positions)
+      // Re-check river crossing every tick (reposition may have changed positions)
       this._updateRiverCrossing(pair, divA, divB);
 
-      this._applyDamage(divA, divB, pair, state, changed, broadcast);
+      // ── Round gate: only resolve damage at round boundary ────────────────
+      pair.round_tick_counter++;
+      if (pair.round_tick_counter < ROUND_TICKS) continue;
+      pair.round_tick_counter = 0;
+
+      // Advance round (pair.round starts at 0; broadcast uses 1-indexed)
       pair.round++;
+      const roundNumber = pair.round;
+
+      // Advance lethality phase (clamp at last index for round 5+)
+      const phaseIndex = Math.min(roundNumber - 1, LETHALITY_PHASES.length - 1);
+      pair.lethality_phase    = LETHALITY_PHASES[phaseIndex].name;
+      pair.lethality_multiplier = LETHALITY_PHASES[phaseIndex].multiplier;
+
+      // Apply division-level damage (cell-level damage added in Branch C)
+      this._applyDamage(divA, divB, pair, state, changed, broadcast);
+
+      // Broadcast COMBAT_RESULT alongside ROUND_RESOLVED for strategic map UI
       broadcast("COMBAT_RESULT", {
         division_a:    divA.division_id,
         division_b:    divB.division_id,
-        round:         pair.round,
+        round:         roundNumber,
         hp_a:          divA.hp,
         hp_b:          divB.hp,
         suppression_a: divA.suppression,
         suppression_b: divB.suppression,
       });
+      broadcast("ROUND_RESOLVED", {
+        engagement_id:           pair.engagement_id,
+        round_number:            roundNumber,
+        lethality_phase:         pair.lethality_phase,
+        attacker_grid_delta:     [],
+        defender_grid_delta:     [],
+        formation_bonuses_active: [],
+        xp_changes:              [],
+      });
+
+      changed.add(pair.attacker_id);
+      changed.add(pair.defender_id);
     }
   }
 
@@ -472,6 +531,11 @@ export class CombatSystem {
         } else if (pair.flank_class === "flank") {
           dmg *= FLANK_BONUS;
         }
+      }
+
+      // Lethality multiplier (force recon units bypass the ramp)
+      if (!this._divisionHasForceReconUnit(attacker, state)) {
+        dmg *= pair.lethality_multiplier;
       }
 
       return dmg;
@@ -516,6 +580,13 @@ export class CombatSystem {
       this._checkAutoRetreatOrRotate(defender, DEFENDER_SUPPRESS_THRESHOLD, enemies(defender), state, changed, broadcast);
       this._checkAutoRetreatOrRotate(attacker, ATTACKER_SUPPRESS_THRESHOLD, enemies(attacker), state, changed, broadcast);
     }
+  }
+
+  private _divisionHasForceReconUnit(div: DivisionState, state: GameRoomState): boolean {
+    if (!div.grid) return false;
+    return div.grid.cells.some(
+      cell => !cell.incapacitated && FORCE_RECON_UNIT_TYPES.has(cell.unit_type)
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1100,4 +1171,12 @@ export class CombatSystem {
   private _pairKey(idA: string, idB: string): string {
     return [idA, idB].sort().join("|");
   }
+}
+
+export function _isGridLocked(division_id: string, state: GameRoomState): boolean {
+  const div = state.divisions.get(division_id);
+  if (!div) return false;
+  return div.combat_state === "engaged"
+    || div.combat_state === "suppressed"
+    || div.combat_state === "retreating";
 }
