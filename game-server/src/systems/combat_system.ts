@@ -790,7 +790,7 @@ export class CombatSystem {
     }
 
     // Find nearest waypoint and set as retreat target
-    const waypoint = this.movementSystem.getNearestWaypoint(retreatLng, retreatLat);
+    const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations);
     if (waypoint) {
       div.move_order.splice(0, div.move_order.length);
       div.move_order.push(waypoint.id);
