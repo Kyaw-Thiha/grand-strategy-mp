@@ -535,6 +535,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       observation_radius: div.observation_radius,
       engagement_radius: div.engagement_radius,
       move_order: [...div.move_order],
+      consumed_waypoint_ids: [...div.consumed_waypoint_ids],
       reposition_order: [...div.reposition_order],
       stack_id: div.stack_id,
       stack_position: div.stack_position,
