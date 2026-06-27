@@ -18,11 +18,16 @@ const MAX_SKIP_DIST_SQ := 0.05 * 0.05
 const ROAD_PROXIMITY_DEG   := 0.003           # ~300m — counts as "road in the way"
 const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
 const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
+const SYNTHETIC_GOAL_ID := "_synthetic_goal"
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
 var _road_nodes: Dictionary = {}
 var _built: bool = false
+var _cluster_of: Dictionary = {}       # node_id -> leaf_cluster_id
+var _abstract_edges: Dictionary = {}   # cluster_id -> Array of {from, to, cost}
+var _border_nodes: Dictionary = {}     # cluster_id -> Array[String] of node_ids
+var _clusters_loaded: bool = false
 
 
 func build(wp_graph: Dictionary) -> void:
@@ -81,6 +86,37 @@ func is_built() -> bool:
 	return _built
 
 
+func build_clusters(cluster_data: Dictionary) -> void:
+	_cluster_of.clear()
+	_abstract_edges.clear()
+	_border_nodes.clear()
+
+	for cluster: Dictionary in cluster_data.get("clusters", []) as Array:
+		var cid: String = cluster["id"]
+		var children: Array = cluster.get("children", [])
+		var border: Array = cluster.get("border_nodes", [])
+		_border_nodes[cid] = border
+		if children.is_empty():
+			for nid in border:
+				_cluster_of[str(nid)] = cid
+
+	for edge: Dictionary in cluster_data.get("abstract_edges", []) as Array:
+		var cid: String = edge["cluster_id"]
+		if not _abstract_edges.has(cid):
+			_abstract_edges[cid] = []
+		_abstract_edges[cid].append({
+			"from": str(edge["from"]),
+			"to": str(edge["to"]),
+			"cost": float(edge["cost"])
+		})
+
+	_clusters_loaded = true
+	print("[Pathfinder] clusters loaded: %d leaf mappings, %d abstract edges total" % [
+		_cluster_of.size(),
+		cluster_data.get("abstract_edges", []).size()
+	])
+
+
 ## Returns {lng, lat, ...} for a waypoint id, or an empty dict if not found.
 func get_node(wp_id: String) -> Dictionary:
 	return _nodes.get(wp_id, {})
@@ -89,6 +125,51 @@ func get_node(wp_id: String) -> Dictionary:
 ## Returns true if wp_id is a road-connected waypoint node.
 func is_road_node(wp_id: String) -> bool:
 	return _road_nodes.has(wp_id)
+
+
+func _insert_synthetic_goal(goal_lng: float, goal_lat: float) -> void:
+	_nodes[SYNTHETIC_GOAL_ID] = {
+		"id": SYNTHETIC_GOAL_ID, "lng": goal_lng, "lat": goal_lat,
+		"cover_combat": "plains", "elevation": "flat", "nation_id": null
+	}
+	_adjacency[SYNTHETIC_GOAL_ID] = []
+	var K := 8
+	var candidates: Array = []
+	for nid in _nodes:
+		if nid == SYNTHETIC_GOAL_ID:
+			continue
+		var n: Dictionary = _nodes[nid]
+		var ddx := float(n["lng"]) - goal_lng
+		var ddy := float(n["lat"]) - goal_lat
+		candidates.append([ddx*ddx + ddy*ddy, nid])
+	candidates.sort()
+	for i in range(min(K, candidates.size())):
+		var nb_id: String = candidates[i][1]
+		var nb: Dictionary = _nodes[nb_id]
+		var ddx := float(nb["lng"]) - goal_lng
+		var ddy := float(nb["lat"]) - goal_lat
+		var dist_deg := sqrt(ddx*ddx + ddy*ddy)
+		var edge_entry: Dictionary = {
+			"to": nb_id, "base_cost": 1.0, "dist_deg": dist_deg,
+			"river_penalty": 1.0, "on_road": false
+		}
+		_adjacency[SYNTHETIC_GOAL_ID].append(edge_entry)
+		_adjacency[nb_id].append({
+			"to": SYNTHETIC_GOAL_ID, "base_cost": 1.0, "dist_deg": dist_deg,
+			"river_penalty": 1.0, "on_road": false
+		})
+
+
+func _remove_synthetic_goal() -> void:
+	if not _nodes.has(SYNTHETIC_GOAL_ID):
+		return
+	for edge: Dictionary in _adjacency.get(SYNTHETIC_GOAL_ID, []):
+		var nb_id: String = edge["to"]
+		if _adjacency.has(nb_id):
+			_adjacency[nb_id] = _adjacency[nb_id].filter(
+				func(e): return str(e["to"]) != SYNTHETIC_GOAL_ID)
+	_nodes.erase(SYNTHETIC_GOAL_ID)
+	_adjacency.erase(SYNTHETIC_GOAL_ID)
 
 
 ## Returns the nearest waypoint ID to (lng, lat). O(n) — call only on user clicks.
@@ -171,13 +252,25 @@ func road_crosses_segment(from_id: String, to_id: String) -> bool:
 ## road_cost_multiplier inflates road edge costs — used by the shift-move intent heuristic
 ## to discourage routing back through roads between consecutive off-road waypoints.
 func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
-		road_cost_multiplier: float = 1.0) -> Array:
+		road_cost_multiplier: float = 1.0,
+		player_nation_id: String = "",
+		relations: Dictionary = {}) -> Array:
 	if not _built or from_id.is_empty() or to_id.is_empty():
 		return []
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
 		return []
+
+	# HPA* delegation: if clusters are loaded, try hierarchical search
+	if _clusters_loaded:
+		var goal_node: Dictionary = _nodes.get(to_id, {})
+		if not goal_node.is_empty():
+			var hpa_result: Array = _hpa_find_path(from_id, to_id, movement_profile,
+				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
+				road_cost_multiplier, player_nation_id, relations)
+			if not hpa_result.is_empty():
+				return _string_pull(hpa_result, movement_profile)
 
 	# Off-road purity pre-check: when both endpoints are off-road, run A* once to see
 	# if the natural path avoids roads entirely. If so, skip Phase 1 — it would only
@@ -449,6 +542,108 @@ func _reconstruct_bidir(came_f: Dictionary, came_b: Dictionary, meet: String) ->
 		cur = came_b[cur]
 		path.append(cur)
 	return path
+
+
+# ── HPA* ─────────────────────────────────────────────────────────────────────
+
+
+func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary,
+		goal_lng: float, goal_lat: float,
+		road_cost_multiplier: float = 1.0,
+		player_nation_id: String = "",
+		relations: Dictionary = {}) -> Array:
+	_insert_synthetic_goal(goal_lng, goal_lat)
+
+	var from_cluster: String = _cluster_of.get(from_id, "")
+	var to_cluster: String = _cluster_of.get(SYNTHETIC_GOAL_ID, "")
+
+	# If same cluster or clusters not found, fall back
+	if from_cluster.is_empty() or to_cluster.is_empty() or from_cluster == to_cluster:
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+		_remove_synthetic_goal()
+		return _substitute_synthetic(flat, to_id)
+
+	# Abstract search: Dijkstra over abstract graph
+	var abstract_path: Array = _abstract_dijkstra(from_cluster, to_cluster)
+	if abstract_path.is_empty():
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+		_remove_synthetic_goal()
+		return _substitute_synthetic(flat, to_id)
+
+	# For each cluster in the abstract path, run A* restricted to that cluster's border nodes
+	var all_path_nodes: Array = [from_id]
+	for i in range(abstract_path.size()):
+		var cid: String = abstract_path[i]
+		if not _abstract_edges.has(cid):
+			continue
+		var ab_edges: Array = _abstract_edges[cid]
+		for ae in ab_edges:
+			var ae_dict: Dictionary = ae
+			if not all_path_nodes.has(ae_dict["from"]):
+				all_path_nodes.append(ae_dict["from"])
+			if not all_path_nodes.has(ae_dict["to"]):
+				all_path_nodes.append(ae_dict["to"])
+
+	if not all_path_nodes.has(SYNTHETIC_GOAL_ID):
+		all_path_nodes.append(SYNTHETIC_GOAL_ID)
+
+	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+	_remove_synthetic_goal()
+	return _substitute_synthetic(stitched, to_id)
+
+
+func _substitute_synthetic(path: Array, to_id: String) -> Array:
+	if path.is_empty():
+		return path
+	var result: Array = path.duplicate()
+	for i in range(result.size()):
+		if str(result[i]) == SYNTHETIC_GOAL_ID:
+			result[i] = to_id
+	return result
+
+
+func _abstract_dijkstra(from_cluster: String, to_cluster: String) -> Array:
+	if from_cluster == to_cluster:
+		return [from_cluster]
+	var dist: Dictionary = {from_cluster: 0.0}
+	var came_from: Dictionary = {}
+	var heap: Array = [[0.0, from_cluster]]
+	var visited: Dictionary = {}
+	while heap.size() > 0:
+		heap.sort()
+		var entry: Array = heap.pop_front()
+		var d: float = entry[0]
+		var u: String = entry[1]
+		if visited.has(u):
+			continue
+		visited[u] = true
+		if u == to_cluster:
+			var path: Array = [u]
+			var cur = u
+			while came_from.has(cur):
+				cur = came_from[cur]
+				path.push_front(cur)
+			return path
+		var edges: Array = _abstract_edges.get(u, [])
+		for edge_data in edges:
+			var edge: Dictionary = edge_data
+			var v: String = ""
+			if edge["from"] == str(u):
+				v = edge["to"]
+			else:
+				v = edge["from"]
+			if visited.has(v):
+				continue
+			# v is a node_id, need cluster_of -> cluster_id
+			var v_cluster: String = _cluster_of.get(v, "")
+			if v_cluster.is_empty():
+				continue
+			var nd: float = d + float(edge["cost"])
+			if nd < dist.get(v_cluster, INF):
+				dist[v_cluster] = nd
+				came_from[v_cluster] = u
+				heap.append([nd, v_cluster])
+	return []
 
 
 # ── Min-heap ──────────────────────────────────────────────────────────────────
