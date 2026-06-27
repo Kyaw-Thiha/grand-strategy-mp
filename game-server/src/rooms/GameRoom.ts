@@ -104,6 +104,20 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.incapacitated !== undefined) cell.incapacitated = msg.incapacitated;
         if (msg.stealthed     !== undefined) cell.stealthed     = msg.stealthed;
       });
+      this.onMessage("SPAWN_NATION", (_client, msg: { nation_id: string }) => {
+        const nation = new NationState();
+        nation.nation_id = msg.nation_id;
+        this.state.nations.set(msg.nation_id, nation);
+      });
+      this.onMessage("APPLY_PERKS", (_client, msg: {
+        nation_id: string;
+        perk_ids: string[];
+      }) => {
+        const nation = this.state.nations.get(msg.nation_id);
+        if (!nation) return;
+        nation.researched_perks.clear();
+        for (const id of msg.perk_ids) nation.researched_perks.push(id);
+      });
     }
 
     console.log(`[GameRoom] ${this.roomId} created`);

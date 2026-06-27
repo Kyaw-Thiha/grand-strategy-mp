@@ -3,7 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
-import { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
+import { GameRoomState, DivisionState } from "../src/rooms/schema/GameRoomState.js";
 import { UnitType, XpTier } from "../src/types/tactical_types.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
@@ -142,5 +142,16 @@ describe("6a — Tactical Grid Schema", function () {
         `unit_terrain_costs is missing entry for UnitType.${key} ("${unitType}")`
       );
     }
+  });
+
+  it("DivisionState.grid is NOT a Colyseus schema-tracked field (not synced to clients)", () => {
+    const metadata = (DivisionState as any)[Symbol.metadata] as
+      Record<string | number, unknown> | null;
+    const isTracked = metadata != null && "grid" in metadata;
+    assert.strictEqual(
+      isTracked,
+      false,
+      "grid must not be in Colyseus schema metadata — it inflates the state patch for all clients"
+    );
   });
 });

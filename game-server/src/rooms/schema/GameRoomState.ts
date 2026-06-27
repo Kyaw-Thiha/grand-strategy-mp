@@ -22,9 +22,10 @@ export class PlayerState extends Schema {
 }
 
 export class NationState extends Schema {
-  @type("string") nation_id: string = "";
-  @type("string") player_id: string = "";
-  @type("boolean") is_ready: boolean = false;
+  @type("string")   nation_id: string  = "";
+  @type("string")   player_id: string  = "";
+  @type("boolean")  is_ready: boolean  = false;
+  @type(["string"]) researched_perks   = new ArraySchema<string>();
 }
 
 export class ProvinceState extends Schema {
@@ -57,7 +58,7 @@ export class DivisionState extends Schema {
   @type("number") final_position_lng: number = -999; // exact click target (-999 = none)
   @type("number") final_position_lat: number = -999;
   @type("string")          template_id: string = "";
-  @type(DivisionGridState) grid = new DivisionGridState();
+  grid: DivisionGridState = new DivisionGridState(); // server-side only — not schema-synced
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
