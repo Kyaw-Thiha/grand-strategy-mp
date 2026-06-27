@@ -22,7 +22,7 @@ const SYNTHETIC_GOAL_ID := "_synthetic_goal"
 
 const MAX_SPLINE_DEV_DEG: float = 0.0067
 const SPLINE_SUBDIVISIONS: int = 8
-const MAX_FALLBACK_CANDIDATES := 20
+const MAX_FALLBACK_CANDIDATES := 5
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
