@@ -104,6 +104,17 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	if not wp_graph.is_empty():
 		_pathfinder.build(wp_graph)
 
+	# Load HPA* clusters if available
+	var cluster_path := "res://assets/data/western_europe_6/waypoints_clusters.json"
+	if FileAccess.file_exists(cluster_path):
+		var file := FileAccess.open(cluster_path, FileAccess.READ)
+		if file:
+			var cluster_data: Variant = JSON.parse_string(file.get_as_text())
+			file.close()
+			if cluster_data is Dictionary:
+				_pathfinder.build_clusters(cluster_data)
+				print("[MilitarySystem] HPA* clusters loaded")
+
 	# Ghost overlay for the pending route being built (shift+click chain preview)
 	_ghost_overlay = MoveOrderOverlay.new()
 	_icon_layer.add_child(_ghost_overlay)
@@ -411,27 +422,45 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var movement_profile: Dictionary = _get_movement_profile(division_id)
-	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
-	var path: Array = path_result.get("logical", [])
-	if path.is_empty():
-		var fallback_id: String = _pathfinder.find_nearest_reachable(
-			start_id, target_lng, target_lat, movement_profile,
-			GameState.get_my_nation_id(), GameState.relations)
-		if fallback_id.is_empty():
-			push_warning("[MilitarySystem] No path found for %s — target completely unreachable" % division_id)
-			return
-		path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
-			GameState.get_my_nation_id(), GameState.relations)
-		path = path_result.get("logical", [])
+	var division_id_snapshot := division_id
+	var goal_lng_snapshot := target_lng
+	var goal_lat_snapshot := target_lat
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	_path_pending = true
+	_path_thread = Thread.new()
+	_path_thread.start(func() -> void:
+		var path_result: Dictionary = _pathfinder.find_path(
+			start_id, goal_id, movement_profile, 1.0,
+			my_nation, relations_snapshot)
+		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
-			push_warning("[MilitarySystem] No fallback path found for %s" % division_id)
-			return
+			var fallback_id: String = _pathfinder.find_nearest_reachable(
+				start_id, goal_lng_snapshot, goal_lat_snapshot, movement_profile,
+				my_nation, relations_snapshot)
+			if not fallback_id.is_empty():
+				path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
+					my_nation, relations_snapshot)
+				path = path_result.get("logical", [])
+		call_deferred("_on_direct_move_ready", path, division_id_snapshot, goal_lng_snapshot, goal_lat_snapshot)
+	)
 
+
+func _on_direct_move_ready(path: Array, division_id: String, target_lng: float, target_lat: float) -> void:
+	if _path_thread != null and _path_thread.is_started():
+		_path_thread.wait_to_finish()
+	_path_thread = null
+	_path_pending = false
+	if path.is_empty():
+		push_warning("[MilitarySystem] No path found for %s" % division_id)
+		_clear_pending()
+		return
+	_dr_final_goal[division_id] = Vector2(target_lng, target_lat)
 	var path_to_submit: Array[String] = []
 	for waypoint_id: Variant in path:
 		path_to_submit.append(str(waypoint_id))
-	_dr_final_goal[division_id] = Vector2(target_lng, target_lat)
 	_submit_move_order_for_division(division_id, path_to_submit)
+
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if not _pathfinder.is_built():
