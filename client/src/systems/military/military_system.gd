@@ -72,6 +72,7 @@ var _route_overlays: Dictionary = {}   # div_id → MoveOrderOverlay node
 
 var _path_thread: Thread = null
 var _path_pending: bool = false
+var _path_gen: int = 0
 var _pending_auto_submit: bool = false      # true during the 1.2s non-shift flash window
 var _submit_on_thread_complete: bool = false # submit chain as soon as current thread finishes
 var _shift_chain_started: bool = false      # true once the user has made at least one shift-click
@@ -80,6 +81,9 @@ var _dr_pos_deg: Dictionary = {}   # div_id -> Vector2(lng, lat) — local simul
 var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local waypoint queue
 var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
 var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0 normal, 0.30 repos)
+var _dr_final_goal: Dictionary = {}   # div_id -> Vector2(lng, lat) of exact click
+var _dr_last_waypoint_road: bool = false    # was the last consumed waypoint on a road?
+var _dr_last_waypoint_terrain: String = ""  # "cover_elevation" of the last consumed waypoint
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -102,6 +106,17 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	var wp_graph: Dictionary = _map_loader.get_waypoint_graph()
 	if not wp_graph.is_empty():
 		_pathfinder.build(wp_graph)
+
+	# Load HPA* clusters if available
+	var cluster_path := "res://assets/data/western_europe_6/waypoints_clusters.json"
+	if FileAccess.file_exists(cluster_path):
+		var file := FileAccess.open(cluster_path, FileAccess.READ)
+		if file:
+			var cluster_data: Variant = JSON.parse_string(file.get_as_text())
+			file.close()
+			if cluster_data is Dictionary:
+				_pathfinder.build_clusters(cluster_data)
+				print("[MilitarySystem] HPA* clusters loaded")
 
 	# Ghost overlay for the pending route being built (shift+click chain preview)
 	_ghost_overlay = MoveOrderOverlay.new()
@@ -138,7 +153,7 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 func _process(delta: float) -> void:
 	for div_id: String in _icons:
 		var icon: Node2D = _icons[div_id]
-		if _dr_order.has(div_id) and not _dr_order[div_id].is_empty():
+		if _dr_order.has(div_id) and (not _dr_order[div_id].is_empty() or _dr_final_goal.has(div_id)):
 			_advance_dr(div_id, delta)
 			_update_division_route(div_id)
 		else:
@@ -410,15 +425,56 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var movement_profile: Dictionary = _get_movement_profile(division_id)
-	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	var division_id_snapshot := division_id
+	var goal_lng_snapshot := target_lng
+	var goal_lat_snapshot := target_lat
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	_path_gen += 1
+	var gen := _path_gen
+	_path_pending = true
+	_pathfinder._insert_synthetic_goal(goal_lng_snapshot, goal_lat_snapshot, my_nation, relations_snapshot)
+	_path_thread = Thread.new()
+	_path_thread.start(func() -> void:
+		var path_result: Dictionary = _pathfinder.find_path(
+			start_id, "_synthetic_goal", movement_profile, 1.0,
+			my_nation, relations_snapshot,
+			INF, INF, true)
+		var path: Array = path_result.get("logical", [])
+		if path.is_empty():
+			var fallback_id: String = _pathfinder.find_nearest_reachable(
+				start_id, goal_lng_snapshot, goal_lat_snapshot, movement_profile,
+				my_nation, relations_snapshot)
+			if not fallback_id.is_empty():
+				path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
+					my_nation, relations_snapshot,
+					INF, INF, true)
+				path = path_result.get("logical", [])
+		call_deferred("_on_direct_move_ready", path, division_id_snapshot, goal_lng_snapshot, goal_lat_snapshot, gen)
+	)
+
+
+func _on_direct_move_ready(path: Array, division_id: String, target_lng: float, target_lat: float, gen: int = 0) -> void:
+	if gen != _path_gen:
+		return
+	_pathfinder._remove_synthetic_goal()
+	if _path_thread != null and _path_thread.is_started():
+		_path_thread.wait_to_finish()
+	_path_thread = null
+	_path_pending = false
 	if path.is_empty():
 		push_warning("[MilitarySystem] No path found for %s" % division_id)
+		_clear_pending()
 		return
-
+	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var path_to_submit: Array[String] = []
 	for waypoint_id: Variant in path:
-		path_to_submit.append(str(waypoint_id))
-	_submit_move_order_for_division(division_id, path_to_submit)
+		var wpid: String = str(waypoint_id)
+		if wpid == "_synthetic_goal":
+			wpid = goal_id
+		path_to_submit.append(wpid)
+	_submit_move_order_for_division(division_id, path_to_submit, Vector2(target_lng, target_lat))
+
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if not _pathfinder.is_built():
@@ -465,17 +521,20 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 			var d: float = _pathfinder.nearest_road_node_distance(float(sn["lng"]), float(sn["lat"]))
 			road_mult = _compute_avoidance_multiplier(d)
 
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	_path_gen += 1
+	var gen := _path_gen
 	_path_pending = true
 	_path_thread = Thread.new()
 	var division_id_snapshot := _selected_division_id
 	_path_thread.start(func() -> void:
-		# Only apply avoidance when there is no road naturally lying between waypoints.
 		var effective_mult := 1.0
 		if shift_held and waypoint_index > 0 and road_mult > 1.0:
 			if not _pathfinder.road_crosses_segment(start_id, goal_id):
 				effective_mult = road_mult
-		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult)
-		call_deferred("_on_segment_ready", segment, goal_id, shift_held, division_id_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot)
+		call_deferred("_on_segment_ready", seg_result.get("logical", []), goal_id, shift_held, division_id_snapshot, gen)
 	)
 
 
@@ -503,10 +562,12 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
 		var movement_profile: Dictionary = _get_movement_profile(division_id)
-		var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			goal_id = _pathfinder.find_nearest(target_lng, target_lat)
-			path = _pathfinder.find_path(start_id, goal_id, movement_profile)
+			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+			path = path_result.get("logical", [])
 			if path.is_empty():
 				push_warning("[MilitarySystem] No group path found for %s" % division_id)
 				continue
@@ -519,13 +580,14 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 	_clear_pending()
 
 
-func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, division_id_snapshot: String) -> void:
+func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, division_id_snapshot: String, gen: int = 0) -> void:
+	if gen != _path_gen:
+		return
 	if _path_thread != null and _path_thread.is_started():
 		_path_thread.wait_to_finish()
 	_path_thread = null
 	_path_pending = false
 
-	# Division was deselected or mode changed while computing — discard result.
 	if not _move_mode or _selected_division_id != division_id_snapshot:
 		_submit_on_thread_complete = false
 		return
@@ -615,11 +677,13 @@ func _refresh_chain_start() -> void:
 	var milestones_snapshot: Array = _pending_milestones.duplicate()
 	var div_id_snapshot := div_id
 
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
 	_path_pending = true
 	_path_thread = Thread.new()
 	_path_thread.start(func() -> void:
-		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
-		call_deferred("_on_chain_refresh_ready", segment, milestones_snapshot, div_id_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot)
+		call_deferred("_on_chain_refresh_ready", seg_result.get("logical", []), milestones_snapshot, div_id_snapshot)
 	)
 
 
@@ -671,6 +735,8 @@ func _replace_chain_first_segment(new_segment: Array) -> void:
 func _advance_dr(div_id: String, delta: float) -> void:
 	var order: Array[String] = _dr_order[div_id]
 	if order.is_empty():
+		if _dr_final_goal.has(div_id):
+			_advance_dr_last_mile(div_id, delta)
 		return
 	var pos_deg: Vector2 = _dr_pos_deg[div_id]
 
@@ -681,7 +747,6 @@ func _advance_dr(div_id: String, delta: float) -> void:
 
 	var target_deg := Vector2(float(next_node["lng"]), float(next_node["lat"]))
 
-	# Speed — mirrors movement_system.ts formula exactly.
 	var kmh: float
 	if _pathfinder.is_road_node(next_id):
 		kmh = DR_ROAD_KMH
@@ -690,13 +755,12 @@ func _advance_dr(div_id: String, delta: float) -> void:
 		var terrain_key := str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
 		var raw_cost: Variant = profile.get(terrain_key, 1.0)
 		if raw_cost == null:
-			return  # impassable (null = Infinity from server JSON) — wait for server to reroute
+			return
 		var cost: float = float(raw_cost)
 		if not is_finite(cost) or cost <= 0.0:
-			return  # impassable — wait for server to reroute
+			return
 		kmh = DR_OFFROAD_KMH / cost
 
-	# Apply speed multiplier (1.0 for normal movement, 0.30 for reposition)
 	kmh *= _dr_speed_mult.get(div_id, 1.0)
 	var speed_degs: float = (kmh / DR_KM_PER_DEG) * float(GameState.game_speed)
 	var advance: float = speed_degs * delta
@@ -705,25 +769,29 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	var dist: float = to_target.length()
 
 	if dist < DR_SNAP_DEG or advance >= dist:
-		# Reached waypoint — snap and carry leftover time into the next segment.
+		if order.size() == 1:
+			_dr_last_waypoint_road = _pathfinder.is_road_node(next_id)
+			_dr_last_waypoint_terrain = str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
 		_dr_pos_deg[div_id] = target_deg
 		order.pop_front()
 		_dr_order[div_id] = order
 		if order.is_empty():
-			# DR exhausted — park icon at final waypoint so lerp doesn't pull back to origin.
-			_target_positions[div_id] = _map_loader.project_lng_lat(
-					_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
-			_update_division_route(div_id)
-			var done_icon := _icons[div_id] as Node2D
-			done_icon.position = _target_positions[div_id]
-			done_icon.set_moving(false)
-			_update_division_visibility(div_id)
+			if _dr_final_goal.has(div_id):
+				_advance_dr_last_mile(div_id, delta)
+			else:
+				_target_positions[div_id] = _map_loader.project_lng_lat(
+						_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
+				_update_division_route(div_id)
+				var done_icon := _icons[div_id] as Node2D
+				done_icon.position = _target_positions[div_id]
+				done_icon.set_moving(false)
+				_update_division_visibility(div_id)
 			return
 		if dist > 0.0:
 			var leftover: float = delta * maxf(1.0 - dist / maxf(advance, 1e-9), 0.0)
 			if leftover > 0.001:
 				_advance_dr(div_id, leftover)
-				return  # icon position already updated by recursive call
+				return
 	else:
 		_dr_pos_deg[div_id] = pos_deg + to_target.normalized() * advance
 
@@ -731,6 +799,66 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	moving_icon.position = _map_loader.project_lng_lat(
 			_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
 	moving_icon.queue_redraw()
+	_update_division_visibility(div_id)
+
+
+func _advance_dr_last_mile(div_id: String, delta: float) -> void:
+	if not _dr_final_goal.has(div_id):
+		return
+	var pos_deg: Vector2 = _dr_pos_deg[div_id]
+	var final_goal: Vector2 = _dr_final_goal[div_id]
+	var to_final: Vector2 = final_goal - pos_deg
+	var dist_final: float = to_final.length()
+
+	if dist_final < DR_SNAP_DEG:
+		_dr_pos_deg[div_id] = final_goal
+		_dr_final_goal.erase(div_id)
+		var done_icon := _icons[div_id] as Node2D
+		done_icon.position = _map_loader.project_lng_lat(final_goal.x, final_goal.y)
+		done_icon.set_moving(false)
+		_target_positions[div_id] = done_icon.position
+		_update_division_route(div_id)
+		_update_division_visibility(div_id)
+		return
+
+	var lm_profile: Dictionary = _dr_profiles.get(div_id, {})
+
+	# Base speed from the last waypoint (cached — no per-frame oscillation)
+	var lm_base_kmh: float
+	if _dr_last_waypoint_road:
+		lm_base_kmh = DR_ROAD_KMH
+	else:
+		var lm_cost: Variant = lm_profile.get(_dr_last_waypoint_terrain, 1.0)
+		if lm_cost == null or not is_finite(float(lm_cost)) or float(lm_cost) <= 0.0:
+			_dr_final_goal.erase(div_id)
+			var abort_icon := _icons[div_id] as Node2D
+			abort_icon.set_moving(false)
+			_update_division_visibility(div_id)
+			return
+		lm_base_kmh = DR_OFFROAD_KMH / float(lm_cost)
+
+	# Destination speed from the synthetic goal's terrain
+	var dest_node: Dictionary = _pathfinder.get_node("_synthetic_goal")
+	var lm_dest_kmh: float = DR_OFFROAD_KMH
+	if not dest_node.is_empty() and not lm_profile.is_empty():
+		var dest_key: String = str(dest_node.get("cover_combat", "")) + "_" + str(dest_node.get("elevation", ""))
+		var dest_cost: Variant = lm_profile.get(dest_key, 1.0)
+		if dest_cost != null and is_finite(float(dest_cost)) and float(dest_cost) > 0.0:
+			lm_dest_kmh = DR_OFFROAD_KMH / float(dest_cost)
+
+	# Smooth average between base and destination speeds
+	var lm_kmh: float = (lm_base_kmh + lm_dest_kmh) * 0.5
+	lm_kmh *= _dr_speed_mult.get(div_id, 1.0)
+	var lm_advance: float = (lm_kmh / DR_KM_PER_DEG) * float(GameState.game_speed) * delta
+	if lm_advance >= dist_final:
+		_dr_pos_deg[div_id] = final_goal
+	else:
+		_dr_pos_deg[div_id] = pos_deg + to_final.normalized() * lm_advance
+
+	var lm_icon := _icons[div_id] as Node2D
+	lm_icon.position = _map_loader.project_lng_lat(_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
+	_target_positions[div_id] = lm_icon.position
+	lm_icon.queue_redraw()
 	_update_division_visibility(div_id)
 
 
@@ -754,7 +882,8 @@ func _recompute_chain() -> void:
 	_pending_chain.clear()
 	var current_start := start_id
 	for milestone_id: String in _pending_milestones:
-		var seg: Array = _pathfinder.find_path(current_start, milestone_id, movement_profile)
+		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var seg: Array = seg_result.get("logical", [])
 		if seg.is_empty():
 			break
 		var skip_first: bool = false
@@ -806,7 +935,8 @@ func _submit_pending() -> void:
 ## - div_id: division receiving the order.
 ## - waypoint_ids: ordered waypoint ids for the server command and local route.
 ## Returns: Nothing.
-func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> void:
+func _submit_move_order_for_division(div_id: String, waypoint_ids: Array, final_pos: Vector2 = Vector2.INF) -> void:
+	_dr_final_goal.erase(div_id)  # clear any previous final goal first
 	if waypoint_ids.is_empty():
 		return
 	if not _is_own_unit(div_id):
@@ -814,10 +944,14 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> voi
 
 	var chain_snapshot: Array = waypoint_ids.duplicate()
 
-	CommandQueue.submit("SUBMIT_MOVE_ORDER", {
+	var msg: Dictionary = {
 		"division_id": div_id,
 		"waypoints": chain_snapshot,
-	})
+	}
+	if final_pos != Vector2.INF:
+		msg["final_lng"] = final_pos.x
+		msg["final_lat"] = final_pos.y
+	CommandQueue.submit("SUBMIT_MOVE_ORDER", msg)
 
 	# Seed DR immediately — don't wait for the server's ~1s DIVISION_UPDATES confirmation.
 	if not _dr_pos_deg.has(div_id):
@@ -838,6 +972,10 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> voi
 	for wp: Variant in chain_snapshot:
 		str_order.append(str(wp))
 	_dr_order[div_id] = str_order
+
+	# Set new final goal AFTER clearing old one — must come after _dr_order assignment
+	if final_pos != Vector2.INF:
+		_dr_final_goal[div_id] = final_pos
 
 	var icon_node := _icons.get(div_id) as Node2D
 	if icon_node:
@@ -890,13 +1028,23 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var movement_profile: Dictionary = _get_movement_profile(div_id)
-	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+	var path: Array = path_result.get("logical", [])
 	if path.is_empty():
-		push_warning("[MilitarySystem] No reposition path found for %s" % div_id)
-		_clear_pending()
-		return
-
-	# Walk through path waypoints, truncate at engagement boundary.
+		var fallback_id: String = _pathfinder.find_nearest_reachable(
+			start_id, target_lng, target_lat, movement_profile,
+			GameState.get_my_nation_id(), GameState.relations)
+		if fallback_id.is_empty():
+			push_warning("[MilitarySystem] No reposition path found for %s — target unreachable" % div_id)
+			_clear_pending()
+			return
+		path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
+			GameState.get_my_nation_id(), GameState.relations)
+		path = path_result.get("logical", [])
+		if path.is_empty():
+			push_warning("[MilitarySystem] No reposition fallback path for %s" % div_id)
+			_clear_pending()
+			return
 	# Start distance accumulation from SERVER position (authoritative), not DR position.
 	var path_to_submit: Array[String] = []
 	var accum_km: float = 0.0
@@ -932,6 +1080,9 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 
 
 func _clear_pending() -> void:
+	if _path_thread != null and _path_thread.is_started():
+		_path_thread.wait_to_finish()
+	_path_thread = null
 	_set_selected_icons_move_mode(false)
 	_pending_milestones.clear()
 	_pending_chain.clear()
@@ -1051,12 +1202,16 @@ func _update_division_route(division_id: String) -> void:
 
 	# DR active (owning client) — 60fps update via client-side remaining order.
 	var dr_order: Array = _dr_order.get(division_id, [])
-	if not dr_order.is_empty() and icon != null:
+	var has_remaining: bool = not dr_order.is_empty() or _dr_final_goal.has(division_id)
+	if has_remaining and icon != null:
 		var positions: Array[Vector2] = []
 		for wp_id: Variant in dr_order:
 			var node: Dictionary = _pathfinder.get_node(str(wp_id))
 			if not node.is_empty():
 				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+		if _dr_final_goal.has(division_id):
+			var fg: Vector2 = _dr_final_goal[division_id]
+			positions.append(_map_loader.project_lng_lat(fg.x, fg.y))
 		route.start_node = icon
 		if is_repos:
 			route.set_path(positions, no_milestones, color)
@@ -1154,7 +1309,17 @@ func _on_division_updated(division_id: String) -> void:
 		return
 
 	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
-		# Division stopped or locked in combat — freeze at server-authoritative position.
+		var server_final_lng: float = float(data.get("final_position_lng", -999.0))
+		# Waypoints done but server is still advancing to the exact click position — let
+		# client DR continue the last mile; do not freeze yet.
+		if order.is_empty() and server_final_lng > -998.0 and not (combat_state_val in ["engaged", "suppressed"]):
+			_update_division_route(division_id)
+			_update_division_visibility(division_id)
+			return
+		# Server cleared final position (reached it) or combat overrides — sync client goal too.
+		if _dr_final_goal.has(division_id):
+			_dr_final_goal.erase(division_id)
+		# Division fully stopped or locked in combat — freeze at server-authoritative position.
 		_dr_pos_deg.erase(division_id)
 		_dr_order.erase(division_id)
 		_dr_profiles.erase(division_id)
@@ -1191,13 +1356,37 @@ func _on_division_updated(division_id: String) -> void:
 		var cur_order: Array = _dr_order[division_id]
 		var cur_lead: String = cur_order[0] if not cur_order.is_empty() else ""
 		var new_lead: String = str_order[0] if not str_order.is_empty() else ""
-		if cur_lead != new_lead:
-			# Leading waypoint changed — path re-routed mid-move.
-			# Re-seed from server position so all clients track the new path.
+		var consumed_ids: Array = data.get("consumed_waypoint_ids", [])
+		var local_order: Array = cur_order.duplicate()
+		for cid: Variant in consumed_ids:
+			if not local_order.is_empty() and str(cid) == str(local_order[0]):
+				local_order = local_order.slice(1)
+		_dr_order[division_id] = local_order
+		var updated_lead: String = local_order[0] if not local_order.is_empty() else ""
+
+		# Check if client is ahead of server (local_order is a suffix of str_order).
+		# Avoids resetting position when DR has simply outpaced server consumption.
+		var is_ahead: bool = false
+		if not local_order.is_empty() and local_order.size() <= str_order.size():
+			var str_tail: Array = str_order.slice(str_order.size() - local_order.size())
+			is_ahead = true
+			for i in range(local_order.size()):
+				if str(local_order[i]) != str(str_tail[i]):
+					is_ahead = false
+					break
+
+		# Client at final goal (DR fully consumed) while server still has trailing waypoints
+		var at_final_goal: bool = local_order.is_empty() and _dr_final_goal.has(division_id)
+
+		if is_ahead:
+			var consumed_count: int = str_order.size() - local_order.size()
+			if consumed_count > 0:
+				var last_consumed_node: Dictionary = _pathfinder.get_node(str(str_order[consumed_count - 1]))
+				if not last_consumed_node.is_empty():
+					_dr_pos_deg[division_id] = Vector2(float(last_consumed_node["lng"]), float(last_consumed_node["lat"]))
+		elif not at_final_goal and updated_lead != new_lead:
+			_dr_final_goal.erase(division_id)
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
-			_dr_order[division_id] = str_order
-		elif str_order.size() < cur_order.size():
-			# Server consumed leading waypoints — trim local order to match.
 			_dr_order[division_id] = str_order
 
 	_update_division_route(division_id)

@@ -15,6 +15,7 @@ import math
 import shutil
 import sys
 import warnings
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -519,11 +520,17 @@ def generate_waypoints(sources: dict, output_dir: Path) -> None:
     elev_tree = STRtree(elev_geoms) if elev_geoms else None
     river_tree = STRtree(river_geoms) if river_geoms else None
 
-    def _tag(lng: float, lat: float) -> tuple[str, str]:
-        """Return (cover_combat, elevation) for a point."""
+    prov_feats  = sources.get("provinces", [])
+    prov_geoms  = [shape(f["geometry"]) for f in prov_feats]
+    prov_nids   = [f["properties"].get("nation_id") for f in prov_feats]
+    prov_tree   = STRtree(prov_geoms) if prov_geoms else None
+
+    def _tag(lng: float, lat: float) -> tuple[str, str, str | None]:
+        """Return (cover_combat, elevation, nation_id) for a point."""
         pt = Point(lng, lat)
         cover_combat = "plains"
         elevation = "flat"
+        nation_id = None
         if cover_tree is not None:
             for idx in cover_tree.query(pt, predicate="intersects"):
                 if cover_geoms[idx].contains(pt):
@@ -534,7 +541,12 @@ def generate_waypoints(sources: dict, output_dir: Path) -> None:
                 if elev_geoms[idx].contains(pt):
                     elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
                     break
-        return cover_combat, elevation
+        if prov_tree is not None:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    nation_id = prov_nids[idx]
+                    break
+        return cover_combat, elevation, nation_id
 
     def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
         seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
@@ -575,13 +587,14 @@ def generate_waypoints(sources: dict, output_dir: Path) -> None:
             return node_by_key[key]
         wp_counter += 1
         wid = f"wp_{wp_counter:06d}"
-        cover, elev = _tag(lng, lat)
+        cover, elev, nation_id = _tag(lng, lat)
         nodes.append({
             "id": wid,
             "lng": round(lng, 6),
             "lat": round(lat, 6),
             "cover_combat": cover,
             "elevation": elev,
+            "nation_id": nation_id,
         })
         node_by_key[key] = wid
         return wid
@@ -686,6 +699,11 @@ def generate_terrain_grid(
     river_tree = STRtree(river_geoms) if river_geoms else None
     water_tree = STRtree(water_geoms) if water_geoms else None
 
+    prov_feats  = sources.get("provinces", [])
+    prov_geoms  = [shape(f["geometry"]) for f in prov_feats]
+    prov_nids   = [f["properties"].get("nation_id") for f in prov_feats]
+    prov_tree   = STRtree(prov_geoms) if prov_geoms else None
+
     def _in_water(lng: float, lat: float) -> bool:
         pt = Point(lng, lat)
         if water_tree is None:
@@ -695,9 +713,10 @@ def generate_terrain_grid(
                 return True
         return False
 
-    def _tag(lng: float, lat: float) -> tuple[str, str]:
+    def _tag(lng: float, lat: float) -> tuple[str, str, str | None]:
         pt = Point(lng, lat)
         cover_combat, elevation = "plains", "flat"
+        nation_id = None
         if cover_tree is not None:
             for idx in cover_tree.query(pt, predicate="intersects"):
                 if cover_geoms[idx].contains(pt):
@@ -708,7 +727,12 @@ def generate_terrain_grid(
                 if elev_geoms[idx].contains(pt):
                     elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
                     break
-        return cover_combat, elevation
+        if prov_tree is not None:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    nation_id = prov_nids[idx]
+                    break
+        return cover_combat, elevation, nation_id
 
     def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
         seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
@@ -750,7 +774,7 @@ def generate_terrain_grid(
         while lng <= max_lng + lng_step * 0.5:
             gx = round((lng - min_lng) / lng_step)
             if not _in_water(lng, lat):
-                cover_combat, elevation = _tag(lng, lat)
+                cover_combat, elevation, nation_id = _tag(lng, lat)
                 if COVER_MOVE.get(cover_combat, 1.0) < 9000:  # skip glacier
                     node: dict = {
                         "id":           f"{id_prefix}_{node_counter:06d}",
@@ -758,6 +782,7 @@ def generate_terrain_grid(
                         "lat":          round(lat, 6),
                         "cover_combat": cover_combat,
                         "elevation":    elevation,
+                        "nation_id":    nation_id,
                     }
                     grid_map[(gx, gy)] = node
                     new_nodes.append(node)
@@ -876,6 +901,11 @@ def generate_nonuniform_terrain_grid(
     river_tree = STRtree(river_geoms) if river_geoms else None
     water_tree = STRtree(water_geoms) if water_geoms else None
 
+    prov_feats  = sources.get("provinces", [])
+    prov_geoms  = [shape(f["geometry"]) for f in prov_feats]
+    prov_nids   = [f["properties"].get("nation_id") for f in prov_feats]
+    prov_tree   = STRtree(prov_geoms) if prov_geoms else None
+
     def _in_water(lng: float, lat: float) -> bool:
         pt = Point(lng, lat)
         if water_tree is None:
@@ -885,9 +915,10 @@ def generate_nonuniform_terrain_grid(
                 return True
         return False
 
-    def _tag(lng: float, lat: float) -> tuple[str, str]:
+    def _tag(lng: float, lat: float) -> tuple[str, str, str | None]:
         pt = Point(lng, lat)
         cover_combat, elevation = "plains", "flat"
+        nation_id = None
         if cover_tree is not None:
             for idx in cover_tree.query(pt, predicate="intersects"):
                 if cover_geoms[idx].contains(pt):
@@ -898,7 +929,12 @@ def generate_nonuniform_terrain_grid(
                 if elev_geoms[idx].contains(pt):
                     elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
                     break
-        return cover_combat, elevation
+        if prov_tree is not None:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    nation_id = prov_nids[idx]
+                    break
+        return cover_combat, elevation, nation_id
 
     def _river_crossing(lng0: float, lat0: float, lng1: float, lat1: float) -> str | None:
         seg = ShapelyLS([(lng0, lat0), (lng1, lat1)])
@@ -941,7 +977,7 @@ def generate_nonuniform_terrain_grid(
             return
         if _in_water(lng, lat):
             return
-        cover, elev = _tag(lng, lat)
+        cover, elev, nation_id = _tag(lng, lat)
         if COVER_MOVE.get(cover, 1.0) >= 9000:
             return
         key = (round(lng * 100_000), round(lat * 100_000))
@@ -951,7 +987,7 @@ def generate_nonuniform_terrain_grid(
         node_counter[0] += 1
         node_by_key[key] = {
             "id": nid, "lng": round(lng, 6), "lat": round(lat, 6),
-            "cover_combat": cover, "elevation": elev,
+            "cover_combat": cover, "elevation": elev, "nation_id": nation_id,
         }
 
     # Three sweeps — each only emits the tier it owns (or finer).
@@ -973,7 +1009,7 @@ def generate_nonuniform_terrain_grid(
     while lat <= max_lat + step * 0.5:
         lng = min_lng
         while lng <= max_lng + lng_step * 0.5:
-            cover, elev = _tag(lng, lat)
+            cover, elev, _ = _tag(lng, lat)
             if _tier(cover, elev) in ("medium", "complex"):
                 _try_add(lng, lat)
             lng += lng_step
@@ -986,7 +1022,7 @@ def generate_nonuniform_terrain_grid(
     while lat <= max_lat + step * 0.5:
         lng = min_lng
         while lng <= max_lng + lng_step * 0.5:
-            cover, elev = _tag(lng, lat)
+            cover, elev, _ = _tag(lng, lat)
             if _tier(cover, elev) == "complex":
                 _try_add(lng, lat)
             lng += lng_step
@@ -1060,6 +1096,382 @@ def generate_nonuniform_terrain_grid(
     road_conn_count = len(road_seen_pairs)
     print(f"  non-uniform terrain grid: {len(new_edges)} edges ({road_conn_count} road connections)")
     return new_nodes, new_edges
+
+
+def insert_boundary_nodes(
+    sources: dict,
+    existing_wp: dict,
+    boundary_sample_deg: float = 1.0,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Insert nodes along every terrain-category boundary (cover or elevation changes).
+    Two nodes per sample point: one offset to each side of the boundary.
+    ID prefix: bn_
+
+    Performance: dissolves individual polygons by type before boundary detection,
+    reducing O(n^2) polygon-pair checks to O(k^2) type-pair checks (~55 pairs for
+    11 cover types vs. 72M pairs for 12k individual polygons).
+    """
+    BOUNDARY_OFFSET_DEG = 0.0001   # ~11m perpendicular offset
+    K_CONNECT = 8                  # max neighbours per new node (matches K_TERRAIN)
+
+    COVER_MOVE: dict[str, float] = {
+        "plains": 1.0, "steppe": 1.1, "shrubland": 1.2, "light_forest": 1.3,
+        "dense_forest": 1.8, "jungle": 2.5, "desert": 1.4, "swamp": 2.0,
+        "tundra": 1.5, "glacier": 9999.0, "urban": 0.9,
+    }
+    ELEV_MOVE: dict[str, float] = {"flat": 1.0, "hills": 1.4, "mountains": 2.2}
+
+    cover_feats = sources.get("cover", [])
+    elev_feats  = sources.get("elevation", [])
+    water_feats = sources.get("base_water", [])
+    prov_feats  = sources.get("provinces", [])
+
+    cover_geoms = [shape(f["geometry"]) for f in cover_feats]
+    elev_geoms  = [shape(f["geometry"]) for f in elev_feats]
+    water_geoms = [shape(f["geometry"]) for f in water_feats]
+    prov_geoms  = [shape(f["geometry"]) for f in prov_feats]
+    prov_nids   = [f["properties"].get("nation_id") for f in prov_feats]
+
+    cover_tree = STRtree(cover_geoms) if cover_geoms else None
+    elev_tree  = STRtree(elev_geoms)  if elev_geoms  else None
+    water_union = unary_union(water_geoms) if water_geoms else None
+    prov_tree  = STRtree(prov_geoms)  if prov_geoms  else None
+
+    def _in_water(lng: float, lat: float) -> bool:
+        if water_union is None:
+            return False
+        pt = Point(lng, lat)
+        return water_union.contains(pt)
+
+    def _tag_point(lng: float, lat: float) -> tuple[str, str, str | None]:
+        pt = Point(lng, lat)
+        cover_combat, elevation, nation_id = "plains", "flat", None
+        if cover_tree:
+            for idx in cover_tree.query(pt, predicate="intersects"):
+                if cover_geoms[idx].contains(pt):
+                    cover_combat = cover_feats[idx]["properties"].get("cover_combat", "plains")
+                    break
+        if elev_tree:
+            for idx in elev_tree.query(pt, predicate="intersects"):
+                if elev_geoms[idx].contains(pt):
+                    elevation = _get_elev_type(elev_feats[idx]["properties"]) or "flat"
+                    break
+        if prov_tree:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    nation_id = prov_nids[idx]
+                    break
+        return cover_combat, elevation, nation_id
+
+    def _sample_boundary(geom_a, geom_b) -> list[tuple[float, float]]:
+        """Sample points along the shared boundary between two polygons."""
+        try:
+            boundary = geom_a.boundary.intersection(geom_b.boundary)
+        except Exception:
+            return []
+        if boundary.is_empty:
+            return []
+        coords: list[tuple[float, float]] = []
+        lines = []
+        if boundary.geom_type == "LineString":
+            lines = [list(boundary.coords)]
+        elif boundary.geom_type == "MultiLineString":
+            lines = [list(g.coords) for g in boundary.geoms]
+        elif boundary.geom_type == "GeometryCollection":
+            for g in boundary.geoms:
+                if g.geom_type in ("LineString", "MultiLineString"):
+                    if g.geom_type == "LineString":
+                        lines.append(list(g.coords))
+                    else:
+                        lines.extend([list(l.coords) for l in g.geoms])
+        for line in lines:
+            if len(line) < 2:
+                continue
+            current = 0.0
+            for i in range(len(line) - 1):
+                lng0, lat0 = line[i][0], line[i][1]
+                lng1, lat1 = line[i+1][0], line[i+1][1]
+                seg_len = math.hypot(lng1 - lng0, lat1 - lat0)
+                while current <= seg_len:
+                    t = current / seg_len if seg_len > 0 else 0.0
+                    coords.append((lng0 + t * (lng1 - lng0), lat0 + t * (lat1 - lat0)))
+                    current += boundary_sample_deg
+                current -= seg_len
+        return coords
+
+    # Collect all boundary points from cover and elevation type boundaries.
+    #
+    # PERFORMANCE NOTE: Do NOT iterate individual polygon pairs (O(n^2) with 12k polys
+    # -> 767k+ sample points, pipeline timeout). Instead dissolve by type first so we
+    # only check O(k^2) type-pair boundaries (~11 cover types -> 55 pairs).
+    bn_samples: list[tuple[float, float]] = []
+
+    # Cover boundaries — dissolve per cover_combat type, then find type-pair boundaries
+    cover_by_type: dict[str, list] = defaultdict(list)
+    for g, f in zip(cover_geoms, cover_feats):
+        cover_by_type[f["properties"].get("cover_combat", "plains")].append(g)
+    cover_dissolved = {ct: unary_union([g.buffer(0) for g in geoms]) for ct, geoms in cover_by_type.items()}
+    cover_types = list(cover_dissolved.keys())
+    print(f"  boundary nodes: dissolving {len(cover_geoms)} cover polys into {len(cover_types)} types")
+    for i in range(len(cover_types)):
+        for j in range(i + 1, len(cover_types)):
+            pts = _sample_boundary(cover_dissolved[cover_types[i]], cover_dissolved[cover_types[j]])
+            bn_samples.extend(pts)
+
+    # Elevation boundaries — same dissolve-first approach
+    elev_by_type: dict[str, list] = defaultdict(list)
+    for g, f in zip(elev_geoms, elev_feats):
+        elev_by_type[_get_elev_type(f["properties"]) or "flat"].append(g)
+    elev_dissolved = {et: unary_union([g.buffer(0) for g in geoms]) for et, geoms in elev_by_type.items()}
+    elev_types = list(elev_dissolved.keys())
+    print(f"  boundary nodes: dissolving {len(elev_geoms)} elev polys into {len(elev_types)} types")
+    for i in range(len(elev_types)):
+        for j in range(i + 1, len(elev_types)):
+            pts = _sample_boundary(elev_dissolved[elev_types[i]], elev_dissolved[elev_types[j]])
+            bn_samples.extend(pts)
+
+    print(f"  boundary nodes: {len(bn_samples)} raw sample points")
+
+    # For each sample, insert two offset nodes (one each side of boundary)
+    new_nodes: list[dict] = []
+    bn_counter = 1
+
+    for lng, lat in bn_samples:
+        if _in_water(lng, lat):
+            continue
+        for dlng, dlat in [(BOUNDARY_OFFSET_DEG, 0.0), (-BOUNDARY_OFFSET_DEG, 0.0), (0.0, BOUNDARY_OFFSET_DEG), (0.0, -BOUNDARY_OFFSET_DEG)]:
+            nlng = round(lng + dlng, 6)
+            nlat = round(lat + dlat, 6)
+            if _in_water(nlng, nlat):
+                continue
+            cover, elev, nation_id = _tag_point(nlng, nlat)
+            if COVER_MOVE.get(cover, 1.0) >= 9000:
+                continue
+            nid = f"bn_{bn_counter:06d}"
+            bn_counter += 1
+            new_nodes.append({
+                "id": nid, "lng": nlng, "lat": nlat,
+                "cover_combat": cover, "elevation": elev, "nation_id": nation_id,
+            })
+
+    print(f"  boundary nodes: {len(new_nodes)} nodes after water/glacier filter")
+
+    # Connect each boundary node to K_CONNECT nearest existing nodes
+    all_existing = existing_wp.get("nodes", []) + new_nodes
+    all_pts = [Point(n["lng"], n["lat"]) for n in all_existing]
+    all_tree = STRtree(all_pts)
+    all_ids  = [n["id"] for n in all_existing]
+
+    CONNECT_DEG = 0.40
+    connect_sq  = CONNECT_DEG ** 2
+
+    new_edges: list[dict] = []
+    seen_edges: set[tuple[str, str]] = set()
+
+    for node in new_nodes:
+        pt = Point(node["lng"], node["lat"])
+        candidates: list[tuple[float, int]] = []
+        for idx in all_tree.query(pt.buffer(CONNECT_DEG), predicate="intersects"):
+            nb = all_existing[idx]
+            if nb["id"] == node["id"]:
+                continue
+            dist_sq = (node["lng"] - nb["lng"])**2 + (node["lat"] - nb["lat"])**2
+            if dist_sq <= connect_sq:
+                candidates.append((dist_sq, idx))
+        candidates.sort()
+        for _, idx in candidates[:K_CONNECT]:
+            nb = all_existing[idx]
+            ekey = (min(node["id"], nb["id"]), max(node["id"], nb["id"]))
+            if ekey in seen_edges:
+                continue
+            seen_edges.add(ekey)
+            c1 = COVER_MOVE.get(node["cover_combat"], 1.0) * ELEV_MOVE.get(node["elevation"], 1.0)
+            c2 = COVER_MOVE.get(nb["cover_combat"],   1.0) * ELEV_MOVE.get(nb.get("elevation", "flat"), 1.0)
+            new_edges.append({
+                "from": node["id"], "to": nb["id"],
+                "base_cost": round((c1 + c2) / 2, 3), "river_size": None,
+            })
+
+    print(f"  boundary nodes: {len(new_edges)} edges")
+    return new_nodes, new_edges
+
+
+import heapq
+
+
+def generate_hpa_clusters(
+    sources: dict,
+    existing_wp: dict,
+    cluster_threshold: int = 300,
+) -> dict:
+    """
+    Build recursive HPA* cluster hierarchy and precompute abstract edges.
+
+    Step 1: Assign each waypoint node to its province via point-in-polygon.
+    Step 2: Recursively sub-partition clusters with > cluster_threshold nodes
+            using 2x2 bounding-box quadrant split.
+    Step 3: Find border nodes (nodes with at least one edge crossing to a
+            different leaf cluster).
+    Step 4: Precompute intra-cluster A* costs between all border node pairs.
+    Step 5: Build abstract edge list.
+
+    Returns: dict compatible with waypoints_clusters.json format.
+    """
+    from shapely.geometry import shape, Point
+    from shapely.strtree import STRtree
+
+    # Step 1: Province assignment
+    prov_feats = sources.get("provinces", [])
+    prov_geoms = [shape(f["geometry"]) for f in prov_feats]
+    prov_ids   = [f["properties"]["province_id"] for f in prov_feats]
+    prov_tree  = STRtree(prov_geoms) if prov_geoms else None
+
+    node_province: dict[str, str] = {}
+    for node in existing_wp.get("nodes", []):
+        pt = Point(node["lng"], node["lat"])
+        assigned = "sea"
+        if prov_tree:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    assigned = prov_ids[idx]
+                    break
+        node_province[node["id"]] = assigned
+
+    province_nodes: dict[str, list[str]] = {}
+    for nid, pid in node_province.items():
+        if pid == "sea":
+            continue
+        province_nodes.setdefault(pid, []).append(nid)
+
+    node_coords: dict[str, tuple[float, float]] = {}
+    for node in existing_wp.get("nodes", []):
+        node_coords[node["id"]] = (node["lng"], node["lat"])
+
+    adjacency: dict[str, list[str]] = {}
+    for edge in existing_wp.get("edges", []):
+        adjacency.setdefault(edge["from"], []).append(edge["to"])
+        adjacency.setdefault(edge["to"],   []).append(edge["from"])
+
+    # Step 2: Recursive sub-partitioning
+    def _partition(node_ids: list[str], province_id: str, depth: int, parent_id: str | None,
+                   node_coords: dict[str, tuple[float, float]]) -> list[dict]:
+        cluster_id = f"c_{province_id}_{depth}_{parent_id or 'root'}"
+        cluster: dict = {
+            "id": cluster_id,
+            "province_id": province_id,
+            "parent": parent_id,
+            "children": [],
+            "border_nodes": [],
+            "node_ids": node_ids,
+        }
+        if len(node_ids) <= cluster_threshold:
+            return [cluster]
+        lngs = [node_coords[nid][0] for nid in node_ids]
+        lats = [node_coords[nid][1] for nid in node_ids]
+        mid_lng = (min(lngs) + max(lngs)) / 2
+        mid_lat = (min(lats) + max(lats)) / 2
+        quads: dict[str, list[str]] = {"NW": [], "NE": [], "SW": [], "SE": []}
+        for nid in node_ids:
+            lng, lat = node_coords[nid]
+            q = ("N" if lat >= mid_lat else "S") + ("E" if lng >= mid_lng else "W")
+            quads[q].append(nid)
+        children = []
+        for qname, qnids in quads.items():
+            if not qnids:
+                continue
+            sub = _partition(qnids, province_id, depth + 1, cluster_id, node_coords)
+            children.extend(sub)
+        cluster["children"] = [c["id"] for c in children]
+        return [cluster] + children
+
+    all_clusters: list[dict] = []
+    for pid, nids in province_nodes.items():
+        clusters = _partition(nids, pid, 0, None, node_coords)
+        all_clusters.extend(clusters)
+
+    # Step 3: Border node detection
+    leaf_cluster_of: dict[str, str] = {}
+    for cluster in all_clusters:
+        if not cluster["children"]:
+            for nid in cluster["node_ids"]:
+                leaf_cluster_of[nid] = cluster["id"]
+
+    border_nodes: set[str] = set()
+    for nid, neighbours in adjacency.items():
+        my_cluster = leaf_cluster_of.get(nid)
+        if my_cluster is None:
+            continue
+        for nb in neighbours:
+            if leaf_cluster_of.get(nb) != my_cluster:
+                border_nodes.add(nid)
+                break
+
+    border_by_cluster: dict[str, set[str]] = {}
+    for nid in border_nodes:
+        cid = leaf_cluster_of.get(nid)
+        if cid:
+            border_by_cluster.setdefault(cid, set()).add(nid)
+
+    for cluster in all_clusters:
+        if not cluster["children"]:
+            cluster["border_nodes"] = list(border_by_cluster.get(cluster["id"], []))
+
+    # Step 4: Precompute intra-cluster border costs
+    def _astar_in_cluster(start: str, goal: str, cluster_node_ids: set[str],
+                          adjacency: dict, node_coords: dict) -> float | None:
+        if start == goal:
+            return 0.0
+        def heuristic(a, b):
+            ax, ay = node_coords[a]; bx, by = node_coords[b]
+            return math.hypot(ax-bx, ay-by)
+        heap = [(0.0, start)]
+        dist = {start: 0.0}
+        while heap:
+            d, u = heapq.heappop(heap)
+            if d > dist.get(u, float("inf")):
+                continue
+            if u == goal:
+                return d
+            for v in adjacency.get(u, []):
+                if v not in cluster_node_ids:
+                    continue
+                nd = d + heuristic(u, v)
+                if nd < dist.get(v, float("inf")):
+                    dist[v] = nd
+                    heapq.heappush(heap, (nd, v))
+        return None
+
+    abstract_edges: list[dict] = []
+    for cid, bnids in border_by_cluster.items():
+        cluster_node_ids = set(leaf_cluster_of.keys())
+        bn_list = list(bnids)
+        for i in range(len(bn_list)):
+            for j in range(i + 1, len(bn_list)):
+                cost = _astar_in_cluster(bn_list[i], bn_list[j], cluster_node_ids, adjacency, node_coords)
+                if cost is not None:
+                    abstract_edges.append({
+                        "from": bn_list[i], "to": bn_list[j],
+                        "cluster_id": cid, "cost": round(cost, 3),
+                    })
+
+    # Step 5: Build output (strip temporary node_ids)
+    output_clusters = []
+    for c in all_clusters:
+        output_clusters.append({
+            "id": c["id"],
+            "province_id": c["province_id"],
+            "parent": c["parent"],
+            "children": c["children"],
+            "border_nodes": c["border_nodes"],
+        })
+
+    print(f"  HPA clusters: {len(output_clusters)} clusters, {len(abstract_edges)} abstract edges")
+    return {
+        "cluster_threshold": cluster_threshold,
+        "clusters": output_clusters,
+        "abstract_edges": abstract_edges,
+    }
 
 
 def copy_passthrough_files(map_dir: Path, output_dir: Path) -> None:
@@ -1147,6 +1559,24 @@ def main() -> None:
             json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
         print(f"  waypoints.json: +{len(coarse_nodes)} coarse nodes → "
               f"{len(existing_wp['nodes'])} total, {len(existing_wp['edges'])} edges")
+
+    print("Inserting boundary-conforming nodes...")
+    bn_nodes, bn_edges = insert_boundary_nodes(sources, existing_wp)
+    if bn_nodes:
+        existing_wp["nodes"].extend(bn_nodes)
+        existing_wp["edges"].extend(bn_edges)
+        with open(wp_path, "w", encoding="utf-8") as f:
+            json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"  waypoints.json: +{len(bn_nodes)} boundary nodes → "
+              f"{len(existing_wp['nodes'])} total")
+
+    print("Building HPA* cluster hierarchy...")
+    cluster_data = generate_hpa_clusters(sources, existing_wp)
+    cluster_path = output_dir / "waypoints_clusters.json"
+    with open(cluster_path, "w", encoding="utf-8") as f:
+        json.dump(cluster_data, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"  waypoints_clusters.json: {len(cluster_data['clusters'])} clusters, "
+          f"{len(cluster_data['abstract_edges'])} abstract edges")
 
     # Fine grid (0.07° ≈ 7.5 km): server-only — generated after coarse so fine nodes
     # can connect to coarse nodes via the TERRAIN_CONNECT_DEG snapping

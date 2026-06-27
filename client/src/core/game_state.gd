@@ -171,6 +171,13 @@ func _apply_stack_dissolved(data: Dictionary) -> void:
 	EventBus.stack_dissolved.emit(sid)
 
 
+## Called by SessionManager when server sends RELATIONS_UPDATED.
+func _apply_relations_updated(data: Dictionary) -> void:
+	var raw: Dictionary = data.get("relations", {})
+	for key: String in raw:
+		relations[key] = {"stance": str(raw[key])}
+
+
 # ── Getters ──────────────────────────────────────────────────────────────────
 
 func get_phase() -> String:

@@ -132,6 +132,18 @@ complexity (~11 km), dense/complex (~7.5 km). Each node stores `cover_combat` an
 `edge_cost = base_cost × division_movement_profile[terrain]`. Impassable terrain
 (`profile_cost == INF`) is excluded from the search entirely.
 
+**Synthetic goal (pixel-perfect destination):** The client inserts a temporary `_synthetic_goal`
+node at the exact click position before routing, connected to the K=8 nearest non-neutral
+waypoints. A* routes to this node, then the path is post-processed to replace it with the
+original waypoint ID. The exact click coordinates are preserved as `_dr_final_goal` for the
+dead reckoning last mile.
+
+**Neutral territory exclusion:** Both forward and backward A* neighbor expansions exclude
+nodes belonging to nations the player is not at war with (`_is_neutral_for`). Only
+`stance: "war"` allows passage; neutral, allied, and absent relations all block routing.
+The target node itself is exempt — the search must be able to reach it.
+See `docs/PATHFINDING.md` for the full relation-stance resolution table.
+
 **Two-phase routing:** Pathfinding runs an off-road purity pre-check, then a road entry
 pre-check (route to the nearest road node, then road-only to goal). Only if both fail
 does it fall back to the full unified graph. This is explicit routing logic, not just
@@ -148,9 +160,26 @@ this — if a road naturally lies between waypoints, the normal algorithm is use
 **River crossing:** Edges crossing a river LineString are flagged at pipeline time with
 a multiplier (minor 1.8×, moderate 3.0×, major 4.5×). Road crossings (bridges) exempt.
 
-**Server validation:** The client submits the ordered waypoint list. The server validates
-each step against the division's server-side movement profile and the authoritative graph.
-Invalid paths are rejected and the client receives a correction.
+**HPA* cluster abstraction:** The pipeline partitions waypoints into province-based clusters
+and pre-computes border-crossing costs. Client-side HPA* search runs a cheap abstract-graph
+Dijkstra first, then full-precision A* only within the clusters the abstract path crosses.
+Synthetic goal targets bypass HPA* (not in cluster data) and fall through to flat A*.
+
+**Path smoothing:** A centripetal Catmull-Rom spline is fit through the string-pulled
+waypoint list client-side, producing smooth heading transitions at turns. Deviation from
+the original polyline is clamped to ~750m to prevent cutting across blocked terrain.
+
+**Server validation:** The client submits the ordered waypoint list plus `final_lng`/`final_lat`
+(the exact click position). The server validates each waypoint step against the division's
+server-side movement profile and the authoritative graph. After all waypoints are consumed,
+the server advances toward `final_position_lng/lat` in `_advanceFinalPosition()` using the
+same terrain-speed formula as the client's last-mile DR. Invalid paths are rejected and the
+client receives a correction.
+
+**Consumed waypoint tracking:** The server broadcasts `consumed_waypoint_ids` each tick.
+The client trims its local DR order by matching consumed IDs from the front. When the
+client's DR is ahead of the server, a suffix-match comparison prevents unnecessary resets
+(see `docs/PATHFINDING.md` — Dead Reckoning).
 
 ---
 

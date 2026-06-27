@@ -100,9 +100,16 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           nation.player_id = "";
           nation.is_ready = false;
           break;
-        }
       }
     }
+    // Broadcast to all clients using colon-separated key (matches client's _is_neutral_for)
+    const relationsPayload: Record<string, string> = {};
+    for (const [, rel] of this.state.relations) {
+      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
+      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;  // both directions
+    }
+    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
+  }
 
     if (this.hostSessionId === client.sessionId && this.state.players.size > 0) {
       this.hostSessionId = this.state.players.keys().next().value ?? "";
@@ -201,7 +208,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.endGame("");
   }
 
-  private handleSubmitMoveOrder(client: Client, msg: { division_id?: string; waypoints?: string[] }) {
+  private handleSubmitMoveOrder(client: Client, msg: { division_id?: string; waypoints?: string[]; final_lng?: number; final_lat?: number }) {
     if (this.state.phase !== "running") return;
     const divisionId = msg.division_id ?? "";
     const waypoints = msg.waypoints ?? [];
@@ -240,6 +247,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     for (const wpId of allowedWaypoints) {
       division.move_order.push(wpId);
     }
+
+    // Store exact click target for last-mile advancement (-999 = none)
+    division.final_position_lng = (typeof msg.final_lng === "number") ? msg.final_lng : -999;
+    division.final_position_lat = (typeof msg.final_lat === "number") ? msg.final_lat : -999;
   }
 
   private handleHold(client: Client, msg: { division_id?: string }) {
@@ -385,6 +396,12 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
     this._initRelations();
+    const relationsPayload: Record<string, string> = {};
+    for (const [, rel] of this.state.relations) {
+      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
+      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;
+    }
+    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
 
     // Spawn all divisions
     this.spawnDivisions();
@@ -522,6 +539,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       observation_radius: div.observation_radius,
       engagement_radius: div.engagement_radius,
       move_order: [...div.move_order],
+      consumed_waypoint_ids: [...div.consumed_waypoint_ids],
+      final_position_lng: div.final_position_lng,
+      final_position_lat: div.final_position_lat,
       reposition_order: [...div.reposition_order],
       stack_id: div.stack_id,
       stack_position: div.stack_position,

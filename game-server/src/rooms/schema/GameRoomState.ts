@@ -38,6 +38,9 @@ export class DivisionState extends Schema {
   @type("number") stack_position: number = 0;   // 0 = front of stack
   @type("string") attacker_role: string = "";   // "attacker"|"defender"|"meeting"|""
   @type(["string"]) engaged_with = new ArraySchema<string>(); // division IDs
+  @type(["string"]) consumed_waypoint_ids: string[] = []; // waypoints consumed on this tick
+  @type("number") final_position_lng: number = -999; // exact click target (-999 = none)
+  @type("number") final_position_lat: number = -999;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

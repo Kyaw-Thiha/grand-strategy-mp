@@ -688,7 +688,7 @@ dedicated anti-stealth units are present.
 
 **Both divisions' terrain is sampled, not just the defender's.** When combat initiates, the
 server reads each division's own province `terrain_elevation` and `terrain_cover` fields from
-`map_data.json` — pre-computed O(1) lookups, not per-pixel sampling at runtime. This is a
+`map_data.json` — Combat samples terrain per-pixel at sub-province resolution at each tick, reading against the cover/elevation raster at the division's live position. This is a
 change from treating the defender's terrain as the sole input: elevation and cover are no
 longer combined into a single defender-bonus/attacker-penalty pair. Instead, each bonus type
 follows one of two distinct rules, depending on what it represents physically:

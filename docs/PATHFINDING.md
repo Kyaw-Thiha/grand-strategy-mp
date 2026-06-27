@@ -3,7 +3,7 @@
 > Technical reference for the pathfinding system as implemented.
 > For design intent and UX decisions see `STRATEGIC_COMBAT.md`.
 > Source files: `map/tools/map_pipeline/pipeline.py`, `client/src/systems/military/pathfinder.gd`,
-> `client/src/systems/military/military_system.gd`.
+> `client/src/systems/military/military_system.gd`, `game-server/src/systems/movement_system.ts`.
 
 ---
 
@@ -120,6 +120,95 @@ terrain at 1.0+/deg, but this phase has no explicit road-snapping guarantee.
 
 ---
 
+## Synthetic Goal — Pixel-Perfect Destination
+
+By default A* routes to the nearest waypoint from the click position. For pixel-perfect
+destination, the client inserts a **synthetic goal** node at the exact click coordinates
+before routing.
+
+### Insertion (`pathfinder.gd:_insert_synthetic_goal`)
+
+A temporary node `_synthetic_goal` is added to `_nodes` at `(goal_lng, goal_lat)` with
+`cover_combat: "plains"`, `elevation: "flat"`. It is connected to the K=8 nearest
+non-neutral waypoint nodes via bidirectional terrain-cost edges.
+
+**Two-pass connection:**
+1. Collect K nearest nodes where `_is_neutral_for()` returns false (non-neutral)
+2. If zero non-neutral nodes are found within the entire graph, the synthetic goal
+   remains unconnected — no path to it is possible. This is correct: clicking in
+   or near neutral territory should fail to find a route.
+
+**Neutral filter rationale:** The A* engine already checks neutrality at
+edge-expansion time (see Neutral Territory Exclusion below). Connecting the synthetic
+goal to neutral nodes would be useless — A* would skip them at search time.
+
+### Removal (`pathfinder.gd:_remove_synthetic_goal`)
+
+After A* completes, `_synthetic_goal` is removed from `_nodes` and `_adjacency`,
+including back-edges from its neighbours. The path is then post-processed:
+`_substitute_synthetic()` replaces all `_synthetic_goal` references with the original
+`to_id` (the nearest waypoint). The exact click position is preserved as `_dr_final_goal`
+for the dead reckoning last mile.
+
+### HPA* bypass
+
+The synthetic goal is never present in the HPA* cluster data (`_cluster_of`). When
+clusters are loaded and a synthetic goal is active, the `_hpa_find_path` call detects
+`to_cluster == ""` and falls through to flat bidirectional A*. No HPA* acceleration
+applies to the synthetic goal routing.
+
+---
+
+## Route-to-Closest-Reachable-Waypoint Fallback (`pathfinder.gd:find_nearest_reachable`)
+
+When the primary `find_path` returns an empty path, the client tries a fallback:
+`find_nearest_reachable()` sorts all nodes by Euclidean distance to the click position,
+skips `SYNTHETIC_GOAL_ID`, and attempts `find_path` to each of the top
+`MAX_FALLBACK_CANDIDATES = 5` nodes. Returns the first candidate that produces a
+non-empty path, or `""` if none work.
+
+This handles cases where the click position's nearest waypoint is impassable (e.g.
+clicked in a lake or glacier) but a slightly more distant waypoint is reachable.
+
+---
+
+## Neutral Territory Exclusion
+
+### Client-side A* (`pathfinder.gd:_is_neutral_for`)
+
+The `_is_neutral_for(node_id, player_nation_id, relations)` function checks whether a
+waypoint node belongs to a nation the player is not at war with:
+
+```
+is_neutral_for(node_id, player_nation_id, relations):
+    if player_nation_id is empty → false (no one to be neutral toward)
+    if node.nation_id is null or same as player_nation_id → false (own or unclaimed)
+    if relations is empty → false (cold start — no data yet, fail open)
+    key = player_nation_id + ":" + node.nation_id
+    if relations has key:
+        stance = relations[key].stance
+        return stance != "war"  # only war stance allows passage
+    return true  # nation absent from relations → treat as neutral (blocked)
+```
+
+**In `_astar_impl`:** both forward and backward neighbor expansions check
+`if v != to_id and _is_neutral_for(v, player_nation_id, relations): continue`.
+The target node (`to_id`) is exempt — the search must be able to reach it even if
+it lies in neutral territory. Synthetic goals at click positions bypass this by
+having `nation_id: null` (never flagged as neutral).
+
+**Relations data source:** `RELATIONS_UPDATED` is broadcast at game start and on
+diplomatic changes. The client stores it in `GameState.relations`. The pathfinder
+receives a snapshot at each `find_path` call.
+
+### Server-side (`game-server/src/systems/movement_system.ts`)
+
+The server mirrors the same logic in `_isNeutralFor()` for path validation and
+`trimToAllowedTerritory()` for move order processing (see Territory Movement
+Restriction in `STRATEGIC_COMBAT.md`).
+
+---
+
 ## String-Pulling (`pathfinder.gd` lines 358–397)
 
 Post-processes the raw A* waypoint list to remove redundant intermediate nodes:
@@ -181,6 +270,11 @@ crossed when terrain is impassable — they are just not actively sought.
 
 ## Hierarchical Layer (HPA*-style abstraction)
 
+> **Status:** Pipeline cluster generation is implemented. Client-side HPA* routing is
+> code-complete but the synthetic goal bypass (to_cluster is always empty) means flat A*
+> is used for all right-click moves. HPA* only activates for non-synthetic targets
+> (group move offset positions).
+
 **Problem this solves:** the unified graph (road nodes at ~750m spacing plus the 3-tier
 terrain grid at 7.5–22km spacing) gives the precision needed for combat-relevant terrain
 decisions, but a full bidirectional A* search across the *entire* graph for a long-distance
@@ -210,45 +304,171 @@ full-detail graph.
 3. Stitch the per-cluster detailed segments together at the border-crossing nodes the
    abstract search already identified.
 
-**Why this resolves the speed/precision tradeoff rather than compromising between the two:**
-a short move within a single cluster barely touches the abstract layer and runs close to
-today's speed already (clusters are not large). A long move across many clusters becomes
-fast because the expensive part — searching the full-detail graph — only happens inside a
-handful of clusters near the path's start, end, and any clusters the abstract route
-genuinely passes through, instead of across the entire map's node count. No terrain detail
-is lost anywhere a player is actually making a tactical decision; the graph itself never
-changes.
-
-**Expected gain, from published results on the equivalent technique:** independent
-benchmarks of refined HPA*-style approaches report computation time reduced by over 95%
-compared to plain A* on large maps, with total path cost deviating from the true optimum by
-well under 1% — the abstraction cost is negligible relative to the speed gained.
-
-**Precompute cost:** the per-cluster border-crossing cache is generated once at pipeline
-time, alongside the existing waypoint graph generation step — no new runtime cost beyond
-the (much cheaper) two-stage query described above. Re-running the pipeline after any map
-edit regenerates the cache the same way it already regenerates the waypoint graph.
-
 ---
 
-## Dead Reckoning (`military_system.gd` lines 418–477)
+## Dead Reckoning (`military_system.gd`)
 
 The client drives unit animation entirely from the validated waypoint list. No server
-acknowledgement is awaited per waypoint.
+acknowledgement is awaited per waypoint — DR runs at 60fps from the client's local order
+queue.
 
-**Speed formula (mirrors `movement_system.ts` exactly):**
+### Speed formula (mirrors `movement_system.ts` exactly)
 
 ```
 road node:    DR_ROAD_KMH   = 60.0 km/h
 off-road:     DR_OFFROAD_KMH / terrain_cost  (DR_OFFROAD_KMH = 20.0)
 conversion:   DR_KM_PER_DEG = 111.0 km/deg
+advance/frame = (kmh / DR_KM_PER_DEG) × GameState.game_speed × delta
 ```
 
-**Server corrections:**
-- `division_updated` from Colyseus state: trim local waypoint order when server has consumed
-  leading waypoints; re-seed from server position if leading waypoint diverges (reroute)
-- Foreign units (other players) use the same DR loop — see `FOREIGN_UNIT_PATH_DR` flag in
-  `military_system.gd` to toggle back to legacy lerp mode for performance testing
+A speed multiplier `_dr_speed_mult` is applied per division:
+- Normal movement: 1.0×
+- Reposition (in-combat): 0.30× (matches server's `REPOSITION_SPEED`)
+
+### Waypoint consumption
+
+`_advance_dr()` processes the front of `_dr_order` each frame. When distance to the
+next waypoint falls below `DR_SNAP_DEG = 0.0001°` (~11 m), the waypoint is consumed
+and popped from the queue. Leftover delta time is carried forward recursively through
+the next waypoint, allowing multiple waypoints to be consumed in a single frame at
+high game speeds.
+
+### Last-mile — final goal advancement
+
+When the last waypoint is consumed and `_dr_final_goal` is set (the exact click
+position), DR enters the **last mile** phase. Rather than stopping at the last
+waypoint, `_advance_dr_last_mile()` advances the icon frame-by-frame toward the
+exact click position:
+
+1. Each frame, compute distance remaining to `_dr_final_goal`
+2. If within `DR_SNAP_DEG` → snap to final position, erase `_dr_final_goal`,
+   set `_target_positions`, park icon with `set_moving(false)`
+3. Otherwise → compute speed from **weighted average** of last-waypoint speed
+   and destination terrain speed
+
+**Weighted speed formula:**
+
+```
+base_speed:
+  if last_waypoint was a road node → DR_ROAD_KMH (60)
+  else                           → DR_OFFROAD_KMH / last_waypoint_terrain_cost
+
+dest_speed:
+  DR_OFFROAD_KMH / synthetic_goal_terrain_cost   (always "plains_flat" = 1.0)
+
+final_speed = (base_speed + dest_speed) × 0.5
+```
+
+This averaging eliminates the speed discontinuity when the unit arrives at the
+last waypoint via road (60 km/h) and transitions to off-road last mile (20 km/h).
+The resulting speed of (60 + 20) / 2 = 40 km/h is a smooth deceleration rather
+than a jarring 3× slowdown.
+
+**`_target_positions` synchronisation:** After each last-mile step,
+`_target_positions[div_id]` is updated to match the icon's current position.
+This prevents the `_process` else-branch from lerping the icon back to a stale
+position when `_dr_order` is empty but `_dr_final_goal` is still active.
+
+**Visual path:** During the last mile, `_update_division_route()` appends the
+final goal position as a visual endpoint to the route overlay, so the player sees
+the complete path including the last leg.
+
+### Server corrections
+
+`_on_division_updated()` handles Colyseus state patches for each division:
+
+**Consumed waypoint trimming:**
+The server broadcasts `consumed_waypoint_ids` each tick. The client trims its local
+`_dr_order` by checking if the first element matches each consumed ID:
+
+```
+for cid in consumed_waypoint_ids:
+    if local_order is not empty and cid == local_order[0]:
+        pop front
+_dr_order[div_id] = local_order
+```
+
+**Client-ahead detection (suffix match):**
+When the client's DR has consumed waypoints faster than the server, the consumed
+IDs may not match the client's `local_order` front. A suffix match is used instead:
+
+```
+if local_order is not empty and local_order.size <= str_order.size:
+    str_tail = str_order.slice(str_order.size - local_order.size)
+    if local_order == str_tail:
+        # Client is ahead but on the same route — advance position forward
+        # to match the server's last consumed waypoint
+    else:
+        # Real divergence — full reset to server position
+```
+
+This prevents the client from snapping backward when DR simply outpaced server
+consumption. Only real route changes (server rerouted) trigger a full reset.
+
+**`at_final_goal` guard:**
+When `local_order` is empty and `_dr_final_goal` is active (client in last mile),
+the handler returns early — the server still has final_position_lng set. When the
+server clears `final_position_lng` (arrived at its own final destination), the
+client syncs its `_target_positions` to the server's position, which should
+match the client's already-arrived icon position (no visual snap).
+
+### `_process` dispatch
+
+The `_process` loop decides per frame whether to call `_advance_dr`:
+
+```
+if _dr_order has div_id and (not _dr_order[div_id] is empty or _dr_final_goal has div_id):
+    _advance_dr(div_id, delta)
+    _update_division_route(div_id)
+else:
+    lerp icon toward _target_positions
+```
+
+This ensures `_advance_dr` is called even when `_dr_order` is empty, as long as
+`_dr_final_goal` is still active (last-mile phase). Without the `_dr_final_goal`
+check, the `else` branch would lerp the icon back to a stale `_target_positions`
+on every frame after the last waypoint is consumed.
+
+---
+
+## Thread Safety
+
+Pathfinding runs in a separate `Thread` to avoid blocking the main game loop. The
+thread calls `_pathfinder.find_path()`, which previously mutated shared state via
+`_insert_synthetic_goal()` / `_remove_synthetic_goal()`. Two concurrent threads
+mutating the same GDScript Dictionary causes hash table corruption.
+
+### Generation counter (`_path_gen`)
+
+Each move request increments `_path_gen`. The deferred callback (`_on_direct_move_ready`,
+`_on_segment_ready`) receives the generation ID and discards stale results:
+
+```
+if gen != _path_gen: return
+```
+
+This prevents a callback from a cancelled thread (e.g. user pressed ESC) from
+overwriting state set by a newer request.
+
+### Synthetic goal lifecycle on main thread
+
+`_insert_synthetic_goal()` is called on the main thread **before** the thread
+starts. The thread calls `find_path()` with `_skip_synthetic_lifecycle = true`,
+which skips all insert/remove calls and performs a read-only A* search.
+`_remove_synthetic_goal()` is called in `_on_direct_move_ready()` on the main
+thread after the thread completes.
+
+### `_clear_pending` waits for thread
+
+`_clear_pending()` calls `_path_thread.wait_to_finish()` before clearing any
+state, preventing a second thread from spawning while the first is still running.
+
+### Read-only A* during fallback
+
+`find_nearest_reachable()` skips `SYNTHETIC_GOAL_ID` in its candidate iteration
+to prevent routing to the temporary node. When called from the thread with
+`_skip_synthetic_lifecycle`, the fallback `find_path` calls use the flag to
+skip lifecycle management.
 
 ---
 
