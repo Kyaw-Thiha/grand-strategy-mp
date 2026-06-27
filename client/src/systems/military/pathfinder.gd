@@ -139,19 +139,20 @@ func _insert_synthetic_goal(goal_lng: float, goal_lat: float,
 	}
 	_adjacency[SYNTHETIC_GOAL_ID] = []
 	var K := 8
-	var candidates: Array = []
+	var non_neutral: Array = []
 	for nid in _nodes:
 		if nid == SYNTHETIC_GOAL_ID or str(nid).begins_with("_spline"):
 			continue
-		if not player_nation_id.is_empty() and _is_neutral_for(str(nid), player_nation_id, relations):
-			continue  # bidirectional A* backward search must not get stuck on neutral neighbors
 		var n: Dictionary = _nodes[nid]
 		var ddx := float(n["lng"]) - goal_lng
 		var ddy := float(n["lat"]) - goal_lat
-		candidates.append([ddx*ddx + ddy*ddy, nid])
-	candidates.sort()
-	for i in range(min(K, candidates.size())):
-		var nb_id: String = candidates[i][1]
+		var sq := ddx*ddx + ddy*ddy
+		if player_nation_id.is_empty() or not _is_neutral_for(str(nid), player_nation_id, relations):
+			non_neutral.append([sq, nid])
+	non_neutral.sort()
+	var to_connect: Array = non_neutral.slice(0, min(K, non_neutral.size()))
+	for entry: Array in to_connect:
+		var nb_id: String = entry[1]
 		var nb: Dictionary = _nodes[nb_id]
 		var ddx := float(nb["lng"]) - goal_lng
 		var ddy := float(nb["lat"]) - goal_lat
@@ -263,7 +264,8 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		player_nation_id: String = "",
 		relations: Dictionary = {},
 		goal_lng: float = INF,
-		goal_lat: float = INF) -> Dictionary:
+		goal_lat: float = INF,
+		_skip_synthetic_lifecycle: bool = false) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
 		return { "logical": [], "visual": [] }
 	if from_id == to_id:
@@ -271,26 +273,23 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
 		return { "logical": [], "visual": [] }
 
-	# If exact click coordinates provided, insert synthetic goal at that position
-	# and route to it instead of the nearest pre-baked node
 	var actual_to_id: String = to_id
 	var has_synthetic: bool = false
 	if goal_lng != INF and goal_lat != INF:
-		_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
+		if not _skip_synthetic_lifecycle:
+			_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
+			has_synthetic = true
 		actual_to_id = SYNTHETIC_GOAL_ID
-		has_synthetic = true
 
-	# HPA* delegation: if clusters are loaded, try hierarchical search
 	if _clusters_loaded:
 		var goal_node: Dictionary = _nodes.get(actual_to_id, {})
 		if not goal_node.is_empty():
 			var hpa_result: Array = _hpa_find_path(from_id, actual_to_id, movement_profile,
 				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
-				road_cost_multiplier, player_nation_id, relations)
+				road_cost_multiplier, player_nation_id, relations, _skip_synthetic_lifecycle)
 			if not hpa_result.is_empty():
-				return _finalize_path(hpa_result, movement_profile, has_synthetic, to_id)
+				return _finalize_path(hpa_result, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
-	# Off-road purity pre-check: when both endpoints are off-road, run A* once to see
 	if not _road_nodes.has(from_id) and not _road_nodes.has(actual_to_id):
 		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 		var has_road := false
@@ -299,24 +298,22 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 				has_road = true
 				break
 		if not offroad_path.is_empty() and not has_road:
-			return _finalize_path(offroad_path, movement_profile, has_synthetic, to_id)
+			return _finalize_path(offroad_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
-	# Phase 1: road entry pre-check.
 	if _road_nodes.has(from_id):
 		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 		if not road_path.is_empty():
-			return _finalize_path(road_path, movement_profile, has_synthetic, to_id)
+			return _finalize_path(road_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 	else:
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
 			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 			if not seg1.is_empty() and not seg2.is_empty():
-				return _finalize_path(_join_segments(seg1, seg2), movement_profile, has_synthetic, to_id)
+				return _finalize_path(_join_segments(seg1, seg2), movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
-	# Phase 2: full A* across the entire graph
 	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-	return _finalize_path(path, movement_profile, has_synthetic, to_id)
+	return _finalize_path(path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 
 func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
@@ -325,6 +322,8 @@ func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
 		relations: Dictionary = {}) -> String:
 	var candidates: Array = []
 	for node_id: String in _nodes:
+		if node_id == SYNTHETIC_GOAL_ID:
+			continue
 		var n: Dictionary = _nodes[node_id]
 		var dx: float = float(n["lng"]) - near_lng
 		var dy: float = float(n["lat"]) - near_lat
@@ -347,8 +346,8 @@ func _build_path_result(raw_path: Array, movement_profile: Dictionary) -> Dictio
 	return { "logical": logical, "visual": visual }
 
 
-func _finalize_path(raw_path: Array, movement_profile: Dictionary, has_synthetic: bool, original_to_id: String) -> Dictionary:
-	if has_synthetic:
+func _finalize_path(raw_path: Array, movement_profile: Dictionary, has_synthetic: bool, original_to_id: String, _skip_synthetic_lifecycle: bool = false) -> Dictionary:
+	if has_synthetic and not _skip_synthetic_lifecycle:
 		_remove_synthetic_goal()
 	var result: Dictionary = _build_path_result(raw_path, movement_profile)
 	if has_synthetic:
@@ -721,8 +720,10 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 		goal_lng: float, goal_lat: float,
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> Array:
-	_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
+		relations: Dictionary = {},
+		_skip_synthetic_lifecycle: bool = false) -> Array:
+	if not _skip_synthetic_lifecycle:
+		_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
 
 	var from_cluster: String = _cluster_of.get(from_id, "")
 	var to_cluster: String = _cluster_of.get(SYNTHETIC_GOAL_ID, "")
@@ -730,14 +731,16 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	# If same cluster or clusters not found, fall back
 	if from_cluster.is_empty() or to_cluster.is_empty() or from_cluster == to_cluster:
 		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-		_remove_synthetic_goal()
+		if not _skip_synthetic_lifecycle:
+			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
 
 	# Abstract search: Dijkstra over abstract graph
 	var abstract_path: Array = _abstract_dijkstra(from_cluster, to_cluster)
 	if abstract_path.is_empty():
 		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-		_remove_synthetic_goal()
+		if not _skip_synthetic_lifecycle:
+			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
 
 	# For each cluster in the abstract path, run A* restricted to that cluster's border nodes
@@ -758,7 +761,8 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 		all_path_nodes.append(SYNTHETIC_GOAL_ID)
 
 	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-	_remove_synthetic_goal()
+	if not _skip_synthetic_lifecycle:
+		_remove_synthetic_goal()
 	return _substitute_synthetic(stitched, to_id)
 
 

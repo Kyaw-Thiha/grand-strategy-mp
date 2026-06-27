@@ -208,7 +208,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.endGame("");
   }
 
-  private handleSubmitMoveOrder(client: Client, msg: { division_id?: string; waypoints?: string[] }) {
+  private handleSubmitMoveOrder(client: Client, msg: { division_id?: string; waypoints?: string[]; final_lng?: number; final_lat?: number }) {
     if (this.state.phase !== "running") return;
     const divisionId = msg.division_id ?? "";
     const waypoints = msg.waypoints ?? [];
@@ -247,6 +247,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     for (const wpId of allowedWaypoints) {
       division.move_order.push(wpId);
     }
+
+    // Store exact click target for last-mile advancement (-999 = none)
+    division.final_position_lng = (typeof msg.final_lng === "number") ? msg.final_lng : -999;
+    division.final_position_lat = (typeof msg.final_lat === "number") ? msg.final_lat : -999;
   }
 
   private handleHold(client: Client, msg: { division_id?: string }) {
@@ -536,6 +540,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       engagement_radius: div.engagement_radius,
       move_order: [...div.move_order],
       consumed_waypoint_ids: [...div.consumed_waypoint_ids],
+      final_position_lng: div.final_position_lng,
+      final_position_lat: div.final_position_lat,
       reposition_order: [...div.reposition_order],
       stack_id: div.stack_id,
       stack_position: div.stack_position,

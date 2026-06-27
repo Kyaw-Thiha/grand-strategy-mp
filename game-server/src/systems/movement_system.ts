@@ -306,12 +306,19 @@ export class MovementSystem {
     const speedMult = state.game_speed;
 
     for (const division of state.divisions.values()) {
-      if (division.move_order.length === 0) continue;
+      const hasFinalPos = division.final_position_lng > -998;
+      if (division.move_order.length === 0 && !hasFinalPos) continue;
       if (division.combat_state === "engaged" || division.combat_state === "suppressed") continue;
 
       // Reset consumed_waypoint_ids before each tick
       division.consumed_waypoint_ids.splice(0, division.consumed_waypoint_ids.length);
-      this._advanceDivision(division, speedMult);
+      if (division.move_order.length > 0) {
+        this._advanceDivision(division, speedMult);
+      }
+      // After waypoints exhausted, advance to exact click target if set
+      if (division.move_order.length === 0 && division.final_position_lng > -998) {
+        this._advanceFinalPosition(division, speedMult);
+      }
     }
 
     // Secondary loop: process reposition movement for engaged/suppressed divisions
@@ -393,6 +400,65 @@ export class MovementSystem {
       division.position_lat += dy * ratio;
       // No waypoint consumed this call — pre-tick reset already cleared the array.
     }
+  }
+
+  private _advanceFinalPosition(division: DivisionState, speedMult: number): void {
+    const dx = division.final_position_lng - division.position_lng;
+    const dy = division.final_position_lat - division.position_lat;
+    const distDeg = Math.sqrt(dx * dx + dy * dy);
+
+    if (distDeg < 0.0001) {
+      division.position_lng = division.final_position_lng;
+      division.position_lat = division.final_position_lat;
+      division.final_position_lng = -999;
+      division.final_position_lat = -999;
+      return;
+    }
+
+    // Use nearest graph node's terrain type to determine last-mile speed
+    const nearestId = this._findNearestNode(division.position_lng, division.position_lat);
+    const nearestNode = nearestId !== null ? this.graph.nodes.get(nearestId) : undefined;
+    let kmh = OFFROAD_SPEED_KMH;
+    if (nearestNode) {
+      if (this.graph.road_node_ids.has(nearestId!)) {
+        kmh = ROAD_SPEED_KMH;
+      } else {
+        const profile = this._getProfile(division);
+        const terrainKey = `${nearestNode.cover_combat}_${nearestNode.elevation}`;
+        const cost = profile[terrainKey] ?? 1.0;
+        if (!isFinite(cost) || cost <= 0) {
+          // Impassable — abort final position
+          division.final_position_lng = -999;
+          division.final_position_lat = -999;
+          return;
+        }
+        kmh = OFFROAD_SPEED_KMH / cost;
+      }
+    }
+
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult;
+    if (advanceDeg >= distDeg) {
+      division.position_lng = division.final_position_lng;
+      division.position_lat = division.final_position_lat;
+      division.final_position_lng = -999;
+      division.final_position_lat = -999;
+    } else {
+      const ratio = advanceDeg / distDeg;
+      division.position_lng += dx * ratio;
+      division.position_lat += dy * ratio;
+    }
+  }
+
+  private _findNearestNode(lng: number, lat: number): string | null {
+    let bestId: string | null = null;
+    let bestDist = Infinity;
+    for (const [id, node] of this.graph.nodes) {
+      const dx = node.lng - lng;
+      const dy = node.lat - lat;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; bestId = id; }
+    }
+    return bestId;
   }
 
   private _advanceReposition(division: DivisionState, speedMult: number): void {
