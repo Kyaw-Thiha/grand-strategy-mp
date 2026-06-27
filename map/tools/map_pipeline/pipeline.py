@@ -15,6 +15,7 @@ import math
 import shutil
 import sys
 import warnings
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -1100,15 +1101,17 @@ def generate_nonuniform_terrain_grid(
 def insert_boundary_nodes(
     sources: dict,
     existing_wp: dict,
-    boundary_sample_deg: float = 0.007,
+    boundary_sample_deg: float = 1.0,
 ) -> tuple[list[dict], list[dict]]:
     """
     Insert nodes along every terrain-category boundary (cover or elevation changes).
     Two nodes per sample point: one offset to each side of the boundary.
     ID prefix: bn_
-    """
-    import math
 
+    Performance: dissolves individual polygons by type before boundary detection,
+    reducing O(n^2) polygon-pair checks to O(k^2) type-pair checks (~55 pairs for
+    11 cover types vs. 72M pairs for 12k individual polygons).
+    """
     BOUNDARY_OFFSET_DEG = 0.0001   # ~11m perpendicular offset
     K_CONNECT = 8                  # max neighbours per new node (matches K_TERRAIN)
 
@@ -1197,34 +1200,36 @@ def insert_boundary_nodes(
                 current -= seg_len
         return coords
 
-    # Collect all boundary points from cover and elevation polygon pairs
+    # Collect all boundary points from cover and elevation type boundaries.
+    #
+    # PERFORMANCE NOTE: Do NOT iterate individual polygon pairs (O(n^2) with 12k polys
+    # -> 767k+ sample points, pipeline timeout). Instead dissolve by type first so we
+    # only check O(k^2) type-pair boundaries (~11 cover types -> 55 pairs).
     bn_samples: list[tuple[float, float]] = []
 
-    # Cover boundaries
-    for i, (g_a, f_a) in enumerate(zip(cover_geoms, cover_feats)):
-        for j in cover_tree.query(g_a, predicate="intersects"):
-            if j <= i:
-                continue
-            g_b = cover_geoms[j]
-            f_b = cover_feats[j]
-            if f_a["properties"].get("cover_combat") == f_b["properties"].get("cover_combat"):
-                continue
-            pts = _sample_boundary(g_a, g_b)
-            for lng, lat in pts:
-                bn_samples.append((lng, lat))
+    # Cover boundaries — dissolve per cover_combat type, then find type-pair boundaries
+    cover_by_type: dict[str, list] = defaultdict(list)
+    for g, f in zip(cover_geoms, cover_feats):
+        cover_by_type[f["properties"].get("cover_combat", "plains")].append(g)
+    cover_dissolved = {ct: unary_union([g.buffer(0) for g in geoms]) for ct, geoms in cover_by_type.items()}
+    cover_types = list(cover_dissolved.keys())
+    print(f"  boundary nodes: dissolving {len(cover_geoms)} cover polys into {len(cover_types)} types")
+    for i in range(len(cover_types)):
+        for j in range(i + 1, len(cover_types)):
+            pts = _sample_boundary(cover_dissolved[cover_types[i]], cover_dissolved[cover_types[j]])
+            bn_samples.extend(pts)
 
-    # Elevation boundaries
-    for i, (g_a, f_a) in enumerate(zip(elev_geoms, elev_feats)):
-        for j in elev_tree.query(g_a, predicate="intersects"):
-            if j <= i:
-                continue
-            g_b = elev_geoms[j]
-            f_b = elev_feats[j]
-            if (_get_elev_type(f_a["properties"]) == _get_elev_type(f_b["properties"])):
-                continue
-            pts = _sample_boundary(g_a, g_b)
-            for lng, lat in pts:
-                bn_samples.append((lng, lat))
+    # Elevation boundaries — same dissolve-first approach
+    elev_by_type: dict[str, list] = defaultdict(list)
+    for g, f in zip(elev_geoms, elev_feats):
+        elev_by_type[_get_elev_type(f["properties"]) or "flat"].append(g)
+    elev_dissolved = {et: unary_union([g.buffer(0) for g in geoms]) for et, geoms in elev_by_type.items()}
+    elev_types = list(elev_dissolved.keys())
+    print(f"  boundary nodes: dissolving {len(elev_geoms)} elev polys into {len(elev_types)} types")
+    for i in range(len(elev_types)):
+        for j in range(i + 1, len(elev_types)):
+            pts = _sample_boundary(elev_dissolved[elev_types[i]], elev_dissolved[elev_types[j]])
+            bn_samples.extend(pts)
 
     print(f"  boundary nodes: {len(bn_samples)} raw sample points")
 
