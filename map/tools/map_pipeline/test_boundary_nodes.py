@@ -111,3 +111,20 @@ def test_nation_id_on_boundary_nodes():
     for n in nodes:
         assert "nation_id" in n, f"Node {n['id']} missing nation_id key"
         assert n["nation_id"] == "testland", f"Expected 'testland', got {n['nation_id']}"
+
+
+def test_dissolve_scales_with_type_count_not_polygon_count():
+    """100 alternating-type polys must not explode sample count (dissolve check)."""
+    import time
+    feats = []
+    for i in range(50):
+        x0 = i * 0.04
+        x1 = x0 + 0.02
+        feats.append(_cover_feat([(x0,0),(x1,0),(x1,1),(x0,1),(x0,0)], "plains"))
+        feats.append(_cover_feat([(x0+0.02,0),(x1+0.02,0),(x1+0.02,1),(x0+0.02,1),(x0+0.02,0)], "dense_forest"))
+    sources = {"cover": feats, "elevation": [], "base_water": [], "provinces": []}
+    t0 = time.time()
+    nodes, edges = insert_boundary_nodes(sources, _empty_wp())
+    elapsed = time.time() - t0
+    assert elapsed < 3.0, f"Dissolve took {elapsed:.1f}s — likely still using polygon-pair iteration"
+    assert len(nodes) > 0
