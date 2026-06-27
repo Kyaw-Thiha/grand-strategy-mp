@@ -86,6 +86,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"REAR_ATTACK":
 			EventBus.rear_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
 
+		"RELATIONS_UPDATED":
+			GameState._apply_relations_updated(data)
+
 		"MOVE_ORDER_REJECTED":
 			EventBus.notification_requested.emit(
 				"Move rejected: " + data.get("reason", "unknown"), "error"

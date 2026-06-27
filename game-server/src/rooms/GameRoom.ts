@@ -100,9 +100,16 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           nation.player_id = "";
           nation.is_ready = false;
           break;
-        }
       }
     }
+    // Broadcast to all clients using colon-separated key (matches client's _is_neutral_for)
+    const relationsPayload: Record<string, string> = {};
+    for (const [, rel] of this.state.relations) {
+      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
+      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;  // both directions
+    }
+    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
+  }
 
     if (this.hostSessionId === client.sessionId && this.state.players.size > 0) {
       this.hostSessionId = this.state.players.keys().next().value ?? "";
