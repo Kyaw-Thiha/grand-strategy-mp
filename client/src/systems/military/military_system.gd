@@ -80,6 +80,7 @@ var _dr_pos_deg: Dictionary = {}   # div_id -> Vector2(lng, lat) — local simul
 var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local waypoint queue
 var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
 var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0 normal, 0.30 repos)
+var _dr_final_goal: Dictionary = {}   # div_id -> Vector2(lng, lat) of exact click
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -429,6 +430,7 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var path_to_submit: Array[String] = []
 	for waypoint_id: Variant in path:
 		path_to_submit.append(str(waypoint_id))
+	_dr_final_goal[division_id] = Vector2(target_lng, target_lat)
 	_submit_move_order_for_division(division_id, path_to_submit)
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
@@ -727,6 +729,14 @@ func _advance_dr(div_id: String, delta: float) -> void:
 		order.pop_front()
 		_dr_order[div_id] = order
 		if order.is_empty():
+			if _dr_final_goal.has(div_id):
+				var final_goal: Vector2 = _dr_final_goal[div_id]
+				_dr_final_goal.erase(div_id)
+				var icon_node := _icons.get(div_id) as Node2D
+				if icon_node:
+					var final_screen: Vector2 = _map_loader.project_lng_lat(final_goal.x, final_goal.y)
+					var tw := create_tween()
+					tw.tween_property(icon_node, "position", final_screen, 0.3)
 			# DR exhausted — park icon at final waypoint so lerp doesn't pull back to origin.
 			_target_positions[div_id] = _map_loader.project_lng_lat(
 					_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
@@ -825,6 +835,7 @@ func _submit_pending() -> void:
 ## - waypoint_ids: ordered waypoint ids for the server command and local route.
 ## Returns: Nothing.
 func _submit_move_order_for_division(div_id: String, waypoint_ids: Array) -> void:
+	_dr_final_goal.erase(div_id)
 	if waypoint_ids.is_empty():
 		return
 	if not _is_own_unit(div_id):
@@ -1227,6 +1238,7 @@ func _on_division_updated(division_id: String) -> void:
 		_dr_order[division_id] = local_order
 		var updated_lead: String = local_order[0] if not local_order.is_empty() else ""
 		if updated_lead != new_lead:
+			_dr_final_goal.erase(division_id)
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
 			_dr_order[division_id] = str_order
 
