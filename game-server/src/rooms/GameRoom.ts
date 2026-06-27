@@ -6,8 +6,9 @@ import { dirname, join } from "path";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
-import { CombatSystem } from "../systems/combat_system.js";
+import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
+import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
@@ -93,6 +94,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         incapacitated?: boolean;
         stealthed?: boolean;
       }) => {
+        if (_isGridLocked(msg.division_id, this.state)) {
+          console.warn(`[test] SET_CELL rejected — division ${msg.division_id} is grid-locked`);
+          return;
+        }
         const div = this.state.divisions.get(msg.division_id);
         if (!div?.grid) return;
         const cell = div.grid.cells[msg.cell_index];

@@ -13,7 +13,7 @@
     "loadtest": "tsx loadtest/example.ts --room my_room --numClients 2",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "clean": "rimraf build",
-    "test": "NODE_ENV=test mocha -r tsx test/GameRoom.test.ts test/movement-jerk.test.ts --exit --timeout 15000 && NODE_ENV=test mocha -r tsx test/6a-grid-schema.test.ts --exit --timeout 15000 && NODE_ENV=test mocha -r tsx test/6b-perk-extensibility.test.ts --exit --timeout 15000"
+    "test": "NODE_ENV=test mocha -r tsx test/GameRoom.test.ts test/movement-jerk.test.ts --exit --timeout 15000 && NODE_ENV=test mocha -r tsx test/6a-grid-schema.test.ts --exit --timeout 15000 && NODE_ENV=test mocha -r tsx test/6b-perk-extensibility.test.ts --exit --timeout 15000 && NODE_ENV=test mocha -r tsx test/6b-round-system.test.ts --exit --timeout 180000"
   },
   "author": "",
   "license": "UNLICENSED",
