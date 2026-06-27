@@ -281,7 +281,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	# (e.g., mountain bridge), returns empty, or when either endpoint is on a road.
 	# Untyped for loop (no ": String") avoids a Godot 4 thread coercion crash.
 	if not _road_nodes.has(from_id) and not _road_nodes.has(to_id):
-		var offroad_path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier)
+		var offroad_path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 		var has_road := false
 		for wp_id in offroad_path:
 			if _road_nodes.has(wp_id):
@@ -294,7 +294,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	# Phase 1: road entry pre-check.
 	if _road_nodes.has(from_id):
 		# Start is already on a road — try road-only A* first.
-		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true, road_cost_multiplier)
+		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 		if not road_path.is_empty():
 			return _build_path_result(road_path, movement_profile)
 		# Road-only failed (destination off-road) → fall to phase 2.
@@ -302,14 +302,14 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		# Start is off-road — find nearest road node within ROAD_SEARCH_RADIUS.
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
-			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier)
-			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true, road_cost_multiplier)
+			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 			if not seg1.is_empty() and not seg2.is_empty():
 				return _build_path_result(_join_segments(seg1, seg2), movement_profile)
 		# No road nearby or road path failed → fall to phase 2.
 
 	# Phase 2: full A* across the entire graph (natural road preference via costs).
-	var path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier)
+	var path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 	return _build_path_result(path, movement_profile)
 
 
@@ -348,7 +348,9 @@ func _find_nearest_road_node(from_id: String) -> String:
 ## road_only=true skips edges where on_road==false.
 ## road_cost_multiplier scales road edge costs (>1 discourages road use).
 func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
-		road_only: bool, road_cost_multiplier: float = 1.0) -> Array:
+		road_only: bool, road_cost_multiplier: float = 1.0,
+		player_nation_id: String = "",
+		relations: Dictionary = {}) -> Array:
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
@@ -399,6 +401,8 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 					continue
 				if road_only and not edge["on_road"]:
 					continue
+				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
+					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
 					continue
@@ -426,6 +430,8 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 				if closed_b.has(v):
 					continue
 				if road_only and not edge["on_road"]:
+					continue
+				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
 					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
@@ -545,6 +551,21 @@ func _dist(a: Dictionary, b: Dictionary) -> float:
 	var dx := float(a.get("lng", 0.0)) - float(b.get("lng", 0.0))
 	var dy := float(a.get("lat", 0.0)) - float(b.get("lat", 0.0))
 	return sqrt(dx*dx + dy*dy)
+
+
+func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dictionary) -> bool:
+	if player_nation_id.is_empty():
+		return false
+	var node: Dictionary = _nodes.get(node_id, {})
+	var nation = node.get("nation_id", null)
+	if nation == null or str(nation).is_empty() or str(nation) == player_nation_id:
+		return false
+	var key: String = player_nation_id + ":" + str(nation)
+	var rel_entry = relations.get(key, {})
+	if typeof(rel_entry) == TYPE_DICTIONARY:
+		var stance: String = rel_entry.get("stance", "neutral")
+		return stance != "war"
+	return true
 
 
 func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
@@ -667,14 +688,14 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 
 	# If same cluster or clusters not found, fall back
 	if from_cluster.is_empty() or to_cluster.is_empty() or from_cluster == to_cluster:
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 		_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
 
 	# Abstract search: Dijkstra over abstract graph
 	var abstract_path: Array = _abstract_dijkstra(from_cluster, to_cluster)
 	if abstract_path.is_empty():
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 		_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
 
@@ -695,7 +716,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	if not all_path_nodes.has(SYNTHETIC_GOAL_ID):
 		all_path_nodes.append(SYNTHETIC_GOAL_ID)
 
-	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier)
+	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 	_remove_synthetic_goal()
 	return _substitute_synthetic(stitched, to_id)
 
