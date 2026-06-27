@@ -38,7 +38,7 @@ export class DivisionState extends Schema {
   @type("number") stack_position: number = 0;   // 0 = front of stack
   @type("string") attacker_role: string = "";   // "attacker"|"defender"|"meeting"|""
   @type(["string"]) engaged_with = new ArraySchema<string>(); // division IDs
-  @type("string") consumed_waypoint_id: string = ""; // set to the last consumed waypoint ID each tick; "" if none
+  @type(["string"]) consumed_waypoint_ids: string[] = []; // waypoints consumed on this tick
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

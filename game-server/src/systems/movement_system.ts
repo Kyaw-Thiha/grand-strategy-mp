@@ -309,8 +309,8 @@ export class MovementSystem {
       if (division.move_order.length === 0) continue;
       if (division.combat_state === "engaged" || division.combat_state === "suppressed") continue;
 
-      // Reset consumed_waypoint_id before each tick so "" means "nothing consumed this tick".
-      division.consumed_waypoint_id = "";
+      // Reset consumed_waypoint_ids before each tick
+      division.consumed_waypoint_ids.splice(0, division.consumed_waypoint_ids.length);
       this._advanceDivision(division, speedMult);
     }
 
@@ -347,7 +347,7 @@ export class MovementSystem {
     if (distDeg < 0.0001) {
       division.position_lng = nextNode.lng;
       division.position_lat = nextNode.lat;
-      division.consumed_waypoint_id = nextId;
+      division.consumed_waypoint_ids.push(nextId);
       division.move_order.splice(0, 1);
       if (division.move_order.length > 0) {
         this._advanceDivision(division, speedMult);
@@ -378,7 +378,7 @@ export class MovementSystem {
     if (advanceDeg >= distDeg) {
       division.position_lng = nextNode.lng;
       division.position_lat = nextNode.lat;
-      division.consumed_waypoint_id = nextId;
+      division.consumed_waypoint_ids.push(nextId);
       division.move_order.splice(0, 1);
       // Carry leftover budget into the next waypoint — mirrors client _advance_dr logic.
       if (division.move_order.length > 0 && advanceDeg > 0) {
@@ -391,8 +391,7 @@ export class MovementSystem {
       const ratio = advanceDeg / distDeg;
       division.position_lng += dx * ratio;
       division.position_lat += dy * ratio;
-      // No waypoint consumed this call — ensure the field is clear.
-      division.consumed_waypoint_id = "";
+      // No waypoint consumed this call — pre-tick reset already cleared the array.
     }
   }
 

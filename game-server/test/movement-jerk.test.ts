@@ -7,19 +7,19 @@
  * first DIVISION_UPDATES arrived ~1 second after a move order.
  *
  * Assertions:
- *   A. DivisionState has consumed_waypoint_id field (schema check).
- *   B. _advanceDivision sets consumed_waypoint_id to the consumed waypoint ID
+ *   A. DivisionState has consumed_waypoint_ids field (schema check).
+ *   B. _advanceDivision sets consumed_waypoint_ids to the consumed waypoint ID
  *      when a waypoint is snapped/passed through (distDeg < 0.0001).
- *   C. _advanceDivision resets consumed_waypoint_id to "" on ticks where no
+ *   C. _advanceDivision resets consumed_waypoint_ids to [] on ticks where no
  *      waypoint is fully consumed (partial movement).
- *   D. consumed_waypoint_id is annotated with @type("string") so Colyseus
+ *   D. consumed_waypoint_ids is annotated with @type(["string"]) so Colyseus
  *      includes it in schema serialisation.
  *
  * These are pure unit tests — no live server or Colyseus test server needed.
  */
 
 import assert from "assert";
-import { ArraySchema, getStateCallbacks } from "@colyseus/schema";
+import { ArraySchema } from "@colyseus/schema";
 import { DivisionState } from "../src/rooms/schema/GameRoomState.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,13 +48,13 @@ function makeDiv(
   startLng: number,
   startLat: number,
   targetWpId: string,
-  consumedWpId = "",
+  consumedWpIds: string[] = [],
 ): DivisionState {
   const div = new DivisionState();
   div.division_id           = id;
   div.position_lng          = startLng;
   div.position_lat          = startLat;
-  div.consumed_waypoint_id  = consumedWpId;
+  for (const cid of consumedWpIds) div.consumed_waypoint_ids.push(cid);
   div.move_order            = new ArraySchema<string>(targetWpId);
   return div;
 }
@@ -62,33 +62,30 @@ function makeDiv(
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("Phase 1 — movement-jerk regression", () => {
-  it("DivisionState schema includes consumed_waypoint_id field with default ''", () => {
+  it("DivisionState schema includes consumed_waypoint_ids field with default []", () => {
     const div = new DivisionState();
     assert.ok(
-      "consumed_waypoint_id" in div,
-      "DivisionState is missing consumed_waypoint_id — add @type(\"string\") consumed_waypoint_id to the schema",
+      "consumed_waypoint_ids" in div,
+      'DivisionState is missing consumed_waypoint_ids — add @type(["string"]) consumed_waypoint_ids to the schema',
     );
     assert.strictEqual(
-      div.consumed_waypoint_id,
-      "",
-      "consumed_waypoint_id default value must be empty string",
+      div.consumed_waypoint_ids.length,
+      0,
+      "consumed_waypoint_ids default value must be empty array",
     );
   });
 
-  it("consumed_waypoint_id is registered in Colyseus schema (serialisation proof)", () => {
-    // @colyseus/schema registers @type'd fields as enumerable own properties on each
-    // instance via Object.defineProperty.  Object.keys() exposes exactly those fields.
-    // If consumed_waypoint_id were plain TypeScript (no decorator) it would NOT appear here.
+  it("consumed_waypoint_ids is registered in Colyseus schema (serialisation proof)", () => {
     const keys = Object.keys(new DivisionState());
     assert.ok(
-      keys.includes("consumed_waypoint_id"),
-      `consumed_waypoint_id not in Colyseus schema registry (Object.keys).  ` +
-        `Add @type("string") consumed_waypoint_id to DivisionState.  ` +
+      keys.includes("consumed_waypoint_ids"),
+      `consumed_waypoint_ids not in Colyseus schema registry (Object.keys).  ` +
+        `Add @type(["string"]) consumed_waypoint_ids to DivisionState.  ` +
         `Found: ${keys.join(", ")}`,
     );
   });
 
-  it("_advanceDivision sets consumed_waypoint_id when a waypoint is consumed (snap path)", async () => {
+  it("_advanceDivision sets consumed_waypoint_ids when a waypoint is consumed (snap path)", async () => {
     const { MovementSystem } = await import("../src/systems/movement_system.js");
     const system = new MovementSystem();
 
@@ -99,20 +96,19 @@ describe("Phase 1 — movement-jerk regression", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any).graph = makeGraph(A, B);
 
-    const div = makeDiv("div_snap", A.lng, A.lat, B.id, "");
+    const div = makeDiv("div_snap", A.lng, A.lat, B.id);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any)._advanceDivision(div, 1.0);
 
-    assert.strictEqual(
-      div.consumed_waypoint_id,
-      B.id,
-      "_advanceDivision must set consumed_waypoint_id to 'wp_B' when within snap threshold",
+    assert.ok(
+      div.consumed_waypoint_ids.includes(B.id),
+      `_advanceDivision must push 'wp_B' into consumed_waypoint_ids within snap threshold`,
     );
     assert.strictEqual(div.move_order.length, 0, "move_order must be empty after consuming the only waypoint");
   });
 
-  it("_advanceDivision sets consumed_waypoint_id when a waypoint is consumed (speed-overshoot path)", async () => {
+  it("_advanceDivision sets consumed_waypoint_ids when a waypoint is consumed (speed-overshoot path)", async () => {
     const { MovementSystem } = await import("../src/systems/movement_system.js");
     const system = new MovementSystem();
 
@@ -125,20 +121,19 @@ describe("Phase 1 — movement-jerk regression", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any).graph = makeGraph(A, B, true /* onRoad */);
 
-    const div = makeDiv("div_overshoot", A.lng, A.lat, B.id, "");
+    const div = makeDiv("div_overshoot", A.lng, A.lat, B.id);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any)._advanceDivision(div, 1.0);
 
-    assert.strictEqual(
-      div.consumed_waypoint_id,
-      B.id,
-      "_advanceDivision must set consumed_waypoint_id to 'wp_B' when speed overshoots the waypoint",
+    assert.ok(
+      div.consumed_waypoint_ids.includes(B.id),
+      `_advanceDivision must push 'wp_B' into consumed_waypoint_ids when speed overshoots the waypoint`,
     );
     assert.strictEqual(div.move_order.length, 0, "move_order must be empty after consuming the only waypoint");
   });
 
-  it("_advanceDivision resets consumed_waypoint_id to '' when no waypoint is consumed this tick", async () => {
+  it("_advanceDivision leaves consumed_waypoint_ids empty when no waypoint is consumed this tick", async () => {
     const { MovementSystem } = await import("../src/systems/movement_system.js");
     const system = new MovementSystem();
 
@@ -149,16 +144,15 @@ describe("Phase 1 — movement-jerk regression", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any).graph = makeGraph(A, B, true);
 
-    // Pre-populate with a stale value to confirm it gets cleared.
-    const div = makeDiv("div_partial", A.lng, A.lat, B.id, "stale_value");
+    const div = makeDiv("div_partial", A.lng, A.lat, B.id, []);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (system as any)._advanceDivision(div, 1.0);
 
     assert.strictEqual(
-      div.consumed_waypoint_id,
-      "",
-      "_advanceDivision must reset consumed_waypoint_id to '' when the division only moves partially toward a waypoint",
+      div.consumed_waypoint_ids.length,
+      0,
+      "_advanceDivision must leave consumed_waypoint_ids empty when the division only moves partially toward a waypoint",
     );
     assert.strictEqual(div.move_order.length, 1, "move_order must still contain wp_B (not yet consumed)");
   });

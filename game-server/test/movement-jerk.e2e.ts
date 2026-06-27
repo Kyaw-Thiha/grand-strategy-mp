@@ -5,10 +5,10 @@
  *
  * Scenario: Spawn a division, issue a move order, then observe every
  * DIVISION_UPDATES broadcast for 2 seconds.  Assert:
- *   1. consumed_waypoint_id is present on every broadcast (schema exists).
+ *   1. consumed_waypoint_ids is present on every broadcast (schema exists).
  *   2. No single-tick position jump exceeds DR_SNAP_DEG (0.001°) — the jerk
  *      that occurred when the server's first tick snapped the client position.
- *   3. When consumed_waypoint_id is non-empty it equals the waypoint that was
+ *   3. When consumed_waypoint_ids is non-empty it contains the waypoint that was
  *      at the head of the move_order before that tick (server consumed it).
  *
  * Run: npx tsx test/movement-jerk.e2e.ts
@@ -35,7 +35,7 @@ interface DivisionUpdate {
   position_lng?: number;
   position_lat?: number;
   move_order?: string[];
-  consumed_waypoint_id?: string;
+  consumed_waypoint_ids?: string[];
 }
 
 interface AuthResult { token: string; userId: string; hasHostPass: boolean; }
@@ -208,7 +208,7 @@ async function main() {
   console.log(`   Received ${allBatches.length} DIVISION_UPDATES batches`);
   assert(allBatches.length > 0, "No DIVISION_UPDATES received — is the tick loop running?");
 
-  // 6. Extract per-tick position + consumed_waypoint_id for germany_div_01
+  // 6. Extract per-tick position + consumed_waypoint_ids for germany_div_01
   const frames: DivisionUpdate[] = [];
   for (const batch of allBatches) {
     const d = batch.find(u => u.division_id === "germany_div_01");
@@ -216,15 +216,15 @@ async function main() {
   }
   console.log(`   germany_div_01 appeared in ${frames.length} batches`);
 
-  // ── Assertion A: consumed_waypoint_id field exists on every frame ──────────
-  console.log("5. Assert A: consumed_waypoint_id field present on every division update...");
+  // ── Assertion A: consumed_waypoint_ids field exists on every frame ──────────
+  console.log("5. Assert A: consumed_waypoint_ids field present on every division update...");
   for (let i = 0; i < frames.length; i++) {
     assert(
-      "consumed_waypoint_id" in frames[i],
-      `Frame ${i}: consumed_waypoint_id missing from DIVISION_UPDATES payload`,
+      "consumed_waypoint_ids" in frames[i],
+      `Frame ${i}: consumed_waypoint_ids missing from DIVISION_UPDATES payload`,
     );
   }
-  console.log("   ✓ consumed_waypoint_id field present on all frames");
+  console.log("   ✓ consumed_waypoint_ids field present on all frames");
 
   // ── Assertion B: No single-tick position jump exceeds DR_SNAP_DEG ──────────
   console.log("6. Assert B: no position jump > DR_SNAP_DEG between consecutive frames...");
@@ -244,21 +244,19 @@ async function main() {
   }
   console.log(`   ✓ Max inter-frame jump: ${maxJump.toFixed(6)}° (threshold: ${DR_SNAP_DEG}°)`);
 
-  // ── Assertion C: consumed_waypoint_id is either "" or the target waypoint ──
-  console.log("7. Assert C: consumed_waypoint_id is '' or a known waypoint ID...");
-  const consumedValues = frames
-    .map(f => f.consumed_waypoint_id ?? "")
-    .filter(v => v !== "");
+  // ── Assertion C: consumed_waypoint_ids entries are non-empty strings ──
+  console.log("7. Assert C: consumed_waypoint_ids values are valid waypoint IDs...");
+  const consumedValues = frames.flatMap(f => f.consumed_waypoint_ids ?? []);
   if (consumedValues.length > 0) {
     for (const v of consumedValues) {
       assert(
         typeof v === "string" && v.length > 0,
-        `consumed_waypoint_id has unexpected value: ${JSON.stringify(v)}`,
+        `consumed_waypoint_ids has unexpected value: ${JSON.stringify(v)}`,
       );
     }
-    console.log(`   ✓ consumed_waypoint_id was non-empty ${consumedValues.length} time(s): ${[...new Set(consumedValues)].join(", ")}`);
+    console.log(`   ✓ consumed_waypoint_ids was non-empty ${consumedValues.length} time(s): ${[...new Set(consumedValues)].join(", ")}`);
   } else {
-    console.log("   ✓ consumed_waypoint_id was '' on all frames (single-hop not yet reached)");
+    console.log("   ✓ consumed_waypoint_ids was empty on all frames (single-hop not yet reached)");
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
