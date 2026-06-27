@@ -165,6 +165,41 @@ All combat resolution is **server-side** (Colyseus). The client displays results
   no damage is distributed to empty cells.
 - Attacks are resolved simultaneously each round — not sequentially.
 
+### Firing Order and Spillover
+
+**Default firing order:** Attacking units fire in front-to-back, left-to-right sequence.
+R5 (vanguard) fires before R4, which fires before R3, etc. Within a row, C1 fires before
+C2, and so on.
+
+**Priority fire (researchable perk):** Specific unit types can be researched to fire
+before the default sequence:
+- Artillery prep doctrine → artillery fires first (prep bombardment clears front row,
+  enabling other units to reach deeper rows sooner)
+- Cavalry charge doctrine → cavalry fires first (charge bonus hits before lines are set,
+  especially powerful on Round 1)
+- Sniper precision doctrine → snipers fire first (priority kill lands before mass damage)
+- Commando strike doctrine → commandos fire first
+
+Default: no unit has fire priority. All units follow the row-based sequence above.
+
+**Spillover — row-cleared redirect:** When earlier attackers in the firing sequence fully
+clear the frontmost enemy row (all cells incapacitated or destroyed), subsequent attackers
+automatically redirect to the next occupied row. This is the only spillover condition.
+
+**No spillover from n-cap:** If an attacker is configured to target n units but fewer
+than n living units exist in the frontmost row, all damage concentrates on the available
+units. There is NO redirect to the next row — the remaining "slots" are wasted.
+
+**Simultaneous resolution:** The firing order list is determined from the round-start
+state. A unit that is incapacitated mid-round by enemy fire still fires in the same round
+— it was alive when the round began.
+
+**Client preview:** Because there is no randomness in attack resolution, the client can
+compute the exact same target assignments as the server for the upcoming round. The
+`AttackPatternRegistry.simulate_round()` function performs this computation during the
+inter-round timer window, allowing the UI to show each unit's intended targets before the
+server's `ROUND_RESOLVED` message arrives.
+
 ---
 
 ### Infantry archetypes — horizontal attack pattern

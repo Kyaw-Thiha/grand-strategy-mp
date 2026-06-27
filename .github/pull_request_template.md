@@ -8,4 +8,4 @@
 ## Screenshots
 
 ## Other Notes
-<can add details of the changes being made>
+<can add details of the changes being made in bullet points>

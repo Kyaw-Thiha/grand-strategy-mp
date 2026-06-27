@@ -2,8 +2,10 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { randomUUID } from "crypto";
-import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
+import type { GameRoomState, DivisionState, GridCellState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
+import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
+import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -16,12 +18,7 @@ let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
-// Raw outgoing damage per combat tick at full HP, before all modifiers
-const BASE_ATTRITION = 2.5;
-// Fraction of dealt damage that goes to the HP pool
-const HP_DAMAGE_FRACTION = 0.3;
-// Fraction of dealt damage that goes to the suppression pool
-const SUPPRESSION_FRACTION = 0.7;
+import { BASE_ATTRITION, HP_DAMAGE_FRACTION, SUPPRESSION_FRACTION } from "../data/combat_constants.js";
 
 // Damage output multiplier by division type
 const TYPE_MULT: Record<string, number> = {
@@ -42,6 +39,21 @@ const LETHALITY_PHASES: ReadonlyArray<{ name: string; multiplier: number }> = [
   { name: "intense",      multiplier: 1.0  },   // Round 3
   { name: "decisive",     multiplier: 1.5  },   // Round 4
   { name: "annihilation", multiplier: 2.0  },   // Round 5+
+];
+
+// ── Per-cell stat constants ───────────────────────────────────────────────────
+const CELL_SUPP_DECAY_BASE    = 8;    // suppression points decayed per round during active combat
+const CELL_SUPP_DECAY_RETREAT = 20;   // 2.5× faster during retreat
+
+// Armour penetration table: [pen/armour ratio threshold, damage multiplier]
+// Apply first entry where ratio ≥ threshold (table must be sorted descending).
+const ARMOUR_PEN_TABLE: Array<[number, number]> = [
+  [1.00, 1.00],
+  [0.90, 0.70],
+  [0.80, 0.40],
+  [0.70, 0.30],
+  [0.60, 0.20],
+  [0.00, 0.00],
 ];
 
 // Units that bypass the lethality ramp — deal full damage (multiplier=1.0) every round.
@@ -134,6 +146,28 @@ interface ProvinceInfo {
   polygons: [number, number][][];
 }
 
+// ── Exported pure functions (tested directly by 6c unit tests) ────────────────
+
+export function _armorPenMultiplier(pen: number, armour: number): number {
+  if (armour <= 0) return 1.0;
+  const ratio = pen / armour;
+  for (const [threshold, mult] of ARMOUR_PEN_TABLE) {
+    if (ratio >= threshold) return mult;
+  }
+  return 0.0;
+}
+
+export function _getIncapFloor(unit_type: string): number {
+  const stats = UNIT_COMBAT_STATS[unit_type];
+  return stats?.hp_floor_pct ?? 0;
+}
+
+export function _computeDivisionSuppression(cells: GridCellState[]): number {
+  const eligible = cells.filter(c => c.unit_type !== "" && !c.stealthed && !c.incapacitated);
+  if (eligible.length === 0) return 0;
+  return eligible.reduce((sum, c) => sum + c.suppression, 0) / eligible.length;
+}
+
 interface ActivePair {
   attacker_id: string;  // "" in meeting battle
   defender_id: string;  // "" in meeting battle
@@ -149,6 +183,8 @@ interface ActivePair {
   round_tick_counter: number;                // ticks elapsed since last round resolved; resets each round
   lethality_phase: string;                   // current phase name
   lethality_multiplier: number;              // current damage multiplier
+  _lastDeltaAttacker: GridCellDelta[];       // last round's attacker grid deltas (populated in _applyDamage)
+  _lastDeltaDefender: GridCellDelta[];       // last round's defender grid deltas (populated in _applyDamage)
 }
 
 // ─── CombatSystem ────────────────────────────────────────────────────────────
@@ -315,8 +351,10 @@ export class CombatSystem {
               river_side_attacker: riverSize && !is_meeting ? attacker_id : "",
               engagement_id:       `${a.division_id}_vs_${b.division_id}_${Date.now()}`,
               round_tick_counter:  0,
-              lethality_phase:     LETHALITY_PHASES[0].name,
+              lethality_phase:      LETHALITY_PHASES[0].name,
               lethality_multiplier: LETHALITY_PHASES[0].multiplier,
+              _lastDeltaAttacker:   [],
+              _lastDeltaDefender:   [],
             };
             this.activePairs.set(key, pair);
 
@@ -491,16 +529,99 @@ export class CombatSystem {
       broadcast("ROUND_RESOLVED", {
         engagement_id:           pair.engagement_id,
         round_number:            roundNumber,
-        lethality_phase:         pair.lethality_phase,
-        attacker_grid_delta:     [],
-        defender_grid_delta:     [],
+        lethality_phase:         pair.lethality_phase as any,
+        attacker_grid_delta:     pair._lastDeltaAttacker,
+        defender_grid_delta:     pair._lastDeltaDefender,
         formation_bonuses_active: [],
         xp_changes:              [],
-      });
+      } satisfies RoundResolvedPayload);
+
+      // Reset for next round
+      pair._lastDeltaAttacker = [];
+      pair._lastDeltaDefender = [];
 
       changed.add(pair.attacker_id);
       changed.add(pair.defender_id);
     }
+  }
+
+  // ── Per-cell helpers ─────────────────────────────────────────────────────────
+
+  private _getBestPenValue(div: DivisionState): number {
+    if (!div.grid) return 10;
+    let best = 0;
+    for (const cell of div.grid.cells) {
+      if (cell.unit_type === "" || cell.incapacitated) continue;
+      const stats = UNIT_COMBAT_STATS[cell.unit_type];
+      if (stats && stats.pen > best) best = stats.pen;
+    }
+    return best > 0 ? best : 10;
+  }
+
+  private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
+    if (!div.grid) return;
+    const decay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
+    for (const cell of div.grid.cells) {
+      if (cell.unit_type === "") continue;
+      cell.suppression = Math.max(0, cell.suppression - decay);
+    }
+  }
+
+  private _computeDivisionHp(cells: GridCellState[]): number {
+    const occupied = cells.filter(c => c.unit_type !== "");
+    if (occupied.length === 0) return 100;
+    return occupied.reduce((sum, c) => sum + c.hp, 0) / occupied.length;
+  }
+
+  private _applyPerCellDamage(
+    attacker: DivisionState,
+    defender: DivisionState,
+    rawDamage: number,
+    pair: ActivePair,
+    broadcast: (type: string, msg: unknown) => void,
+  ): GridCellDelta[] {
+    if (!defender.grid) return [];
+
+    const eligibleCells = defender.grid.cells
+      .map((cell, idx) => ({ cell, idx }))
+      .filter(({ cell }) => cell.unit_type !== "" && !cell.incapacitated);
+
+    if (eligibleCells.length === 0) return [];
+
+    const attackerPen    = this._getBestPenValue(attacker);
+    const perCellHpDmg   = (rawDamage * HP_DAMAGE_FRACTION)   / eligibleCells.length;
+    const perCellSuppDmg = (rawDamage * SUPPRESSION_FRACTION) / eligibleCells.length;
+    const deltas: GridCellDelta[] = [];
+
+    for (const { cell, idx } of eligibleCells) {
+      const stats    = UNIT_COMBAT_STATS[cell.unit_type];
+      const penMult  = _armorPenMultiplier(attackerPen, stats?.armour ?? 0);
+      const hpDelta  = perCellHpDmg * penMult;
+
+      cell.hp          = Math.max(0, cell.hp - hpDelta);
+      cell.suppression = Math.min(100, cell.suppression + perCellSuppDmg);
+
+      const floor = _getIncapFloor(cell.unit_type);
+      if (floor > 0 && cell.hp <= floor && !cell.incapacitated) {
+        cell.incapacitated = true;
+        broadcast("UNIT_INCAPACITATED", {
+          engagement_id: pair.engagement_id,
+          division_id:   defender.division_id,
+          cell_index:    idx,
+          unit_type:     cell.unit_type as UnitTypeValue,
+          xp_retained:   0,
+        } satisfies UnitIncapacitatedPayload);
+      }
+
+      deltas.push({
+        cell_index:    idx,
+        hp:            cell.hp,
+        suppression:   cell.suppression,
+        incapacitated: cell.incapacitated,
+      });
+    }
+
+    return deltas;
   }
 
   // Helper: apply bidirectional damage between two divisions in a pair
@@ -549,13 +670,21 @@ export class CombatSystem {
       console.log(`[Combat] DAMAGE: ${divA.division_id}(hp=${divA.hp.toFixed(1)}) ↔ ${divB.division_id}(hp=${divB.hp.toFixed(1)})`);
     }
 
-    // Apply damage from A → B
-    divB.hp           = Math.max(0, divB.hp           - damageByA * HP_DAMAGE_FRACTION);
-    divB.suppression  = Math.min(100, divB.suppression + damageByA * SUPPRESSION_FRACTION);
+    // Per-cell damage (returns deltas for ROUND_RESOLVED; stored on pair for collection)
+    this._decayCellSuppression(divB, divB.combat_state === "retreating");
+    const deltasB = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast);
+    this._decayCellSuppression(divA, divA.combat_state === "retreating");
+    const deltasA = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast);
 
-    // Apply damage from B → A
-    divA.hp           = Math.max(0, divA.hp           - damageByB * HP_DAMAGE_FRACTION);
-    divA.suppression  = Math.min(100, divA.suppression + damageByB * SUPPRESSION_FRACTION);
+    // Recompute division-level aggregates from cell data
+    divB.hp           = this._computeDivisionHp(divB.grid?.cells ?? []);
+    divB.suppression  = _computeDivisionSuppression(divB.grid?.cells ?? []);
+    divA.hp           = this._computeDivisionHp(divA.grid?.cells ?? []);
+    divA.suppression  = _computeDivisionSuppression(divA.grid?.cells ?? []);
+
+    // Store deltas on pair so _resolveCombat can include them in ROUND_RESOLVED
+    pair._lastDeltaAttacker = deltasA;
+    pair._lastDeltaDefender = deltasB;
 
     changed.add(divA.division_id);
     changed.add(divB.division_id);
