@@ -82,6 +82,8 @@ var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local wa
 var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
 var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0 normal, 0.30 repos)
 var _dr_final_goal: Dictionary = {}   # div_id -> Vector2(lng, lat) of exact click
+var _dr_last_waypoint_road: bool = false    # was the last consumed waypoint on a road?
+var _dr_last_waypoint_terrain: String = ""  # "cover_elevation" of the last consumed waypoint
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -767,6 +769,9 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	var dist: float = to_target.length()
 
 	if dist < DR_SNAP_DEG or advance >= dist:
+		if order.size() == 1:
+			_dr_last_waypoint_road = _pathfinder.is_road_node(next_id)
+			_dr_last_waypoint_terrain = str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
 		_dr_pos_deg[div_id] = target_deg
 		order.pop_front()
 		_dr_order[div_id] = order
@@ -816,23 +821,33 @@ func _advance_dr_last_mile(div_id: String, delta: float) -> void:
 		_update_division_visibility(div_id)
 		return
 
-	var lm_nearest_id: String = _pathfinder.find_nearest(pos_deg.x, pos_deg.y)
-	var lm_node: Dictionary = _pathfinder.get_node(lm_nearest_id)
-	var lm_kmh: float = DR_OFFROAD_KMH
-	if not lm_node.is_empty():
-		if _pathfinder.is_road_node(lm_nearest_id):
-			lm_kmh = DR_ROAD_KMH
-		else:
-			var lm_profile: Dictionary = _dr_profiles.get(div_id, {})
-			var lm_key := str(lm_node.get("cover_combat", "")) + "_" + str(lm_node.get("elevation", ""))
-			var lm_cost: Variant = lm_profile.get(lm_key, 1.0)
-			if lm_cost == null or not is_finite(float(lm_cost)) or float(lm_cost) <= 0.0:
-				_dr_final_goal.erase(div_id)
-				var abort_icon := _icons[div_id] as Node2D
-				abort_icon.set_moving(false)
-				_update_division_visibility(div_id)
-				return
-			lm_kmh = DR_OFFROAD_KMH / float(lm_cost)
+	var lm_profile: Dictionary = _dr_profiles.get(div_id, {})
+
+	# Base speed from the last waypoint (cached — no per-frame oscillation)
+	var lm_base_kmh: float
+	if _dr_last_waypoint_road:
+		lm_base_kmh = DR_ROAD_KMH
+	else:
+		var lm_cost: Variant = lm_profile.get(_dr_last_waypoint_terrain, 1.0)
+		if lm_cost == null or not is_finite(float(lm_cost)) or float(lm_cost) <= 0.0:
+			_dr_final_goal.erase(div_id)
+			var abort_icon := _icons[div_id] as Node2D
+			abort_icon.set_moving(false)
+			_update_division_visibility(div_id)
+			return
+		lm_base_kmh = DR_OFFROAD_KMH / float(lm_cost)
+
+	# Destination speed from the synthetic goal's terrain
+	var dest_node: Dictionary = _pathfinder.get_node("_synthetic_goal")
+	var lm_dest_kmh: float = DR_OFFROAD_KMH
+	if not dest_node.is_empty() and not lm_profile.is_empty():
+		var dest_key: String = str(dest_node.get("cover_combat", "")) + "_" + str(dest_node.get("elevation", ""))
+		var dest_cost: Variant = lm_profile.get(dest_key, 1.0)
+		if dest_cost != null and is_finite(float(dest_cost)) and float(dest_cost) > 0.0:
+			lm_dest_kmh = DR_OFFROAD_KMH / float(dest_cost)
+
+	# Smooth average between base and destination speeds
+	var lm_kmh: float = (lm_base_kmh + lm_dest_kmh) * 0.5
 	lm_kmh *= _dr_speed_mult.get(div_id, 1.0)
 	var lm_advance: float = (lm_kmh / DR_KM_PER_DEG) * float(GameState.game_speed) * delta
 	if lm_advance >= dist_final:
@@ -1187,12 +1202,16 @@ func _update_division_route(division_id: String) -> void:
 
 	# DR active (owning client) — 60fps update via client-side remaining order.
 	var dr_order: Array = _dr_order.get(division_id, [])
-	if not dr_order.is_empty() and icon != null:
+	var has_remaining: bool = not dr_order.is_empty() or _dr_final_goal.has(division_id)
+	if has_remaining and icon != null:
 		var positions: Array[Vector2] = []
 		for wp_id: Variant in dr_order:
 			var node: Dictionary = _pathfinder.get_node(str(wp_id))
 			if not node.is_empty():
 				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+		if _dr_final_goal.has(division_id):
+			var fg: Vector2 = _dr_final_goal[division_id]
+			positions.append(_map_loader.project_lng_lat(fg.x, fg.y))
 		route.start_node = icon
 		if is_repos:
 			route.set_path(positions, no_milestones, color)
