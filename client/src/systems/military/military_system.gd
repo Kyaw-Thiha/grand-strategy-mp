@@ -410,7 +410,8 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var movement_profile: Dictionary = _get_movement_profile(division_id)
-	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+	var path: Array = path_result.get("logical", [])
 	if path.is_empty():
 		push_warning("[MilitarySystem] No path found for %s" % division_id)
 		return
@@ -465,6 +466,8 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 			var d: float = _pathfinder.nearest_road_node_distance(float(sn["lng"]), float(sn["lat"]))
 			road_mult = _compute_avoidance_multiplier(d)
 
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
 	_path_pending = true
 	_path_thread = Thread.new()
 	var division_id_snapshot := _selected_division_id
@@ -474,8 +477,8 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		if shift_held and waypoint_index > 0 and road_mult > 1.0:
 			if not _pathfinder.road_crosses_segment(start_id, goal_id):
 				effective_mult = road_mult
-		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult)
-		call_deferred("_on_segment_ready", segment, goal_id, shift_held, division_id_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot)
+		call_deferred("_on_segment_ready", seg_result.get("logical", []), goal_id, shift_held, division_id_snapshot)
 	)
 
 
@@ -503,10 +506,12 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
 		var movement_profile: Dictionary = _get_movement_profile(division_id)
-		var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			goal_id = _pathfinder.find_nearest(target_lng, target_lat)
-			path = _pathfinder.find_path(start_id, goal_id, movement_profile)
+			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+			path = path_result.get("logical", [])
 			if path.is_empty():
 				push_warning("[MilitarySystem] No group path found for %s" % division_id)
 				continue
@@ -615,11 +620,13 @@ func _refresh_chain_start() -> void:
 	var milestones_snapshot: Array = _pending_milestones.duplicate()
 	var div_id_snapshot := div_id
 
+	var my_nation: String = GameState.get_my_nation_id()
+	var relations_snapshot: Dictionary = GameState.relations.duplicate()
 	_path_pending = true
 	_path_thread = Thread.new()
 	_path_thread.start(func() -> void:
-		var segment: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
-		call_deferred("_on_chain_refresh_ready", segment, milestones_snapshot, div_id_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot)
+		call_deferred("_on_chain_refresh_ready", seg_result.get("logical", []), milestones_snapshot, div_id_snapshot)
 	)
 
 
@@ -754,7 +761,8 @@ func _recompute_chain() -> void:
 	_pending_chain.clear()
 	var current_start := start_id
 	for milestone_id: String in _pending_milestones:
-		var seg: Array = _pathfinder.find_path(current_start, milestone_id, movement_profile)
+		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var seg: Array = seg_result.get("logical", [])
 		if seg.is_empty():
 			break
 		var skip_first: bool = false
@@ -890,7 +898,8 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 	var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 	var goal_id: String = _pathfinder.find_nearest(target_lng, target_lat)
 	var movement_profile: Dictionary = _get_movement_profile(div_id)
-	var path: Array = _pathfinder.find_path(start_id, goal_id, movement_profile)
+	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+	var path: Array = path_result.get("logical", [])
 	if path.is_empty():
 		push_warning("[MilitarySystem] No reposition path found for %s" % div_id)
 		_clear_pending()
