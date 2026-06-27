@@ -257,7 +257,9 @@ func road_crosses_segment(from_id: String, to_id: String) -> bool:
 func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> Dictionary:
+		relations: Dictionary = {},
+		goal_lng: float = INF,
+		goal_lat: float = INF) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
 		return { "logical": [], "visual": [] }
 	if from_id == to_id:
@@ -265,58 +267,68 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
 		return { "logical": [], "visual": [] }
 
+	# If exact click coordinates provided, insert synthetic goal at that position
+	# and route to it instead of the nearest pre-baked node
+	var actual_to_id: String = to_id
+	var has_synthetic: bool = false
+	if goal_lng != INF and goal_lat != INF:
+		_insert_synthetic_goal(goal_lng, goal_lat)
+		actual_to_id = SYNTHETIC_GOAL_ID
+		has_synthetic = true
+
 	# HPA* delegation: if clusters are loaded, try hierarchical search
 	if _clusters_loaded:
-		var goal_node: Dictionary = _nodes.get(to_id, {})
+		var goal_node: Dictionary = _nodes.get(actual_to_id, {})
 		if not goal_node.is_empty():
-			var hpa_result: Array = _hpa_find_path(from_id, to_id, movement_profile,
+			var hpa_result: Array = _hpa_find_path(from_id, actual_to_id, movement_profile,
 				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
 				road_cost_multiplier, player_nation_id, relations)
 			if not hpa_result.is_empty():
-				return _build_path_result(hpa_result, movement_profile)
+				return _finalize_path(hpa_result, movement_profile, has_synthetic, to_id)
 
 	# Off-road purity pre-check: when both endpoints are off-road, run A* once to see
-	# if the natural path avoids roads entirely. If so, skip Phase 1 — it would only
-	# pull the route onto a road unnecessarily. Falls through when A* picks a road node
-	# (e.g., mountain bridge), returns empty, or when either endpoint is on a road.
-	# Untyped for loop (no ": String") avoids a Godot 4 thread coercion crash.
-	if not _road_nodes.has(from_id) and not _road_nodes.has(to_id):
-		var offroad_path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	if not _road_nodes.has(from_id) and not _road_nodes.has(actual_to_id):
+		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 		var has_road := false
 		for wp_id in offroad_path:
 			if _road_nodes.has(wp_id):
 				has_road = true
 				break
 		if not offroad_path.is_empty() and not has_road:
-			return _build_path_result(offroad_path, movement_profile)
-		# Path crossed a road or A* failed — fall through to Phase 1.
+			return _finalize_path(offroad_path, movement_profile, has_synthetic, to_id)
 
 	# Phase 1: road entry pre-check.
 	if _road_nodes.has(from_id):
-		# Start is already on a road — try road-only A* first.
-		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 		if not road_path.is_empty():
-			return _build_path_result(road_path, movement_profile)
-		# Road-only failed (destination off-road) → fall to phase 2.
+			return _finalize_path(road_path, movement_profile, has_synthetic, to_id)
 	else:
-		# Start is off-road — find nearest road node within ROAD_SEARCH_RADIUS.
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
 			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
 			if not seg1.is_empty() and not seg2.is_empty():
-				return _build_path_result(_join_segments(seg1, seg2), movement_profile)
-		# No road nearby or road path failed → fall to phase 2.
+				return _finalize_path(_join_segments(seg1, seg2), movement_profile, has_synthetic, to_id)
 
-	# Phase 2: full A* across the entire graph (natural road preference via costs).
-	var path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-	return _build_path_result(path, movement_profile)
+	# Phase 2: full A* across the entire graph
+	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	return _finalize_path(path, movement_profile, has_synthetic, to_id)
 
 
 func _build_path_result(raw_path: Array, movement_profile: Dictionary) -> Dictionary:
 	var logical: Array = _string_pull(raw_path, movement_profile)
 	var visual: Array = _smooth_path(logical)
 	return { "logical": logical, "visual": visual }
+
+
+func _finalize_path(raw_path: Array, movement_profile: Dictionary, has_synthetic: bool, original_to_id: String) -> Dictionary:
+	if has_synthetic:
+		_remove_synthetic_goal()
+	var result: Dictionary = _build_path_result(raw_path, movement_profile)
+	if has_synthetic:
+		var logical: Array = result.get("logical", [])
+		result["logical"] = _substitute_synthetic(logical, original_to_id)
+	return result
 
 
 # ── Private ──────────────────────────────────────────────────────────────────
