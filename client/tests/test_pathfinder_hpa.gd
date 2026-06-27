@@ -46,7 +46,7 @@ func _ready() -> void:
     pf.build(wp_graph)
 
     # TEST 1: without clusters, find_path works normally
-    var path_flat: Array = pf.find_path("l0", "r4", {})
+    var path_flat: Array = pf.find_path("l0", "r4", {}).get("logical", [])
     if path_flat.size() >= 2 and str(path_flat[0]) == "l0" and str(path_flat[-1]) == "r4":
         print("PASS test_flat_path_works")
         pass_count += 1
@@ -58,7 +58,7 @@ func _ready() -> void:
     pf.build_clusters(cluster_data)
 
     # TEST 2: HPA* finds a path from l0 to r4
-    var path_hpa: Array = pf.find_path("l0", "r4", {})
+    var path_hpa: Array = pf.find_path("l0", "r4", {}).get("logical", [])
     if path_hpa.size() >= 2 and str(path_hpa[0]) == "l0" and str(path_hpa[-1]) == "r4":
         print("PASS test_hpa_finds_cross_cluster_path")
         pass_count += 1
@@ -67,7 +67,7 @@ func _ready() -> void:
         fail_count += 1
 
     # TEST 3: synthetic goal — find_path with exact coordinates
-    var path_synthetic: Array = pf.find_path("l0", "r4", {})
+    var path_synthetic: Array = pf.find_path("l0", "r4", {}).get("logical", [])
     if path_synthetic.size() >= 2:
         print("PASS test_synthetic_goal_returns_valid_path")
         pass_count += 1
@@ -78,7 +78,7 @@ func _ready() -> void:
     # TEST 4: cluster fallback — reload without clusters, result same as flat
     var pf2 = load("res://src/systems/military/pathfinder.gd").new()
     pf2.build(wp_graph)
-    var path_no_cluster: Array = pf2.find_path("l0", "r4", {})
+    var path_no_cluster: Array = pf2.find_path("l0", "r4", {}).get("logical", [])
     if path_no_cluster.size() >= 2:
         print("PASS test_cluster_fallback_when_no_cluster_file")
         pass_count += 1

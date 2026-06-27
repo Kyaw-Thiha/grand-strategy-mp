@@ -2,7 +2,7 @@ extends RefCounted
 ## A* pathfinder over the waypoint graph.
 ## Phase 4B: Two-phase routing (road entry pre-check) + string-pulling post-processor.
 ## Call build() once after loading the waypoint graph.
-## Call find_path() for each route request — returns ordered waypoint ID list.
+## Call find_path() for each route request — returns {"logical": Array, "visual": Array}.
 
 const ROAD_COST_BASE := 0.05
 const RIVER_PENALTIES := {
@@ -19,6 +19,9 @@ const ROAD_PROXIMITY_DEG   := 0.003           # ~300m — counts as "road in the
 const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
 const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
 const SYNTHETIC_GOAL_ID := "_synthetic_goal"
+
+const MAX_SPLINE_DEV_DEG: float = 0.0067
+const SPLINE_SUBDIVISIONS: int = 8
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
@@ -136,7 +139,7 @@ func _insert_synthetic_goal(goal_lng: float, goal_lat: float) -> void:
 	var K := 8
 	var candidates: Array = []
 	for nid in _nodes:
-		if nid == SYNTHETIC_GOAL_ID:
+		if nid == SYNTHETIC_GOAL_ID or str(nid).begins_with("_spline"):
 			continue
 		var n: Dictionary = _nodes[nid]
 		var ddx := float(n["lng"]) - goal_lng
@@ -254,13 +257,13 @@ func road_crosses_segment(from_id: String, to_id: String) -> bool:
 func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> Array:
+		relations: Dictionary = {}) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
-		return []
+		return { "logical": [], "visual": [] }
 	if from_id == to_id:
-		return [from_id]
+		return { "logical": [from_id], "visual": [from_id] }
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
-		return []
+		return { "logical": [], "visual": [] }
 
 	# HPA* delegation: if clusters are loaded, try hierarchical search
 	if _clusters_loaded:
@@ -270,7 +273,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
 				road_cost_multiplier, player_nation_id, relations)
 			if not hpa_result.is_empty():
-				return _string_pull(hpa_result, movement_profile)
+				return _build_path_result(hpa_result, movement_profile)
 
 	# Off-road purity pre-check: when both endpoints are off-road, run A* once to see
 	# if the natural path avoids roads entirely. If so, skip Phase 1 — it would only
@@ -285,7 +288,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 				has_road = true
 				break
 		if not offroad_path.is_empty() and not has_road:
-			return _string_pull(offroad_path, movement_profile)
+			return _build_path_result(offroad_path, movement_profile)
 		# Path crossed a road or A* failed — fall through to Phase 1.
 
 	# Phase 1: road entry pre-check.
@@ -293,7 +296,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		# Start is already on a road — try road-only A* first.
 		var road_path: Array = _astar_impl(from_id, to_id, movement_profile, true, road_cost_multiplier)
 		if not road_path.is_empty():
-			return _string_pull(road_path, movement_profile)
+			return _build_path_result(road_path, movement_profile)
 		# Road-only failed (destination off-road) → fall to phase 2.
 	else:
 		# Start is off-road — find nearest road node within ROAD_SEARCH_RADIUS.
@@ -302,12 +305,18 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier)
 			var seg2: Array = _astar_impl(road_entry_id, to_id, movement_profile, true, road_cost_multiplier)
 			if not seg1.is_empty() and not seg2.is_empty():
-				return _string_pull(_join_segments(seg1, seg2), movement_profile)
+				return _build_path_result(_join_segments(seg1, seg2), movement_profile)
 		# No road nearby or road path failed → fall to phase 2.
 
 	# Phase 2: full A* across the entire graph (natural road preference via costs).
 	var path: Array = _astar_impl(from_id, to_id, movement_profile, false, road_cost_multiplier)
-	return _string_pull(path, movement_profile)
+	return _build_path_result(path, movement_profile)
+
+
+func _build_path_result(raw_path: Array, movement_profile: Dictionary) -> Dictionary:
+	var logical: Array = _string_pull(raw_path, movement_profile)
+	var visual: Array = _smooth_path(logical)
+	return { "logical": logical, "visual": visual }
 
 
 # ── Private ──────────────────────────────────────────────────────────────────
@@ -488,6 +497,105 @@ func _can_skip_to(path: Array, from_idx: int, to_idx: int, movement_profile: Dic
 		if cost == INF or not is_finite(cost):
 			return false
 	return true
+
+
+func _smooth_path(waypoints: Array) -> Array:
+	if waypoints.size() <= 2:
+		return waypoints.duplicate()
+	var result: Array = []
+	var pts: Array = []
+	pts.append(waypoints[0])
+	pts.append_array(waypoints)
+	pts.append(waypoints[-1])
+	for i in range(1, pts.size() - 2):
+		var p0: Dictionary = _nodes.get(str(pts[i-1]), {})
+		var p1: Dictionary = _nodes.get(str(pts[i]),   {})
+		var p2: Dictionary = _nodes.get(str(pts[i+1]), {})
+		var p3: Dictionary = _nodes.get(str(pts[i+2]), {})
+		if p0.is_empty() or p1.is_empty() or p2.is_empty() or p3.is_empty():
+			result.append(pts[i])
+			continue
+		var t01 := pow(_dist(p0, p1), 0.5)
+		var t12 := pow(_dist(p1, p2), 0.5)
+		var t23 := pow(_dist(p2, p3), 0.5)
+		if t01 < 1e-9 or t12 < 1e-9 or t23 < 1e-9:
+			result.append(pts[i])
+			continue
+		var max_dev := _max_catmull_rom_deviation(p0, p1, p2, p3, t01, t12, t23)
+		if max_dev > MAX_SPLINE_DEV_DEG:
+			result.append(pts[i])
+			continue
+		if result.is_empty() or str(result[-1]) != str(pts[i]):
+			result.append(pts[i])
+		for s in range(1, SPLINE_SUBDIVISIONS):
+			var tt: float = float(s) / float(SPLINE_SUBDIVISIONS)
+			var sp: Vector2 = _catmull_rom_point(p0, p1, p2, p3, t01, t12, t23, tt)
+			result.append("_spline_%f_%f" % [sp.x, sp.y])
+			_nodes["_spline_%f_%f" % [sp.x, sp.y]] = {
+				"id": "_spline_%f_%f" % [sp.x, sp.y],
+				"lng": sp.x, "lat": sp.y,
+				"cover_combat": "plains", "elevation": "flat", "nation_id": null
+			}
+	if waypoints.size() > 0:
+		result.append(waypoints[-1])
+	return result
+
+
+func _dist(a: Dictionary, b: Dictionary) -> float:
+	var dx := float(a.get("lng", 0.0)) - float(b.get("lng", 0.0))
+	var dy := float(a.get("lat", 0.0)) - float(b.get("lat", 0.0))
+	return sqrt(dx*dx + dy*dy)
+
+
+func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
+		t01: float, t12: float, t23: float, t: float) -> Vector2:
+	var t_val := t01 + t * t12
+	var t0 := 0.0; var t1 := t01; var t2 := t01 + t12; var t3 := t01 + t12 + t23
+	var A1 := _lerp_pt(p0, p1, t0, t1, t_val)
+	var A2 := _lerp_pt(p1, p2, t1, t2, t_val)
+	var A3 := _lerp_pt(p2, p3, t2, t3, t_val)
+	var B1 := _lerp_pt_v(A1, A2, t0, t2, t_val)
+	var B2 := _lerp_pt_v(A2, A3, t1, t3, t_val)
+	return _lerp_pt_v(B1, B2, t1, t2, t_val)
+
+
+func _lerp_pt(a: Dictionary, b: Dictionary, ta: float, tb: float, tv: float) -> Vector2:
+	if abs(tb - ta) < 1e-9:
+		return Vector2(float(a["lng"]), float(a["lat"]))
+	var r := (tv - ta) / (tb - ta)
+	return Vector2(
+		float(a["lng"]) + r * (float(b["lng"]) - float(a["lng"])),
+		float(a["lat"]) + r * (float(b["lat"]) - float(a["lat"]))
+	)
+
+
+func _lerp_pt_v(a: Vector2, b: Vector2, ta: float, tb: float, tv: float) -> Vector2:
+	if abs(tb - ta) < 1e-9:
+		return a
+	var r := (tv - ta) / (tb - ta)
+	return Vector2(a.x + r * (b.x - a.x), a.y + r * (b.y - a.y))
+
+
+func _max_catmull_rom_deviation(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
+		t01: float, t12: float, t23: float) -> float:
+	var max_dev := 0.0
+	var line_start := Vector2(float(p1["lng"]), float(p1["lat"]))
+	var line_end   := Vector2(float(p2["lng"]), float(p2["lat"]))
+	for s in range(1, SPLINE_SUBDIVISIONS):
+		var t := float(s) / float(SPLINE_SUBDIVISIONS)
+		var sp := _catmull_rom_point(p0, p1, p2, p3, t01, t12, t23, t)
+		var dev := _point_to_segment_dist(sp, line_start, line_end)
+		if dev > max_dev:
+			max_dev = dev
+	return max_dev
+
+
+func _point_to_segment_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var ap := p - a
+	var t_val := ab.dot(ap) / (ab.length_squared() + 1e-9)
+	t_val = clamp(t_val, 0.0, 1.0)
+	return (p - (a + t_val * ab)).length()
 
 
 func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary,
