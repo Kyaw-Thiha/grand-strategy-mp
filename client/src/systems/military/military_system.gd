@@ -426,6 +426,11 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 			push_warning("[MilitarySystem] No fallback path found for %s" % division_id)
 			return
 
+	var path_to_submit: Array[String] = []
+	for waypoint_id: Variant in path:
+		path_to_submit.append(str(waypoint_id))
+	_submit_move_order_for_division(division_id, path_to_submit)
+
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if not _pathfinder.is_built():
 		push_warning("[MilitarySystem] Pathfinder not built — cannot route")
