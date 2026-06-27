@@ -1292,6 +1292,183 @@ def insert_boundary_nodes(
     return new_nodes, new_edges
 
 
+import heapq
+
+
+def generate_hpa_clusters(
+    sources: dict,
+    existing_wp: dict,
+    cluster_threshold: int = 300,
+) -> dict:
+    """
+    Build recursive HPA* cluster hierarchy and precompute abstract edges.
+
+    Step 1: Assign each waypoint node to its province via point-in-polygon.
+    Step 2: Recursively sub-partition clusters with > cluster_threshold nodes
+            using 2x2 bounding-box quadrant split.
+    Step 3: Find border nodes (nodes with at least one edge crossing to a
+            different leaf cluster).
+    Step 4: Precompute intra-cluster A* costs between all border node pairs.
+    Step 5: Build abstract edge list.
+
+    Returns: dict compatible with waypoints_clusters.json format.
+    """
+    from shapely.geometry import shape, Point
+    from shapely.strtree import STRtree
+
+    # Step 1: Province assignment
+    prov_feats = sources.get("provinces", [])
+    prov_geoms = [shape(f["geometry"]) for f in prov_feats]
+    prov_ids   = [f["properties"]["province_id"] for f in prov_feats]
+    prov_tree  = STRtree(prov_geoms) if prov_geoms else None
+
+    node_province: dict[str, str] = {}
+    for node in existing_wp.get("nodes", []):
+        pt = Point(node["lng"], node["lat"])
+        assigned = "sea"
+        if prov_tree:
+            for idx in prov_tree.query(pt, predicate="intersects"):
+                if prov_geoms[idx].contains(pt):
+                    assigned = prov_ids[idx]
+                    break
+        node_province[node["id"]] = assigned
+
+    province_nodes: dict[str, list[str]] = {}
+    for nid, pid in node_province.items():
+        if pid == "sea":
+            continue
+        province_nodes.setdefault(pid, []).append(nid)
+
+    node_coords: dict[str, tuple[float, float]] = {}
+    for node in existing_wp.get("nodes", []):
+        node_coords[node["id"]] = (node["lng"], node["lat"])
+
+    adjacency: dict[str, list[str]] = {}
+    for edge in existing_wp.get("edges", []):
+        adjacency.setdefault(edge["from"], []).append(edge["to"])
+        adjacency.setdefault(edge["to"],   []).append(edge["from"])
+
+    # Step 2: Recursive sub-partitioning
+    def _partition(node_ids: list[str], province_id: str, depth: int, parent_id: str | None,
+                   node_coords: dict[str, tuple[float, float]]) -> list[dict]:
+        cluster_id = f"c_{province_id}_{depth}_{parent_id or 'root'}"
+        cluster: dict = {
+            "id": cluster_id,
+            "province_id": province_id,
+            "parent": parent_id,
+            "children": [],
+            "border_nodes": [],
+            "node_ids": node_ids,
+        }
+        if len(node_ids) <= cluster_threshold:
+            return [cluster]
+        lngs = [node_coords[nid][0] for nid in node_ids]
+        lats = [node_coords[nid][1] for nid in node_ids]
+        mid_lng = (min(lngs) + max(lngs)) / 2
+        mid_lat = (min(lats) + max(lats)) / 2
+        quads: dict[str, list[str]] = {"NW": [], "NE": [], "SW": [], "SE": []}
+        for nid in node_ids:
+            lng, lat = node_coords[nid]
+            q = ("N" if lat >= mid_lat else "S") + ("E" if lng >= mid_lng else "W")
+            quads[q].append(nid)
+        children = []
+        for qname, qnids in quads.items():
+            if not qnids:
+                continue
+            sub = _partition(qnids, province_id, depth + 1, cluster_id, node_coords)
+            children.extend(sub)
+        cluster["children"] = [c["id"] for c in children]
+        return [cluster] + children
+
+    all_clusters: list[dict] = []
+    for pid, nids in province_nodes.items():
+        clusters = _partition(nids, pid, 0, None, node_coords)
+        all_clusters.extend(clusters)
+
+    # Step 3: Border node detection
+    leaf_cluster_of: dict[str, str] = {}
+    for cluster in all_clusters:
+        if not cluster["children"]:
+            for nid in cluster["node_ids"]:
+                leaf_cluster_of[nid] = cluster["id"]
+
+    border_nodes: set[str] = set()
+    for nid, neighbours in adjacency.items():
+        my_cluster = leaf_cluster_of.get(nid)
+        if my_cluster is None:
+            continue
+        for nb in neighbours:
+            if leaf_cluster_of.get(nb) != my_cluster:
+                border_nodes.add(nid)
+                break
+
+    border_by_cluster: dict[str, set[str]] = {}
+    for nid in border_nodes:
+        cid = leaf_cluster_of.get(nid)
+        if cid:
+            border_by_cluster.setdefault(cid, set()).add(nid)
+
+    for cluster in all_clusters:
+        if not cluster["children"]:
+            cluster["border_nodes"] = list(border_by_cluster.get(cluster["id"], []))
+
+    # Step 4: Precompute intra-cluster border costs
+    def _astar_in_cluster(start: str, goal: str, cluster_node_ids: set[str],
+                          adjacency: dict, node_coords: dict) -> float | None:
+        if start == goal:
+            return 0.0
+        def heuristic(a, b):
+            ax, ay = node_coords[a]; bx, by = node_coords[b]
+            return math.hypot(ax-bx, ay-by)
+        heap = [(0.0, start)]
+        dist = {start: 0.0}
+        while heap:
+            d, u = heapq.heappop(heap)
+            if d > dist.get(u, float("inf")):
+                continue
+            if u == goal:
+                return d
+            for v in adjacency.get(u, []):
+                if v not in cluster_node_ids:
+                    continue
+                nd = d + heuristic(u, v)
+                if nd < dist.get(v, float("inf")):
+                    dist[v] = nd
+                    heapq.heappush(heap, (nd, v))
+        return None
+
+    abstract_edges: list[dict] = []
+    for cid, bnids in border_by_cluster.items():
+        cluster_node_ids = set(leaf_cluster_of.keys())
+        bn_list = list(bnids)
+        for i in range(len(bn_list)):
+            for j in range(i + 1, len(bn_list)):
+                cost = _astar_in_cluster(bn_list[i], bn_list[j], cluster_node_ids, adjacency, node_coords)
+                if cost is not None:
+                    abstract_edges.append({
+                        "from": bn_list[i], "to": bn_list[j],
+                        "cluster_id": cid, "cost": round(cost, 3),
+                    })
+
+    # Step 5: Build output (strip temporary node_ids)
+    output_clusters = []
+    for c in all_clusters:
+        output_clusters.append({
+            "id": c["id"],
+            "province_id": c["province_id"],
+            "parent": c["parent"],
+            "children": c["children"],
+            "border_nodes": c["border_nodes"],
+        })
+
+    print(f"  HPA clusters: {len(output_clusters)} clusters, {len(abstract_edges)} abstract edges")
+    return {
+        "cluster_threshold": cluster_threshold,
+        "clusters": output_clusters,
+        "abstract_edges": abstract_edges,
+    }
+
+
 def copy_passthrough_files(map_dir: Path, output_dir: Path) -> None:
     """
     Copy visual-layer files unchanged from map_dir to output_dir.
@@ -1387,6 +1564,14 @@ def main() -> None:
             json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
         print(f"  waypoints.json: +{len(bn_nodes)} boundary nodes → "
               f"{len(existing_wp['nodes'])} total")
+
+    print("Building HPA* cluster hierarchy...")
+    cluster_data = generate_hpa_clusters(sources, existing_wp)
+    cluster_path = output_dir / "waypoints_clusters.json"
+    with open(cluster_path, "w", encoding="utf-8") as f:
+        json.dump(cluster_data, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"  waypoints_clusters.json: {len(cluster_data['clusters'])} clusters, "
+          f"{len(cluster_data['abstract_edges'])} abstract edges")
 
     # Fine grid (0.07° ≈ 7.5 km): server-only — generated after coarse so fine nodes
     # can connect to coarse nodes via the TERRAIN_CONNECT_DEG snapping
