@@ -1222,6 +1222,15 @@ func _on_division_updated(division_id: String) -> void:
 		return
 
 	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
+		# Fire final-goal tween when the server confirms the path is complete
+		if order.is_empty() and _dr_final_goal.has(division_id):
+			var final_goal: Vector2 = _dr_final_goal[division_id]
+			_dr_final_goal.erase(division_id)
+			var icon_node := _icons.get(division_id) as Node2D
+			if icon_node:
+				var final_screen: Vector2 = _map_loader.project_lng_lat(final_goal.x, final_goal.y)
+				var tw := create_tween()
+				tw.tween_property(icon_node, "position", final_screen, 0.3)
 		# Division stopped or locked in combat — freeze at server-authoritative position.
 		_dr_pos_deg.erase(division_id)
 		_dr_order.erase(division_id)
