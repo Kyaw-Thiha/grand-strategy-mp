@@ -130,6 +130,7 @@ func _open_websocket(matchmake_response: Dictionary) -> String:
 	# Colyseus 0.17: URL must include processId between host and roomId
 	var path: String = (process_id + "/" if process_id != "" else "") + room_id
 	var ws_url: String = Config.COLYSEUS_URL + "/" + path + "?sessionId=" + session_id
+	_socket.inbound_buffer_size = 1024 * 1024   # 1 MB — defence against large Colyseus state patches
 	_socket.connect_to_url(ws_url)
 	_connected = true
 	set_process(true)

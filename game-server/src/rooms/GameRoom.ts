@@ -69,6 +69,56 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
       this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
     }
+    if (process.env.NODE_ENV === "test") {
+      this.onMessage("SPAWN_DIVISION", (_client, msg: {
+        division_id: string;
+        nation_id: string;
+        position_lng: number;
+        position_lat: number;
+      }) => {
+        const div = new DivisionState();
+        div.division_id  = msg.division_id;
+        div.nation_id    = msg.nation_id;
+        div.position_lng = msg.position_lng;
+        div.position_lat = msg.position_lat;
+        this.state.divisions.set(msg.division_id, div);
+      });
+      this.onMessage("SET_CELL", (_client, msg: {
+        division_id: string;
+        cell_index: number;
+        unit_type?: string;
+        hp?: number;
+        suppression?: number;
+        xp_tier?: string;
+        incapacitated?: boolean;
+        stealthed?: boolean;
+      }) => {
+        const div = this.state.divisions.get(msg.division_id);
+        if (!div?.grid) return;
+        const cell = div.grid.cells[msg.cell_index];
+        if (!cell) return;
+        if (msg.unit_type     !== undefined) cell.unit_type     = msg.unit_type;
+        if (msg.hp            !== undefined) cell.hp            = msg.hp;
+        if (msg.suppression   !== undefined) cell.suppression   = msg.suppression;
+        if (msg.xp_tier       !== undefined) cell.xp_tier       = msg.xp_tier;
+        if (msg.incapacitated !== undefined) cell.incapacitated = msg.incapacitated;
+        if (msg.stealthed     !== undefined) cell.stealthed     = msg.stealthed;
+      });
+      this.onMessage("SPAWN_NATION", (_client, msg: { nation_id: string }) => {
+        const nation = new NationState();
+        nation.nation_id = msg.nation_id;
+        this.state.nations.set(msg.nation_id, nation);
+      });
+      this.onMessage("APPLY_PERKS", (_client, msg: {
+        nation_id: string;
+        perk_ids: string[];
+      }) => {
+        const nation = this.state.nations.get(msg.nation_id);
+        if (!nation) return;
+        nation.researched_perks.clear();
+        for (const id of msg.perk_ids) nation.researched_perks.push(id);
+      });
+    }
 
     console.log(`[GameRoom] ${this.roomId} created`);
   }

@@ -758,7 +758,7 @@ Phase 4 strategic plumbing intact.
 for all attack pattern logic before any Godot work.
 
 ### Colyseus (server-side simulation)
-- [ ] 5×5 grid state per division — each cell tracks unit type, HP, suppression value,
+- [x] 5×5 grid state per division — each cell tracks unit type, HP, suppression value,
       experience tier (Green/Seasoned/Veteran/Elite)
 - [ ] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
       5-phase lethality escalation (Contact → Firefight → Intense → Decisive → Annihilation)
@@ -1676,6 +1676,7 @@ Full contracts written when implementation begins. Prioritise based on playteste
 | `AchievementSystem` | `[LATER]` | Steam achievement unlocks from game events |
 | `AIPlayerSystem` | `[LATER]` | Server-side AI for unfilled nation slots (Colyseus module) |
 | `LobbyTimerSystem` | `[LATER]` | Auto-start lobby after configurable countdown. Requires `AIPlayerSystem`. |
+| `NetworkScalingSystem` | `[LATER]` | Colyseus interest management (AOI): `@filter` / `@filterChildren` on the `divisions` MapSchema so each client receives only divisions within their strategic viewport. Required when map size or division count grows beyond ~150 units. Pair with chunked initial-load to keep the game-start state patch bounded regardless of total unit count. |
 | `AmphbiousSystem` | `[LATER]` | Shore bombardment and amphibious assault. Requires Phase 13 naval complete. |
 | `MineWarfareSystem` | `[LATER]` | Minelayer and minesweeper ship classes. Sea zone denial via minefield placement. Requires Phase 13 naval complete. |
 | `MidgetSubmarineSystem` | `[LATER]` | Harbour-penetration submarine variant. Requires naval-land integration design. |
