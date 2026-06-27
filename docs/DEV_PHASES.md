@@ -760,7 +760,7 @@ for all attack pattern logic before any Godot work.
 ### Colyseus (server-side simulation)
 - [x] 5×5 grid state per division — each cell tracks unit type, HP, suppression value,
       experience tier (Green/Seasoned/Veteran/Elite)
-- [ ] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
+- [x] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
       5-phase lethality escalation (Contact → Firefight → Intense → Decisive → Annihilation)
 - [ ] All unit attack patterns server-side:
   - [ ] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
@@ -814,13 +814,13 @@ for all attack pattern logic before any Godot work.
       threshold; destroyed division puts stealthed units into reserve with experience retained
 - [ ] Recon value accumulation per round per unit type; formation bonus (Artillery+Recon inf)
       increases recon rate; artillery targeting weight shifts with recon
-- [ ] Force recon units bypass lethality ramp — deal full damage from Round 1
+- [x] Force recon units bypass lethality ramp — deal full damage from Round 1
 - [ ] Terrain modifiers feeding into grid combat (from Phase 4 terrain detection):
       unit-type specific bonuses by cover_combat (infantry suppression resistance in forests,
       armour flanking bonus in plains, AT ambush bonus in forest, etc.)
-- [ ] Grid locked during combat — no template switching while engaged
+- [x] Grid locked during combat — no template switching while engaged
 - [ ] Movement profile recomputed whenever template is saved or unit research changes
-- [ ] `ROUND_RESOLVED` event broadcast each round with full grid delta including experience
+- [x] `ROUND_RESOLVED` event broadcast each round with full grid delta including experience
       changes and formation bonuses active
 - [ ] `TACTICAL_BREAKTHROUGH` event when front row cleared with no reserves
 - [ ] `UNIT_EXPERIENCE_GAINED`, `UNIT_ELITE_REACHED` events
