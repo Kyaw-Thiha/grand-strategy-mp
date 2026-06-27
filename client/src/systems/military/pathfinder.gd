@@ -22,6 +22,7 @@ const SYNTHETIC_GOAL_ID := "_synthetic_goal"
 
 const MAX_SPLINE_DEV_DEG: float = 0.0067
 const SPLINE_SUBDIVISIONS: int = 8
+const MAX_FALLBACK_CANDIDATES := 20
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
@@ -313,6 +314,28 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	# Phase 2: full A* across the entire graph
 	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
 	return _finalize_path(path, movement_profile, has_synthetic, to_id)
+
+
+func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
+		movement_profile: Dictionary,
+		player_nation_id: String = "",
+		relations: Dictionary = {}) -> String:
+	var candidates: Array = []
+	for node_id: String in _nodes:
+		var n: Dictionary = _nodes[node_id]
+		var dx: float = float(n["lng"]) - near_lng
+		var dy: float = float(n["lat"]) - near_lat
+		candidates.append([dx * dx + dy * dy, node_id])
+	candidates.sort_custom(func(a, b): return a[0] < b[0])
+	for i in range(min(MAX_FALLBACK_CANDIDATES, candidates.size())):
+		var candidate_id: String = candidates[i][1]
+		if candidate_id == from_id:
+			continue
+		var result: Dictionary = find_path(from_id, candidate_id, movement_profile, 1.0,
+				player_nation_id, relations)
+		if not result.get("logical", []).is_empty():
+			return candidate_id
+	return ""
 
 
 func _build_path_result(raw_path: Array, movement_profile: Dictionary) -> Dictionary:

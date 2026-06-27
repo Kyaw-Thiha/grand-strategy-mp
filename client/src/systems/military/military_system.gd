@@ -413,13 +413,18 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
 	var path: Array = path_result.get("logical", [])
 	if path.is_empty():
-		push_warning("[MilitarySystem] No path found for %s" % division_id)
-		return
-
-	var path_to_submit: Array[String] = []
-	for waypoint_id: Variant in path:
-		path_to_submit.append(str(waypoint_id))
-	_submit_move_order_for_division(division_id, path_to_submit)
+		var fallback_id: String = _pathfinder.find_nearest_reachable(
+			start_id, target_lng, target_lat, movement_profile,
+			GameState.get_my_nation_id(), GameState.relations)
+		if fallback_id.is_empty():
+			push_warning("[MilitarySystem] No path found for %s — target completely unreachable" % division_id)
+			return
+		path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
+			GameState.get_my_nation_id(), GameState.relations)
+		path = path_result.get("logical", [])
+		if path.is_empty():
+			push_warning("[MilitarySystem] No fallback path found for %s" % division_id)
+			return
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 	if not _pathfinder.is_built():
@@ -901,11 +906,20 @@ func _submit_reposition_order(div_id: String, target_lng: float, target_lat: flo
 	var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
 	var path: Array = path_result.get("logical", [])
 	if path.is_empty():
-		push_warning("[MilitarySystem] No reposition path found for %s" % div_id)
-		_clear_pending()
-		return
-
-	# Walk through path waypoints, truncate at engagement boundary.
+		var fallback_id: String = _pathfinder.find_nearest_reachable(
+			start_id, target_lng, target_lat, movement_profile,
+			GameState.get_my_nation_id(), GameState.relations)
+		if fallback_id.is_empty():
+			push_warning("[MilitarySystem] No reposition path found for %s — target unreachable" % div_id)
+			_clear_pending()
+			return
+		path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
+			GameState.get_my_nation_id(), GameState.relations)
+		path = path_result.get("logical", [])
+		if path.is_empty():
+			push_warning("[MilitarySystem] No reposition fallback path for %s" % div_id)
+			_clear_pending()
+			return
 	# Start distance accumulation from SERVER position (authoritative), not DR position.
 	var path_to_submit: Array[String] = []
 	var accum_km: float = 0.0
