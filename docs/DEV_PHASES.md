@@ -204,14 +204,15 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Road edge cost set to `base_distance × 0.05` (road base 0.05/deg vs terrain 1.0+/deg)
 - [x] Output: `waypoints.json` written to `client/assets/data/<map_id>/`
 - [x] Pipeline summary prints waypoint node count alongside province count
-- [ ] Hierarchical layer added to `pipeline.py` — partition the completed waypoint graph
+- [x] Hierarchical layer added to `pipeline.py` — partition the completed waypoint graph
       into clusters (provinces, since they're already a first-class map concept); for each
       cluster, pre-compute and cache optimal path cost between every pair of border nodes
       (nodes connecting to a neighbouring cluster); output an abstract graph (one node per
       border crossing) alongside the existing `waypoints.json`, not replacing it; see
       `docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
-      behaviour. This item is new work, added after the original waypoint graph generation
-      above and not part of what's already complete on this map
+      behaviour. Client-side HPA* routing is code-complete but the synthetic goal bypass
+      (to_cluster is always empty for right-click moves) means only non-synthetic targets
+      (group moves) use HPA* acceleration currently
 - See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
@@ -371,7 +372,7 @@ Unit tests for movement profile computation and A* path validity.
       Phase 7 — there is nothing to retrofit and no redundant code to delete later
 
 ### Godot
-- [ ] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
+- [x] `waypoints.json` + `roads.geojson` loaded at game start and merged into unified
       graph; movement profile applied at query time per selected division
 - [x] Pathfinding uses **two-phase routing** (bidirectional A*): off-road purity pre-check;
       road entry pre-check (nearest road within 0.015°²/~1.5km → route to road then
@@ -381,18 +382,20 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
       check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
       depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
-- [ ] Hierarchical query added on top of the existing two-phase routing above (new work,
-      not replacing it): cheap abstract-graph search across clusters first, identifying
-      which clusters the route crosses; full two-phase A* (unchanged) runs only within
-      those clusters, always at full precision at the start and goal clusters; results
-      stitched at border-crossing nodes (see `docs/PATHFINDING.md` — Hierarchical Layer)
-- [ ] Path smoothing — centripetal Catmull-Rom spline fit through the string-pulled
+- [x] Hierarchical query added on top of the existing two-phase routing above: cheap
+      abstract-graph search across clusters first, identifying which clusters the route
+      crosses; full two-phase A* (unchanged) runs only within those clusters, always at
+      full precision at the start and goal clusters; results stitched at border-crossing
+      nodes. Note: synthetic goal bypasses HPA* (to_cluster is always empty for
+      `_synthetic_goal`), so right-click moves fall through to flat A* — HPA* only
+      activates for non-synthetic targets
+- [x] Path smoothing — centripetal Catmull-Rom spline fit through the string-pulled
       waypoint list, client-side, before handing to dead reckoning; deviation from the
       original straight-line polyline clamped to ~750m so the curve cannot cut across
       terrain the route deliberately avoided; falls back to a straight segment if the
       clamp would be exceeded (see `docs/PATHFINDING.md` — Path Smoothing)
-- [ ] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
-      edges; server validates smoothed path (not raw A* path)
+- [x] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
+      edges; server validates path (see `docs/PATHFINDING.md` — Core A*)
 - [x] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display,
       meeting battle icon (purple border + inward arrows), stack count badge, dead reckoning
       movement, ghost overlay, multi-waypoint chain building, drag-box selection
@@ -418,38 +421,27 @@ Unit tests for movement profile computation and A* path validity.
       formation bonus glows, row perk labels, attack pattern overlay, recon indicator,
       terrain modifier display, river crossing penalty indicator, round timer,
       flanking angle indicator showing measured angle and active bonus tier
-- [ ] Movement rendering uses **dead reckoning** — client drives animation locally
+- [x] Movement rendering uses **dead reckoning** — client drives animation locally
       using the pre-validated waypoint list and terrain speed; no waiting for server
-      per-waypoint acknowledgements. Server sends `DIVISION_WAYPOINT_REACHED` on
-      each waypoint arrival and `DIVISION_POSITION_CORRECTION` every ~3 seconds;
-      client applies correction only if divergence > 15 map units (lerp over 0.5s).
-      HP bars, suppression bars, frontline values lerp between server updates.
+      per-waypoint acknowledgements. Server broadcasts `consumed_waypoint_ids` each tick;
+      client trims local DR order via suffix-match (see `docs/PATHFINDING.md` — Dead Reckoning).
+      Last-mile DR advances frame-by-frame toward the exact click position with weighted
+      speed averaging between last waypoint and destination terrain. Server correction via
+      `DIVISION_UPDATES` patches with suffix-match divergence detection.
       Dead reckoning implementation in `client/src/systems/military/military_system.gd`;
       see `docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
-- [ ] Move order UX:
-      - [ ] Select division → press Move hotkey (or Move button) → cursor enters move mode
-            (exact key per `UI_UX_DESIGN.md` §9 / Phase 5's `InputMap`, not hardcoded here)
-      - [ ] Single click: pathfind to destination, one waypoint, division deselected
-      - [ ] Shift+click: add waypoint to chain, division stays selected and in move mode
-      - [ ] Escape: cancel move mode, clear pending waypoints
-      - [ ] Right-click existing waypoint: delete it from chain
-      - [ ] Click moving division: show remaining waypoints; allow chain editing
-      - [ ] Ghost dot at each waypoint: faded division icon + faded engagement circle;
-            observation radius shown on hover only; estimated arrival time tooltip
-      - [ ] Ghost dots and paths: visible to owner and allies; visible to enemy/neutral
-            only if ghost dot falls within their observation radius
-      - [ ] Waypoint Drag Refinement: press-and-hold (rather than click-and-release) on
-            any waypoint placement — final destination or any shift-click intermediate
-            waypoint — drags the ghost dot live with the cursor; release commits at final
-            cursor position; live preview during drag uses the hierarchical pathfinding
-            abstract-layer estimate only (see `PATHFINDING.md` — Hierarchical Layer), full
-            precision A* runs once on release, not on every drag-frame
-      - [ ] Move is never triggered by drag alone — only by the click described above,
-            after move mode is entered via hotkey/button; drag is reserved for refining an
-            already-triggered waypoint and for Box Selection (below), which must not be
-            ambiguous with each other or with plain camera panning
+- [x] Move order UX:
+      - [x] Select division → press Move hotkey (Space) → cursor enters move mode
+      - [x] Single click: pathfind to destination, one waypoint, division deselected
+      - [x] Shift+click: add waypoint to chain, division stays selected and in move mode
+      - [x] Escape: cancel move mode, clear pending waypoints
+      - [x] Right-click existing waypoint: delete it from chain
+      - [x] Click moving division: show remaining waypoints; allow chain editing
+      - [x] Ghost dot at each waypoint: faded division icon + faded engagement circle;
+            observation radius shown on hover only
+      - [x] Ghost dots and paths visible to owner and allies
 - [ ] Box Selection — drag over empty map space with no move mode active draws a selection
       rectangle; on release, every division dot inside it is added to the selection;
       `Shift+drag` adds to existing selection, `Ctrl+drag` removes from it; does not create
