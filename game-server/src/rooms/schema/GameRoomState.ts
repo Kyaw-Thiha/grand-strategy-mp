@@ -1,5 +1,20 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 
+export class GridCellState extends Schema {
+  @type("string")  unit_type: string      = "";
+  @type("number")  hp: number             = 100;
+  @type("number")  suppression: number    = 0;
+  @type("string")  xp_tier: string        = "green";
+  @type("boolean") incapacitated: boolean = false;
+  @type("boolean") stealthed: boolean     = false;
+}
+
+export class DivisionGridState extends Schema {
+  @type([GridCellState]) cells = new ArraySchema<GridCellState>(
+    ...Array.from({ length: 25 }, () => new GridCellState())
+  );
+}
+
 export class PlayerState extends Schema {
   @type("string") userId: string = "";
   @type("string") steamId: string = "";
@@ -41,6 +56,8 @@ export class DivisionState extends Schema {
   @type(["string"]) consumed_waypoint_ids: string[] = []; // waypoints consumed on this tick
   @type("number") final_position_lng: number = -999; // exact click target (-999 = none)
   @type("number") final_position_lat: number = -999;
+  @type("string")          template_id: string = "";
+  @type(DivisionGridState) grid = new DivisionGridState();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
