@@ -596,11 +596,12 @@ func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dicti
 	if nation == null or str(nation).is_empty() or str(nation) == player_nation_id:
 		return false
 	var key: String = player_nation_id + ":" + str(nation)
-	var rel_entry = relations.get(key, {})
-	if typeof(rel_entry) == TYPE_DICTIONARY:
-		var stance: String = rel_entry.get("stance", "neutral")
-		return stance != "war"
-	return true
+	if relations.has(key):
+		var rel_entry = relations.get(key, {})
+		if typeof(rel_entry) == TYPE_DICTIONARY:
+			var stance: String = rel_entry.get("stance", "neutral")
+			return stance != "war"
+	return false
 
 
 func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
