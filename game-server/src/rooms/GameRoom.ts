@@ -392,6 +392,12 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
     this._initRelations();
+    const relationsPayload: Record<string, string> = {};
+    for (const [, rel] of this.state.relations) {
+      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
+      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;
+    }
+    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
 
     // Spawn all divisions
     this.spawnDivisions();

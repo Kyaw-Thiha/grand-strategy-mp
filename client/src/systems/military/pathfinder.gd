@@ -131,7 +131,8 @@ func is_road_node(wp_id: String) -> bool:
 	return _road_nodes.has(wp_id)
 
 
-func _insert_synthetic_goal(goal_lng: float, goal_lat: float) -> void:
+func _insert_synthetic_goal(goal_lng: float, goal_lat: float,
+		player_nation_id: String = "", relations: Dictionary = {}) -> void:
 	_nodes[SYNTHETIC_GOAL_ID] = {
 		"id": SYNTHETIC_GOAL_ID, "lng": goal_lng, "lat": goal_lat,
 		"cover_combat": "plains", "elevation": "flat", "nation_id": null
@@ -142,6 +143,8 @@ func _insert_synthetic_goal(goal_lng: float, goal_lat: float) -> void:
 	for nid in _nodes:
 		if nid == SYNTHETIC_GOAL_ID or str(nid).begins_with("_spline"):
 			continue
+		if not player_nation_id.is_empty() and _is_neutral_for(str(nid), player_nation_id, relations):
+			continue  # bidirectional A* backward search must not get stuck on neutral neighbors
 		var n: Dictionary = _nodes[nid]
 		var ddx := float(n["lng"]) - goal_lng
 		var ddy := float(n["lat"]) - goal_lat
@@ -273,7 +276,7 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 	var actual_to_id: String = to_id
 	var has_synthetic: bool = false
 	if goal_lng != INF and goal_lat != INF:
-		_insert_synthetic_goal(goal_lng, goal_lat)
+		_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
 		actual_to_id = SYNTHETIC_GOAL_ID
 		has_synthetic = true
 
@@ -595,13 +598,15 @@ func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dicti
 	var nation = node.get("nation_id", null)
 	if nation == null or str(nation).is_empty() or str(nation) == player_nation_id:
 		return false
+	if relations.is_empty():
+		return false  # cold start — no data yet, fail open
 	var key: String = player_nation_id + ":" + str(nation)
 	if relations.has(key):
 		var rel_entry = relations.get(key, {})
 		if typeof(rel_entry) == TYPE_DICTIONARY:
 			var stance: String = rel_entry.get("stance", "neutral")
 			return stance != "war"
-	return false
+	return true  # relations loaded but nation absent → treat as neutral (blocked)
 
 
 func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
@@ -717,7 +722,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
 		relations: Dictionary = {}) -> Array:
-	_insert_synthetic_goal(goal_lng, goal_lat)
+	_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
 
 	var from_cluster: String = _cluster_of.get(from_id, "")
 	var to_cluster: String = _cluster_of.get(SYNTHETIC_GOAL_ID, "")
