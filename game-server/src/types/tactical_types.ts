@@ -16,7 +16,10 @@ export const UnitType = {
   FLAMETHROWER:    "flamethrower",
   ARTILLERY:       "artillery",
   COMMANDO:        "commando",
-  EMPTY:           "",
+  EMPTY:              "",
+  FORCE_RECON_SNIPER: "force_recon_sniper",
+  HOWITZER:           "howitzer",
+  SELF_PROPELLED_GUN: "self_propelled_gun",
 } as const;
 
 export type UnitTypeValue = typeof UnitType[keyof typeof UnitType];

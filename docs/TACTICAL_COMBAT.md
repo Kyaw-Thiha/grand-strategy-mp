@@ -493,13 +493,44 @@ to reach.
 | Veteran | +20% | +15% | +25% | 5–8 total battles |
 | Elite | +35% | +25% | +40% | Session-long achievement |
 
+### XP retention rules at engagement end
+
+At the end of each engagement, accumulated XP (stored as `xp_pending` per cell during the
+engagement) is committed with a retention multiplier based on the unit's state:
+
+| Condition | XP retained |
+|---|---|
+| Unit HP > 50% at engagement end | 100% of engagement XP |
+| Unit HP ≤ 50%, not incapacitated | 60% |
+| Unit incapacitated, **division won** | 40% |
+| Unit incapacitated, division lost/retreated | 0% |
+| **Division destroyed** (encirclement, HP=0) | 0% for all units |
+
+Perks can modify per unit type: lower the full-XP threshold, raise incapacitated retention,
+or raise destroyed retention. See `xp_config` in `PerkDefinition`.
+
+### Post-Elite XP
+
+After reaching Elite (1000+ XP points), additional XP still provides stat benefits with
+diminishing returns:
+```
+post_elite_bonus = POST_ELITE_SCALE × log1p((xp − 1000) / POST_ELITE_DECAY)
+```
+Applied additively to Elite-tier multipliers. Values `POST_ELITE_SCALE=0.05`,
+`POST_ELITE_DECAY=500` — set by playtesting.
+
 ### Experience accumulation sources
-- **Combat:** each round survived in active engagement contributes experience. Winning the
-  engagement contributes a larger bonus.
+- **Combat:** each round survived in active engagement contributes `xp_pending`. Retention
+  multiplier applied at engagement end based on the unit's HP state (see table above).
 - **Barracks building:** constructed in a province. Allows players to spend resources to
   accelerate experience gain for units stationed in or passing through during non-combat
   downtime. Trains up to the tier currently unlocked by research — a player who has not
   researched veteran doctrine cannot train past Seasoned even at level 3 barracks.
+
+### XP UI display
+XP tier badges and pending XP bar per cell are displayed in the tactical grid panel (Branch K)
+and the DivisionBuilder UI (Branch G-Builder). The `xp_pending` field syncs live so the panel
+can show XP earned so far in the current engagement.
 
 ### Irreplaceability
 When a unit is destroyed its experience is gone permanently. A rebuilt unit starts at Green.
@@ -513,8 +544,9 @@ compositional flexibility.
 
 ### Experience and stealthed units
 Stealthed units that survive a destroyed division into reserve **retain their experience
-tier**. When returned to active service in a new division, they continue from their current
-tier. This makes elite commando and stealth AT units extremely valuable across a session.
+tier and XP points**. When returned to active service in a new division, they continue from
+their current tier. This makes elite commando and stealth recon units extremely valuable
+across a session.
 
 ---
 
@@ -706,8 +738,11 @@ This prevents stacking under-spec AT for marginal effect (the HoI4 failure mode)
 
 ## Stealth System
 
-Certain units have a **stealth level** that varies by terrain. Stealth is a value that must
-be exceeded by an enemy's **anti-stealth level** to reveal the unit.
+Certain units have a **stealth level** (integer ≥ 0). Anti-stealth is also an integer ≥ 0
+per unit type. Stealth is evaluated **every round**, not just at engagement start.
+
+**Reveal rule:** A unit is stealthed unless any active enemy unit has
+`anti_stealth ≥ effective_stealth_level`. Re-checked at the start of each round.
 
 **While stealthed:**
 - The unit deals damage normally
@@ -715,17 +750,32 @@ be exceeded by an enemy's **anti-stealth level** to reveal the unit.
 - The unit's HP and suppression values are **excluded** from the division's retreat/destroy
   threshold calculation
 - If the division is destroyed while units remain stealthed, those units are placed into
-  reserve and **retain their experience tier**
+  reserve and **retain their experience tier and XP**
 
-**Terrain stealth values (exact values set by playtesting):**
-- Sniper: high stealth in urban, moderate in forest, zero in plains or desert
-- AT gun (specialised): moderate stealth in forest and hills, zero in open terrain
-- AT infantry (specialised): moderate stealth in forest, urban; zero in plains
-- Commandos: high stealth in most terrain types; zero in plains and desert
+**Base stealth levels (in `UNIT_COMBAT_STATS`):**
 
-**Anti-stealth:** Units with anti-stealth level greater than the target's stealth level
-reveal the stealthed unit. Revealed units lose stealth for the remainder of that combat
-round.
+| Unit type | stealth_level | anti_stealth |
+|---|---|---|
+| sniper | 2 | 0 |
+| force_recon_sniper | 2 | 2 |
+| commando | 2 | 0 |
+| recon_infantry | 0 | 1 |
+| armoured_car | 0 | 2 |
+| all others | 0 | 0 |
+
+**Terrain stealth bonuses (perk-driven, extensible via research):**
+Researched perks add terrain-specific stealth bonuses per unit type via `terrain_stealth_bonus`
+in `PerkDefinition`. For example, a sniper with `sniper_forest_stealth` research gains
++1 stealth in light_forest and +2 in dense_forest.
+
+`effective_stealth = base_stealth_level + terrain_bonus_from_perks(unit_type, cover)`
+
+A sniper (base=2) in dense_forest with `sniper_forest_stealth` research has effective
+stealth=4. Only a unit with anti_stealth ≥ 4 can reveal it.
+
+**Anti-stealth units:** recon_infantry (anti=1), armoured_car (anti=2),
+force_recon_sniper (anti=2). Stacking multiple anti-stealth units does NOT raise the
+effective anti — only the highest anti_stealth value on the field counts.
 
 ---
 

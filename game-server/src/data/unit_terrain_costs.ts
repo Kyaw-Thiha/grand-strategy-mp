@@ -286,6 +286,48 @@ export const UNIT_TERRAIN_COSTS: Record<string, Record<string, number>> = {
     glacier_flat: INF,   glacier_hills: INF,   glacier_mountains: INF,
     urban_flat: 0.9,     urban_hills: 0.9,     urban_mountains: 1.4,
   },
+
+  force_recon_sniper: {
+    plains_flat: 1.0,    plains_hills: 1.0,    plains_mountains: 1.6,
+    steppe_flat: 1.0,    steppe_hills: 1.0,    steppe_mountains: 1.6,
+    shrubland_flat: 1.0, shrubland_hills: 1.0, shrubland_mountains: 1.8,
+    light_forest_flat: 1.0, light_forest_hills: 1.0, light_forest_mountains: 2.0,
+    dense_forest_flat: 1.2, dense_forest_hills: 1.6, dense_forest_mountains: INF,
+    jungle_flat: 1.8,    jungle_hills: 2.5,    jungle_mountains: INF,
+    desert_flat: 1.0,    desert_hills: 1.0,    desert_mountains: 2.0,
+    swamp_flat: 1.5,     swamp_hills: 2.0,     swamp_mountains: INF,
+    tundra_flat: 1.0,    tundra_hills: 1.4,    tundra_mountains: 2.2,
+    glacier_flat: INF,   glacier_hills: INF,   glacier_mountains: INF,
+    urban_flat: 0.9,     urban_hills: 0.9,     urban_mountains: 1.4,
+  },
+
+  howitzer: {
+    plains_flat: 1.3,    plains_hills: 2.0,    plains_mountains: INF,
+    steppe_flat: 1.4,    steppe_hills: 2.2,    steppe_mountains: INF,
+    shrubland_flat: 1.6, shrubland_hills: 2.5, shrubland_mountains: INF,
+    light_forest_flat: 2.0, light_forest_hills: 3.2, light_forest_mountains: INF,
+    dense_forest_flat: INF, dense_forest_hills: INF, dense_forest_mountains: INF,
+    jungle_flat: INF,    jungle_hills: INF,    jungle_mountains: INF,
+    desert_flat: 1.8,    desert_hills: 2.8,    desert_mountains: INF,
+    swamp_flat: INF,     swamp_hills: INF,     swamp_mountains: INF,
+    tundra_flat: 2.0,    tundra_hills: 3.0,    tundra_mountains: INF,
+    glacier_flat: INF,   glacier_hills: INF,   glacier_mountains: INF,
+    urban_flat: 1.0,     urban_hills: 1.5,     urban_mountains: INF,
+  },
+
+  self_propelled_gun: {
+    plains_flat: 0.9,    plains_hills: 1.4,    plains_mountains: INF,
+    steppe_flat: 1.0,    steppe_hills: 1.5,    steppe_mountains: INF,
+    shrubland_flat: 1.2, shrubland_hills: 1.9, shrubland_mountains: INF,
+    light_forest_flat: 1.8, light_forest_hills: 2.8, light_forest_mountains: INF,
+    dense_forest_flat: INF, dense_forest_hills: INF, dense_forest_mountains: INF,
+    jungle_flat: INF,    jungle_hills: INF,    jungle_mountains: INF,
+    desert_flat: 1.3,    desert_hills: 2.2,    desert_mountains: INF,
+    swamp_flat: INF,     swamp_hills: INF,     swamp_mountains: INF,
+    tundra_flat: 1.8,    tundra_hills: 2.8,    tundra_mountains: INF,
+    glacier_flat: INF,   glacier_hills: INF,   glacier_mountains: INF,
+    urban_flat: 1.1,     urban_hills: 1.7,     urban_mountains: INF,
+  },
 };
 
 export const TERRAIN_KEYS: string[] = [

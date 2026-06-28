@@ -5,6 +5,8 @@ export class GridCellState extends Schema {
   @type("number")  hp: number             = 100;
   @type("number")  suppression: number    = 0;
   @type("string")  xp_tier: string        = "green";
+  @type("number")  xp_points: number      = 0;
+  @type("number")  xp_pending: number     = 0;
   @type("boolean") incapacitated: boolean = false;
   @type("boolean") stealthed: boolean     = false;
 }

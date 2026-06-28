@@ -34,3 +34,27 @@ export const ARTY_UNIT_VALUE: Record<string, number> = {
   howitzer:          3,
   self_propelled_gun:3,
 };
+
+// ── XP system ──────────────────────────────────────────────────────────────
+
+export const XP_PER_ROUND              = 10;
+export const XP_THRESHOLD_SEASONED     = 100;
+export const XP_THRESHOLD_VETERAN      = 400;
+export const XP_THRESHOLD_ELITE        = 1000;
+
+export const XP_HP_FULL_THRESHOLD      = 0.50; // HP ratio strictly > this → full XP retention
+export const XP_RETENTION_DAMAGED      = 0.60; // HP ≤ threshold, not incapacitated
+export const XP_RETENTION_INCAP_WIN    = 0.40; // incapacitated, division won
+
+export const XP_POST_ELITE_SCALE       = 0.05;
+export const XP_POST_ELITE_DECAY       = 500;
+
+export const XP_TIER_HP_MULT: Record<string, number> = {
+  green: 1.00, seasoned: 1.10, veteran: 1.20, elite: 1.35,
+};
+export const XP_TIER_SUPP_RESIST_MULT: Record<string, number> = {
+  green: 1.00, seasoned: 1.05, veteran: 1.15, elite: 1.25,
+};
+export const XP_TIER_RECON_MULT: Record<string, number> = {
+  green: 1.00, seasoned: 1.10, veteran: 1.25, elite: 1.40,
+};
