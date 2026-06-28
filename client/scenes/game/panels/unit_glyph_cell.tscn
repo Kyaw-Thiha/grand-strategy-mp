@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/ui/hud/unit_glyph_cell.gd" id="1"]
+
+[node name="UnitGlyphCell" type="Control"]
+custom_minimum_size = Vector2(72, 72)
+script = ExtResource("1")
