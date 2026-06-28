@@ -596,7 +596,6 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 		var mb := event as InputEventMouseButton
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
 			place_unit.call()
-			accept_event()
 	)
 
 	mini.cell_clicked.connect(func(_c: UnitGlyphCell) -> void:

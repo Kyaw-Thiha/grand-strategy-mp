@@ -100,14 +100,20 @@ func _ready() -> void:
 			_military_system.deselect()
 		if _map_interaction != null and _map_interaction.has_method("deselect"):
 			_map_interaction.deselect()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
 		hud_manager.show_panel("division_builder")
 	)
 	EventBus.division_builder_closed.connect(func() -> void:
 		hud_manager.hide_panel("division_builder")
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
 	)
 	if _division_builder_panel.has_signal("close_requested"):
 		_division_builder_panel.connect("close_requested", func() -> void:
 			hud_manager.hide_panel("division_builder")
+			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+				_map_interaction.set_player_input_enabled(true)
 		)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
