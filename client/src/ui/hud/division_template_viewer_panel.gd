@@ -51,6 +51,12 @@ func _ready() -> void:
 	_cells.fill("")
 	_build_top_bar()
 	_build_body()
+	EventBus.division_template_viewer_open_requested.connect(_on_open_requested)
+	close_requested.connect(func() -> void: EventBus.division_template_viewer_closed.emit())
+
+
+func _on_open_requested(div_id: String) -> void:
+	open_for_division(div_id)
 
 
 func open_for_division(division_id: String) -> void:

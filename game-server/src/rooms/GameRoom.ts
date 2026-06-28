@@ -541,6 +541,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       div.observation_radius = observationRadius;
       div.engagement_radius = engagementRadius;
       div.movement_profile_json = profileJson;
+      div.template_id = "preset_combined_arms";
+      if (div.grid) {
+        for (let i = 0; i < div.grid.cells.length; i++) div.grid.cells[i].unit_type = "";
+        const defaultCells = [
+          { row: 0, col: 0, unit_type: "recon_infantry" },
+          { row: 0, col: 2, unit_type: "recon_infantry" },
+          { row: 1, col: 0, unit_type: "medium_tank" },
+          { row: 1, col: 1, unit_type: "medium_tank" },
+          { row: 1, col: 2, unit_type: "infantry" },
+          { row: 2, col: 0, unit_type: "artillery" },
+          { row: 2, col: 1, unit_type: "at_gun" },
+          { row: 3, col: 0, unit_type: "infantry" },
+        ];
+        for (const c of defaultCells) {
+          const idx = c.row * 5 + c.col;
+          div.grid.cells[idx].unit_type = c.unit_type;
+        }
+      }
       this.state.divisions.set(spawn.division_id, div);
     }
   }

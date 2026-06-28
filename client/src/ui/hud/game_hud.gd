@@ -134,15 +134,15 @@ func _ready() -> void:
 		HUDManager.PlacementMode.FULL_CENTER
 	)
 	EventBus.division_template_viewer_open_requested.connect(func(div_id: String) -> void:
-		(_division_template_viewer_panel as DivisionTemplateViewerPanel).open_for_division(div_id)
 		hud_manager.show_panel("division_template_viewer")
 	)
 	EventBus.division_template_viewer_closed.connect(func() -> void:
 		hud_manager.hide_panel("division_template_viewer")
 	)
-	_division_template_viewer_panel.connect("close_requested", func() -> void:
-		EventBus.division_template_viewer_closed.emit()
-	)
+	if _division_template_viewer_panel.has_signal("close_requested"):
+		_division_template_viewer_panel.connect("close_requested", func() -> void:
+			EventBus.division_template_viewer_closed.emit()
+		)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
