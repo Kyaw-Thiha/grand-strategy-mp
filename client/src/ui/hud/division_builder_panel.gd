@@ -211,15 +211,32 @@ func _build_grid_panel(parent: PanelContainer) -> void:
 	row_label_col.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	grid_area.add_child(row_label_col)
 
+	const ROW_PERK_HINTS: Array[String] = [
+		"+supp dealt",       # VANGUARD (row 0 in builder = front)
+		"+HP damage",        # ASSAULT
+		"+supp resist",      # SUPPORT
+		"↑ supp decay",      # RESERVE
+		"—",                 # REAR
+	]
 	for r: int in range(5):
+		var row_cell := VBoxContainer.new()
+		row_cell.custom_minimum_size = Vector2(68, 76)
+		row_cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		row_label_col.add_child(row_cell)
+
 		var row_lbl := Label.new()
 		row_lbl.text = ROW_NAMES[r]
-		row_lbl.custom_minimum_size = Vector2(68, 76)
-		row_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row_lbl.add_theme_font_size_override("font_size", 11)
 		row_lbl.add_theme_color_override("font_color", ROW_COLORS[r])
-		row_label_col.add_child(row_lbl)
+		row_cell.add_child(row_lbl)
+
+		var perk_lbl := Label.new()
+		perk_lbl.text = ROW_PERK_HINTS[r]
+		perk_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		perk_lbl.add_theme_font_size_override("font_size", 9)
+		perk_lbl.add_theme_color_override("font_color", Color(ROW_COLORS[r].r, ROW_COLORS[r].g, ROW_COLORS[r].b, 0.65))
+		row_cell.add_child(perk_lbl)
 
 	var grid := GridContainer.new()
 	grid.layout_mode = 2
