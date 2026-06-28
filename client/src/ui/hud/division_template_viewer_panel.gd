@@ -325,6 +325,7 @@ func _build_view_state() -> void:
 
 func _build_select_state() -> void:
 	var header_row := HBoxContainer.new()
+	header_row.layout_mode = 2
 	header_row.add_theme_constant_override("separation", 8)
 	_select_container.add_child(header_row)
 
@@ -340,11 +341,14 @@ func _build_select_state() -> void:
 	header_row.add_child(back_btn)
 
 	var list_scroll := ScrollContainer.new()
+	list_scroll.layout_mode = 2
 	list_scroll.size_flags_horizontal = 3
 	list_scroll.size_flags_vertical = 3
 	_select_container.add_child(list_scroll)
 
 	_template_list_container = VBoxContainer.new()
+	_template_list_container.layout_mode = 2
+	_template_list_container.size_flags_vertical = 3
 	_template_list_container.add_theme_constant_override("separation", 4)
 	list_scroll.add_child(_template_list_container)
 
@@ -442,8 +446,11 @@ func _rebuild_template_list() -> void:
 
 func _make_template_card(template: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
+	card.layout_mode = 2
+	card.size_flags_horizontal = 3
 
 	var margin := MarginContainer.new()
+	margin.layout_mode = 2
 	margin.add_theme_constant_override("margin_left", 6)
 	margin.add_theme_constant_override("margin_top", 4)
 	margin.add_theme_constant_override("margin_right", 6)
@@ -451,10 +458,12 @@ func _make_template_card(template: Dictionary) -> PanelContainer:
 	card.add_child(margin)
 
 	var vbox := VBoxContainer.new()
+	vbox.layout_mode = 2
 	vbox.add_theme_constant_override("separation", 2)
 	margin.add_child(vbox)
 
 	var name_row := HBoxContainer.new()
+	name_row.layout_mode = 2
 	vbox.add_child(name_row)
 
 	var is_current: bool = template.get("id", "") == _current_template_id

@@ -67,6 +67,12 @@ func _ready() -> void:
 	_build_comp_cells()
 	if _comp_grid != null:
 		_comp_grid.gui_input.connect(_on_comp_grid_input)
+		_comp_grid.mouse_entered.connect(func() -> void:
+			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_POINTING_HAND)
+		)
+		_comp_grid.mouse_exited.connect(func() -> void:
+			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
+		)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_deselected.connect(func() -> void: _current_div_id = "")
 
@@ -176,6 +182,7 @@ func _build_comp_cells() -> void:
 		var rect := ColorRect.new()
 		rect.custom_minimum_size = Vector2(8, 8)
 		rect.color = UNIT_CLASS_EMPTY_COLOR
+		rect.mouse_filter = Control.MOUSE_FILTER_PASS
 		_comp_grid.add_child(rect)
 		_comp_cells.append(rect)
 
