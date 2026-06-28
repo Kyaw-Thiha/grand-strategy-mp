@@ -248,6 +248,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 
 	var margin := MarginContainer.new()
 	margin.layout_mode = 2
+	margin.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	margin.add_theme_constant_override("margin_left", 10)
 	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_right", 10)
@@ -418,6 +419,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	_eligible_list_container.layout_mode = 2
 	_eligible_list_container.add_theme_constant_override("separation", 4)
 	_eligible_list_container.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	_eligible_list_container.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	list_scroll.add_child(_eligible_list_container)
 
 	var sep := HSeparator.new()
@@ -532,6 +534,7 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 	var card := PanelContainer.new()
 	card.layout_mode = 2
 	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	card.custom_minimum_size = Vector2(0, 56)
 
 	var hbox := HBoxContainer.new()
 	hbox.layout_mode = 2
