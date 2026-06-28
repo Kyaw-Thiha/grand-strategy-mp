@@ -63,7 +63,3 @@ signal notification_cycle_next()
 # ── Division Builder ───────────────────────────────────────────────────────
 signal division_builder_open_requested(template_id: String)  # "" = new blank template
 signal division_builder_closed()
-
-# ── Division Template Viewer ─────────────────────────────────────────────
-signal division_template_viewer_open_requested(division_id: String)
-signal division_template_viewer_closed()
