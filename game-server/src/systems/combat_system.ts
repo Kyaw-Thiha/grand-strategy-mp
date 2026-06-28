@@ -25,6 +25,7 @@ import {
   ARTY_TYPES,
   SNIPER_TYPES,
 } from "./attack_patterns.js";
+import { getRowPerkModifiers } from "./row_perk_system.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -647,11 +648,13 @@ export class CombatSystem {
 
   private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
     if (!div.grid) return;
-    const decay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
-    for (const cell of div.grid.cells) {
-      if (cell.unit_type === "") continue;
-      cell.suppression = Math.max(0, cell.suppression - decay);
-    }
+    const baseDecay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
+    div.grid.cells.forEach((cell, cellIdx) => {
+      if (cell.unit_type === "") return;
+      const cellRow = Math.floor(cellIdx / 5);
+      const decayPerk = getRowPerkModifiers(cellRow);
+      cell.suppression = Math.max(0, cell.suppression - baseDecay * decayPerk.supp_decay_mult);
+    });
   }
 
   private _computeDivisionHp(cells: GridCellState[]): number {
@@ -680,6 +683,7 @@ export class CombatSystem {
 
     for (const { cell: attCell, idx } of fireOrder) {
       const attRow      = Math.floor(idx / 5);
+      const attackerRowPerk = getRowPerkModifiers(attRow);
       const attCol      = idx % 5;
       const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
@@ -734,9 +738,11 @@ export class CombatSystem {
         const xpHpMult     = getXpHpMult(tCell.xp_points);
         const xpSuppResist = getXpSuppResistMult(tCell.xp_points);
 
+        const defRow = Math.floor(tIdx / 5);
+        const defenderRowPerk = getRowPerkModifiers(defRow);
         const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
-        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult) / xpHpMult);
-        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult) / xpSuppResist);
+        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult) / xpHpMult);
+        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * defenderRowPerk.supp_resist_mult) / xpSuppResist);
 
         const floor = _getIncapFloor(tCell.unit_type);
         if (floor > 0 && tCell.hp <= floor && !tCell.incapacitated) {
