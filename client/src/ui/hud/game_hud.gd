@@ -47,6 +47,7 @@ var _active_dock_btn: Button = null
 var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
+var _map_renderer: Node = null
 
 
 func _ready() -> void:
@@ -54,6 +55,7 @@ func _ready() -> void:
 	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
 	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
 	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
+	_map_renderer = get_node_or_null("/root/MapDebug/MapRenderer")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
@@ -105,6 +107,8 @@ func _ready() -> void:
 			_military_system.deselect()
 		if _map_interaction != null and _map_interaction.has_method("deselect"):
 			_map_interaction.deselect()
+		if _map_renderer != null and _map_renderer.has_method("clear_highlights"):
+			_map_renderer.clear_highlights()
 		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
 			_map_interaction.set_player_input_enabled(false)
 		hud_manager.show_panel("division_builder")
