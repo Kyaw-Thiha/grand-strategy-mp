@@ -39,7 +39,10 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _friendly_stack_panel: Control = $FriendlyStackPanel
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
 
+var _division_builder_panel: Control
+
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
+const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
 
@@ -83,6 +86,21 @@ func _ready() -> void:
 	hud_manager.register_panel("diplomacy", _diplomacy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research_tree", _research_tree_panel, HUDManager.PlacementMode.FULL_CENTER)
+
+	# Division Builder — full-center, opened from military panel template list
+	_division_builder_panel = _DivisionBuilderScene.instantiate()
+	add_child(_division_builder_panel)
+	hud_manager.register_panel("division_builder", _division_builder_panel, HUDManager.PlacementMode.FULL_CENTER)
+	EventBus.division_builder_open_requested.connect(func(_template_id: String) -> void:
+		hud_manager.show_panel("division_builder")
+	)
+	EventBus.division_builder_closed.connect(func() -> void:
+		hud_manager.hide_panel("division_builder")
+	)
+	if _division_builder_panel.has_signal("close_requested"):
+		_division_builder_panel.connect("close_requested", func() -> void:
+			hud_manager.hide_panel("division_builder")
+		)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
