@@ -530,6 +530,7 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 	var is_in_cell: bool = (_cells[target_index] == unit_type)
 
 	var card := PanelContainer.new()
+	card.layout_mode = 2
 	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 
 	var hbox := HBoxContainer.new()
