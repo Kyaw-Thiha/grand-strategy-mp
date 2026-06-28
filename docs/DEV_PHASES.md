@@ -769,11 +769,11 @@ for all attack pattern logic before any Godot work.
   - [x] Cavalry — horizontal attack like infantry; charge bonus (higher HP damage) in
         Round 1 only; standard infantry values from Round 2+; MG suppression vulnerability
         and non-combat traits (observation, stealth, movement) deferred to later branches
-  - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
+  - [x] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
         column shift disabled in dense_forest and urban terrain
-  - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift;
+  - [x] AT infantry / AT gun — column selective targeting, side armour on column shift;
         picks one direction only (not both adjacent columns)
-  - [ ] AA gun — passive defence vs air (no ground attack role)
+  - [x] AA gun — passive defence vs air (no ground attack role)
   - [ ] Sniper — selective targeting across full grid with priority list (fallback to
         standard infantry when no priority targets present)
   - [x] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
