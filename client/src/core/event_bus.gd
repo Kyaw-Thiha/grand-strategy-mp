@@ -59,3 +59,7 @@ signal settings_requested()
 signal pause_menu_blocking_changed(blocking: bool)
 signal move_mode_cancelled()
 signal notification_cycle_next()
+
+# ── Division Builder ───────────────────────────────────────────────────────
+signal division_builder_open_requested(template_id: String)  # "" = new blank template
+signal division_builder_closed()
