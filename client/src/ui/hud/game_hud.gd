@@ -40,9 +40,11 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
 
 var _division_builder_panel: Control
+var _division_template_viewer_panel: Control
 
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
 const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
+const _DivisionTemplateViewerScene := preload("res://scenes/game/panels/division_template_viewer_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
 var _military_system: Node = null
@@ -124,6 +126,23 @@ func _ready() -> void:
 			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
 				_map_interaction.set_player_input_enabled(true)
 		)
+
+	# Division Template Viewer — full-center, opened from mini-comp grid click
+	_division_template_viewer_panel = _DivisionTemplateViewerScene.instantiate()
+	add_child(_division_template_viewer_panel)
+	hud_manager.register_panel("division_template_viewer", _division_template_viewer_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
+	EventBus.division_template_viewer_open_requested.connect(func(div_id: String) -> void:
+		(_division_template_viewer_panel as DivisionTemplateViewerPanel).open_for_division(div_id)
+		hud_manager.show_panel("division_template_viewer")
+	)
+	EventBus.division_template_viewer_closed.connect(func() -> void:
+		hud_manager.hide_panel("division_template_viewer")
+	)
+	_division_template_viewer_panel.connect("close_requested", func() -> void:
+		EventBus.division_template_viewer_closed.emit()
+	)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
