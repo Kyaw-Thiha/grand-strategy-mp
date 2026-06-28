@@ -78,7 +78,7 @@ func _build_top_bar() -> void:
 
 	_div_title_label = Label.new()
 	_div_title_label.size_flags_horizontal = 3
-	_div_title_label.theme_override_font_sizes/font_size = 16
+	_div_title_label.add_theme_font_size_override("font_size", 16)
 	top_bar.add_child(_div_title_label)
 
 	var close_btn := Button.new()
@@ -106,33 +106,33 @@ func _build_body() -> void:
 
 func _build_grid_panel(parent_node: PanelContainer) -> void:
 	var margin := MarginContainer.new()
-	margin.theme_override_constants/margin_left = 8
-	margin.theme_override_constants/margin_top = 8
-	margin.theme_override_constants/margin_right = 8
-	margin.theme_override_constants/margin_bottom = 8
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
 	parent_node.add_child(margin)
 
 	var vbox := VBoxContainer.new()
-	vbox.theme_override_constants/separation = 6
+	vbox.add_theme_constant_override("separation", 6)
 	margin.add_child(vbox)
 
 	var header_row := HBoxContainer.new()
 	var header_label := Label.new()
 	header_label.text = "TEMPLATE GRID · 5×5"
-	header_label.theme_override_font_sizes/font_size = 12
+	header_label.add_theme_font_size_override("font_size", 12)
 	header_row.add_child(header_label)
 	var header_spacer := Control.new()
 	header_spacer.size_flags_horizontal = 3
 	header_row.add_child(header_spacer)
 	var header_dir := Label.new()
 	header_dir.text = "front-to-back ↓"
-	header_dir.theme_override_font_sizes/font_size = 10
+	header_dir.add_theme_font_size_override("font_size", 10)
 	header_row.add_child(header_dir)
 	vbox.add_child(header_row)
 
 	var front_lbl := Label.new()
 	front_lbl.text = "══════════ FRONT LINE ══════════"
-	front_lbl.theme_override_font_sizes/font_size = 10
+	front_lbl.add_theme_font_size_override("font_size", 10)
 	front_lbl.horizontal_alignment = 1
 	vbox.add_child(front_lbl)
 
@@ -143,20 +143,20 @@ func _build_grid_panel(parent_node: PanelContainer) -> void:
 
 	var row_label_col := VBoxContainer.new()
 	row_label_col.size_flags_vertical = 3
-	row_label_col.theme_override_constants/separation = 6
+	row_label_col.add_theme_constant_override("separation", 6)
 	grid_area.add_child(row_label_col)
 
 	for r: int in range(5):
 		var row_vbox := VBoxContainer.new()
-		row_vbox.theme_override_constants/separation = 0
+		row_vbox.add_theme_constant_override("separation", 0)
 		var name_lbl := Label.new()
 		name_lbl.text = ROW_NAMES[r]
-		name_lbl.theme_override_font_sizes/font_size = 10
+		name_lbl.add_theme_font_size_override("font_size", 10)
 		name_lbl.modulate = ROW_COLORS[r]
 		row_vbox.add_child(name_lbl)
 		var hint_lbl := Label.new()
 		hint_lbl.text = ROW_PERK_HINTS[r]
-		hint_lbl.theme_override_font_sizes/font_size = 8
+		hint_lbl.add_theme_font_size_override("font_size", 8)
 		hint_lbl.modulate = Color(0.6, 0.6, 0.6, 1.0)
 		row_vbox.add_child(hint_lbl)
 		row_label_col.add_child(row_vbox)
@@ -182,22 +182,22 @@ func _build_right_panel(parent_node: PanelContainer) -> void:
 	parent_node.add_child(scroll)
 
 	var margin := MarginContainer.new()
-	margin.theme_override_constants/margin_left = 8
-	margin.theme_override_constants/margin_top = 8
-	margin.theme_override_constants/margin_right = 8
-	margin.theme_override_constants/margin_bottom = 8
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
 	scroll.add_child(margin)
 
 	var vbox := VBoxContainer.new()
-	vbox.theme_override_constants/separation = 8
+	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 
 	_view_container = VBoxContainer.new()
-	_view_container.theme_override_constants/separation = 8
+	_view_container.add_theme_constant_override("separation", 8)
 	vbox.add_child(_view_container)
 
 	_select_container = VBoxContainer.new()
-	_select_container.theme_override_constants/separation = 8
+	_select_container.add_theme_constant_override("separation", 8)
 	_select_container.visible = false
 	vbox.add_child(_select_container)
 
@@ -208,12 +208,12 @@ func _build_right_panel(parent_node: PanelContainer) -> void:
 func _build_view_state() -> void:
 	var header := Label.new()
 	header.text = "CURRENT TEMPLATE"
-	header.theme_override_font_sizes/font_size = 14
+	header.add_theme_font_size_override("font_size", 14)
 	_view_container.add_child(header)
 
 	_no_template_label = Label.new()
 	_no_template_label.text = "NO TEMPLATE ASSIGNED"
-	_no_template_label.theme_override_font_sizes/font_size = 12
+	_no_template_label.add_theme_font_size_override("font_size", 12)
 	_no_template_label.modulate = Color(0.6, 0.6, 0.6, 1.0)
 	_view_container.add_child(_no_template_label)
 
@@ -221,29 +221,29 @@ func _build_view_state() -> void:
 	_view_container.add_child(separator)
 
 	_template_name_label = Label.new()
-	_template_name_label.theme_override_font_sizes/font_size = 16
+	_template_name_label.add_theme_font_size_override("font_size", 16)
 	_view_container.add_child(_template_name_label)
 
 	var type_radius_row := HBoxContainer.new()
-	type_radius_row.theme_override_constants/separation = 8
+	type_radius_row.add_theme_constant_override("separation", 8)
 	_view_container.add_child(type_radius_row)
 
 	_division_type_label = Label.new()
 	_division_type_label.size_flags_horizontal = 3
-	_division_type_label.theme_override_font_sizes/font_size = 11
+	_division_type_label.add_theme_font_size_override("font_size", 11)
 	type_radius_row.add_child(_division_type_label)
 
 	_engagement_radius_label = Label.new()
-	_engagement_radius_label.theme_override_font_sizes/font_size = 11
+	_engagement_radius_label.add_theme_font_size_override("font_size", 11)
 	type_radius_row.add_child(_engagement_radius_label)
 
 	var profile_header := Label.new()
 	profile_header.text = "MOVEMENT PROFILE"
-	profile_header.theme_override_font_sizes/font_size = 12
+	profile_header.add_theme_font_size_override("font_size", 12)
 	_view_container.add_child(profile_header)
 
 	var swatch_row := HBoxContainer.new()
-	swatch_row.theme_override_constants/separation = 4
+	swatch_row.add_theme_constant_override("separation", 4)
 	_view_container.add_child(swatch_row)
 
 	var terrain_names := ["Plains", "Hills", "Forest", "DnsF", "Mtn"]
@@ -265,24 +265,24 @@ func _build_view_state() -> void:
 
 	var fill_header := Label.new()
 	fill_header.text = "FILL & ROLE BALANCE"
-	fill_header.theme_override_font_sizes/font_size = 12
+	fill_header.add_theme_font_size_override("font_size", 12)
 	_view_container.add_child(fill_header)
 
 	_fill_count_label = Label.new()
-	_fill_count_label.theme_override_font_sizes/font_size = 11
+	_fill_count_label.add_theme_font_size_override("font_size", 11)
 	_view_container.add_child(_fill_count_label)
 
 	_fill_bars.clear()
 	_fill_labels.clear()
 	for r: int in range(5):
 		var row_hbox := HBoxContainer.new()
-		row_hbox.theme_override_constants/separation = 4
+		row_hbox.add_theme_constant_override("separation", 4)
 		_view_container.add_child(row_hbox)
 
 		var name_lbl := Label.new()
 		name_lbl.text = ROW_NAMES[r]
 		name_lbl.custom_minimum_size = Vector2(60, 0)
-		name_lbl.theme_override_font_sizes/font_size = 10
+		name_lbl.add_theme_font_size_override("font_size", 10)
 		row_hbox.add_child(name_lbl)
 
 		var bar := ProgressBar.new()
@@ -295,13 +295,13 @@ func _build_view_state() -> void:
 
 		var count_lbl := Label.new()
 		count_lbl.custom_minimum_size = Vector2(20, 0)
-		count_lbl.theme_override_font_sizes/font_size = 10
+		count_lbl.add_theme_font_size_override("font_size", 10)
 		row_hbox.add_child(count_lbl)
 		_fill_labels.append(count_lbl)
 
 	_locked_notice = Label.new()
 	_locked_notice.text = "Template cannot be changed while division is engaged"
-	_locked_notice.theme_override_font_sizes/font_size = 11
+	_locked_notice.add_theme_font_size_override("font_size", 11)
 	_locked_notice.modulate = Color(0.8, 0.3, 0.3, 1.0)
 	_locked_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_view_container.add_child(_locked_notice)
@@ -314,12 +314,12 @@ func _build_view_state() -> void:
 
 func _build_select_state() -> void:
 	var header_row := HBoxContainer.new()
-	header_row.theme_override_constants/separation = 8
+	header_row.add_theme_constant_override("separation", 8)
 	_select_container.add_child(header_row)
 
 	var header := Label.new()
 	header.text = "SELECT TEMPLATE"
-	header.theme_override_font_sizes/font_size = 14
+	header.add_theme_font_size_override("font_size", 14)
 	header.size_flags_horizontal = 3
 	header_row.add_child(header)
 
@@ -334,13 +334,13 @@ func _build_select_state() -> void:
 	_select_container.add_child(list_scroll)
 
 	_template_list_container = VBoxContainer.new()
-	_template_list_container.theme_override_constants/separation = 4
+	_template_list_container.add_theme_constant_override("separation", 4)
 	list_scroll.add_child(_template_list_container)
 
 	_select_container.add_child(HSeparator.new())
 
 	_confirm_label = Label.new()
-	_confirm_label.theme_override_font_sizes/font_size = 11
+	_confirm_label.add_theme_font_size_override("font_size", 11)
 	_select_container.add_child(_confirm_label)
 
 	_confirm_btn = Button.new()
@@ -430,17 +430,17 @@ func _rebuild_template_list() -> void:
 
 func _make_template_card(template: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
-	card.theme_override_styles/panel = null
+	card.add_theme_stylebox_override("panel", null)
 
 	var margin := MarginContainer.new()
-	margin.theme_override_constants/margin_left = 6
-	margin.theme_override_constants/margin_top = 4
-	margin.theme_override_constants/margin_right = 6
-	margin.theme_override_constants/margin_bottom = 4
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_right", 6)
+	margin.add_theme_constant_override("margin_bottom", 4)
 	card.add_child(margin)
 
 	var vbox := VBoxContainer.new()
-	vbox.theme_override_constants/separation = 2
+	vbox.add_theme_constant_override("separation", 2)
 	margin.add_child(vbox)
 
 	var name_row := HBoxContainer.new()
@@ -450,19 +450,19 @@ func _make_template_card(template: Dictionary) -> PanelContainer:
 	if is_current:
 		var star := Label.new()
 		star.text = "[★]"
-		star.theme_override_font_sizes/font_size = 11
+		star.add_theme_font_size_override("font_size", 11)
 		name_row.add_child(star)
 
 	var name_lbl := Label.new()
 	name_lbl.text = template.get("name", "—")
-	name_lbl.theme_override_font_sizes/font_size = 12
+	name_lbl.add_theme_font_size_override("font_size", 12)
 	name_lbl.size_flags_horizontal = 3
 	name_row.add_child(name_lbl)
 
 	if is_current:
 		var badge := Label.new()
 		badge.text = "[CURRENT]"
-		badge.theme_override_font_sizes/font_size = 9
+		badge.add_theme_font_size_override("font_size", 9)
 		badge.modulate = Color(0.18, 0.62, 0.56, 1.0)
 		name_row.add_child(badge)
 
@@ -471,7 +471,7 @@ func _make_template_card(template: Dictionary) -> PanelContainer:
 	var t_type: String = _derive_division_type(t_cells)
 	var t_radius: String = _derive_engagement_radius(t_cells)
 	sub_lbl.text = "%s  ·  %s" % [t_type, t_radius]
-	sub_lbl.theme_override_font_sizes/font_size = 9
+	sub_lbl.add_theme_font_size_override("font_size", 9)
 	sub_lbl.modulate = Color(0.6, 0.6, 0.6, 1.0)
 	vbox.add_child(sub_lbl)
 
