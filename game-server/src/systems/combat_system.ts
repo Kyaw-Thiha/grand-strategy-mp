@@ -6,7 +6,19 @@ import type { GameRoomState, DivisionState, GridCellState } from "../rooms/schem
 import type { MovementSystem } from "./movement_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
-import { getTargetCells, getDamageProfile, getFireOrder, _resolveArmourColumn, _resolveATColumn } from "./attack_patterns.js";
+import {
+  getTargetCells,
+  getDamageProfile,
+  getFireOrder,
+  _resolveArmourColumn,
+  _resolveATColumn,
+  _artilleryTargets,
+  getArtilleryDamageMultipliers,
+  _hashString,
+  _reconContribution,
+  ARTY_TYPES,
+  SNIPER_TYPES,
+} from "./attack_patterns.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -19,7 +31,16 @@ let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
-import { BASE_ATTRITION, SIDE_ARMOUR_MULT, TACTICAL_FLANK_BONUS, TACTICAL_ENVELOPMENT_BONUS } from "../data/combat_constants.js";
+import {
+  BASE_ATTRITION,
+  SIDE_ARMOUR_MULT,
+  TACTICAL_FLANK_BONUS,
+  TACTICAL_ENVELOPMENT_BONUS,
+  RECON_BASE_PER_ROUND,
+  RECON_MAX,
+} from "../data/combat_constants.js";
+import { resolvePerkModifiers, resolveAttackConfig } from "../data/perks.js";
+import type { SpecialAttackConfig } from "../types/perk_types.js";
 
 // Damage output multiplier by division type
 const TYPE_MULT: Record<string, number> = {
@@ -519,6 +540,19 @@ export class CombatSystem {
       // Apply division-level damage (cell-level damage added in Branch C)
       this._applyDamage(divA, divB, pair, state, changed, broadcast);
 
+      // Accumulate recon_value after damage — only surviving units contribute
+      const _accumulateRecon = (division: DivisionState): void => {
+        let gain = RECON_BASE_PER_ROUND;
+        for (const cell of Array.from(division.grid.cells)) {
+          if (cell.unit_type !== "" && !cell.incapacitated) {
+            gain += _reconContribution(cell.unit_type);
+          }
+        }
+        division.recon_value = Math.min(RECON_MAX, (division.recon_value ?? 0) + gain);
+      };
+      _accumulateRecon(divA);
+      _accumulateRecon(divB);
+
       // Broadcast COMBAT_RESULT alongside ROUND_RESOLVED for strategic map UI
       broadcast("COMBAT_RESULT", {
         division_a:    divA.division_id,
@@ -566,11 +600,12 @@ export class CombatSystem {
   }
 
   private _applyPerCellDamage(
-    attacker: DivisionState,
-    defender: DivisionState,
-    rawDamage: number,
-    pair: ActivePair,
-    broadcast: (type: string, msg: unknown) => void,
+    attacker:       DivisionState,
+    defender:       DivisionState,
+    rawDamage:      number,
+    pair:           ActivePair,
+    broadcast:      (type: string, msg: unknown) => void,
+    attackerPerkIds: string[],
   ): GridCellDelta[] {
     if (!attacker.grid || !defender.grid) return [];
 
@@ -587,7 +622,26 @@ export class CombatSystem {
       const attCol      = idx % 5;
       const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
-      const targets     = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber, Infinity, cover);
+      // Resolve targets — arty calls _artilleryTargets directly (avoids double call);
+      // sniper uses getTargetCells with perk config; all others use getTargetCells as before.
+      let specialCfg: SpecialAttackConfig | undefined;
+      let targets: number[];
+      let artyMultMap: Map<number, number> | null = null;
+
+      if (ARTY_TYPES.has(attCell.unit_type)) {
+        specialCfg             = resolveAttackConfig(attCell.unit_type, attackerPerkIds);
+        specialCfg.recon_value = attacker.recon_value ?? 0;
+        specialCfg.rng_seed    = _hashString(pair.engagement_id) ^ pair.round;
+        const artyResult       = _artilleryTargets(defender.grid.cells, specialCfg.recon_value, specialCfg.area_radius, specialCfg.rng_seed);
+        targets    = artyResult.targets;
+        artyMultMap = getArtilleryDamageMultipliers(targets, artyResult.center_col, specialCfg.falloff_per_col);
+      } else if (SNIPER_TYPES.has(attCell.unit_type)) {
+        specialCfg          = resolveAttackConfig(attCell.unit_type, attackerPerkIds);
+        specialCfg.rng_seed = 0; // snipers don't use RNG
+        targets = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber, Infinity, cover, specialCfg);
+      } else {
+        targets = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber, Infinity, cover);
+      }
       const attackerPen = UNIT_COMBAT_STATS[attCell.unit_type]?.pen ?? 10;
 
       // Column-shift modifiers: attacker-level (apply to all targets uniformly)
@@ -616,7 +670,8 @@ export class CombatSystem {
         const penMult         = profile.bypasses_armour ? 1.0 : _armorPenMultiplier(attackerPen, effectiveArmour);
         const cavMult = (tCell.unit_type === "cavalry") ? profile.cavalry_supp_mult : 1.0;
 
-        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult * tacticalHpBonus);
+        const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
+        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult * tacticalHpBonus * artyMult);
         tCell.suppression = Math.min(100, tCell.suppression + perTargetSupp * cavMult);
 
         const floor = _getIncapFloor(tCell.unit_type);
@@ -691,9 +746,13 @@ export class CombatSystem {
 
     // Per-cell damage (returns deltas for ROUND_RESOLVED; stored on pair for collection)
     this._decayCellSuppression(divB, divB.combat_state === "retreating");
-    const deltasB = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast);
+    const aNation1 = state.nations.get(divA.nation_id);
+    const aPerks1  = aNation1 ? Array.from(aNation1.researched_perks) : [];
+    const deltasB  = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast, aPerks1);
     this._decayCellSuppression(divA, divA.combat_state === "retreating");
-    const deltasA = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast);
+    const aNation2 = state.nations.get(divB.nation_id);
+    const aPerks2  = aNation2 ? Array.from(aNation2.researched_perks) : [];
+    const deltasA  = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast, aPerks2);
 
     // Recompute division-level aggregates from cell data
     divB.hp           = this._computeDivisionHp(divB.grid?.cells ?? []);

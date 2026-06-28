@@ -311,13 +311,19 @@ anti-infantry unit. Value is entirely in reducing incoming air damage.
 
 **Pattern:** Ignores row and column restrictions. Targets anywhere in the enemy 5×5 grid.
 
-**Priority target list (in order):**
-1. Enemy snipers
-2. Flamethrowers
-3. Force recon units
-4. Machine gun teams
-5. AT gun crews
-6. Standard infantry (fallback when no priority targets present)
+**Default priority target list (in order):**
+1. Enemy snipers (`sniper`)
+2. Force recon snipers (`force_recon_sniper`)
+3. Flamethrowers (`flamethrower`)
+4. Recon infantry (`recon_infantry`)
+5. Machine gun teams (`mg`)
+6. AT gun crews (`at_gun`)
+7. Self-propelled AT guns (`at_gun_sp`)
+8. AT infantry (`at_infantry`)
+9. Commandos (`commando`)
+10. Standard infantry (`infantry`) — fallback when no priority targets present
+
+**Perk overrides:** The priority list can be replaced entirely by researchable perks (e.g. a counter-armour doctrine replaces the list with tank types). Available perks also raise `n_targets` (default 1).
 
 **Damage profile:** High HP damage to infantry targets. Low suppression. Bypasses cover
 bonuses that infantry receive in certain terrain.
@@ -349,24 +355,51 @@ Zero effect against armoured units — armour is immune to flame suppression.
 
 ---
 
-### Artillery — recon-proportional random area hit
+### Artillery — recon-proportional weighted column targeting
 
 **Units:** Field artillery, howitzer, self-propelled gun.
 
-**Pattern:** Hits a random cell (or 2×2 cluster for upgraded variants) in the enemy grid.
-Target cell chosen randomly, but probability weights shift toward occupied cells proportional
-to the division's current recon value.
+**Pattern:** Selects a target column via weighted random, then damages all living units
+within an area around that column. Column weights blend two factors:
 
-- At zero recon: fully random across all 25 cells. Many shots land on empty cells.
-- At maximum recon: weighted heavily toward occupied cells, prioritising high-value targets.
+```
+weight(col) = (1 − recon_value) × occupied_count(col)
+            + recon_value       × value_score(col)
+```
+
+Where:
+- `occupied_count(col)` = number of living enemy cells in that column
+- `value_score(col)` = sum of `ARTY_UNIT_VALUE[unit_type]` for each living cell in the
+  column (high-value targets like snipers and heavy tanks score 5; infantry score 1)
+
+- At `recon_value = 0`: all occupied columns are equally likely by cell count (more
+  units in a column = proportionally more weight)
+- At `recon_value = 1`: high-value columns are strongly preferred (a single sniper
+  in a column outweighs several infantry in another)
+
+**Area expansion:** After column selection, all living cells in
+`center_col ± area_radius` columns are targeted. Default `area_radius = 0` (single
+column). Researchable perks raise it to 1 (3-column area) or 2 (full 5-column width).
+
+**Damage falloff:** Cells further from the center column take reduced HP damage:
+
+```
+damage_mult(col) = max(0, 1.0 − falloff_per_col × |col − center_col|)
+```
+
+Default `falloff_per_col = 0.3`: center column = 1.0×, adjacent = 0.7×, two away = 0.4×.
+Researchable perks can improve this (e.g. `arty_precision_fire` sets it to 0.5).
+
+**Deterministic RNG:** The column selection uses a seeded LCG (djb2 hash of engagement_id
+XOR round_number). Same engagement + same round = same result on server and client.
 
 **Damage profile:** High HP damage to any unit hit. Moderate suppression. Effective against
 infantry and lightly armoured targets. Cannot penetrate heavy armour.
 
-**Recon dependency:** Artillery effectiveness scales directly with accumulated recon value.
-Early rounds (before recon builds) artillery is wasteful. Investing in recon units converts
-it from a random nuisance into a precision asset — a primary skill lever for experienced
-players.
+**Recon dependency:** Artillery accuracy scales directly with accumulated recon value.
+Early rounds (before recon builds) artillery is wasteful — shots scatter evenly across
+all columns regardless of value. Investing in recon units converts it from a random
+nuisance into a precision asset that strips high-value targets from the enemy grid.
 
 ---
 

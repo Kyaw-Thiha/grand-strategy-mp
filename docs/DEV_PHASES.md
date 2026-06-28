@@ -774,11 +774,11 @@ for all attack pattern logic before any Godot work.
   - [x] AT infantry / AT gun — column selective targeting, side armour on column shift;
         picks one direction only (not both adjacent columns)
   - [x] AA gun — passive defence vs air (no ground attack role)
-  - [ ] Sniper — selective targeting across full grid with priority list (fallback to
+   - [x] Sniper — selective targeting across full grid with priority list (fallback to
         standard infantry when no priority targets present)
   - [x] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
         position (1 row ahead of own position, not anchored to enemy contact row)
-  - [ ] Artillery — recon-proportional weighted random cell targeting
+   - [x] Artillery — recon-proportional weighted random cell targeting
 - [ ] Row positional perks applied per round:
       R5 Vanguard: +% suppression dealt; R4 Assault: +% HP damage dealt;
       R3 Support: +% suppression resistance; R2 Reserve: faster suppression decay;
