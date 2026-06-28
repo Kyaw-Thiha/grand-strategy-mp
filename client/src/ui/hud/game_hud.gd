@@ -45,11 +45,15 @@ const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
 const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
+var _military_system: Node = null
+var _map_interaction: Node = null
 
 
 func _ready() -> void:
 	# MapLoader is a sibling of GameHUD in the MapDebug scene tree
 	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
+	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
+	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
@@ -92,6 +96,10 @@ func _ready() -> void:
 	add_child(_division_builder_panel)
 	hud_manager.register_panel("division_builder", _division_builder_panel, HUDManager.PlacementMode.FULL_CENTER)
 	EventBus.division_builder_open_requested.connect(func(_template_id: String) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
 		hud_manager.show_panel("division_builder")
 	)
 	EventBus.division_builder_closed.connect(func() -> void:
