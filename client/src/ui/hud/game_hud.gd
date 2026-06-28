@@ -39,14 +39,21 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _friendly_stack_panel: Control = $FriendlyStackPanel
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
 
+var _division_builder_panel: Control
+
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
+const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
+var _military_system: Node = null
+var _map_interaction: Node = null
 
 
 func _ready() -> void:
 	# MapLoader is a sibling of GameHUD in the MapDebug scene tree
 	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
+	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
+	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
@@ -83,6 +90,31 @@ func _ready() -> void:
 	hud_manager.register_panel("diplomacy", _diplomacy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research_tree", _research_tree_panel, HUDManager.PlacementMode.FULL_CENTER)
+
+	# Division Builder — full-center, opened from military panel template list
+	_division_builder_panel = _DivisionBuilderScene.instantiate()
+	add_child(_division_builder_panel)
+	hud_manager.register_panel("division_builder", _division_builder_panel, HUDManager.PlacementMode.FULL_CENTER)
+	EventBus.division_builder_open_requested.connect(func(_template_id: String) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
+		hud_manager.show_panel("division_builder")
+	)
+	EventBus.division_builder_closed.connect(func() -> void:
+		hud_manager.hide_panel("division_builder")
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
+	)
+	if _division_builder_panel.has_signal("close_requested"):
+		_division_builder_panel.connect("close_requested", func() -> void:
+			hud_manager.hide_panel("division_builder")
+			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+				_map_interaction.set_player_input_enabled(true)
+		)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
@@ -242,6 +274,7 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 	var panel_rect: Rect2 = center_child.get_global_rect()
 	if not panel_rect.has_point(mb.position):
 		hud_manager.hide_panel(open_name)
+		get_viewport().set_input_as_handled()
 
 
 ## Called by game session to update the persistent nation display.

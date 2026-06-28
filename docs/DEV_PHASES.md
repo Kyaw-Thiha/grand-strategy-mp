@@ -762,7 +762,7 @@ for all attack pattern logic before any Godot work.
       experience tier (Green/Seasoned/Veteran/Elite)
 - [x] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
       5-phase lethality escalation (Contact → Firefight → Intense → Decisive → Annihilation)
-- [ ] All unit attack patterns server-side:
+- [x] All unit attack patterns server-side:
   - [x] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
         targets first row with at least one living unit; damage distributed only among
         living units in that row)
@@ -842,12 +842,16 @@ for all attack pattern logic before any Godot work.
 - [ ] Combat icon enhancements — aggregate HP bar, suppression pulse, round phase dots,
       meeting battle vs standard Engaged icon (from Phase 4)
 - [ ] Combat button — appears over active combat icons, opens `TacticalGridUI`
-- [ ] `DivisionBuilder` (MVP) — template builder UI in main menu; create/edit/save custom
-      templates; shows movement profile summary (which terrains are impassable, slowest
-      terrain); formation bonus preview (highlight when placing adjacent synergy units);
-      select from nation presets in lobby; cavalry unit available to all nations per
-      nation_config; motorised toggle available after motorisation research (Phase 10);
-      mechanised infantry unit available after armour research branch unlocks it (Phase 10+)
+- [x] `DivisionBuilder` (MVP) — in-game full-center overlay with 5×5 grid, row role labels
+      (Vanguard/Assault/Support/Reserve/Rear), cell glyphs via `UnitGlyphCell` NATO-style
+      drawing; right panel switches between Overview (division type, engagement radius,
+      movement swatches, fill bars) and Cell-Selected (eligible unit list per row, clickable
+      cards with mini-glyph + description + hover preview, click-to-place, right-click-to-clear);
+      Save button persists to in-memory `DivisionTemplateStore` with 3 hardcoded presets;
+      map selection cleared + map input disabled when panel opens
+- [ ] Formation bonus preview (highlight when placing adjacent synergy units) — deferred
+- [ ] Motorised toggle available after motorisation research (Phase 10)
+- [ ] Mechanised infantry unit available after armour research branch unlocks it (Phase 10+)
 - [ ] Template redeployment — switch template when out of combat; 1-minute flat cooldown;
       division redeploys at nearest friendly city; experience on existing units lost on redeploy
 - [ ] Movement profile displayed on division selection — player can see what terrain their

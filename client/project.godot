@@ -30,6 +30,7 @@ SessionManager="*res://src/systems/session/session_manager.gd"
 LobbySystem="*res://src/systems/session/lobby_system.gd"
 SceneManager="*res://src/core/scene_manager.gd"
 KeybindManager="*res://src/core/keybind_manager.gd"
+DivisionTemplateStore="*res://src/core/division_template_store.gd"
 
 [display]
 
