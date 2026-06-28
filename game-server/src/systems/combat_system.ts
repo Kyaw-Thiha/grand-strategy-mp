@@ -6,6 +6,7 @@ import type { GameRoomState, DivisionState, GridCellState } from "../rooms/schem
 import type { MovementSystem } from "./movement_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
+import { getTargetCells, getDamageProfile, getFireOrder } from "./attack_patterns.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
-import { BASE_ATTRITION, HP_DAMAGE_FRACTION, SUPPRESSION_FRACTION } from "../data/combat_constants.js";
+import { BASE_ATTRITION } from "../data/combat_constants.js";
 
 // Damage output multiplier by division type
 const TYPE_MULT: Record<string, number> = {
@@ -547,17 +548,6 @@ export class CombatSystem {
 
   // ── Per-cell helpers ─────────────────────────────────────────────────────────
 
-  private _getBestPenValue(div: DivisionState): number {
-    if (!div.grid) return 10;
-    let best = 0;
-    for (const cell of div.grid.cells) {
-      if (cell.unit_type === "" || cell.incapacitated) continue;
-      const stats = UNIT_COMBAT_STATS[cell.unit_type];
-      if (stats && stats.pen > best) best = stats.pen;
-    }
-    return best > 0 ? best : 10;
-  }
-
   private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
     if (!div.grid) return;
     const decay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
@@ -580,48 +570,61 @@ export class CombatSystem {
     pair: ActivePair,
     broadcast: (type: string, msg: unknown) => void,
   ): GridCellDelta[] {
-    if (!defender.grid) return [];
+    if (!attacker.grid || !defender.grid) return [];
 
-    const eligibleCells = defender.grid.cells
-      .map((cell, idx) => ({ cell, idx }))
-      .filter(({ cell }) => cell.unit_type !== "" && !cell.incapacitated);
+    const fireOrder = getFireOrder(attacker.grid.cells, []);
+    if (fireOrder.length === 0) return [];
 
-    if (eligibleCells.length === 0) return [];
+    const perAttackerBudget = rawDamage / fireOrder.length;
+    const roundNumber       = pair.round;
+    const deltasMap         = new Map<number, GridCellDelta>();
 
-    const attackerPen    = this._getBestPenValue(attacker);
-    const perCellHpDmg   = (rawDamage * HP_DAMAGE_FRACTION)   / eligibleCells.length;
-    const perCellSuppDmg = (rawDamage * SUPPRESSION_FRACTION) / eligibleCells.length;
-    const deltas: GridCellDelta[] = [];
+    for (const { cell: attCell, idx } of fireOrder) {
+      const attRow      = Math.floor(idx / 5);
+      const attCol      = idx % 5;
+      const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
-    for (const { cell, idx } of eligibleCells) {
-      const stats    = UNIT_COMBAT_STATS[cell.unit_type];
-      const penMult  = _armorPenMultiplier(attackerPen, stats?.armour ?? 0);
-      const hpDelta  = perCellHpDmg * penMult;
+      const targets     = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber);
+      const attackerPen = UNIT_COMBAT_STATS[attCell.unit_type]?.pen ?? 10;
 
-      cell.hp          = Math.max(0, cell.hp - hpDelta);
-      cell.suppression = Math.min(100, cell.suppression + perCellSuppDmg);
+      if (targets.length === 0) continue;
 
-      const floor = _getIncapFloor(cell.unit_type);
-      if (floor > 0 && cell.hp <= floor && !cell.incapacitated) {
-        cell.incapacitated = true;
-        broadcast("UNIT_INCAPACITATED", {
-          engagement_id: pair.engagement_id,
-          division_id:   defender.division_id,
-          cell_index:    idx,
-          unit_type:     cell.unit_type as UnitTypeValue,
-          xp_retained:   0,
-        } satisfies UnitIncapacitatedPayload);
+      const perTargetHp   = (perAttackerBudget * profile.hp_fraction)   / targets.length;
+      const perTargetSupp = (perAttackerBudget * profile.supp_fraction) / targets.length;
+
+      for (const tIdx of targets) {
+        const tCell  = defender.grid.cells[tIdx];
+        if (!tCell) continue;
+
+        const armour  = UNIT_COMBAT_STATS[tCell.unit_type]?.armour ?? 0;
+        const penMult = profile.bypasses_armour ? 1.0 : _armorPenMultiplier(attackerPen, armour);
+        const cavMult = (tCell.unit_type === "cavalry") ? profile.cavalry_supp_mult : 1.0;
+
+        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult);
+        tCell.suppression = Math.min(100, tCell.suppression + perTargetSupp * cavMult);
+
+        const floor = _getIncapFloor(tCell.unit_type);
+        if (floor > 0 && tCell.hp <= floor && !tCell.incapacitated) {
+          tCell.incapacitated = true;
+          broadcast("UNIT_INCAPACITATED", {
+            engagement_id: pair.engagement_id,
+            division_id:   defender.division_id,
+            cell_index:    tIdx,
+            unit_type:     tCell.unit_type as UnitTypeValue,
+            xp_retained:   0,
+          } satisfies UnitIncapacitatedPayload);
+        }
+
+        deltasMap.set(tIdx, {
+          cell_index:    tIdx,
+          hp:            tCell.hp,
+          suppression:   tCell.suppression,
+          incapacitated: tCell.incapacitated,
+        });
       }
-
-      deltas.push({
-        cell_index:    idx,
-        hp:            cell.hp,
-        suppression:   cell.suppression,
-        incapacitated: cell.incapacitated,
-      });
     }
 
-    return deltas;
+    return Array.from(deltasMap.values());
   }
 
   // Helper: apply bidirectional damage between two divisions in a pair
