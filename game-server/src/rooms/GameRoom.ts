@@ -101,6 +101,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       div.movement_profile_json = JSON.stringify(
         this.movementSystem.computeMovementProfile(templateCells)
       );
+      this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
     });
     if (process.env.DEV_MODE === "true") {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
