@@ -134,10 +134,20 @@ func _ready() -> void:
 		HUDManager.PlacementMode.FULL_CENTER
 	)
 	EventBus.division_template_viewer_open_requested.connect(func(div_id: String) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _map_renderer != null and _map_renderer.has_method("clear_highlights"):
+			_map_renderer.clear_highlights()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
 		hud_manager.show_panel("division_template_viewer")
 	)
 	EventBus.division_template_viewer_closed.connect(func() -> void:
 		hud_manager.hide_panel("division_template_viewer")
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
 	)
 	if _division_template_viewer_panel.has_signal("close_requested"):
 		_division_template_viewer_panel.connect("close_requested", func() -> void:

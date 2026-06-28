@@ -201,10 +201,12 @@ func _build_right_panel(parent_node: PanelContainer) -> void:
 	margin.add_child(vbox)
 
 	_view_container = VBoxContainer.new()
+	_view_container.size_flags_vertical = 3
 	_view_container.add_theme_constant_override("separation", 8)
 	vbox.add_child(_view_container)
 
 	_select_container = VBoxContainer.new()
+	_select_container.size_flags_vertical = 3
 	_select_container.add_theme_constant_override("separation", 8)
 	_select_container.visible = false
 	vbox.add_child(_select_container)
