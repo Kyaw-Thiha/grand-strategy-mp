@@ -197,6 +197,7 @@ func _build_right_panel(parent_node: PanelContainer) -> void:
 	scroll.add_child(margin)
 
 	var vbox := VBoxContainer.new()
+	vbox.size_flags_vertical = 3
 	vbox.add_theme_constant_override("separation", 8)
 	margin.add_child(vbox)
 
@@ -433,9 +434,12 @@ func _rebuild_template_list() -> void:
 		child.queue_free()
 
 	var templates: Array = DivisionTemplateStore.get_templates()
+	print("DivisionTemplateViewer: templates count = ", templates.size())
 	for t: Dictionary in templates:
 		var card: PanelContainer = _make_template_card(t)
 		_template_list_container.add_child(card)
+		print("  added card: ", t.get("name", "?"))
+	print("  total children: ", _template_list_container.get_child_count())
 
 
 func _make_template_card(template: Dictionary) -> PanelContainer:
