@@ -1,6 +1,12 @@
 import { GridCellState } from "../rooms/schema/GameRoomState.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
-import { BASE_ATTRITION } from "../data/combat_constants.js";
+import {
+  BASE_ATTRITION,
+  RECON_CONTRIB_RATES,
+  ARTY_UNIT_VALUE,
+} from "../data/combat_constants.js";
+import type { SpecialAttackConfig } from "../types/perk_types.js";
+import { DEFAULT_SNIPER_CONFIG, DEFAULT_ARTILLERY_CONFIG } from "../types/perk_types.js";
 
 const ARMOUR_TYPES = new Set(["light_tank", "medium_tank", "heavy_tank", "armoured_car"]);
 const AT_TYPES     = new Set(["at_infantry", "at_gun", "at_gun_sp"]);
@@ -10,6 +16,9 @@ const AT_TYPES     = new Set(["at_infantry", "at_gun", "at_gun_sp"]);
 const ARMOURED_TARGET_TYPES = new Set([
   "light_tank", "medium_tank", "heavy_tank", "armoured_car", "at_gun_sp",
 ]);
+
+export const SNIPER_TYPES = new Set(["sniper", "force_recon_sniper"]);
+export const ARTY_TYPES   = new Set(["artillery", "howitzer", "self_propelled_gun"]);
 
 export interface DamageProfile {
   hp_fraction:       number;
@@ -46,6 +55,20 @@ const PROFILE_ARMOUR: DamageProfile = {
   hp_fraction: 0.50, supp_fraction: 0.50, bypasses_armour: false, cavalry_supp_mult: 1.5,
 };
 
+const PROFILE_SNIPER: DamageProfile = {
+  hp_fraction:       0.80,
+  supp_fraction:     0.20,
+  bypasses_armour:   false,
+  cavalry_supp_mult: 1.0,
+};
+
+const PROFILE_ARTILLERY: DamageProfile = {
+  hp_fraction:       0.65,
+  supp_fraction:     0.35,
+  bypasses_armour:   false,
+  cavalry_supp_mult: 1.0,
+};
+
 export function getDamageProfile(unit_type: string, round_number: number): DamageProfile {
   switch (unit_type) {
     case "mg":           return PROFILE_MG;
@@ -58,6 +81,11 @@ export function getDamageProfile(unit_type: string, round_number: number): Damag
     case "medium_tank":
     case "heavy_tank":
     case "armoured_car": return PROFILE_ARMOUR;
+    case "sniper":
+    case "force_recon_sniper": return PROFILE_SNIPER;
+    case "artillery":
+    case "howitzer":
+    case "self_propelled_gun": return PROFILE_ARTILLERY;
     default:             return PROFILE_INFANTRY;
   }
 }
@@ -182,14 +210,141 @@ export function _resolveATColumn(
   return null;
 }
 
+/** djb2 string hash → non-negative 32-bit integer. Deterministic across runtimes. */
+export function _hashString(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) & 0xFFFFFFFF;
+  return h >>> 0;
+}
+
+/**
+ * Priority-based full-grid targeting for snipers.
+ * Scans all 25 enemy cells in priority_list order, collecting up to n_targets living cells.
+ * Returns cells in priority order (first matching priority type first).
+ */
+export function _sniperTargets(
+  priority_list: string[],
+  n_targets:     number,
+  cells:         GridCellState[],
+): number[] {
+  const result: number[] = [];
+  for (const type of priority_list) {
+    if (result.length >= n_targets) break;
+    for (let i = 0; i < cells.length; i++) {
+      if (result.length >= n_targets) break;
+      const c = cells[i];
+      if (c.unit_type === type && !c.incapacitated && c.unit_type !== "") {
+        result.push(i);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Weighted-random column selection followed by area expansion.
+ *
+ * Column weight formula:
+ *   weight(col) = (1 - recon_value) * occupied_count(col)
+ *               + recon_value       * value_score(col)
+ * where value_score sums ARTY_UNIT_VALUE[unit_type] per living cell in col.
+ *
+ * center_col is chosen via seeded LCG random. Targets = all living cells in
+ * columns [center_col - area_radius, center_col + area_radius] clamped to [0,4].
+ * Ordered R5-first (row 4 descending) within each column.
+ *
+ * Returns { center_col: 0, targets: [] } if grid is empty.
+ */
+export function _artilleryTargets(
+  cells:       GridCellState[],
+  recon_value: number,    // 0.0–1.0 normalized
+  area_radius: number,
+  rng_seed:    number,
+): { center_col: number; targets: number[] } {
+  const colOccupied = [0, 0, 0, 0, 0];
+  const colValue    = [0, 0, 0, 0, 0];
+
+  for (let col = 0; col < 5; col++) {
+    for (let row = 0; row < 5; row++) {
+      const cell = cells[row * 5 + col];
+      if (cell && cell.unit_type !== "" && !cell.incapacitated) {
+        colOccupied[col]++;
+        colValue[col] += ARTY_UNIT_VALUE[cell.unit_type] ?? 1;
+      }
+    }
+  }
+
+  const totalOccupied = colOccupied.reduce((s, n) => s + n, 0);
+  if (totalOccupied === 0) return { center_col: 0, targets: [] };
+
+  // Build final weights: lerp between occupied count and value score by recon_value
+  const colWeights = colOccupied.map((oc, i) =>
+    (1 - recon_value) * oc + recon_value * colValue[i],
+  );
+
+  const totalWeight = colWeights.reduce((s, w) => s + w, 0);
+  // LCG step for deterministic random in [0, 1)
+  const r = ((rng_seed * 1664525 + 1013904223) >>> 0) / 0x100000000;
+
+  let center_col = 4; // fallback to last col
+  let cumulative = 0;
+  for (let c = 0; c < 5; c++) {
+    cumulative += colWeights[c] / totalWeight;
+    if (r < cumulative) { center_col = c; break; }
+  }
+
+  // Collect living cells in [center_col - area_radius, center_col + area_radius]
+  const minCol = Math.max(0, center_col - area_radius);
+  const maxCol = Math.min(4, center_col + area_radius);
+  const targets: number[] = [];
+
+  for (let col = minCol; col <= maxCol; col++) {
+    for (let row = 4; row >= 0; row--) { // R5 first
+      const idx  = row * 5 + col;
+      const cell = cells[idx];
+      if (cell && cell.unit_type !== "" && !cell.incapacitated) targets.push(idx);
+    }
+  }
+
+  return { center_col, targets };
+}
+
+/**
+ * Returns per-cell damage multipliers for an artillery strike.
+ * mult(idx) = max(0, 1.0 - falloff_per_col × |col(idx) − center_col|)
+ * Center column always gets 1.0. Multiplier never goes below 0.
+ */
+export function getArtilleryDamageMultipliers(
+  targets:         number[],
+  center_col:      number,
+  falloff_per_col: number,
+): Map<number, number> {
+  const result = new Map<number, number>();
+  for (const idx of targets) {
+    const col  = idx % 5;
+    const dist = Math.abs(col - center_col);
+    result.set(idx, Math.max(0, 1.0 - falloff_per_col * dist));
+  }
+  return result;
+}
+
+/**
+ * Per-round recon contribution for a single living cell of unit_type.
+ * Returns 0 for non-recon units (combat_system adds RECON_BASE_PER_ROUND separately).
+ */
+export function _reconContribution(unit_type: string): number {
+  return RECON_CONTRIB_RATES[unit_type] ?? 0;
+}
+
 export function getTargetCells(
   unit_type:    string,
   attacker_row: number,
   attacker_col: number,
   enemy_cells:  GridCellState[],
   round_number: number,
-  n:            number = Infinity,
-  cover:        string = "",
+  n:            number              = Infinity,
+  cover:        string              = "",
+  config?:      SpecialAttackConfig,
 ): number[] {
   switch (unit_type) {
     case "infantry":
@@ -225,6 +380,19 @@ export function getTargetCells(
     }
     case "aa_gun":
       return [];
+    case "sniper":
+    case "force_recon_sniper": {
+      const cfg = config ?? { ...DEFAULT_SNIPER_CONFIG, priority_list: [...DEFAULT_SNIPER_CONFIG.priority_list] };
+      const raw = _sniperTargets(cfg.priority_list, cfg.n_targets, enemy_cells);
+      return isFinite(n) ? raw.slice(0, n) : raw;
+    }
+    case "artillery":
+    case "howitzer":
+    case "self_propelled_gun": {
+      const cfg = config ?? { ...DEFAULT_ARTILLERY_CONFIG };
+      const { targets } = _artilleryTargets(enemy_cells, cfg.recon_value, cfg.area_radius, cfg.rng_seed);
+      return isFinite(n) ? targets.slice(0, n) : targets;
+    }
     default:
       return [];
   }
@@ -258,6 +426,7 @@ export function simulateRound(
   priority_types: string[] = [],
   n:              number   = Infinity,
   cover:          string   = "",
+  seed:           number   = 0,
 ): Map<number, number[]> {
   const virtual: GridCellState[] = enemy_cells.map(c => {
     const v         = new GridCellState();
@@ -276,7 +445,14 @@ export function simulateRound(
     const attRow = Math.floor(idx / 5);
     const attCol = idx % 5;
 
-    const targets = getTargetCells(attCell.unit_type, attRow, attCol, virtual, round_number, n, cover);
+    // Build special config for sniper/arty — default perks, runtime fields from params.
+    let specialCfg: SpecialAttackConfig | undefined;
+    if (SNIPER_TYPES.has(attCell.unit_type)) {
+      specialCfg = { ...DEFAULT_SNIPER_CONFIG, priority_list: [...DEFAULT_SNIPER_CONFIG.priority_list] };
+    } else if (ARTY_TYPES.has(attCell.unit_type)) {
+      specialCfg = { ...DEFAULT_ARTILLERY_CONFIG, rng_seed: seed };
+    }
+    const targets = getTargetCells(attCell.unit_type, attRow, attCol, virtual, round_number, n, cover, specialCfg);
     result.set(idx, targets);
     if (targets.length === 0) continue;
 

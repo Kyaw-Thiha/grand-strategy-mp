@@ -34,6 +34,10 @@ static func get_targets(
             return _at_column_targets(att_col, enemy_cells, n)
         "aa_gun":
             return []
+        "sniper", "force_recon_sniper":
+            return _sniper_targets(enemy_cells, n)
+        "artillery", "howitzer", "self_propelled_gun":
+            return _artillery_area_targets(cell_index, enemy_cells, n)
         _:
             return []
 
@@ -75,6 +79,10 @@ static func simulate_round(
                 targets = _at_column_targets(att_col, virtual, n)
             "aa_gun":
                 targets = []
+            "sniper", "force_recon_sniper":
+                targets = _sniper_targets(virtual, n)
+            "artillery", "howitzer", "self_propelled_gun":
+                targets = _artillery_area_targets(att_idx, virtual, n)
             _:
                 targets = []
 
@@ -164,6 +172,8 @@ static func _hp_fraction_for(unit_type: String, round_number: int) -> float:
         "cavalry":      return 0.55 if round_number == 1 else 0.30
         "at_infantry", "at_gun", "at_gun_sp": return 0.75
         "light_tank", "medium_tank", "heavy_tank", "armoured_car": return 0.50
+        "sniper", "force_recon_sniper": return 0.80
+        "artillery", "howitzer", "self_propelled_gun": return 0.65
         _:              return 0.30
 
 # Returns living cells in `col` where row >= min_row. R5 first (row 4 -> min_row).
@@ -226,3 +236,40 @@ static func _at_column_targets(att_col: int, cells: Array, n: int) -> Array[int]
         if ARMOURED_TARGET_TYPES.has(cells[idx].get("unit_type", "")):
             armoured.append(idx)
     return armoured.slice(0, n) if n > 0 else armoured
+
+# Priority-based full-grid scan. Uses default priority list (perk overrides not available client-side).
+# Ignores row/col position entirely.
+static func _sniper_targets(cells: Array, n: int) -> Array[int]:
+    const PRIORITY := ["sniper","force_recon_sniper","flamethrower","recon_infantry",
+                       "mg","at_gun","at_gun_sp","at_infantry","commando","infantry"]
+    var result: Array[int] = []
+    for utype in PRIORITY:
+        if n > 0 and result.size() >= n:
+            break
+        for i in range(cells.size()):
+            if n > 0 and result.size() >= n:
+                break
+            var cell = cells[i]
+            if cell.get("unit_type","") == utype and not cell.get("incapacitated",false):
+                result.append(i)
+    return result
+
+# Client-side arty preview: shows all occupied cells in the target area.
+# Uses area_radius=0 (default, no perk awareness) and the cell_index column as center.
+# This is a preview approximation — actual center_col is determined server-side by seeded RNG.
+static func _artillery_area_targets(att_cell_index: int, cells: Array, n: int) -> Array[int]:
+    # Default: show own column as potential target area (radius=0 approximation)
+    var center_col := att_cell_index % 5
+    var area_radius := 0  # TODO: pass researched area_radius from client state in Branch K
+    var min_col := max(0, center_col - area_radius)
+    var max_col := min(4, center_col + area_radius)
+    var result: Array[int] = []
+    for col in range(min_col, max_col + 1):
+        for row in range(4, -1, -1):  # R5 first
+            var idx := row * 5 + col
+            var cell = cells[idx]
+            if cell.get("unit_type","") != "" and not cell.get("incapacitated",false):
+                result.append(idx)
+                if n > 0 and result.size() >= n:
+                    return result
+    return result

@@ -47,6 +47,7 @@ export class DivisionState extends Schema {
   @type("string") supply_status: string = "normal"; // "normal"|"out_of_supply"|"cut_off"|"encircled"
   @type("number") observation_radius: number = 100; // km
   @type("number") engagement_radius: number = 50;   // km, computed from template
+  @type("number") recon_value: number = 0;    // 0.0–1.0; accumulated per engagement round
   @type("string") movement_profile_json: string = "{}"; // 33-value terrain cost table
   @type(["string"]) move_order = new ArraySchema<string>(); // ordered waypoint IDs
   @type(["string"]) reposition_order = new ArraySchema<string>(); // in-combat reposition path
