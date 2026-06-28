@@ -43,7 +43,7 @@ func _setup_tab_buttons() -> void:
 
 func _on_tab_button_pressed(idx: int) -> void:
 	var tc: TabContainer = get_node_or_null(_CONTENT_PATH + "/TabBar") as TabContainer
-	if tc != None:
+	if tc != null:
 		tc.current_tab = idx
 
 

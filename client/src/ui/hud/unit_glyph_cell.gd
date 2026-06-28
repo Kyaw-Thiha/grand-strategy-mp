@@ -189,7 +189,7 @@ func _draw_dashed_line(from: Vector2, to: Vector2, color: Color,
 	var on    := true
 	while pos < total:
 		var seg := dash if on else gap
-		var end := min(pos + seg, total)
+		var end: float = min(pos + seg, total)
 		if on:
 			draw_line(from + dir * pos, from + dir * end, color, width)
 		pos = end

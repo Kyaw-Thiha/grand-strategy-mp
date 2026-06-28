@@ -491,7 +491,7 @@ func _refresh_cell_selected_panel(index: int) -> void:
 	_cell_title_label.text = cell_title
 
 	var eligible_hdr: Label = _cell_selected_container.find_child("EligibleHeader", true, false) as Label
-	if eligible_hdr != None:
+	if eligible_hdr != null:
 		eligible_hdr.text = "ELIGIBLE UNITS \u00b7 %s ROW" % ROW_NAMES[row]
 
 	for child: Node in _eligible_list_container.get_children():
@@ -506,7 +506,7 @@ func _refresh_cell_selected_panel(index: int) -> void:
 
 
 func _make_unit_card(unit_type: String, target_index: int) -> Control:
-	var is_in_cell := (_cells[target_index] == unit_type)
+	var is_in_cell: bool = (_cells[target_index] == unit_type)
 
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
