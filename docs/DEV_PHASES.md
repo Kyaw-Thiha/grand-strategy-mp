@@ -786,12 +786,12 @@ for all attack pattern logic before any Godot work.
 - [ ] Formation bonus detection — check adjacency of unit pairs each round; apply bonuses
       for confirmed pairs (AT+MG, Sniper+Recon inf, FLM+Assault inf, MG+MG same row,
       Artillery+Recon inf)
-- [ ] Unit experience system:
-      - [ ] Experience accumulates per unit per combat round survived + win bonus
-      - [ ] Four tiers: Green → Seasoned → Veteran → Elite (diminishing returns curve)
-      - [ ] Tier stat bonuses: HP%, suppression resistance%, recon contribution%
+- [x] Unit experience system:
+      - [x] Experience accumulates per unit per combat round survived + win bonus
+      - [x] Four tiers: Green → Seasoned → Veteran → Elite (diminishing returns curve)
+      - [x] Tier stat bonuses: HP%, suppression resistance%, recon contribution%
       - [ ] Experience is per cell slot — lost permanently if unit destroyed
-      - [ ] Stealthed units that survive to reserve retain their experience tier
+      - [x] Stealthed units that survive to reserve retain their experience tier
       - [ ] Barracks building grants training experience during non-combat downtime
             (up to tier unlocked by research; not above)
 - [x] Dual-bar system — HP (permanent) and suppression (decaying) tracked per cell
@@ -805,12 +805,12 @@ for all attack pattern logic before any Godot work.
       - [x] Armoured units: incapacitate at ~30% HP (mobility kill threshold)
       - [x] Artillery, towed AT gun, AA gun: no incapacitation — fight until destroyed
       - [ ] Incapacitated units recover HP via supply when division not engaged
-      - [ ] Experience on incapacitation: unit retains 60% of combat experience gained
+      - [x] Experience on incapacitation: unit retains 40% of combat experience gained (60% if damaged but not incapacitated)
       - [ ] Incapacitated units destroyed if division is destroyed (even at HP > 0)
       - [x] `UNIT_INCAPACITATED` broadcast on incapacitation
       - [ ] `UNIT_RECOVERED` event
 - [x] Armour penetration scale (60/70/80/90/100% thresholds → 0/20/30/40/70/100% damage)
-- [ ] Stealth system — stealthed units deal damage, cannot be targeted, excluded from retreat
+- [x] Stealth system — stealthed units deal damage, cannot be targeted, excluded from retreat
       threshold; destroyed division puts stealthed units into reserve with experience retained
 - [ ] Recon value accumulation per round per unit type; formation bonus (Artillery+Recon inf)
       increases recon rate; artillery targeting weight shifts with recon
