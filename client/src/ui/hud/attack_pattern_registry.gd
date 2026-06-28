@@ -111,7 +111,7 @@ static func _frontmost_occupied_row(cells: Array) -> int:
     for row in range(4, -1, -1):
         for col in range(5):
             var cell = cells[row * 5 + col]
-            if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false):
+            if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false) and not cell.get("stealthed", false):
                 return row
     return -1
 
@@ -123,7 +123,7 @@ static func _horizontal_targets(cells: Array, n: int) -> Array[int]:
     for col in range(5):
         var idx  := row * 5 + col
         var cell  = cells[idx]
-        if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false):
+        if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false) and not cell.get("stealthed", false):
             result.append(idx)
         if n > 0 and result.size() >= n:
             break
@@ -141,7 +141,7 @@ static func _flamethrower_targets(att_row: int, att_col: int, cells: Array) -> A
         for c in cols:
             var idx  := r * 5 + c
             var cell  = cells[idx]
-            if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false):
+            if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false) and not cell.get("stealthed", false):
                 result.append(idx)
     return result
 
@@ -182,14 +182,14 @@ static func _column_targets(col: int, min_row: int, cells: Array) -> Array[int]:
     for row in range(4, min_row - 1, -1):
         var idx := row * 5 + col
         var cell = cells[idx]
-        if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false):
+        if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false) and not cell.get("stealthed", false):
             result.append(idx)
     return result
 
 static func _has_armour_in_col(col: int, cells: Array) -> bool:
     for row in range(4, -1, -1):
         var cell = cells[row * 5 + col]
-        if ARMOURED_TARGET_TYPES.has(cell.get("unit_type", "")) and not cell.get("incapacitated", false):
+        if ARMOURED_TARGET_TYPES.has(cell.get("unit_type", "")) and not cell.get("incapacitated", false) and not cell.get("stealthed", false):
             return true
     return false
 
@@ -250,7 +250,7 @@ static func _sniper_targets(cells: Array, n: int) -> Array[int]:
             if n > 0 and result.size() >= n:
                 break
             var cell = cells[i]
-            if cell.get("unit_type","") == utype and not cell.get("incapacitated",false):
+            if cell.get("unit_type","") == utype and not cell.get("incapacitated",false) and not cell.get("stealthed",false):
                 result.append(i)
     return result
 
@@ -268,7 +268,7 @@ static func _artillery_area_targets(att_cell_index: int, cells: Array, n: int) -
         for row in range(4, -1, -1):  # R5 first
             var idx := row * 5 + col
             var cell = cells[idx]
-            if cell.get("unit_type","") != "" and not cell.get("incapacitated",false):
+            if cell.get("unit_type","") != "" and not cell.get("incapacitated",false) and not cell.get("stealthed",false):
                 result.append(idx)
                 if n > 0 and result.size() >= n:
                     return result

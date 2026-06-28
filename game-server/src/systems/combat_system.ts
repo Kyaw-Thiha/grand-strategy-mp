@@ -16,6 +16,12 @@ import {
   getArtilleryDamageMultipliers,
   _hashString,
   _reconContribution,
+  getXpHpMult,
+  getXpSuppResistMult,
+  getXpReconMult,
+  getXpTier,
+  _resolveStealthForRound,
+  _computeXpRetention,
   ARTY_TYPES,
   SNIPER_TYPES,
 } from "./attack_patterns.js";
@@ -38,8 +44,9 @@ import {
   TACTICAL_ENVELOPMENT_BONUS,
   RECON_BASE_PER_ROUND,
   RECON_MAX,
+  XP_PER_ROUND,
 } from "../data/combat_constants.js";
-import { resolvePerkModifiers, resolveAttackConfig } from "../data/perks.js";
+import { resolvePerkModifiers, resolveAttackConfig, resolveTerrainStealthBonuses, resolveXpConfig } from "../data/perks.js";
 import type { SpecialAttackConfig } from "../types/perk_types.js";
 
 // Damage output multiplier by division type
@@ -382,6 +389,10 @@ export class CombatSystem {
             };
             this.activePairs.set(key, pair);
 
+            // Reset XP pending for both divisions at engagement start
+            for (const cell of Array.from(a.grid.cells)) cell.xp_pending = 0;
+            for (const cell of Array.from(b.grid.cells)) cell.xp_pending = 0;
+
             // Update division states
             a.combat_state = "engaged";
             b.combat_state = "engaged";
@@ -528,6 +539,19 @@ export class CombatSystem {
       if (pair.round_tick_counter < ROUND_TICKS) continue;
       pair.round_tick_counter = 0;
 
+      // ── Stealth resolution (before damage each round) ─────────────────────────
+      {
+        const terrain    = pair.battle_cover ?? "";
+        const perksA     = Array.from(state.nations.get(divA.nation_id)?.researched_perks ?? []);
+        const perksB     = Array.from(state.nations.get(divB.nation_id)?.researched_perks ?? []);
+        const bonusesA   = resolveTerrainStealthBonuses(terrain, perksA);
+        const bonusesB   = resolveTerrainStealthBonuses(terrain, perksB);
+        const cellsA     = Array.from(divA.grid.cells);
+        const cellsB     = Array.from(divB.grid.cells);
+        _resolveStealthForRound(cellsA, this._computeMaxAntiStealth(cellsB), this._computeEffectiveStealths(cellsA, bonusesA));
+        _resolveStealthForRound(cellsB, this._computeMaxAntiStealth(cellsA), this._computeEffectiveStealths(cellsB, bonusesB));
+      }
+
       // Advance round (pair.round starts at 0; broadcast uses 1-indexed)
       pair.round++;
       const roundNumber = pair.round;
@@ -545,13 +569,28 @@ export class CombatSystem {
         let gain = RECON_BASE_PER_ROUND;
         for (const cell of Array.from(division.grid.cells)) {
           if (cell.unit_type !== "" && !cell.incapacitated) {
-            gain += _reconContribution(cell.unit_type);
+            gain += _reconContribution(cell.unit_type) * getXpReconMult(cell.xp_points);
           }
         }
         division.recon_value = Math.min(RECON_MAX, (division.recon_value ?? 0) + gain);
       };
       _accumulateRecon(divA);
       _accumulateRecon(divB);
+
+      // ── Per-round XP accumulation ─────────────────────────────────────────────
+      {
+        const perksA = Array.from(state.nations.get(divA.nation_id)?.researched_perks ?? []);
+        const perksB = Array.from(state.nations.get(divB.nation_id)?.researched_perks ?? []);
+        const accXp = (division: DivisionState, perkIds: string[]): void => {
+          for (const cell of Array.from(division.grid.cells)) {
+            if (cell.unit_type === "" || cell.incapacitated) continue;
+            const mods = resolvePerkModifiers(cell.unit_type, perkIds);
+            cell.xp_pending += XP_PER_ROUND * (mods.xp_gain_mult ?? 1.0);
+          }
+        };
+        accXp(divA, perksA);
+        accXp(divB, perksB);
+      }
 
       // Broadcast COMBAT_RESULT alongside ROUND_RESOLVED for strategic map UI
       broadcast("COMBAT_RESULT", {
@@ -583,6 +622,28 @@ export class CombatSystem {
   }
 
   // ── Per-cell helpers ─────────────────────────────────────────────────────────
+
+  private _computeEffectiveStealths(
+    cells:       GridCellState[],
+    perkBonuses: Record<string, number>,
+  ): number[] {
+    return cells.map(cell => {
+      const base  = UNIT_COMBAT_STATS[cell.unit_type]?.stealth_level ?? 0;
+      const bonus = perkBonuses[cell.unit_type]                       ?? 0;
+      return base + bonus;
+    });
+  }
+
+  private _computeMaxAntiStealth(cells: GridCellState[]): number {
+    let max = 0;
+    for (const cell of cells) {
+      if (cell.unit_type !== "" && !cell.incapacitated) {
+        const anti = UNIT_COMBAT_STATS[cell.unit_type]?.anti_stealth ?? 0;
+        if (anti > max) max = anti;
+      }
+    }
+    return max;
+  }
 
   private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
     if (!div.grid) return;
@@ -670,9 +731,12 @@ export class CombatSystem {
         const penMult         = profile.bypasses_armour ? 1.0 : _armorPenMultiplier(attackerPen, effectiveArmour);
         const cavMult = (tCell.unit_type === "cavalry") ? profile.cavalry_supp_mult : 1.0;
 
+        const xpHpMult     = getXpHpMult(tCell.xp_points);
+        const xpSuppResist = getXpSuppResistMult(tCell.xp_points);
+
         const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
-        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult * tacticalHpBonus * artyMult);
-        tCell.suppression = Math.min(100, tCell.suppression + perTargetSupp * cavMult);
+        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult) / xpHpMult);
+        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult) / xpSuppResist);
 
         const floor = _getIncapFloor(tCell.unit_type);
         if (floor > 0 && tCell.hp <= floor && !tCell.incapacitated) {
@@ -760,6 +824,18 @@ export class CombatSystem {
     divA.hp           = this._computeDivisionHp(divA.grid?.cells ?? []);
     divA.suppression  = _computeDivisionSuppression(divA.grid?.cells ?? []);
 
+    // Division destroyed check (encircled, HP = 0 — cannot retreat)
+    if (divA.hp <= 0 && divA.supply_status === "encircled") {
+      for (const cell of Array.from(divA.grid.cells)) cell.xp_pending = 0;
+      divA.combat_state = "destroyed";
+      changed.add(divA.division_id);
+    }
+    if (divB.hp <= 0 && divB.supply_status === "encircled") {
+      for (const cell of Array.from(divB.grid.cells)) cell.xp_pending = 0;
+      divB.combat_state = "destroyed";
+      changed.add(divB.division_id);
+    }
+
     // Store deltas on pair so _resolveCombat can include them in ROUND_RESOLVED
     pair._lastDeltaAttacker = deltasA;
     pair._lastDeltaDefender = deltasB;
@@ -813,6 +889,31 @@ export class CombatSystem {
   // _checkDisengagement
   // ---------------------------------------------------------------------------
 
+  private _finalizeEngagementXp(
+    division:     DivisionState,
+    division_won: boolean,
+    state:        GameRoomState,
+  ): void {
+    const perkIds = Array.from(state.nations.get(division.nation_id)?.researched_perks ?? []);
+    for (const cell of Array.from(division.grid.cells)) {
+      if (cell.unit_type === "" || cell.xp_pending === 0) {
+        cell.xp_pending = 0;
+        continue;
+      }
+      const cfg  = resolveXpConfig(cell.unit_type, perkIds);
+      const mult = _computeXpRetention(
+        cell.hp / 100,
+        cell.incapacitated,
+        division_won,
+        cfg.incap_retention,
+        cfg.damaged_retention,
+      );
+      cell.xp_points += Math.floor(cell.xp_pending * mult);
+      cell.xp_pending = 0;
+      cell.xp_tier    = getXpTier(cell.xp_points);
+    }
+  }
+
   private _checkDisengagement(state: GameRoomState, changed: Set<string>): void {
     const toRemove: string[] = [];
 
@@ -848,6 +949,9 @@ export class CombatSystem {
             changed.add(div.division_id);
           }
         }
+        // XP finalization: natural disengagement — draw, both sides treated as "won"
+        this._finalizeEngagementXp(divA, true, state);
+        this._finalizeEngagementXp(divB, true, state);
         toRemove.push(key);
       }
     }
@@ -1065,6 +1169,13 @@ export class CombatSystem {
       }
       // Opponents in "suppressed" state will retreat on their own next tick;
       // don't interfere — their retreat direction depends on engaged_with.
+    }
+
+    // XP finalization: retreating division is the loser
+    this._finalizeEngagementXp(div, false, state);
+    for (const opponentId of opponentIds) {
+      const opponent = state.divisions.get(opponentId);
+      if (opponent) this._finalizeEngagementXp(opponent, true, state);
     }
 
     // Find nearest waypoint and set as retreat target

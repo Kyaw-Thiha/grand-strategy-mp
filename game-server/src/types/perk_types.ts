@@ -5,6 +5,7 @@ export interface PerkModifiers {
   movement_mult: number;
   observation_mult: number;
   recon_mult: number;
+  xp_gain_mult: number;
 }
 
 export const IDENTITY_MODIFIERS: PerkModifiers = {
@@ -14,6 +15,7 @@ export const IDENTITY_MODIFIERS: PerkModifiers = {
   movement_mult: 1.0,
   observation_mult: 1.0,
   recon_mult: 1.0,
+  xp_gain_mult: 1.0,
 };
 
 export type PerkScope = "unit_type" | "global" | "formation_synergy";
@@ -26,6 +28,12 @@ export interface PerkDefinition {
   modifiers:       Partial<PerkModifiers>;
   // Structural attack overrides (sniper/arty only). NEVER include recon_value or rng_seed here.
   attack_config?:  Partial<Pick<SpecialAttackConfig, "priority_list" | "n_targets" | "area_radius" | "falloff_per_col">>;
+  terrain_stealth_bonus?: Record<string, number>;   // terrain_cover → bonus stealth for applies_to_unit
+  xp_config?: {
+    full_hp_threshold?:  number;   // replaces XP_HP_FULL_THRESHOLD (0.50)
+    incap_retention?:    number;   // replaces XP_RETENTION_INCAP_WIN (0.40)
+    damaged_retention?:  number;   // replaces XP_RETENTION_DAMAGED (0.60)
+  };
 }
 
 export interface SpecialAttackConfig {

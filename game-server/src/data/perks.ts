@@ -1,5 +1,10 @@
 import type { PerkDefinition, PerkModifiers, SpecialAttackConfig } from "../types/perk_types.js";
 import { IDENTITY_MODIFIERS, DEFAULT_SNIPER_CONFIG, DEFAULT_ARTILLERY_CONFIG } from "../types/perk_types.js";
+import {
+  XP_HP_FULL_THRESHOLD,
+  XP_RETENTION_INCAP_WIN,
+  XP_RETENTION_DAMAGED,
+} from "../data/combat_constants.js";
 
 export const PERK_REGISTRY: Record<string, PerkDefinition> = {
   // Infantry specialization tree (suppression resistance)
@@ -98,6 +103,37 @@ export const PERK_REGISTRY: Record<string, PerkDefinition> = {
     modifiers:       {},
     attack_config:   { falloff_per_col: 0.5 },
   },
+
+  // ── Stealth perks ──────────────────────────────────────────────────────────
+
+  "sniper_forest_stealth": {
+    perk_id: "sniper_forest_stealth",
+    scope: "unit_type",
+    applies_to_unit: "sniper",
+    modifiers: {},
+    terrain_stealth_bonus: { "light_forest": 1, "dense_forest": 2 },
+  },
+  "sniper_urban_stealth": {
+    perk_id: "sniper_urban_stealth",
+    scope: "unit_type",
+    applies_to_unit: "sniper",
+    modifiers: {},
+    terrain_stealth_bonus: { "urban": 2 },
+  },
+  "commando_stealth_doctrine": {
+    perk_id: "commando_stealth_doctrine",
+    scope: "unit_type",
+    applies_to_unit: "commando",
+    modifiers: {},
+    terrain_stealth_bonus: { "light_forest": 1, "dense_forest": 2, "urban": 2, "hills": 1 },
+  },
+  "elite_unit_doctrine": {
+    perk_id: "elite_unit_doctrine",
+    scope: "unit_type",
+    applies_to_unit: "commando",
+    modifiers: { xp_gain_mult: 1.25 },
+    xp_config: { incap_retention: 0.55 },
+  },
 };
 
 /** Resolve combined PerkModifiers for a unit type given a list of active perk IDs.
@@ -152,5 +188,46 @@ export function resolveAttackConfig(
     if (ac.priority_list  !== undefined) result.priority_list  = [...ac.priority_list];
   }
 
+  return result;
+}
+
+/**
+ * Returns unit_type → terrain stealth bonus for the given terrain cover string.
+ * Stacks additively across all applicable perks for the same unit type.
+ */
+export function resolveTerrainStealthBonuses(
+  terrain:       string,
+  activePerkIds: string[],
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const id of activePerkIds) {
+    const def = PERK_REGISTRY[id];
+    if (!def || def.scope !== "unit_type" || !def.terrain_stealth_bonus || !def.applies_to_unit) continue;
+    const bonus = def.terrain_stealth_bonus[terrain];
+    if (!bonus) continue;
+    result[def.applies_to_unit] = (result[def.applies_to_unit] ?? 0) + bonus;
+  }
+  return result;
+}
+
+/**
+ * Returns effective XP config for a unit type. Last applicable perk wins per field.
+ */
+export function resolveXpConfig(
+  unitType:      string,
+  activePerkIds: string[],
+): { full_hp_threshold: number; incap_retention: number; damaged_retention: number } {
+  const result = {
+    full_hp_threshold: XP_HP_FULL_THRESHOLD,
+    incap_retention:   XP_RETENTION_INCAP_WIN,
+    damaged_retention: XP_RETENTION_DAMAGED,
+  };
+  for (const id of activePerkIds) {
+    const def = PERK_REGISTRY[id];
+    if (!def || def.scope !== "unit_type" || def.applies_to_unit !== unitType || !def.xp_config) continue;
+    if (def.xp_config.full_hp_threshold !== undefined) result.full_hp_threshold = def.xp_config.full_hp_threshold;
+    if (def.xp_config.incap_retention   !== undefined) result.incap_retention   = def.xp_config.incap_retention;
+    if (def.xp_config.damaged_retention !== undefined) result.damaged_retention = def.xp_config.damaged_retention;
+  }
   return result;
 }

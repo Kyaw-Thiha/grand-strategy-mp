@@ -4,6 +4,14 @@ import {
   BASE_ATTRITION,
   RECON_CONTRIB_RATES,
   ARTY_UNIT_VALUE,
+  XP_THRESHOLD_SEASONED,
+  XP_THRESHOLD_VETERAN,
+  XP_THRESHOLD_ELITE,
+  XP_TIER_HP_MULT,
+  XP_TIER_SUPP_RESIST_MULT,
+  XP_TIER_RECON_MULT,
+  XP_POST_ELITE_SCALE,
+  XP_POST_ELITE_DECAY,
 } from "../data/combat_constants.js";
 import type { SpecialAttackConfig } from "../types/perk_types.js";
 import { DEFAULT_SNIPER_CONFIG, DEFAULT_ARTILLERY_CONFIG } from "../types/perk_types.js";
@@ -94,7 +102,7 @@ export function _getFrontmostOccupiedRow(cells: GridCellState[]): number {
   for (let row = 4; row >= 0; row--) {
     for (let col = 0; col < 5; col++) {
       const cell = cells[row * 5 + col];
-      if (cell && cell.unit_type !== "" && !cell.incapacitated) return row;
+      if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) return row;
     }
   }
   return -1;
@@ -106,7 +114,7 @@ function _getLivingCellsInRow(cells: GridCellState[], row: number): number[] {
   for (let col = 0; col < 5; col++) {
     const idx  = row * 5 + col;
     const cell = cells[idx];
-    if (cell && cell.unit_type !== "" && !cell.incapacitated) result.push(idx);
+    if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) result.push(idx);
   }
   return result;
 }
@@ -129,7 +137,7 @@ function _flamethrowerTargets(
     for (const c of cols) {
       const idx  = r * 5 + c;
       const cell = cells[idx];
-      if (cell && cell.unit_type !== "" && !cell.incapacitated) targets.push(idx);
+      if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) targets.push(idx);
     }
   }
   return targets;
@@ -140,7 +148,7 @@ export function _columnTargets(col: number, min_row: number, cells: GridCellStat
   for (let row = 4; row >= min_row; row--) {
     const idx  = row * 5 + col;
     const cell = cells[idx];
-    if (cell && cell.unit_type !== "" && !cell.incapacitated) result.push(idx);
+    if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) result.push(idx);
   }
   return result;
 }
@@ -187,7 +195,7 @@ export function _resolveATColumn(
   const hasArmourInCol = (col: number): boolean => {
     for (let row = 4; row >= 0; row--) {
       const cell = cells[row * 5 + col];
-      if (cell && ARMOURED_TARGET_TYPES.has(cell.unit_type) && !cell.incapacitated) return true;
+      if (cell && ARMOURED_TARGET_TYPES.has(cell.unit_type) && !cell.incapacitated && !cell.stealthed) return true;
     }
     return false;
   };
@@ -233,7 +241,7 @@ export function _sniperTargets(
     for (let i = 0; i < cells.length; i++) {
       if (result.length >= n_targets) break;
       const c = cells[i];
-      if (c.unit_type === type && !c.incapacitated && c.unit_type !== "") {
+      if (c.unit_type === type && !c.incapacitated && c.unit_type !== "" && !c.stealthed) {
         result.push(i);
       }
     }
@@ -267,7 +275,7 @@ export function _artilleryTargets(
   for (let col = 0; col < 5; col++) {
     for (let row = 0; row < 5; row++) {
       const cell = cells[row * 5 + col];
-      if (cell && cell.unit_type !== "" && !cell.incapacitated) {
+      if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) {
         colOccupied[col]++;
         colValue[col] += ARTY_UNIT_VALUE[cell.unit_type] ?? 1;
       }
@@ -302,7 +310,7 @@ export function _artilleryTargets(
     for (let row = 4; row >= 0; row--) { // R5 first
       const idx  = row * 5 + col;
       const cell = cells[idx];
-      if (cell && cell.unit_type !== "" && !cell.incapacitated) targets.push(idx);
+      if (cell && cell.unit_type !== "" && !cell.incapacitated && !cell.stealthed) targets.push(idx);
     }
   }
 
@@ -334,6 +342,77 @@ export function getArtilleryDamageMultipliers(
  */
 export function _reconContribution(unit_type: string): number {
   return RECON_CONTRIB_RATES[unit_type] ?? 0;
+}
+
+export function getXpTier(xp_points: number): "green" | "seasoned" | "veteran" | "elite" {
+  if (xp_points >= XP_THRESHOLD_ELITE)    return "elite";
+  if (xp_points >= XP_THRESHOLD_VETERAN)  return "veteran";
+  if (xp_points >= XP_THRESHOLD_SEASONED) return "seasoned";
+  return "green";
+}
+
+function _postEliteBonus(xp_points: number): number {
+  if (xp_points < XP_THRESHOLD_ELITE) return 0;
+  return XP_POST_ELITE_SCALE * Math.log1p((xp_points - XP_THRESHOLD_ELITE) / XP_POST_ELITE_DECAY);
+}
+
+/** HP damage reduction multiplier. Divide incoming HP damage by this value. */
+export function getXpHpMult(xp_points: number): number {
+  return (XP_TIER_HP_MULT[getXpTier(xp_points)] ?? 1.0) + _postEliteBonus(xp_points);
+}
+
+/** Suppression resistance multiplier. Divide incoming suppression by this value. */
+export function getXpSuppResistMult(xp_points: number): number {
+  return XP_TIER_SUPP_RESIST_MULT[getXpTier(xp_points)] ?? 1.0;
+}
+
+/** Recon contribution multiplier. Multiply recon gain by this value. */
+export function getXpReconMult(xp_points: number): number {
+  return XP_TIER_RECON_MULT[getXpTier(xp_points)] ?? 1.0;
+}
+
+/**
+ * Returns XP retention multiplier for a unit at engagement end.
+ * @param hp_ratio          cell.hp / 100
+ * @param is_incapacitated  cell.incapacitated
+ * @param division_won      whether this cell's division won
+ * @param incap_retention   perk-resolved (default 0.40)
+ * @param damaged_retention perk-resolved (default 0.60)
+ */
+export function _computeXpRetention(
+  hp_ratio:          number,
+  is_incapacitated:  boolean,
+  division_won:      boolean,
+  incap_retention:   number,
+  damaged_retention: number,
+): number {
+  if (is_incapacitated) return division_won ? incap_retention : 0.0;
+  if (hp_ratio > 0.50)  return 1.0;
+  return damaged_retention;
+}
+
+/**
+ * Resolves stealthed flag for each cell in `cells`.
+ * Mutates cells[i].stealthed in place.
+ *
+ * @param cells              Cells to evaluate (one division's grid)
+ * @param max_enemy_anti     Highest anti_stealth value among ALL active enemy cells
+ * @param effective_stealths Array[25]: effective stealth per cell (base + terrain perk bonus)
+ */
+export function _resolveStealthForRound(
+  cells:              GridCellState[],
+  max_enemy_anti:     number,
+  effective_stealths: number[],
+): void {
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (cell.unit_type === "" || cell.incapacitated) {
+      cell.stealthed = false;
+      continue;
+    }
+    const s = effective_stealths[i] ?? 0;
+    cell.stealthed = s > 0 && max_enemy_anti < s;
+  }
 }
 
 export function getTargetCells(
