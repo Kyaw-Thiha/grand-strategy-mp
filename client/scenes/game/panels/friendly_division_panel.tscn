@@ -136,6 +136,25 @@ max_value = 1.0
 value = 0.0
 show_percentage = false
 
+[node name="CompBlock" type="VBoxContainer" parent="Margin/HBox"]
+layout_mode = 2
+alignment = 1
+custom_minimum_size = Vector2(62, 0)
+theme_override_constants/separation = 2
+
+[node name="CompLabel" type="Label" parent="Margin/HBox/CompBlock"]
+layout_mode = 2
+text = "COMP"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 9
+
+[node name="CompGrid" type="GridContainer" parent="Margin/HBox/CompBlock"]
+layout_mode = 2
+columns = 5
+theme_override_constants/h_separation = 2
+theme_override_constants/v_separation = 2
+mouse_filter = 0
+
 [node name="ActionsBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(200, 0)

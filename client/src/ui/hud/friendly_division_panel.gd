@@ -19,6 +19,33 @@ var _combat_state_label: Label
 
 var _current_div_id: String = ""
 
+var _comp_grid: GridContainer
+var _comp_cells: Array = []
+
+const UNIT_CLASS_COLOR: Dictionary = {
+	"infantry": Color(0.42, 0.49, 0.18, 1.0),
+	"assault_infantry": Color(0.42, 0.49, 0.18, 1.0),
+	"mg": Color(0.42, 0.49, 0.18, 1.0),
+	"commando": Color(0.42, 0.49, 0.18, 1.0),
+	"flamethrower": Color(0.42, 0.49, 0.18, 1.0),
+	"at_infantry": Color(0.42, 0.49, 0.18, 1.0),
+	"sniper": Color(0.42, 0.49, 0.18, 1.0),
+	"light_tank": Color(0.29, 0.43, 0.65, 1.0),
+	"medium_tank": Color(0.29, 0.43, 0.65, 1.0),
+	"heavy_tank": Color(0.29, 0.43, 0.65, 1.0),
+	"armoured_car": Color(0.29, 0.43, 0.65, 1.0),
+	"at_gun_sp": Color(0.29, 0.43, 0.65, 1.0),
+	"self_propelled_gun": Color(0.29, 0.43, 0.65, 1.0),
+	"artillery": Color(0.55, 0.19, 0.19, 1.0),
+	"howitzer": Color(0.55, 0.19, 0.19, 1.0),
+	"at_gun": Color(0.55, 0.19, 0.19, 1.0),
+	"aa_gun": Color(0.55, 0.19, 0.19, 1.0),
+	"recon_infantry": Color(0.10, 0.55, 0.50, 1.0),
+	"cavalry": Color(0.10, 0.55, 0.50, 1.0),
+	"force_recon_sniper": Color(0.10, 0.55, 0.50, 1.0),
+}
+const UNIT_CLASS_EMPTY_COLOR := Color(0.10, 0.08, 0.07, 1.0)
+
 
 func _ready() -> void:
 	_nation_color = get_node_or_null("Margin/HBox/IdentityBlock/NameRow/NationColor")
@@ -36,6 +63,18 @@ func _ready() -> void:
 	_btn_cancel = get_node_or_null("Margin/HBox/ActionsBlock/Row2/BtnCancel")
 	_btn_reposition = get_node_or_null("Margin/HBox/ActionsBlock/Row3/BtnReposition")
 	_combat_state_label = get_node_or_null("Margin/HBox/IdentityBlock/CombatStateLabel")
+	_comp_grid = get_node_or_null("Margin/HBox/CompBlock/CompGrid") as GridContainer
+	var _comp_block := get_node_or_null("Margin/HBox/CompBlock") as VBoxContainer
+	_build_comp_cells()
+	if _comp_grid != null:
+		_comp_grid.gui_input.connect(_on_comp_grid_input)
+	if _comp_block != null:
+		_comp_block.mouse_entered.connect(func() -> void:
+			_comp_block.modulate = Color(0.85, 0.85, 0.85, 1.0)
+		)
+		_comp_block.mouse_exited.connect(func() -> void:
+			_comp_block.modulate = Color(1.0, 1.0, 1.0, 1.0)
+		)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_deselected.connect(func() -> void: _current_div_id = "")
 
@@ -88,6 +127,8 @@ func _refresh_stats(data: Dictionary) -> void:
 	if _btn_reposition != null:
 		_btn_reposition.visible = combat_state in ["engaged", "suppressed"]
 
+	_refresh_comp_grid(data)
+
 
 func _on_division_updated(div_id: String) -> void:
 	if div_id != _current_div_id:
@@ -133,3 +174,36 @@ func _rewire_buttons(div_id: String) -> void:
 	_btn_cancel.pressed.connect(func() -> void:
 		EventBus.division_deselected.emit()
 	)
+
+
+func _build_comp_cells() -> void:
+	if _comp_grid == null:
+		return
+	_comp_cells.clear()
+	for i: int in range(25):
+		var rect := ColorRect.new()
+		rect.custom_minimum_size = Vector2(8, 8)
+		rect.color = UNIT_CLASS_EMPTY_COLOR
+		rect.mouse_filter = Control.MOUSE_FILTER_PASS
+		_comp_grid.add_child(rect)
+		_comp_cells.append(rect)
+
+
+func _refresh_comp_grid(data: Dictionary) -> void:
+	if _comp_cells.is_empty():
+		return
+	var template_id: String = data.get("template_id", "")
+	var cells: Array = []
+	if template_id != "":
+		var template: Dictionary = DivisionTemplateStore.get_template(template_id)
+		cells = template.get("cells", [])
+	for i: int in range(25):
+		var rect: ColorRect = _comp_cells[i] as ColorRect
+		var unit_type: String = cells[i] if i < cells.size() else ""
+		rect.color = UNIT_CLASS_COLOR.get(unit_type, UNIT_CLASS_EMPTY_COLOR)
+
+
+func _on_comp_grid_input(event: InputEvent) -> void:
+	var mb := event as InputEventMouseButton
+	if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+		EventBus.division_template_viewer_open_requested.emit(_current_div_id)
