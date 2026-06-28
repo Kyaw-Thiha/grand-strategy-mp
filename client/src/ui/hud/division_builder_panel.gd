@@ -581,18 +581,26 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 	card.mouse_entered.connect(func() -> void: _preview_unit_in_detail(unit_type))
 	card.mouse_exited.connect(func() -> void: _restore_detail_for_cell(target_index))
 
+	var place_unit := func() -> void:
+		if _cells[target_index] == unit_type:
+			_cells[target_index] = ""
+		else:
+			_cells[target_index] = unit_type
+		(_cell_nodes[target_index] as UnitGlyphCell).unit_type = _cells[target_index]
+		_refresh_cell_selected_panel(target_index)
+		_refresh_overview_stats()
+
 	card.gui_input.connect(func(event: InputEvent) -> void:
 		if not (event is InputEventMouseButton):
 			return
 		var mb := event as InputEventMouseButton
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			if _cells[target_index] == unit_type:
-				_cells[target_index] = ""
-			else:
-				_cells[target_index] = unit_type
-			(_cell_nodes[target_index] as UnitGlyphCell).unit_type = _cells[target_index]
-			_refresh_cell_selected_panel(target_index)
-			_refresh_overview_stats()
+			place_unit.call()
+			accept_event()
+	)
+
+	mini.cell_clicked.connect(func(_c: UnitGlyphCell) -> void:
+		place_unit.call()
 	)
 
 	return card

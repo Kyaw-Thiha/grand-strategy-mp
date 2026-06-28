@@ -268,6 +268,7 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 	var panel_rect: Rect2 = center_child.get_global_rect()
 	if not panel_rect.has_point(mb.position):
 		hud_manager.hide_panel(open_name)
+		accept_event()
 
 
 ## Called by game session to update the persistent nation display.
