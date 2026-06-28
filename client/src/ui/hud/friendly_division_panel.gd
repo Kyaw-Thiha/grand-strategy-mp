@@ -64,14 +64,16 @@ func _ready() -> void:
 	_btn_reposition = get_node_or_null("Margin/HBox/ActionsBlock/Row3/BtnReposition")
 	_combat_state_label = get_node_or_null("Margin/HBox/IdentityBlock/CombatStateLabel")
 	_comp_grid = get_node_or_null("Margin/HBox/CompBlock/CompGrid") as GridContainer
+	var _comp_block := get_node_or_null("Margin/HBox/CompBlock") as VBoxContainer
 	_build_comp_cells()
 	if _comp_grid != null:
 		_comp_grid.gui_input.connect(_on_comp_grid_input)
-		_comp_grid.mouse_entered.connect(func() -> void:
-			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_POINTING_HAND)
+	if _comp_block != null:
+		_comp_block.mouse_entered.connect(func() -> void:
+			_comp_block.modulate = Color(0.85, 0.85, 0.85, 1.0)
 		)
-		_comp_grid.mouse_exited.connect(func() -> void:
-			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
+		_comp_block.mouse_exited.connect(func() -> void:
+			_comp_block.modulate = Color(1.0, 1.0, 1.0, 1.0)
 		)
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.division_deselected.connect(func() -> void: _current_div_id = "")
