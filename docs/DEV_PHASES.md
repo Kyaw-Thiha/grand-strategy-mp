@@ -779,6 +779,24 @@ for all attack pattern logic before any Godot work.
   - [x] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
         position (1 row ahead of own position, not anchored to enemy contact row)
    - [x] Artillery — recon-proportional weighted random cell targeting
+### G-Builder-Assign — Template Assignment UI (Phase 6)
+
+- [x] `ASSIGN_TEMPLATE` production handler in `GameRoom.ts` — sets `template_id`, populates `div.grid.cells`,
+      recomputes `division_type`, `engagement_radius`, `movement_profile_json`
+- [x] `template_id` added to `serializeDivision()` so client receives it in DIVISION_UPDATES broadcasts
+- [x] Default template (`preset_combined_arms`) assigned to pre-spawned divisions with grid cell population
+- [x] `DIVISION_UPDATES` broadcast after `ASSIGN_TEMPLATE` so client GameState stays in sync
+- [x] Mini 5×5 composition grid (CompBlock) in `FriendlyDivisionPanel` — 25 ColorRect cells colored by unit class
+      (olive infantry / steel-blue armour / dark-red artillery / teal recon / dark-brown empty)
+- [x] CompBlock hover effect (subtle darkening on mouse enter, reverts on exit)
+- [x] `DivisionTemplateViewerPanel` — FULL_CENTER overlay with read-only 5×5 grid (left) and View/Select states (right)
+      - View state: current template name, division type, engagement radius, fill & role balance bars
+      - Select state: scrollable template list with hover-preview in left grid, click-to-select, Confirm button
+      - Locked state: hides [Change Template →] when division is engaged/retreating/suppressed
+- [x] Viewer panel wired into `GameHUD` with division deselect on open (matching DivisionBuilderPanel pattern)
+- [x] `game-server/test/6-assign-template.test.ts` — 6 tests (sets template_id, populates cells, clears prior cells,
+      recomputes division_type, rejects when engaged, no-op for missing division)
+
 - [ ] Row positional perks applied per round:
       R5 Vanguard: +% suppression dealt; R4 Assault: +% HP damage dealt;
       R3 Support: +% suppression resistance; R2 Reserve: faster suppression decay;

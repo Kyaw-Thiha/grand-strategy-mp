@@ -71,15 +71,22 @@ Players bring a saved division template into the game. Templates are set in thre
 3. **Mid-game creation** — players can create and save new templates during a game when a
    division is out of combat. The new template is written to their account immediately.
 
-### Mid-game redeployment
+### Mid-game template assignment (Phase 6 MVP)
+
 A player may switch an existing division to a different template while that division is out
-of combat. On switch:
-- The division is removed from the map
-- It redeploys at the nearest friendly city with the new template's composition
-- Redeployment takes a flat **1 minute** of game time regardless of distance
-- The division cannot be ordered or engaged during redeployment
-- New templates only apply to freshly redeployed or newly spawned divisions — existing
-  divisions in the field keep their current composition until explicitly redeployed
+of combat (via `ASSIGN_TEMPLATE` message from the DivisionTemplateViewerPanel). On switch:
+- The division's `template_id` is updated immediately server-side
+- `division_type`, `engagement_radius`, and `movement_profile_json` are recomputed from the
+  new template's cell composition
+- Grid cells are repopulated from the template's preset cell layout
+- A `DIVISION_UPDATES` broadcast syncs the change to all clients
+- The division does **not** change position or pause — composition updates in place
+
+> **Future (Phase 8+):** Full redeployment mechanic — division removed from map, redeploys
+> at nearest friendly city after a flat 1-minute delay, cannot be ordered during redeployment.
+> Phase 6 uses immediate in-place assignment as an MVP simplification. When the full system
+> lands, the `_confirm_template()` flow on the client stays the same; only the server handler
+> and the redeployment UX change.
 
 ### Locked during combat
 The grid composition is **locked** while a division is engaged. No editing, no redeployment

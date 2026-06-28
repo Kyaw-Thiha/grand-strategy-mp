@@ -248,6 +248,7 @@ terrain (see §3).
 | **Research** | TechSystem | General Technology tree (Phase 8+) |
 | **Politics** | PoliticsSystem *(later)* | Reserved panel-row slot, no redesign needed when it ships |
 | **Espionage** | *(future, unscoped)* | Reserved panel-row slot |
+| **Division Template Viewer** | TemplateAssignment | FULL_CENTER overlay for viewing/assigning a division template to a selected unit. Opened by clicking the mini comp grid in the bottom selection panel. View state (current template overview) and Select state (template list to assign). Locked when division is in combat. |
 
 ### 5.2 Why Military is one panel with sub-tabs, not three standalone panels
 
@@ -269,7 +270,7 @@ information density it needs:
 | Placement | Used for | Why |
 |---|---|---|
 | **Side-docked, map stays live** | Military (default state), Economy overview, Diplomacy relations overview | Opened frequently (every move order touches Military); cannot afford to cost map visibility on every open in a no-pause game |
-| **Full-center overlay** | Research tree, DivisionBuilder, TacticalGridUI | Decision-heavy, information-dense, opened occasionally — these are "pause to think" moments even though the clock doesn't stop. Also matches existing HoI4-player expectation for Research specifically |
+| **Full-center overlay** | Research tree, DivisionBuilder, DivisionTemplateViewer, TacticalGridUI | Decision-heavy, information-dense, opened occasionally — these are "pause to think" moments even though the clock doesn't stop. Also matches existing HoI4-player expectation for Research specifically |
 | **Military panel expand** | DivisionBuilder / TacticalGridUI opened *from within* Military | Side-docked by default; explicit expand affordance into full-center only for these sub-screens |
 
 ### 5.4 Sub-tab navigation
@@ -294,8 +295,10 @@ Content is selection-dependent:
 **Selected friendly division:**
 - Identity block (icon, template name, owner flag)
 - HP + suppression dual-bar (matches engine's dual-bar system)
-- Composition summary (grid thumbnail / unit-type breakdown — full 5×5 grid only opens
-  in TacticalGridUI during active combat)
+- Composition summary (mini 5×5 grid thumbnail — 25 colored dots by unit class:
+  olive infantry, blue armour, red artillery, teal recon, dark empty). Clicking opens
+  `DivisionTemplateViewerPanel` for viewing/assigning templates. Full 5×5 grid opens in
+  TacticalGridUI during active combat.
 - Action buttons mirroring keybinds (Move, Hold, Retreat, Cancel) — buttons exist for
   discoverability and mouse-only play; every one is keybound and tooltips show the
   bind, consistent with the existing convention in `STRATEGIC_COMBAT.md` ("Move [M]")
