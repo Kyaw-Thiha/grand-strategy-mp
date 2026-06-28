@@ -82,6 +82,11 @@ func _ready() -> void:
 	# HUDManager signals for dock button visual state
 	hud_manager.panel_opened.connect(_on_panel_opened)
 	hud_manager.panel_closed.connect(_on_panel_closed)
+	hud_manager.panel_closed.connect(func(panel_name: String) -> void:
+		if panel_name == "division_builder":
+			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+				_map_interaction.set_player_input_enabled(true)
+	)
 	hud_manager.panel_sub_tab_cycle_requested.connect(_on_sub_tab_cycle_requested)
 
 	# Register panels with HUDManager and set keyboard shortcuts
