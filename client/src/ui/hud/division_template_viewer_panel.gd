@@ -438,13 +438,10 @@ func _rebuild_template_list() -> void:
 	for t: Dictionary in templates:
 		var card: PanelContainer = _make_template_card(t)
 		_template_list_container.add_child(card)
-		print("  added card: ", t.get("name", "?"))
-	print("  total children: ", _template_list_container.get_child_count())
 
 
 func _make_template_card(template: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", null)
 
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 6)
