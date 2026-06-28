@@ -250,6 +250,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	var right_vbox := VBoxContainer.new()
 	right_vbox.layout_mode = 2
 	right_vbox.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	right_vbox.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	margin.add_child(right_vbox)
 
 	_overview_container = VBoxContainer.new()
@@ -359,6 +360,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 		_fill_labels.append(count_lbl)
 
 	_cell_selected_container = VBoxContainer.new()
+	_cell_selected_container.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	_cell_selected_container.add_theme_constant_override("separation", 8)
 	_cell_selected_container.visible = false
 	right_vbox.add_child(_cell_selected_container)
