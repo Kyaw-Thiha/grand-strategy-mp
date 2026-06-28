@@ -190,6 +190,7 @@ func _build_right_panel(parent_node: PanelContainer) -> void:
 	parent_node.add_child(scroll)
 
 	var margin := MarginContainer.new()
+	margin.size_flags_vertical = 3
 	margin.add_theme_constant_override("margin_left", 8)
 	margin.add_theme_constant_override("margin_top", 8)
 	margin.add_theme_constant_override("margin_right", 8)
