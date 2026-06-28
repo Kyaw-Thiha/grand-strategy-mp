@@ -148,12 +148,14 @@ func _build_body() -> void:
 	var body: HBoxContainer = %Body
 
 	var left := PanelContainer.new()
+	left.layout_mode = 2
 	left.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	left.size_flags_stretch_ratio = 0.6
 	body.add_child(left)
 	_build_grid_panel(left)
 
 	var right := PanelContainer.new()
+	right.layout_mode = 2
 	right.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	right.size_flags_stretch_ratio = 0.4
 	body.add_child(right)
@@ -170,10 +172,12 @@ func _build_grid_panel(parent: PanelContainer) -> void:
 	parent.add_child(margin)
 
 	var vbox := VBoxContainer.new()
+	vbox.layout_mode = 2
 	vbox.add_theme_constant_override("separation", 4)
 	margin.add_child(vbox)
 
 	var header_row := HBoxContainer.new()
+	header_row.layout_mode = 2
 	vbox.add_child(header_row)
 	var grid_title := Label.new()
 	grid_title.text = "TEMPLATE GRID \u00b7 5\u00d75"
@@ -197,10 +201,12 @@ func _build_grid_panel(parent: PanelContainer) -> void:
 	vbox.add_child(front_lbl)
 
 	var grid_area := HBoxContainer.new()
+	grid_area.layout_mode = 2
 	grid_area.add_theme_constant_override("separation", 6)
 	vbox.add_child(grid_area)
 
 	var row_label_col := VBoxContainer.new()
+	row_label_col.layout_mode = 2
 	row_label_col.add_theme_constant_override("separation", 0)
 	row_label_col.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	grid_area.add_child(row_label_col)
@@ -216,6 +222,7 @@ func _build_grid_panel(parent: PanelContainer) -> void:
 		row_label_col.add_child(row_lbl)
 
 	var grid := GridContainer.new()
+	grid.layout_mode = 2
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 4)
 	grid.add_theme_constant_override("v_separation", 4)
@@ -225,8 +232,8 @@ func _build_grid_panel(parent: PanelContainer) -> void:
 	for i: int in range(25):
 		var cell: UnitGlyphCell = _CELL_SCENE.instantiate() as UnitGlyphCell
 		cell.unit_type = _cells[i]
-		cell.cell_clicked.connect(_on_cell_clicked.bind(i))
-		cell.cell_right_clicked.connect(_on_cell_right_clicked.bind(i))
+		cell.cell_clicked.connect(func(_c: UnitGlyphCell) -> void: _on_cell_clicked(i))
+		cell.cell_right_clicked.connect(func(_c: UnitGlyphCell) -> void: _on_cell_right_clicked(i))
 		grid.add_child(cell)
 		_cell_nodes.append(cell)
 
@@ -254,6 +261,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	margin.add_child(right_vbox)
 
 	_overview_container = VBoxContainer.new()
+	_overview_container.layout_mode = 2
 	_overview_container.add_theme_constant_override("separation", 10)
 	right_vbox.add_child(_overview_container)
 
@@ -269,8 +277,10 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	_overview_container.add_child(auto_lbl)
 
 	var type_row := HBoxContainer.new()
+	type_row.layout_mode = 2
 	_overview_container.add_child(type_row)
 	var type_col := VBoxContainer.new()
+	type_col.layout_mode = 2
 	type_col.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	type_row.add_child(type_col)
 	var type_header := Label.new()
@@ -284,6 +294,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	type_col.add_child(_division_type_label)
 
 	var radius_col := VBoxContainer.new()
+	radius_col.layout_mode = 2
 	type_row.add_child(radius_col)
 	var radius_header := Label.new()
 	radius_header.text = "ENGAGEMENT\nRADIUS"
@@ -301,6 +312,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	mp_header.add_theme_color_override("font_color", Color(0.6, 0.55, 0.4, 1.0))
 	_overview_container.add_child(mp_header)
 	var swatch_row := HBoxContainer.new()
+	swatch_row.layout_mode = 2
 	swatch_row.add_theme_constant_override("separation", 4)
 	_overview_container.add_child(swatch_row)
 	for entry: Array in [
@@ -311,6 +323,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 		[Color(0.10, 0.10, 0.10, 0.8), "Mtn"],
 	]:
 		var swatch_col := VBoxContainer.new()
+		swatch_col.layout_mode = 2
 		swatch_row.add_child(swatch_col)
 		var swatch := ColorRect.new()
 		swatch.custom_minimum_size = Vector2(38, 24)
@@ -322,6 +335,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 		swatch_col.add_child(swatch_lbl)
 
 	var fill_header_row := HBoxContainer.new()
+	fill_header_row.layout_mode = 2
 	_overview_container.add_child(fill_header_row)
 	var fill_hdr := Label.new()
 	fill_hdr.text = "FILL & ROLE BALANCE"
@@ -337,6 +351,7 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	_fill_labels.clear()
 	for r: int in range(5):
 		var bar_row := HBoxContainer.new()
+		bar_row.layout_mode = 2
 		bar_row.add_theme_constant_override("separation", 6)
 		_overview_container.add_child(bar_row)
 		var row_lbl := Label.new()
@@ -360,12 +375,14 @@ func _build_right_panel(parent: PanelContainer) -> void:
 		_fill_labels.append(count_lbl)
 
 	_cell_selected_container = VBoxContainer.new()
+	_cell_selected_container.layout_mode = 2
 	_cell_selected_container.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	_cell_selected_container.add_theme_constant_override("separation", 8)
 	_cell_selected_container.visible = false
 	right_vbox.add_child(_cell_selected_container)
 
 	var badge_row := HBoxContainer.new()
+	badge_row.layout_mode = 2
 	badge_row.add_theme_constant_override("separation", 8)
 	_cell_selected_container.add_child(badge_row)
 	_row_badge_label = Label.new()
@@ -391,12 +408,14 @@ func _build_right_panel(parent: PanelContainer) -> void:
 	_cell_selected_container.add_child(eligible_hdr)
 
 	var list_scroll := ScrollContainer.new()
+	list_scroll.layout_mode = 2
 	list_scroll.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	list_scroll.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
 	list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_cell_selected_container.add_child(list_scroll)
 
 	_eligible_list_container = VBoxContainer.new()
+	_eligible_list_container.layout_mode = 2
 	_eligible_list_container.add_theme_constant_override("separation", 4)
 	_eligible_list_container.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	list_scroll.add_child(_eligible_list_container)
@@ -514,6 +533,7 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 
 	var hbox := HBoxContainer.new()
+	hbox.layout_mode = 2
 	hbox.add_theme_constant_override("separation", 8)
 	card.add_child(hbox)
 
@@ -523,10 +543,12 @@ func _make_unit_card(unit_type: String, target_index: int) -> Control:
 	hbox.add_child(mini)
 
 	var text_col := VBoxContainer.new()
+	text_col.layout_mode = 2
 	text_col.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	hbox.add_child(text_col)
 
 	var name_row := HBoxContainer.new()
+	name_row.layout_mode = 2
 	text_col.add_child(name_row)
 	var name_lbl := Label.new()
 	name_lbl.text = unit_type.replace("_", " ").capitalize()
