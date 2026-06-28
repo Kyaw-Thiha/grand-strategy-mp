@@ -66,43 +66,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
     this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
     this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
-    this.onMessage("ASSIGN_TEMPLATE", (_client, msg: {
-      division_id: string;
-      template_id: string;
-      cells: Array<{ cell_index: number; unit_type: string }>;
-    }) => {
-      const div = this.state.divisions.get(msg.division_id);
-      if (!div) return;
-      if (["engaged", "retreating", "suppressed"].includes(div.combat_state)) return;
-
-      div.template_id = msg.template_id;
-
-      if (div.grid) {
-        for (const cell of div.grid.cells) {
-          cell.unit_type = "";
-        }
-        for (const { cell_index, unit_type } of msg.cells) {
-          if (cell_index >= 0 && cell_index < div.grid.cells.length && unit_type !== "") {
-            div.grid.cells[cell_index].unit_type = unit_type;
-          }
-        }
-      }
-
-      const templateCells = msg.cells
-        .filter(c => c.unit_type !== "")
-        .map(c => ({
-          unit_type: c.unit_type,
-          row: Math.floor(c.cell_index / 5),
-          col: c.cell_index % 5,
-        }));
-
-      div.division_type = this.movementSystem.classifyDivisionType(templateCells);
-      div.engagement_radius = this.movementSystem.computeEngagementRadius(templateCells);
-      div.movement_profile_json = JSON.stringify(
-        this.movementSystem.computeMovementProfile(templateCells)
-      );
-      this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
-    });
     if (process.env.DEV_MODE === "true") {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
       this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
@@ -542,24 +505,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       div.observation_radius = observationRadius;
       div.engagement_radius = engagementRadius;
       div.movement_profile_json = profileJson;
-      div.template_id = "preset_combined_arms";
-      if (div.grid) {
-        for (let i = 0; i < div.grid.cells.length; i++) div.grid.cells[i].unit_type = "";
-        const defaultCells = [
-          { row: 0, col: 0, unit_type: "recon_infantry" },
-          { row: 0, col: 2, unit_type: "recon_infantry" },
-          { row: 1, col: 0, unit_type: "medium_tank" },
-          { row: 1, col: 1, unit_type: "medium_tank" },
-          { row: 1, col: 2, unit_type: "infantry" },
-          { row: 2, col: 0, unit_type: "artillery" },
-          { row: 2, col: 1, unit_type: "at_gun" },
-          { row: 3, col: 0, unit_type: "infantry" },
-        ];
-        for (const c of defaultCells) {
-          const idx = c.row * 5 + c.col;
-          div.grid.cells[idx].unit_type = c.unit_type;
-        }
-      }
       this.state.divisions.set(spawn.division_id, div);
     }
   }
@@ -648,7 +593,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       supply_status: div.supply_status,
       observation_radius: div.observation_radius,
       engagement_radius: div.engagement_radius,
-      template_id: div.template_id,
       move_order: [...div.move_order],
       consumed_waypoint_ids: [...div.consumed_waypoint_ids],
       final_position_lng: div.final_position_lng,
