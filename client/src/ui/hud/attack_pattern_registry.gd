@@ -2,6 +2,11 @@ class_name AttackPatternRegistry
 
 const BASE_ATTRITION := 2.5
 
+const ARMOURED_TARGET_TYPES := {
+    "light_tank": true, "medium_tank": true, "heavy_tank": true,
+    "armoured_car": true, "at_gun_sp": true,
+}
+
 const HP_FLOOR_PCT : Dictionary = {
     "infantry": 20, "assault_infantry": 20, "recon_infantry": 20,
     "mg": 20, "cavalry": 20, "sniper": 20, "commando": 20, "flamethrower": 20,
@@ -23,6 +28,12 @@ static func get_targets(
             return _horizontal_targets(enemy_cells, n)
         "flamethrower":
             return _flamethrower_targets(att_row, att_col, enemy_cells)
+        "light_tank", "medium_tank", "heavy_tank", "armoured_car":
+            return _armour_column_targets(att_row, att_col, enemy_cells, n)
+        "at_infantry", "at_gun", "at_gun_sp":
+            return _at_column_targets(att_col, enemy_cells, n)
+        "aa_gun":
+            return []
         _:
             return []
 
@@ -58,6 +69,12 @@ static func simulate_round(
                 targets = _horizontal_targets(virtual, n)
             "flamethrower":
                 targets = _flamethrower_targets(att_row, att_col, virtual)
+            "light_tank", "medium_tank", "heavy_tank", "armoured_car":
+                targets = _armour_column_targets(att_row, att_col, virtual, n)
+            "at_infantry", "at_gun", "at_gun_sp":
+                targets = _at_column_targets(att_col, virtual, n)
+            "aa_gun":
+                targets = []
             _:
                 targets = []
 
@@ -145,4 +162,67 @@ static func _hp_fraction_for(unit_type: String, round_number: int) -> float:
         "mg":           return 0.08
         "flamethrower": return 0.20
         "cavalry":      return 0.55 if round_number == 1 else 0.30
+        "at_infantry", "at_gun", "at_gun_sp": return 0.75
+        "light_tank", "medium_tank", "heavy_tank", "armoured_car": return 0.50
         _:              return 0.30
+
+# Returns living cells in `col` where row >= min_row. R5 first (row 4 -> min_row).
+static func _column_targets(col: int, min_row: int, cells: Array) -> Array[int]:
+    var result: Array[int] = []
+    for row in range(4, min_row - 1, -1):
+        var idx := row * 5 + col
+        var cell = cells[idx]
+        if cell.get("unit_type", "") != "" and not cell.get("incapacitated", false):
+            result.append(idx)
+    return result
+
+static func _has_armour_in_col(col: int, cells: Array) -> bool:
+    for row in range(4, -1, -1):
+        var cell = cells[row * 5 + col]
+        if ARMOURED_TARGET_TYPES.has(cell.get("unit_type", "")) and not cell.get("incapacitated", false):
+            return true
+    return false
+
+# Armour column attack. Client does not check cover — preview approximation is acceptable.
+# TODO: pass cover_string from engagement state once exposed to client (Branch K)
+static func _armour_column_targets(att_row: int, att_col: int, cells: Array, n: int) -> Array[int]:
+    var min_row: int = 4 - att_row
+    var own := _column_targets(att_col, min_row, cells)
+    if own.size() > 0:
+        return own.slice(0, n) if n > 0 else own
+    var search: Array[int] = []
+    if att_col == 0 or att_col == 1:
+        search = [att_col + 1, att_col + 2]
+    elif att_col == 3 or att_col == 4:
+        search = [att_col - 1, att_col - 2]
+    else:
+        search = [att_col - 1, att_col + 1]
+    search = search.filter(func(c): return c >= 0 and c <= 4)
+    for shifted_col in search:
+        var col_targets := _column_targets(shifted_col, min_row, cells)
+        if col_targets.size() > 0:
+            return col_targets.slice(0, n) if n > 0 else col_targets
+    return []
+
+# AT column attack: armoured targets only, no depth rule.
+static func _at_column_targets(att_col: int, cells: Array, n: int) -> Array[int]:
+    var target_col := -1
+    if _has_armour_in_col(att_col, cells):
+        target_col = att_col
+    else:
+        var best_dist := 999
+        for c in range(5):
+            if c == att_col: continue
+            var dist := abs(c - att_col)
+            if _has_armour_in_col(c, cells):
+                if dist < best_dist or (dist == best_dist and (target_col < 0 or c < target_col)):
+                    best_dist = dist
+                    target_col = c
+    if target_col < 0:
+        return []
+    var all_in_col := _column_targets(target_col, 0, cells)
+    var armoured: Array[int] = []
+    for idx in all_in_col:
+        if ARMOURED_TARGET_TYPES.has(cells[idx].get("unit_type", "")):
+            armoured.append(idx)
+    return armoured.slice(0, n) if n > 0 else armoured

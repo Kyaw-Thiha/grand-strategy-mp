@@ -263,7 +263,7 @@ rows in its column.
 When a tank's column in the enemy grid is empty, it shifts to find targets:
 - C1, C2 (left flank): shift right to the nearest occupied column → **Tactical Flanking**
   bonus damage
-- C3 (centre): shift toward nearest occupied column (random if equidistant) → Tactical
+- C3 (centre): shift toward nearest occupied column (prefer left if equidistant) → Tactical
   Flanking
 - C4, C5 (right flank): shift left → Tactical Flanking
 - If the first shift column is also empty, shift one further → **Tactical Envelopment**
@@ -286,7 +286,7 @@ non-armoured units. It does not substitute for MG or standard infantry.
 
 **Pattern:** Targets armoured units in its own column first. If no armour in the column,
 shifts toward the nearest occupied column containing armour (picks one direction — nearest
-first, random if equidistant) and targets **side armour**. Does not target both adjacent
+first, prefer lower column index if equidistant) and targets **side armour**. Does not target both adjacent
 columns simultaneously — picks one.
 
 **Suppression profile:** Very low suppression output against armour. Primary effect is HP
