@@ -91,13 +91,15 @@ func _build_body() -> void:
 	var body: HBoxContainer = %Body
 
 	var left_panel := PanelContainer.new()
-	left_panel.size_flags_horizontal = 3
-	left_panel.stretch_ratio = 0.6
+	left_panel.layout_mode = 2
+	left_panel.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	left_panel.size_flags_stretch_ratio = 0.6
 	body.add_child(left_panel)
 
 	var right_panel := PanelContainer.new()
-	right_panel.size_flags_horizontal = 3
-	right_panel.stretch_ratio = 0.4
+	right_panel.layout_mode = 2
+	right_panel.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	right_panel.size_flags_stretch_ratio = 0.4
 	body.add_child(right_panel)
 
 	_build_grid_panel(left_panel)
