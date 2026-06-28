@@ -6,7 +6,7 @@ import type { GameRoomState, DivisionState, GridCellState } from "../rooms/schem
 import type { MovementSystem } from "./movement_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
-import { getTargetCells, getDamageProfile, getFireOrder } from "./attack_patterns.js";
+import { getTargetCells, getDamageProfile, getFireOrder, _resolveArmourColumn, _resolveATColumn } from "./attack_patterns.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
-import { BASE_ATTRITION } from "../data/combat_constants.js";
+import { BASE_ATTRITION, SIDE_ARMOUR_MULT, TACTICAL_FLANK_BONUS, TACTICAL_ENVELOPMENT_BONUS } from "../data/combat_constants.js";
 
 // Damage output multiplier by division type
 const TYPE_MULT: Record<string, number> = {
@@ -175,6 +175,7 @@ interface ActivePair {
   is_meeting: boolean;
   terrain_mult_atk: number; // multiplier on attacker outgoing damage (≤ 1.0 = penalty)
   terrain_mult_def: number; // multiplier on defender outgoing damage (≥ 1.0 = bonus)
+  battle_cover: string;     // raw cover string for armour column shift rules
   round: number;
   is_primary_attacker: boolean;              // false for meeting battles; first attacker on this defender = true
   flank_class: "none" | "flank" | "rear";   // engagement-wide classification; "none" for primary/meeting
@@ -324,7 +325,7 @@ export class CombatSystem {
 
             const midLng = (a.position_lng + b.position_lng) / 2;
             const midLat = (a.position_lat + b.position_lat) / 2;
-            let { atk, def } = this._terrainModifiers(midLng, midLat);
+            let { atk, def, cover: battle_cover } = this._terrainModifiers(midLng, midLat);
 
             // River crossing check: if the attacker crosses a river to reach the defender
             const riverSize = this.movementSystem.checkRiverCrossing(
@@ -345,6 +346,7 @@ export class CombatSystem {
               is_meeting,
               terrain_mult_atk: atk,
               terrain_mult_def: def,
+              battle_cover,
               round: 0,
               is_primary_attacker: isPrimary,
               flank_class: "none",
@@ -577,6 +579,7 @@ export class CombatSystem {
 
     const perAttackerBudget = rawDamage / fireOrder.length;
     const roundNumber       = pair.round;
+    const cover             = pair.battle_cover ?? "";
     const deltasMap         = new Map<number, GridCellDelta>();
 
     for (const { cell: attCell, idx } of fireOrder) {
@@ -584,8 +587,20 @@ export class CombatSystem {
       const attCol      = idx % 5;
       const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
-      const targets     = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber);
+      const targets     = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber, Infinity, cover);
       const attackerPen = UNIT_COMBAT_STATS[attCell.unit_type]?.pen ?? 10;
+
+      // Column-shift modifiers: attacker-level (apply to all targets uniformly)
+      let sideArmourActive = false;
+      let tacticalHpBonus  = 1.0;
+      const utype = attCell.unit_type;
+      if (utype === "light_tank" || utype === "medium_tank" || utype === "heavy_tank" || utype === "armoured_car") {
+        const shift = _resolveArmourColumn(attCol, defender.grid.cells, attRow, cover);
+        if (shift?.shift_type === "flank")       { sideArmourActive = true; tacticalHpBonus = TACTICAL_FLANK_BONUS; }
+        else if (shift?.shift_type === "envelopment") { sideArmourActive = true; tacticalHpBonus = TACTICAL_ENVELOPMENT_BONUS; }
+      } else if (utype === "at_infantry" || utype === "at_gun" || utype === "at_gun_sp") {
+        if (_resolveATColumn(attCol, defender.grid.cells)?.is_side) sideArmourActive = true;
+      }
 
       if (targets.length === 0) continue;
 
@@ -596,11 +611,12 @@ export class CombatSystem {
         const tCell  = defender.grid.cells[tIdx];
         if (!tCell) continue;
 
-        const armour  = UNIT_COMBAT_STATS[tCell.unit_type]?.armour ?? 0;
-        const penMult = profile.bypasses_armour ? 1.0 : _armorPenMultiplier(attackerPen, armour);
+        const baseArmour      = UNIT_COMBAT_STATS[tCell.unit_type]?.armour ?? 0;
+        const effectiveArmour = sideArmourActive ? baseArmour * SIDE_ARMOUR_MULT : baseArmour;
+        const penMult         = profile.bypasses_armour ? 1.0 : _armorPenMultiplier(attackerPen, effectiveArmour);
         const cavMult = (tCell.unit_type === "cavalry") ? profile.cavalry_supp_mult : 1.0;
 
-        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult);
+        tCell.hp          = Math.max(0, tCell.hp - perTargetHp * penMult * tacticalHpBonus);
         tCell.suppression = Math.min(100, tCell.suppression + perTargetSupp * cavMult);
 
         const floor = _getIncapFloor(tCell.unit_type);
@@ -1018,9 +1034,9 @@ export class CombatSystem {
     }
   }
 
-  private _terrainModifiers(midLng: number, midLat: number): { atk: number; def: number } {
+  private _terrainModifiers(midLng: number, midLat: number): { atk: number; def: number; cover: string } {
     const prov = this._nearestProvince(midLng, midLat);
-    if (!prov) return { atk: 1.0, def: 1.0 };
+    if (!prov) return { atk: 1.0, def: 1.0, cover: "plains" };
 
     const [elevPenalty, elevBonus] = ELEV_MOD[prov.elevation] ?? [0, 0];
     const [coverPenalty, coverBonus] = COVER_MOD[prov.cover]    ?? [0, 0];
@@ -1028,7 +1044,7 @@ export class CombatSystem {
     const atk = Math.max(0.3, 1.0 - elevPenalty - coverPenalty);
     const def = 1.0 + elevBonus + coverBonus;
 
-    return { atk, def };
+    return { atk, def, cover: prov.cover };
   }
 
   // ---------------------------------------------------------------------------
