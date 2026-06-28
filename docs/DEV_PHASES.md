@@ -763,13 +763,12 @@ for all attack pattern logic before any Godot work.
 - [x] Round system — combat resolves in discrete rounds (target: 20 seconds per round);
       5-phase lethality escalation (Contact → Firefight → Intense → Decisive → Annihilation)
 - [ ] All unit attack patterns server-side:
-  - [ ] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
+  - [x] Infantry / MG — horizontal attack on frontmost occupied row (not always R5;
         targets first row with at least one living unit; damage distributed only among
         living units in that row)
-  - [ ] Cavalry — horizontal attack like infantry; charge bonus (higher HP damage and
-        suppression) in Round 1 only; standard infantry values from Round 2+; very high
-        MG suppression vulnerability; moderate-high observation radius contribution;
-        moderate stealth in forest/hills; fastest off-road unit type in movement profile
+  - [x] Cavalry — horizontal attack like infantry; charge bonus (higher HP damage) in
+        Round 1 only; standard infantry values from Round 2+; MG suppression vulnerability
+        and non-combat traits (observation, stealth, movement) deferred to later branches
   - [ ] Armour — vertical column attack with depth rule + flanking/envelopment column shift;
         column shift disabled in dense_forest and urban terrain
   - [ ] AT infantry / AT gun — column selective targeting, side armour on column shift;
@@ -777,7 +776,7 @@ for all attack pattern logic before any Godot work.
   - [ ] AA gun — passive defence vs air (no ground attack role)
   - [ ] Sniper — selective targeting across full grid with priority list (fallback to
         standard infantry when no priority targets present)
-  - [ ] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
+  - [x] Flamethrower — 3-column × 2-row AOE anchored at fixed row offset from unit
         position (1 row ahead of own position, not anchored to enemy contact row)
   - [ ] Artillery — recon-proportional weighted random cell targeting
 - [ ] Row positional perks applied per round:

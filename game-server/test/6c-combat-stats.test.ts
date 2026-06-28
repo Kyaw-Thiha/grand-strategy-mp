@@ -203,11 +203,12 @@ describe("6c — Combat stats: integration", function () {
   });
 
   it("armoured cell takes less damage than soft cell from infantry pen", async () => {
-    const { room, client, engagementId } = await spawnCombat({ 12: "infantry" }, { 5: "infantry", 20: "heavy_tank" });
+    // Both defender cells in R5 so horizontal targeting hits both
+    const { room, client, engagementId } = await spawnCombat({ 12: "infantry" }, { 20: "infantry", 24: "heavy_tank" });
     await waitForEngagementRound(client, engagementId, 60_000);
     const div        = room.state.divisions.get("div-b");
-    const softDmg    = 100 - div.grid.cells[5].hp;
-    const armoredDmg = 100 - div.grid.cells[20].hp;
+    const softDmg    = 100 - div.grid.cells[20].hp;
+    const armoredDmg = 100 - div.grid.cells[24].hp;
     assert.ok(armoredDmg < softDmg,
       `heavy_tank hp loss ${armoredDmg} should be less than infantry hp loss ${softDmg}`);
   });

@@ -500,7 +500,8 @@ Cavalry cannot sustain a prolonged firefight effectively — it is a shock unit,
 grinding unit.
 
 **Damage profile:**
-- Round 1: charge bonus — high HP damage and suppression vs infantry targets
+- Round 1: charge bonus — high HP damage vs infantry targets; suppression is lower than
+  standard infantry (charge trades pinning power for shock damage)
 - Round 2+: standard infantry values
 - Highly vulnerable to MG fire — MG units are the primary hard counter to cavalry.
   Artillery suppression affects cavalry less than infantry (horses scatter and reform
