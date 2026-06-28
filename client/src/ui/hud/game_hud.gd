@@ -40,9 +40,11 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
 
 var _division_builder_panel: Control
+var _division_template_viewer_panel: Control
 
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
 const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
+const _DivisionTemplateViewerScene := preload("res://scenes/game/panels/division_template_viewer_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
 var _military_system: Node = null
@@ -123,6 +125,33 @@ func _ready() -> void:
 			hud_manager.hide_panel("division_builder")
 			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
 				_map_interaction.set_player_input_enabled(true)
+		)
+
+	# Division Template Viewer — full-center, opened from mini-comp grid click
+	_division_template_viewer_panel = _DivisionTemplateViewerScene.instantiate()
+	add_child(_division_template_viewer_panel)
+	hud_manager.register_panel("division_template_viewer", _division_template_viewer_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
+	EventBus.division_template_viewer_open_requested.connect(func(div_id: String) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _map_renderer != null and _map_renderer.has_method("clear_highlights"):
+			_map_renderer.clear_highlights()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
+		hud_manager.show_panel("division_template_viewer")
+	)
+	EventBus.division_template_viewer_closed.connect(func() -> void:
+		hud_manager.hide_panel("division_template_viewer")
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
+	)
+	if _division_template_viewer_panel.has_signal("close_requested"):
+		_division_template_viewer_panel.connect("close_requested", func() -> void:
+			EventBus.division_template_viewer_closed.emit()
 		)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
