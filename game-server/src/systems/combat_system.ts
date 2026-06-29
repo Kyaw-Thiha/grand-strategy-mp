@@ -26,6 +26,11 @@ import {
   SNIPER_TYPES,
 } from "./attack_patterns.js";
 import { getRowPerkModifiers } from "./row_perk_system.js";
+import {
+  evaluateFormationRules,
+  getActiveFormationRules,
+  IDENTITY_FORMATION_BONUS,
+} from "./formation_rule_system.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -609,7 +614,7 @@ export class CombatSystem {
         lethality_phase:         pair.lethality_phase as any,
         attacker_grid_delta:     pair._lastDeltaAttacker,
         defender_grid_delta:     pair._lastDeltaDefender,
-        formation_bonuses_active: [],
+        formation_bonuses_active: [],   // Populated by formation_rule_system in future branches
         xp_changes:              [],
       } satisfies RoundResolvedPayload);
 
@@ -649,11 +654,16 @@ export class CombatSystem {
   private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
     if (!div.grid) return;
     const baseDecay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
+    const decayFormationBonuses = evaluateFormationRules(
+      [...div.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      getActiveFormationRules(),
+    );
     div.grid.cells.forEach((cell, cellIdx) => {
       if (cell.unit_type === "") return;
       const cellRow = Math.floor(cellIdx / 5);
       const decayPerk = getRowPerkModifiers(cellRow);
-      cell.suppression = Math.max(0, cell.suppression - baseDecay * decayPerk.supp_decay_mult);
+      const formationBonus = decayFormationBonuses.get(cellIdx) ?? IDENTITY_FORMATION_BONUS;
+      cell.suppression = Math.max(0, cell.suppression - baseDecay * decayPerk.supp_decay_mult * formationBonus.supp_decay_mult);
     });
   }
 
@@ -681,9 +691,20 @@ export class CombatSystem {
     const cover             = pair.battle_cover ?? "";
     const deltasMap         = new Map<number, GridCellDelta>();
 
+    const _activeRules = getActiveFormationRules();
+    const attackerFormationBonuses = evaluateFormationRules(
+      [...attacker.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      _activeRules,
+    );
+    const defenderFormationBonuses = evaluateFormationRules(
+      [...defender.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      _activeRules,
+    );
+
     for (const { cell: attCell, idx } of fireOrder) {
       const attRow      = Math.floor(idx / 5);
       const attackerRowPerk = getRowPerkModifiers(attRow);
+      const attackerFormationBonus = attackerFormationBonuses.get(idx) ?? IDENTITY_FORMATION_BONUS;
       const attCol      = idx % 5;
       const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
@@ -740,9 +761,10 @@ export class CombatSystem {
 
         const defRow = Math.floor(tIdx / 5);
         const defenderRowPerk = getRowPerkModifiers(defRow);
+        const defenderFormationBonus = defenderFormationBonuses.get(tIdx) ?? IDENTITY_FORMATION_BONUS;
         const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
-        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult) / xpHpMult);
-        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * defenderRowPerk.supp_resist_mult) / xpSuppResist);
+        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult * attackerFormationBonus.hp_dealt_mult) / xpHpMult);
+        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * attackerFormationBonus.supp_dealt_mult * defenderRowPerk.supp_resist_mult * defenderFormationBonus.supp_resist_mult) / xpSuppResist);
 
         const floor = _getIncapFloor(tCell.unit_type);
         if (floor > 0 && tCell.hp <= floor && !tCell.incapacitated) {
