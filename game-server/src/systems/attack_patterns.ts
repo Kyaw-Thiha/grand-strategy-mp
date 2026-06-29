@@ -170,12 +170,16 @@ export function _resolveArmourColumn(
   }
 
   const searchOrder: number[] = [];
-  if (attacker_col <= 1) {
-    for (let c = attacker_col + 1; c <= 4; c++) searchOrder.push(c);
-  } else if (attacker_col >= 3) {
-    for (let c = attacker_col - 1; c >= 0; c--) searchOrder.push(c);
-  } else {
+  if (attacker_col === 0) {
+    for (let c = 1; c <= 4; c++) searchOrder.push(c);
+  } else if (attacker_col === 1) {
+    searchOrder.push(2, 3, 4, 0);
+  } else if (attacker_col === 2) {
     searchOrder.push(1, 3, 0, 4);
+  } else if (attacker_col === 3) {
+    searchOrder.push(2, 1, 0, 4);
+  } else {
+    for (let c = 3; c >= 0; c--) searchOrder.push(c);
   }
 
   for (let d = 0; d < searchOrder.length; d++) {

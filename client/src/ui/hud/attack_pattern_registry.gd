@@ -201,12 +201,16 @@ static func _armour_column_targets(att_row: int, att_col: int, cells: Array, n: 
     if not own.is_empty():
         return own.slice(0, n) if n > 0 else own
     var search: Array[int] = []
-    if att_col <= 1:
-        for c in range(att_col + 1, 5): search.append(c)
-    elif att_col >= 3:
-        for c in range(att_col - 1, -1, -1): search.append(c)
-    else:
+    if att_col == 0:
+        for c in range(1, 5): search.append(c)
+    elif att_col == 1:
+        search = [2, 3, 4, 0]
+    elif att_col == 2:
         search = [1, 3, 0, 4]
+    elif att_col == 3:
+        search = [2, 1, 0, 4]
+    else:
+        for c in range(3, -1, -1): search.append(c)
     for shifted_col in search:
         var col_targets := _column_targets(shifted_col, min_row, cells)
         if not col_targets.is_empty():
