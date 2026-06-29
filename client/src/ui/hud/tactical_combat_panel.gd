@@ -61,7 +61,6 @@ func _ready() -> void:
 	$InnerMargin/VBoxContent/GridRow.add_theme_constant_override("separation", 8)
 	_add_subtitle_extras()
 	_add_context_banner()
-	_add_perk_labels()
 	_build_phase_pills()
 	_phase_label.visible = false
 	_flank_chip = $InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow/FlankChip
@@ -122,7 +121,7 @@ func _add_context_banner() -> void:
 	var inner := HBoxContainer.new()
 	var tag := Label.new()
 	tag.text = "ENGAGEMENT"
-	tag.add_theme_font_size_override("font_size", 8)
+	tag.add_theme_font_size_override("font_size", 13)
 	tag.add_theme_color_override("font_color", Color(0.20, 0.55, 0.60))
 	inner.add_child(tag)
 	_context_label = Label.new()

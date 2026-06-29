@@ -77,7 +77,7 @@ theme_override_font_sizes/font_size = 14
 
 [node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
-theme_override_constants/margin_top = 6
+theme_override_constants/margin_top = 10
 
 [node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
@@ -93,8 +93,8 @@ theme_override_font_sizes/font_size = 13
 [node name="TerrainMargin" type="MarginContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/margin_top = 4
-theme_override_constants/margin_bottom = 4
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_bottom = 6
 
 [node name="TerrainFlankRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin"]
 layout_mode = 2
