@@ -78,7 +78,7 @@ func _update_cell(index: int, data: Dictionary) -> void:
 	glyph.unit_type = utype
 	glyph.incapacitated = data.get("incapacitated", false)
 	bars.set("visible", utype != "")
-	bars.hp_pct = data.get("hp", 100.0) / 100.0
+	bars.hp_pct = 0.0 if data.get("incapacitated", false) else (data.get("hp", 100.0) / 100.0)
 	bars.supp_pct = data.get("suppression", 0.0) / 100.0
 
 
