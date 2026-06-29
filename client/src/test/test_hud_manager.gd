@@ -61,6 +61,25 @@ func _ready() -> void:
 	_check(not chat_input.has_focus(), "clicking outside chat exits chat typing focus")
 	chat_input.release_focus()
 
+	var pointer_blocking_log: Array[bool] = []
+	var text_focus_log: Array[bool] = []
+	EventBus.ui_pointer_blocking_changed.connect(func(blocking: bool) -> void:
+		pointer_blocking_log.append(blocking)
+	)
+	EventBus.ui_text_input_focus_changed.connect(func(focused: bool) -> void:
+		text_focus_log.append(focused)
+	)
+	chat_panel.mouse_entered.emit()
+	_check(pointer_blocking_log == [true], "ChatPanel hover blocks pointer-driven camera input")
+	chat_panel.mouse_exited.emit()
+	_check(pointer_blocking_log == [true, false], "ChatPanel exit restores pointer-driven camera input")
+	chat_input.grab_focus()
+	await get_tree().process_frame
+	_check(text_focus_log == [true], "Chat input focus blocks keyboard camera input")
+	chat_input.release_focus()
+	await get_tree().process_frame
+	_check(text_focus_log == [true, false], "Chat input blur restores keyboard camera input")
+
 	var opened_log: Array[String] = []
 	var closed_log: Array[String] = []
 	mgr.panel_opened.connect(func(n: String) -> void: opened_log.append(n))

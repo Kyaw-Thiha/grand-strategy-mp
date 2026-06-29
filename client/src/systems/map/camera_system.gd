@@ -28,6 +28,8 @@ var _edge_scroll_enabled: bool = true
 var _player_input_enabled: bool = true
 var _pause_input_blocked: bool = false
 var _chat_input_blocked: bool = false
+var _ui_pointer_blocking: bool = false
+var _ui_text_input_focused: bool = false
 var _map_loader: Node = null
 var _label_region_active: bool = false  # true when zoom < threshold
 var _map_bounds: Rect2 = Rect2()
@@ -42,6 +44,10 @@ func setup(camera: Camera2D, map_loader: Node) -> void:
 		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
 	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
+	if not EventBus.ui_pointer_blocking_changed.is_connected(_on_ui_pointer_blocking_changed):
+		EventBus.ui_pointer_blocking_changed.connect(_on_ui_pointer_blocking_changed)
+	if not EventBus.ui_text_input_focus_changed.is_connected(_on_ui_text_input_focus_changed):
+		EventBus.ui_text_input_focus_changed.connect(_on_ui_text_input_focus_changed)
 
 
 func _process(delta: float) -> void:
@@ -66,6 +72,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton:
+		if _ui_pointer_blocking:
+			return
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -128,14 +136,15 @@ func _handle_movement(delta: float) -> void:
 		return
 
 	var wasd_dir: Vector2 = Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		wasd_dir.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		wasd_dir.y += 1.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		wasd_dir.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		wasd_dir.x += 1.0
+	if not _ui_text_input_focused:
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			wasd_dir.y -= 1.0
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			wasd_dir.y += 1.0
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			wasd_dir.x -= 1.0
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			wasd_dir.x += 1.0
 
 	var wasd_active: bool = wasd_dir != Vector2.ZERO
 
@@ -149,7 +158,7 @@ func _handle_movement(delta: float) -> void:
 
 	_move_speed = 0.0
 
-	if _edge_scroll_enabled:
+	if _edge_scroll_enabled and not _ui_pointer_blocking:
 		var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 		var viewport_size: Vector2 = _camera.get_viewport().get_visible_rect().size
 		var edge_velocity: Vector2 = _get_edge_scroll_velocity(mouse, viewport_size)
@@ -280,3 +289,21 @@ func _on_chat_input_focus_changed(focused: bool) -> void:
 ## Returns: nothing.
 func _refresh_player_input_enabled() -> void:
 	set_player_input_enabled(not (_pause_input_blocked or _chat_input_blocked))
+
+
+## Responds to HUD/UI hover ownership changes.
+## Parameters:
+## - blocking: true when pointer-driven map camera controls should ignore the mouse.
+## Returns: nothing.
+func _on_ui_pointer_blocking_changed(blocking: bool) -> void:
+	_ui_pointer_blocking = blocking
+
+
+## Responds to text input focus changes in HUD/UI.
+## Parameters:
+## - focused: true when a text input owns keyboard input.
+## Returns: nothing.
+func _on_ui_text_input_focus_changed(focused: bool) -> void:
+	_ui_text_input_focused = focused
+	if focused:
+		_move_speed = 0.0

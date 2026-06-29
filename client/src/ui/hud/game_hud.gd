@@ -9,6 +9,9 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var hud_manager: _HUDManagerClass = $HUDManager
 @onready var overlay_dim: ColorRect = %OverlayDim
 
+@onready var _top_bar: PanelContainer = $HUDRoot/TopBar
+@onready var _left_dock_rail: PanelContainer = $HUDRoot/LeftDockRail
+@onready var _map_mode_tabs: PanelContainer = $HUDRoot/MapModeTabs
 @onready var _side_panel_anchor: MarginContainer  = %SidePanelAnchor
 @onready var _center_panel_anchor: Control = %CenterPanelAnchor
 @onready var _toast_container: VBoxContainer       = %ToastContainer
@@ -51,6 +54,10 @@ var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
 var _map_renderer: Node = null
+var _ui_pointer_blockers: Dictionary = {}
+var _ui_text_focus_controls: Dictionary = {}
+var _is_ui_pointer_blocking: bool = false
+var _is_ui_text_input_focused: bool = false
 
 const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
@@ -63,6 +70,7 @@ func _ready() -> void:
 	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
 	_map_renderer = get_node_or_null("/root/MapDebug/MapRenderer")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
+	_register_initial_ui_input_ownership()
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
 	_btn_map_cov.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("cover"))
@@ -107,6 +115,7 @@ func _ready() -> void:
 	# Division Builder — full-center, opened from military panel template list
 	_division_builder_panel = _DivisionBuilderScene.instantiate()
 	add_child(_division_builder_panel)
+	_register_ui_input_ownership_root(_division_builder_panel)
 	hud_manager.register_panel("division_builder", _division_builder_panel, HUDManager.PlacementMode.FULL_CENTER)
 	EventBus.division_builder_open_requested.connect(func(_template_id: String) -> void:
 		if _military_system != null and _military_system.has_method("deselect"):
@@ -134,6 +143,7 @@ func _ready() -> void:
 	# Division Template Viewer — full-center, opened from mini-comp grid click
 	_division_template_viewer_panel = _DivisionTemplateViewerScene.instantiate()
 	add_child(_division_template_viewer_panel)
+	_register_ui_input_ownership_root(_division_template_viewer_panel)
 	hud_manager.register_panel("division_template_viewer", _division_template_viewer_panel,
 		HUDManager.PlacementMode.FULL_CENTER
 	)
@@ -162,6 +172,7 @@ func _ready() -> void:
 	var _tcp_scene := preload("res://scenes/game/panels/tactical_combat_panel.tscn")
 	var _tactical_combat_panel: Control = _tcp_scene.instantiate()
 	add_child(_tactical_combat_panel)
+	_register_ui_input_ownership_root(_tactical_combat_panel)
 	hud_manager.register_panel("tactical_combat", _tactical_combat_panel,
 		HUDManager.PlacementMode.FULL_CENTER
 	)
@@ -242,6 +253,147 @@ func _close_chat_input_when_clicking_outside(mouse_event: InputEventMouseButton)
 		return
 	if _chat_panel.has_method("close_chat_input"):
 		_chat_panel.close_chat_input()
+
+
+## Registers HUD controls that should own pointer or text input over the map.
+## Parameters: none.
+## Returns: nothing.
+func _register_initial_ui_input_ownership() -> void:
+	for root: Control in [
+		_top_bar,
+		_left_dock_rail,
+		_map_mode_tabs,
+		_side_panel_anchor,
+		_center_panel_anchor,
+		overlay_dim,
+		_military_panel,
+		_economy_panel,
+		_diplomacy_panel,
+		_research_panel,
+		_research_tree_panel,
+		_friendly_div_panel,
+		_friendly_prov_panel,
+		_friendly_stack_panel,
+		_enemy_div_panel,
+		_chat_panel,
+	]:
+		_register_ui_input_ownership_root(root)
+
+
+## Registers one interactive UI root and its text descendants for map input ownership.
+## Parameters:
+## - root: Control whose visible rect should suppress pointer-driven map controls.
+## Returns: nothing.
+func _register_ui_input_ownership_root(root: Control) -> void:
+	if root == null:
+		return
+	if root.mouse_filter == Control.MOUSE_FILTER_IGNORE:
+		root.mouse_filter = Control.MOUSE_FILTER_STOP
+	if not root.mouse_entered.is_connected(_on_ui_pointer_blocker_entered.bind(root)):
+		root.mouse_entered.connect(_on_ui_pointer_blocker_entered.bind(root))
+	if not root.mouse_exited.is_connected(_on_ui_pointer_blocker_exited.bind(root)):
+		root.mouse_exited.connect(_on_ui_pointer_blocker_exited.bind(root))
+	if not root.visibility_changed.is_connected(_on_ui_pointer_blocker_visibility_changed.bind(root)):
+		root.visibility_changed.connect(_on_ui_pointer_blocker_visibility_changed.bind(root))
+	_register_text_focus_descendants(root)
+
+
+## Registers text controls below a UI root so keyboard camera movement pauses while typing.
+## Parameters:
+## - node: root node to scan.
+## Returns: nothing.
+func _register_text_focus_descendants(node: Node) -> void:
+	if node is LineEdit or node is TextEdit:
+		var control: Control = node as Control
+		if not control.focus_entered.is_connected(_on_ui_text_focus_entered.bind(control)):
+			control.focus_entered.connect(_on_ui_text_focus_entered.bind(control))
+		if not control.focus_exited.is_connected(_on_ui_text_focus_exited.bind(control)):
+			control.focus_exited.connect(_on_ui_text_focus_exited.bind(control))
+	for child: Node in node.get_children():
+		_register_text_focus_descendants(child)
+
+
+## Marks a UI control as currently hovered by the pointer.
+## Parameters:
+## - control: hovered UI root.
+## Returns: nothing.
+func _on_ui_pointer_blocker_entered(control: Control) -> void:
+	if control == null or not control.is_visible_in_tree():
+		return
+	_ui_pointer_blockers[control] = true
+	_refresh_ui_pointer_blocking()
+
+
+## Clears hover ownership for a UI control.
+## Parameters:
+## - control: UI root that no longer contains the pointer.
+## Returns: nothing.
+func _on_ui_pointer_blocker_exited(control: Control) -> void:
+	_ui_pointer_blockers.erase(control)
+	_refresh_ui_pointer_blocking()
+
+
+## Clears stale hover ownership when a UI root is hidden.
+## Parameters:
+## - control: UI root whose visibility changed.
+## Returns: nothing.
+func _on_ui_pointer_blocker_visibility_changed(control: Control) -> void:
+	if control == null or control.is_visible_in_tree():
+		return
+	_ui_pointer_blockers.erase(control)
+	_refresh_ui_pointer_blocking()
+
+
+## Emits pointer blocking only when the aggregate UI hover state changes.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_ui_pointer_blocking() -> void:
+	var blocking: bool = false
+	for key: Variant in _ui_pointer_blockers.keys():
+		var control: Control = key as Control
+		if control != null and control.is_visible_in_tree():
+			blocking = true
+			break
+	if _is_ui_pointer_blocking == blocking:
+		return
+	_is_ui_pointer_blocking = blocking
+	EventBus.ui_pointer_blocking_changed.emit(blocking)
+
+
+## Marks a text control as owning keyboard input.
+## Parameters:
+## - control: text input that gained focus.
+## Returns: nothing.
+func _on_ui_text_focus_entered(control: Control) -> void:
+	if control == null:
+		return
+	_ui_text_focus_controls[control] = true
+	_refresh_ui_text_input_focus()
+
+
+## Clears keyboard input ownership for a text control.
+## Parameters:
+## - control: text input that lost focus.
+## Returns: nothing.
+func _on_ui_text_focus_exited(control: Control) -> void:
+	_ui_text_focus_controls.erase(control)
+	_refresh_ui_text_input_focus()
+
+
+## Emits text-input focus state only when the aggregate focus state changes.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_ui_text_input_focus() -> void:
+	var focused: bool = false
+	for key: Variant in _ui_text_focus_controls.keys():
+		var control: Control = key as Control
+		if control != null and control.has_focus() and control.is_visible_in_tree():
+			focused = true
+			break
+	if _is_ui_text_input_focused == focused:
+		return
+	_is_ui_text_input_focused = focused
+	EventBus.ui_text_input_focus_changed.emit(focused)
 
 
 ## Connects a side drawer close signal to HUDManager so drawer state stays centralized.
