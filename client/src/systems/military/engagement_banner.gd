@@ -1,4 +1,6 @@
 extends Node2D
+## Map combat indicator: colored circle + crossed swords.
+## Circle color reflects attacker advantage (green=winning, red=losing, grey=even).
 
 var _engagement_id:    String     = ""
 var _div_a_id:         String     = ""
@@ -11,22 +13,17 @@ var _icons:            Dictionary = {}
 var _pulse_alpha: float = 1.0
 var _pulse_dir:   float = -1.0
 
-const BANNER_W:   float = 160.0
-const BANNER_H:   float = 28.0
-const BAR_W:      float = 60.0
-const BAR_H:      float = 10.0
-const SWORD_ZONE: float = 20.0
-const OFFSET_Y:   float = -30.0
+const CIRCLE_R: float = 16.0
+const CLICK_R:  float = 20.0
+const OFFSET_Y: float = -30.0
 
 const ATK_WARN_HP: float = 0.20
 const DEF_WARN_HP: float = 0.40
 
-const C_BG:        Color = Color(0.10, 0.07, 0.04, 0.92)  # dark theme bg
-const C_BORDER:    Color = Color(0.08, 0.05, 0.02, 1.0)  # near-black ink
-const C_AMBER:     Color = Color(0.85, 0.55, 0.10, 1.0)
-const C_BAR_FILL:  Color = Color(0.35, 0.75, 0.40, 1.0)
-const C_BAR_EMPTY: Color = Color(0.20, 0.18, 0.15, 1.0)
-const C_SWORD:     Color = Color(0.75, 0.70, 0.60, 1.0)  # light ink on dark bg
+const C_GREEN:  Color = Color(0.20, 0.75, 0.35, 1.0)
+const C_RED:    Color = Color(0.75, 0.20, 0.20, 1.0)
+const C_NEUTRAL:Color = Color(0.70, 0.70, 0.70, 1.0)
+const C_BORDER: Color = Color(0.08, 0.05, 0.02, 0.8)
 
 
 func setup(div_a: String, div_b: String, icon_dict: Dictionary, eng_id: String) -> void:
@@ -55,28 +52,21 @@ func cleanup() -> void:
 		EventBus.round_resolved.disconnect(_on_round_resolved)
 	queue_free()
 
-func get_uses_dashed_border() -> bool: return true
+func get_uses_dashed_border() -> bool: return false
 
 func get_border_color() -> Color:
-	return C_AMBER if _suppression_warn else C_BORDER
+	return Color(1.0, 0.5, 0.0, _pulse_alpha) if _suppression_warn else C_NEUTRAL
 
-func _draw_dashed_border(rect: Rect2, col: Color, dash: float, gap: float) -> void:
-	var corners := PackedVector2Array([
-		rect.position,
-		rect.position + Vector2(rect.size.x, 0),
-		rect.position + rect.size,
-		rect.position + Vector2(0, rect.size.y),
-	])
-	for i in range(4):
-		var a: Vector2     = corners[i]
-		var b: Vector2     = corners[(i + 1) % 4]
-		var total: float   = a.distance_to(b)
-		var dir: Vector2   = (b - a).normalized()
-		var travel: float  = 0.0
-		while travel < total:
-			var d_end: float = min(travel + dash, total)
-			draw_line(a + dir * travel, a + dir * d_end, col, 1.0)
-			travel += dash + gap
+func get_advantage_color() -> Color:
+	return _compute_advantage_color()
+
+func _compute_advantage_color() -> Color:
+	var diff := _atk_hp_pct - _def_hp_pct
+	if diff > 0.02:
+		return C_NEUTRAL.lerp(C_GREEN, diff)
+	elif diff < -0.02:
+		return C_NEUTRAL.lerp(C_RED, -diff)
+	return C_NEUTRAL
 
 
 func _process(delta: float) -> void:
@@ -97,28 +87,15 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var hw := BANNER_W * 0.5
-	var hh := BANNER_H * 0.5
-
-	draw_rect(Rect2(Vector2(-hw, -hh), Vector2(BANNER_W, BANNER_H)), C_BG)
-
-	var border_col := C_AMBER if _suppression_warn else C_BORDER
+	var color := _compute_advantage_color()
 	if _suppression_warn:
-		border_col.a = _pulse_alpha
-	_draw_dashed_border(Rect2(Vector2(-hw, -hh), Vector2(BANNER_W, BANNER_H)),
-		border_col, 4.0, 4.0)
+		color.a = _pulse_alpha
 
-	var bar_y  := -BAR_H * 0.5
-	var atk_x  := -hw + 8.0
-	draw_rect(Rect2(Vector2(atk_x, bar_y), Vector2(BAR_W, BAR_H)), C_BAR_EMPTY)
-	draw_rect(Rect2(Vector2(atk_x, bar_y), Vector2(BAR_W * _atk_hp_pct, BAR_H)), C_BAR_FILL)
+	draw_circle(Vector2.ZERO, CIRCLE_R, color)
+	draw_arc(Vector2.ZERO, CIRCLE_R, 0.0, TAU, 24, C_BORDER, 1.5)
 
-	var def_x := SWORD_ZONE * 0.5 + 4.0
-	draw_rect(Rect2(Vector2(def_x, bar_y), Vector2(BAR_W, BAR_H)), C_BAR_EMPTY)
-	draw_rect(Rect2(Vector2(def_x, bar_y), Vector2(BAR_W * _def_hp_pct, BAR_H)), C_BAR_FILL)
-
-	draw_line(Vector2(-5.0, -5.0), Vector2( 5.0,  5.0), C_SWORD, 1.5)
-	draw_line(Vector2( 5.0, -5.0), Vector2(-5.0,  5.0), C_SWORD, 1.5)
+	draw_line(Vector2(-5.0, -5.0), Vector2( 5.0,  5.0), Color.WHITE, 2.0)
+	draw_line(Vector2( 5.0, -5.0), Vector2(-5.0,  5.0), Color.WHITE, 2.0)
 
 
 func _input(event: InputEvent) -> void:
@@ -127,11 +104,7 @@ func _input(event: InputEvent) -> void:
 	if not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
 		return
 	var local := to_local(get_global_mouse_position())
-	var zone  := Rect2(
-		Vector2(-SWORD_ZONE * 0.5, -SWORD_ZONE * 0.5),
-		Vector2(SWORD_ZONE, SWORD_ZONE)
-	)
-	if zone.has_point(local):
+	if local.length() <= CLICK_R:
 		EventBus.tactical_combat_opened.emit(_engagement_id)
 		get_viewport().set_input_as_handled()
 

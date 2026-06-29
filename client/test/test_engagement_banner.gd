@@ -1,5 +1,5 @@
 extends Node
-## Tests for EngagementBanner HP logic and lifecycle.
+## Tests for EngagementBanner HP logic and advantage color.
 
 var _banner: Node2D = null
 var _failed: bool = false
@@ -29,16 +29,22 @@ func _ready() -> void:
 
 	_assert_true(_banner.has_method("cleanup"), "must have cleanup() for signal disconnection")
 
-	# Task 3: Banner must expose dashed-border API
-	_assert_true(_banner.has_method("get_uses_dashed_border"),
-		"banner must have get_uses_dashed_border()")
-	_assert_true(_banner.has_method("get_border_color"),
-		"banner must have get_border_color()")
-	_assert_true(_banner.get_uses_dashed_border(),
-		"banner must use dashed border style (not solid)")
-	var border_col: Color = _banner.get_border_color()
-	_assert_true(border_col.r < 0.15, "border red channel must be near-black")
-	_assert_true(border_col.g < 0.10, "border green channel must be near-black")
+	# Advantage color tests
+	_banner.update_hp(0.50, 0.50)
+	var neutral: Color = _banner.get_advantage_color()
+	_assert_almost_eq(neutral.r, 0.70, 0.01, "neutral r = 0.70")
+	_assert_almost_eq(neutral.g, 0.70, 0.01, "neutral g = 0.70")
+	_assert_almost_eq(neutral.b, 0.70, 0.01, "neutral b = 0.70")
+
+	_banner.update_hp(1.0, 0.0)
+	var green: Color = _banner.get_advantage_color()
+	_assert_true(green.g > green.r, "green tint: green > red when attacker wins")
+	_assert_true(green.g > green.b, "green tint: green > blue when attacker wins")
+
+	_banner.update_hp(0.0, 1.0)
+	var red: Color = _banner.get_advantage_color()
+	_assert_true(red.r > red.g, "red tint: red > green when attacker loses")
+	_assert_true(red.r > red.b, "red tint: red > blue when attacker loses")
 
 	if _failed:
 		push_error("EngagementBanner test FAILED")
@@ -54,13 +60,11 @@ func _assert_true(value: bool, message: String) -> void:
 	_failed = true
 	push_error("ASSERT TRUE FAILED: " + message)
 
-
 func _assert_false(value: bool, message: String) -> void:
 	if not value:
 		return
 	_failed = true
 	push_error("ASSERT FALSE FAILED: " + message)
-
 
 func _assert_almost_eq(actual: float, expected: float, tolerance: float, message: String) -> void:
 	if absf(actual - expected) <= tolerance:
