@@ -154,6 +154,25 @@ func _ready() -> void:
 			EventBus.division_template_viewer_closed.emit()
 		)
 
+	# TacticalCombatPanel — self-manages visibility via EventBus signals
+	var _tcp_scene := preload("res://scenes/game/panels/tactical_combat_panel.tscn")
+	var _tactical_combat_panel: Control = _tcp_scene.instantiate()
+	add_child(_tactical_combat_panel)
+	EventBus.tactical_combat_opened.connect(func(_eng_id: String) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _map_renderer != null and _map_renderer.has_method("clear_highlights"):
+			_map_renderer.clear_highlights()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
+	)
+	EventBus.tactical_combat_closed.connect(func() -> void:
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
+	)
+
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
