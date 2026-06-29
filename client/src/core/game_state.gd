@@ -139,6 +139,7 @@ func _apply_combat_started(data: Dictionary) -> void:
 	for div_id: String in [data.get("division_a", ""), data.get("division_b", "")]:
 		if divisions.has(div_id):
 			divisions[div_id]["is_meeting_battle"] = is_meeting
+			EventBus.division_updated.emit(div_id)
 
 
 ## Called by SessionManager when server sends STACK_FORMED.

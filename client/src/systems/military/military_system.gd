@@ -3,6 +3,7 @@ extends Node
 ## Phase 4B: A* pathfinding, waypoint chain (shift+click), ghost overlay, hotkeys.
 
 const DIVISION_ICON_SCENE := preload("res://scenes/systems/military/division_icon.tscn")
+const ENGAGEMENT_BANNER_SCENE := preload("res://scenes/systems/military/engagement_banner.tscn")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 const Pathfinder := preload("res://src/systems/military/pathfinder.gd")
 
@@ -44,6 +45,7 @@ var _icon_layer: Node2D = null
 var _vision_system: Node = null
 
 var _icons: Dictionary = {}
+var _banners: Dictionary = {}  # engagement_key → EngagementBanner node
 var _target_positions: Dictionary = {}
 var _visible_provinces: Dictionary = {}
 var _vision_filter_enabled: bool = false
@@ -136,6 +138,8 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.stack_dissolved.connect(_on_stack_dissolved)
 	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
 	EventBus.reposition_mode_requested.connect(_enter_reposition_mode)
+	EventBus.combat_started.connect(_on_combat_started_banner)
+	EventBus.combat_resolved.connect(_on_combat_resolved_banner)
 
 	# Surface SUBMIT_MOVE_ORDER and REPOSITION rejections in the console
 	CommandQueue.command_rejected.connect(func(type: String, reason: String) -> void:
@@ -1635,6 +1639,30 @@ func find_division_at_world(world_pos: Vector2) -> String:
 			best_dist = d
 			best_id = div_id
 	return best_id
+
+
+# ── EngagementBanner lifecycle ────────────────────────────────────────────
+
+func _on_combat_started_banner(division_a: String, division_b: String, _is_meeting: bool) -> void:
+	var eng_key := division_a + "_vs_" + division_b
+	if _banners.has(eng_key):
+		return
+	if not _icons.has(division_a) or not _icons.has(division_b):
+		return
+	var banner: Node2D = ENGAGEMENT_BANNER_SCENE.instantiate()
+	_icon_layer.add_child(banner)
+	banner.setup(division_a, division_b, _icons, eng_key)
+	_banners[eng_key] = banner
+
+
+func _on_combat_resolved_banner(_province_id: String, outcome: Dictionary) -> void:
+	var div_a: String = str(outcome.get("winner_id", ""))
+	var div_b: String = str(outcome.get("retreated_id", ""))
+	for key in [div_a + "_vs_" + div_b, div_b + "_vs_" + div_a]:
+		if _banners.has(key):
+			_banners[key].cleanup()
+			_banners.erase(key)
+			return
 
 
 class SelectionBoxOverlay:

@@ -1,0 +1,199 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Theme" uid="uid://bxm46dfawg64w" path="res://assets/themes/hud_dark.tres" id="1"]
+[ext_resource type="Script" uid="uid://d6v64qlbc5nyd" path="res://src/ui/hud/tactical_combat_panel.gd" id="2"]
+[ext_resource type="Script" path="res://src/ui/hud/front_line.gd" id="3"]
+
+[sub_resource type="StyleBoxFlat" id="SB_panel"]
+bg_color = Color(0.07, 0.05, 0.03, 0.96)
+border_width_left = 3
+border_color = Color(0.55, 0.15, 0.10, 1.0)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="TacticalCombatPanel" type="Control"]
+visible = false
+anchors_preset = 15
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="OuterMargin" type="MarginContainer" parent="."]
+layout_mode = 2
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 42
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 42
+
+[node name="Panel" type="PanelContainer" parent="OuterMargin"]
+theme = ExtResource("1")
+theme_override_styles/panel = SubResource("SB_panel")
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2")
+
+[node name="InnerMargin" type="MarginContainer" parent="OuterMargin/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBoxContent" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="HeaderRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="OuterMargin/Panel/InnerMargin/VBoxContent/HeaderRow"]
+layout_mode = 2
+text = "✕"
+
+[node name="TitleLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "TACTICAL COMBAT"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="RoundLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/HeaderRow"]
+layout_mode = 2
+text = "Round --"
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 14
+
+[node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+
+[node name="DefenderNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 13
+
+[node name="TerrainMargin" type="MarginContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TerrainFlankRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TerrainBanner" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.85, 0.55, 0.10, 1.0)
+theme_override_font_sizes/font_size = 11
+
+[node name="FlankChip" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow"]
+visible = false
+layout_mode = 2
+text = "FLANK"
+theme_override_colors/font_color = Color(0.80, 0.35, 0.10, 1.0)
+theme_override_font_sizes/font_size = 11
+
+[node name="GridRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AttackerGridArea" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AttackerHeader" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ATTACKER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.15, 0.10, 1.0)
+
+[node name="CenterContainer" type="CenterContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="CenterVBox" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer"]
+layout_mode = 2
+
+[node name="AttackerGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox"]
+columns = 5
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FrontLine" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+custom_minimum_size = Vector2(24, 0)
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("3")
+
+[node name="DefenderGridArea" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DefenderHeader" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "DEFENDER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.15, 0.10, 1.0)
+
+[node name="CenterContainer" type="CenterContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="CenterVBox" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer"]
+layout_mode = 2
+
+[node name="DefenderGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer/CenterVBox"]
+columns = 5
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FormationBonusBar" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+
+[node name="EscalationStrip" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RetreatButton" type="Button" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+layout_mode = 2
+text = "RETREAT"
+
+[node name="PhaseLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+text = "Phase: ●○○○○ Contact"
+theme_override_font_sizes/font_size = 12

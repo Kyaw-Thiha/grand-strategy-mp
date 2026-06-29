@@ -61,6 +61,17 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 					GameState.divisions[div_id]["is_meeting_battle"] = false
 			if not winner_id.is_empty():
 				EventBus.division_updated.emit(winner_id)
+			EventBus.combat_resolved.emit("", {"winner_id": winner_id, "retreated_id": retreated_id})
+
+		"ROUND_RESOLVED":
+			var eng_id: String   = data.get("engagement_id", "")
+			var rn: int          = data.get("round_number", 0)
+			var lp: String       = data.get("lethality_phase", "")
+			var atk_delta: Array = data.get("attacker_grid_delta", [])
+			var def_delta: Array = data.get("defender_grid_delta", [])
+			var fb: Array        = data.get("formation_bonuses_active", [])
+			var tur: int          = data.get("ticks_until_next_round", 20)
+			EventBus.round_resolved.emit(eng_id, rn, lp, atk_delta, def_delta, fb, tur)
 
 		"COMBAT_RESULT":
 			pass  # reserved for future tactical panel use
@@ -81,10 +92,10 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			GameState._apply_stack_dissolved(data)
 
 		"FLANK_ATTACK":
-			EventBus.flank_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+			EventBus.flank_attack.emit(data.get("attacker_a", ""), data.get("defender_id", ""))
 
 		"REAR_ATTACK":
-			EventBus.rear_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+			EventBus.rear_attack.emit(data.get("attacker_a", ""), data.get("defender_id", ""))
 
 		"RELATIONS_UPDATED":
 			GameState._apply_relations_updated(data)

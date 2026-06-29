@@ -14,8 +14,14 @@ signal unit_changed(unit_id: String)
 signal combat_started(division_a: String, division_b: String, is_meeting_battle: bool)
 signal combat_resolved(province_id: String, outcome: Dictionary)
 signal unit_destroyed(division_id: String, nation_id: String)
-signal flank_attack(flanker_id: String, defender_id: String)
-signal rear_attack(flanker_id: String, defender_id: String)
+signal flank_attack(attacker_a: String, defender_id: String)
+signal rear_attack(attacker_a: String, defender_id: String)
+
+# ── Tactical Combat ──────────────────────────────────────────────────────────
+signal round_resolved(engagement_id: String, round_number: int, lethality_phase: String, attacker_grid_delta: Array, defender_grid_delta: Array, formation_bonuses_active: Array, ticks_until_next_round: int)
+signal unit_incapacitated(division_id: String, cell_index: int)
+signal tactical_combat_opened(engagement_id: String)
+signal tactical_combat_closed()
 
 # ── Divisions (Phase 4) ───────────────────────────────────────────────────────
 signal division_added(division_id: String)

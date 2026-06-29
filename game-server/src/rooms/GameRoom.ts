@@ -658,6 +658,16 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       stack_position: div.stack_position,
       attacker_role: div.attacker_role,
       engaged_with: [...div.engaged_with],
+      grid: {
+        cells: Array.from(div.grid.cells).map(c => ({
+          unit_type: c.unit_type,
+          hp: c.hp,
+          suppression: c.suppression,
+          xp_tier: c.xp_tier,
+          incapacitated: c.incapacitated,
+          stealthed: c.stealthed,
+        })),
+      },
     };
   }
 

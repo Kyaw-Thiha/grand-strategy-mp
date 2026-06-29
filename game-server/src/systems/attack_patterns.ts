@@ -169,21 +169,25 @@ export function _resolveArmourColumn(
     return null;
   }
 
-  let searchOrder: number[];
-  if (attacker_col === 0 || attacker_col === 1) {
-    searchOrder = [attacker_col + 1, attacker_col + 2].filter(c => c <= 4);
-  } else if (attacker_col === 3 || attacker_col === 4) {
-    searchOrder = [attacker_col - 1, attacker_col - 2].filter(c => c >= 0);
+  const searchOrder: number[] = [];
+  if (attacker_col === 0) {
+    for (let c = 1; c <= 4; c++) searchOrder.push(c);
+  } else if (attacker_col === 1) {
+    searchOrder.push(2, 3, 4, 0);
+  } else if (attacker_col === 2) {
+    searchOrder.push(1, 3, 0, 4);
+  } else if (attacker_col === 3) {
+    searchOrder.push(2, 1, 0, 4);
   } else {
-    searchOrder = [attacker_col - 1, attacker_col + 1].filter(c => c >= 0 && c <= 4);
+    for (let c = 3; c >= 0; c--) searchOrder.push(c);
   }
 
-  const [first, second] = searchOrder;
-  if (first !== undefined && _columnTargets(first, min_row, cells).length > 0) {
-    return { col: first, shift_type: "flank" };
-  }
-  if (second !== undefined && _columnTargets(second, min_row, cells).length > 0) {
-    return { col: second, shift_type: "envelopment" };
+  for (let d = 0; d < searchOrder.length; d++) {
+    const col = searchOrder[d];
+    if (_columnTargets(col, min_row, cells).length > 0) {
+      const dist = Math.abs(col - attacker_col);
+      return { col, shift_type: dist === 1 ? "flank" : "envelopment" };
+    }
   }
   return null;
 }
@@ -449,7 +453,7 @@ export function getTargetCells(
     case "at_gun":
     case "at_gun_sp": {
       const atShift = _resolveATColumn(attacker_col, enemy_cells);
-      if (!atShift) return [];
+      if (!atShift) return _horizontalTargets(enemy_cells, n);
       const raw = _columnTargets(atShift.col, 0, enemy_cells)
         .filter(idx => {
           const cell = enemy_cells[idx];

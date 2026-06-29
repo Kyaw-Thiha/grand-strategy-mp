@@ -616,6 +616,19 @@ persistent ambient state, not hover-gated:
   buried in a per-unit tooltip, since these affect the whole engagement, not one
   unit.
 
+> **Implementation status:** Formation bonus teal outlines are wired
+> in `_apply_formation_bonuses()` but the server always sends `[]` (no active rules until
+> Branch I perk rules land). Row perk labels were removed per user feedback — compact
+> column labels at the bottom of each grid (VGD/ASL/SUP/RSV/REAR) replace side labels.
+> Terrain/river info is via `_terrain_banner` Label node (hidden by default).
+
+> **Implementation status:** The hover overlay is implemented via
+> `AttackPatternRegistry.simulate_round()` — hovering a friendly unit shows a red
+> semi-transparent overlay on its predicted target cells. All archetypes use this unified
+> overlay (not archetype-specific shapes). The artillery heatmap from the spec is not yet
+> implemented — the preview uses own-column approximation. See `is_targeted` property on
+> `UnitGlyphCell`.
+
 ### 7.6 Round phase — making escalation legible at a glance
 
 A five-segment horizontal progress strip above the grids, matching the existing
@@ -627,6 +640,12 @@ Annihilation — so the *feel* of the strip reinforces the actual mechanical
 escalation (`TACTICAL_COMBAT.md`'s lethality ramp) rather than merely labelling it.
 A player should sense rising stakes before reading a single number.
 
+> **Implementation status:** 5 colored pill labels replace the
+> text-based strip. Phase colors: contact=sage green, firefight=golden amber,
+> intense=orange, decisive=dark orange-red, annihilation=dark crimson. Active pill
+> is uppercase with full opacity. Inactive pills are lowercase at 0.4 alpha. Round
+> timer (⏱ M:SS) is displayed in the panel header, not the escalation strip.
+
 ### 7.7 Flanking angle indicator
 
 Per `STRATEGIC_COMBAT.md`/`TACTICAL_COMBAT.md`, when a second attacker is present the
@@ -636,6 +655,11 @@ wedge indicator near the affected division's grid edge, with the active tier's n
 shown directly on it — consistent with the rest of this panel's philosophy: name the
 mechanic in plain language at the point where it's currently relevant, rather than
 requiring a tooltip lookup.
+
+> **Implementation status:** Simple text chip ("FLANK" / "REAR ATTACK")
+> in the terrain bonus row area, right-aligned, amber text. Visible when `FLANK_ATTACK` /
+> `REAR_ATTACK` server events fire. Hidden when `COMBAT_RESOLVED` fires. The
+> `flanker_id` → `attacker_a` field name mismatch in session_manager.gd was fixed.
 
 ---
 

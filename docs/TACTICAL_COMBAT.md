@@ -268,13 +268,12 @@ rows in its column.
 
 **Column shift — flanking and envelopment:**
 When a tank's column in the enemy grid is empty, it shifts to find targets:
-- C1, C2 (left flank): shift right to the nearest occupied column → **Tactical Flanking**
-  bonus damage
-- C3 (centre): shift toward nearest occupied column (prefer left if equidistant) → Tactical
-  Flanking
-- C4, C5 (right flank): shift left → Tactical Flanking
-- If the first shift column is also empty, shift one further → **Tactical Envelopment**
-  (higher bonus), targets hit on **side armour** (reduced armour value)
+- Columns 0, 1 (left side): search **rightward** through all columns (1→2→3→4)
+- Column 2 (centre): search outward in both directions, left-first (1→3→0→4)
+- Columns 3, 4 (right side): search **leftward** through all columns (2→1→0)
+- First column found with targets → targets hit on **side armour** (reduced armour value)
+- Shift distance 1 → **Tactical Flanking** bonus damage
+- Shift distance 2+ → **Tactical Envelopment** (higher bonus)
 
 **In dense_forest or urban terrain:** Armour cannot use column shift flanking at all. Fires
 only in its own column, even if that column is empty. Terrain blocks outflanking manoeuvre.
@@ -299,6 +298,11 @@ columns simultaneously — picks one.
 **Suppression profile:** Very low suppression output against armour. Primary effect is HP
 damage when armour penetration threshold is met (see Armour Penetration System). AT below
 penetration threshold deals zero damage.
+
+**Fallback behavior:** When no armoured units exist anywhere on the enemy grid, AT guns
+fall back to horizontal targeting (infantry-style frontmost-occupied-row targeting).
+Armour is priority, not exclusive — AT guns never sit idle due to a lack of armoured
+targets.
 
 ---
 
@@ -546,7 +550,7 @@ Applied additively to Elite-tier multipliers. Values `POST_ELITE_SCALE=0.05`,
   researched veteran doctrine cannot train past Seasoned even at level 3 barracks.
 
 ### XP UI display
-XP tier badges and pending XP bar per cell are displayed in the tactical grid panel (Branch K)
+XP tier badges and pending XP bar per cell are displayed in the tactical grid panel
 and the DivisionBuilder UI (Branch G-Builder). The `xp_pending` field syncs live so the panel
 can show XP earned so far in the current engagement.
 
@@ -1296,6 +1300,102 @@ The panel can be closed at any time. Combat continues regardless.
   against the broader unit-economy build-cost model
 - Division count band per map size (target: roughly 5–15 per player, scaling with map size —
   confirmed qualitatively, exact numbers per small/large map from playtesting)
+
+---
+
+---
+
+## Client-Side Preview System
+
+The `AttackPatternRegistry` (`client/src/ui/hud/attack_pattern_registry.gd`) provides a
+client-side simulation of attack resolution for the hover preview feature.
+
+### simulate_round()
+
+`simulate_round(attacker_cells, enemy_cells, round_number) → Dictionary[int, int[]]`
+
+Maps each attacking cell's server index (0-24) to an array of enemy cell indices it would
+target in the upcoming round. The simulation:
+1. Creates a mutable copy of the enemy grid (`virtual`)
+2. Gets the fire order (front-to-back, left-to-right)
+3. For each attacker in order: finds targets against the current `virtual` state, then
+   applies damage to `virtual` (handles within-round spillover correctly)
+4. Returns the target map
+
+### Hover Attack Preview
+
+Hovering a friendly unit shows which enemy cells it will target. Hovering an enemy unit
+shows which friendly cells that enemy would target. Target cells are highlighted with a
+semi-transparent red overlay (`is_targeted` property on `UnitGlyphCell`).
+
+### Artillery Preview Limitation
+
+The client preview for artillery always targets the attacker's own column (`area_radius=0`).
+The server uses a seeded LCG for weighted-random column selection based on recon value
+and unit-type value scoring. This means the client preview is an approximation — the
+server may target a different column than what the preview shows. Documented in
+`attack_pattern_registry.gd` line 258-259.
+
+---
+
+## Incapacitated Cell Display
+
+When a cell's HP drops below its floor threshold (20% for infantry, 30% for armour;
+artillery/towed AT/AA have no incapacitation), the server sets `incapacitated: true` in
+the `GridCellDelta`. The client displays:
+
+- **HP bar**: shows 0 (no green fill) instead of the remaining HP
+- **NATO icon**: dark semi-transparent overlay across the entire cell, plus a diagonal
+  cross-out (X) drawn over the glyph area
+- **Background**: dark grey tint via `C_INCAP` color
+
+The HP floor is defined per unit type in `unit_combat_stats.ts` on the server and
+`HP_FLOOR_PCT` in `attack_pattern_registry.gd` on the client.
+
+---
+
+## Fog-of-War / Stealth Display
+
+When a cell has `stealthed: true` in the `GridCellDelta`, the client displays:
+
+- **Dashed border**: muted green (`Color(0.50, 0.58, 0.50)`) dashed border around the cell
+- **Glyph**: hidden — replaced by a centered "?" label in the same muted green
+- **Background**: muted green tint
+
+Stealthed cells are not targeted by enemy attacks and are excluded from the division's
+retreat-suppression threshold calculation. The `stealthed` field is set server-side based
+on the stealth level vs anti-stealth level check each round.
+
+---
+
+## Round Timer Display
+
+The server includes `ticks_until_next_round` in each `ROUND_RESOLVED` broadcast
+(always `ROUND_TICKS` = 20 ticks). The client displays a countdown timer:
+
+- **Format**: `⏱ M:SS` next to the round number in the panel header
+- **Behavior**: counts down from 20 seconds to 0 via `_process(delta)`
+- **Update**: resets on each `ROUND_RESOLVED` event
+
+The timer is purely a convenience feature — combat resolves server-side regardless of
+whether the panel is open.
+
+---
+
+## Experience Tier Badges
+
+Cells with `xp_tier` other than `"green"` display a 12×12 colored badge in the top-right
+corner of the cell:
+
+| Tier | Badge Color | Letter |
+|------|-------------|--------|
+| Seasoned | Yellow-green `Color(0.55, 0.72, 0.25)` | S |
+| Veteran | Blue `Color(0.25, 0.45, 0.80)` | V |
+| Elite | Purple `Color(0.60, 0.20, 0.80)` | E |
+| Green | No badge | — |
+
+The badge is drawn on top of the NATO icon but underneath the incapacitated overlay (if
+active). Implemented via the `xp_tier` property on `UnitGlyphCell`.
 
 ---
 

@@ -1,6 +1,6 @@
 class_name AttackPatternRegistry
 
-const BASE_ATTRITION := 2.5
+const BASE_ATTRITION := 50
 
 const ARMOURED_TARGET_TYPES := {
     "light_tank": true, "medium_tank": true, "heavy_tank": true,
@@ -198,19 +198,22 @@ static func _has_armour_in_col(col: int, cells: Array) -> bool:
 static func _armour_column_targets(att_row: int, att_col: int, cells: Array, n: int) -> Array[int]:
     var min_row: int = 4 - att_row
     var own := _column_targets(att_col, min_row, cells)
-    if own.size() > 0:
+    if not own.is_empty():
         return own.slice(0, n) if n > 0 else own
     var search: Array[int] = []
-    if att_col == 0 or att_col == 1:
-        search = [att_col + 1, att_col + 2]
-    elif att_col == 3 or att_col == 4:
-        search = [att_col - 1, att_col - 2]
+    if att_col == 0:
+        for c in range(1, 5): search.append(c)
+    elif att_col == 1:
+        search = [2, 3, 4, 0]
+    elif att_col == 2:
+        search = [1, 3, 0, 4]
+    elif att_col == 3:
+        search = [2, 1, 0, 4]
     else:
-        search = [att_col - 1, att_col + 1]
-    search = search.filter(func(c): return c >= 0 and c <= 4)
+        for c in range(3, -1, -1): search.append(c)
     for shifted_col in search:
         var col_targets := _column_targets(shifted_col, min_row, cells)
-        if col_targets.size() > 0:
+        if not col_targets.is_empty():
             return col_targets.slice(0, n) if n > 0 else col_targets
     return []
 
@@ -223,13 +226,13 @@ static func _at_column_targets(att_col: int, cells: Array, n: int) -> Array[int]
         var best_dist := 999
         for c in range(5):
             if c == att_col: continue
-            var dist := abs(c - att_col)
+            var dist: int = abs(c - att_col)
             if _has_armour_in_col(c, cells):
                 if dist < best_dist or (dist == best_dist and (target_col < 0 or c < target_col)):
                     best_dist = dist
                     target_col = c
     if target_col < 0:
-        return []
+        return _horizontal_targets(cells, n)
     var all_in_col := _column_targets(target_col, 0, cells)
     var armoured: Array[int] = []
     for idx in all_in_col:
@@ -261,8 +264,8 @@ static func _artillery_area_targets(att_cell_index: int, cells: Array, n: int) -
     # Default: show own column as potential target area (radius=0 approximation)
     var center_col := att_cell_index % 5
     var area_radius := 0  # TODO: pass researched area_radius from client state in Branch K
-    var min_col := max(0, center_col - area_radius)
-    var max_col := min(4, center_col + area_radius)
+    var min_col: int = max(0, center_col - area_radius)
+    var max_col: int = min(4, center_col + area_radius)
     var result: Array[int] = []
     for col in range(min_col, max_col + 1):
         for row in range(4, -1, -1):  # R5 first
