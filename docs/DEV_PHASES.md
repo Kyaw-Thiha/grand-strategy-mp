@@ -801,9 +801,14 @@ for all attack pattern logic before any Godot work.
       R5 Vanguard: +% suppression dealt; R4 Assault: +% HP damage dealt;
       R3 Support: +% suppression resistance; R2 Reserve: faster suppression decay;
       R1: no bonus
-- [ ] Formation bonus detection — check adjacency of unit pairs each round; apply bonuses
-      for confirmed pairs (AT+MG, Sniper+Recon inf, FLM+Assault inf, MG+MG same row,
-      Artillery+Recon inf)
+- [x] Formation bonus engine — `formation_rule_system.ts` provides proximity detection
+      (adjacent/same_row/same_col/distance/self_in_row) and per-cell modifier evaluation
+      (`evaluateFormationRules`, `getActiveFormationRules`); wired into `combat_system.ts`
+      at both damage/suppression dealt (`_applyPerCellDamage`) and suppression decay
+      (`_decayCellSuppression`) call sites. Ships with **zero active rules** — concrete
+      formation bonuses (AT+MG, Sniper+Recon inf, etc.) are added later via perk research
+      once the perk system supports rule definitions. 19 unit tests + 3 integration tests
+      in `6i-formation-rules.test.ts`. No client changes.
 - [x] Unit experience system:
       - [x] Experience accumulates per unit per combat round survived + win bonus
       - [x] Four tiers: Green → Seasoned → Veteran → Elite (diminishing returns curve)

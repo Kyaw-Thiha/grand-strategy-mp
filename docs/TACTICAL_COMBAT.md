@@ -483,6 +483,17 @@ for the artillery rather than passively contributing the base rate.
 The pattern is: historical combined-arms tactics → mechanic. If no historical precedent exists
 for an adjacency, no bonus is designed.*
 
+> **Implementation status (Branch I):** The formation bonus engine is fully implemented
+> and wired into combat, but ships with **zero active rules**. `getActiveFormationRules()`
+> returns `[]`, so `evaluateFormationRules` produces an empty Map and all lookups fall
+> through to the identity modifier (1.0× — no effect). The engine supports all five
+> proximity types (`adjacent`, `same_row`, `same_col`, `distance`, `self_in_row`),
+> per-cell modifier stacking, and incapacitated-cell exclusion. Concrete rules for the
+> specific synergies listed above (AT+MG, Sniper+Recon inf, etc.) require the perk
+> research system to define and activate them — expected in a future Phase 6 branch.
+> The `ROUND_RESOLVED` event carries the `formation_bonuses_active` field (currently
+> empty) for UI display when rules are added.
+
 ---
 
 ## Unit Experience System
