@@ -10,10 +10,15 @@ const GRID_CELL := preload("res://scenes/game/panels/grid_cell.tscn")
 @onready var _def_grid:     GridContainer = $PanelContent/GridRow/DefenderGrid
 @onready var _esc_label:    Label         = $PanelContent/EscalationStrip/EscLabel
 @onready var _close_btn:    Button        = $PanelContent/HeaderRow/CloseButton
+@onready var _withdraw_btn: Button        = $PanelContent/EscalationStrip/WithdrawButton
+@onready var _commit_btn:   Button        = $PanelContent/EscalationStrip/CommitButton
 
-const C_BG:     Color = Color(0.92, 0.88, 0.82, 1.0)
-const C_BORDER: Color = Color(0.45, 0.35, 0.22, 1.0)
-const C_TEXT:   Color = Color(0.20, 0.14, 0.06, 1.0)
+const C_BG:       Color = Color(0.92, 0.88, 0.82, 1.0)
+const C_BORDER:   Color = Color(0.45, 0.35, 0.22, 1.0)
+const C_TEXT:     Color = Color(0.20, 0.14, 0.06, 1.0)
+const C_BTN_BG:   Color = Color(0.85, 0.78, 0.68, 1.0)
+const C_BTN_HVR:  Color = Color(0.78, 0.70, 0.58, 1.0)
+const C_BTN_PRS:  Color = Color(0.65, 0.55, 0.42, 1.0)
 
 var _engagement_id: String = ""
 
@@ -23,9 +28,9 @@ func _ready() -> void:
 
 	mouse_filter = MOUSE_FILTER_STOP
 
-	theme = null
 	_apply_cream_style()
 	_tint_all_labels()
+	_style_all_buttons()
 
 	_build_grid(_atk_grid)
 	_build_grid(_def_grid)
@@ -54,6 +59,40 @@ func _tint_all_labels() -> void:
 	for lbl in [_title_label, _round_label, _atk_name, _def_name, _esc_label]:
 		if lbl != null:
 			lbl.add_theme_color_override("font_color", C_TEXT)
+			lbl.add_theme_font_size_override("font_size", 14)
+
+
+func _style_all_buttons() -> void:
+	for btn in [_close_btn, _withdraw_btn, _commit_btn]:
+		if btn == null:
+			continue
+		btn.add_theme_color_override("font_color", C_TEXT)
+		btn.add_theme_font_size_override("font_size", 13)
+		var normal := StyleBoxFlat.new()
+		normal.bg_color = C_BTN_BG
+		normal.border_color = C_BORDER
+		normal.set_border_width_all(1)
+		normal.set_corner_radius_all(2)
+		btn.add_theme_stylebox_override("normal", normal)
+		var hover := StyleBoxFlat.new()
+		hover.bg_color = C_BTN_HVR
+		hover.border_color = C_BORDER
+		hover.set_border_width_all(1)
+		hover.set_corner_radius_all(2)
+		btn.add_theme_stylebox_override("hover", hover)
+		var pressed := StyleBoxFlat.new()
+		pressed.bg_color = C_BTN_PRS
+		pressed.border_color = C_BORDER
+		pressed.set_border_width_all(1)
+		pressed.set_corner_radius_all(2)
+		btn.add_theme_stylebox_override("pressed", pressed)
+		var disabled := StyleBoxFlat.new()
+		disabled.bg_color = Color(0.75, 0.70, 0.63, 1.0)
+		disabled.border_color = Color(0.60, 0.55, 0.48, 1.0)
+		disabled.set_border_width_all(1)
+		disabled.set_corner_radius_all(2)
+		btn.add_theme_stylebox_override("disabled", disabled)
+
 
 func _build_grid(grid: GridContainer) -> void:
 	grid.columns = 5
@@ -70,11 +109,12 @@ func _on_opened(eng_id: String) -> void:
 func _on_closed() -> void:
 	hide()
 
-func _on_round_resolved(eng_id: String, rn: int, lp: bool,
-						atk_delta: Array, def_delta: Array, _fb: bool) -> void:
+func _on_round_resolved(eng_id: String, rn: int, lp: String,
+						atk_delta: Array, def_delta: Array, _fb: Array) -> void:
 	if eng_id != _engagement_id:
 		return
-	_round_label.text = "Round %d%s" % [rn, "  [LETHALITY]" if lp else ""]
+	var lethality_suffix := "  [LETHALITY]" if lp in ["intense", "decisive", "annihilation"] else ""
+	_round_label.text = "Round %d%s" % [rn, lethality_suffix]
 	_apply_grid_deltas(_atk_grid, atk_delta)
 	_apply_grid_deltas(_def_grid, def_delta)
 

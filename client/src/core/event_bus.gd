@@ -18,7 +18,7 @@ signal flank_attack(flanker_id: String, defender_id: String)
 signal rear_attack(flanker_id: String, defender_id: String)
 
 # ── Tactical Combat ──────────────────────────────────────────────────────────
-signal round_resolved(engagement_id: String, round_number: int, lethality_phase: bool, attacker_grid_delta: Array, defender_grid_delta: Array, formation_bonuses_active: bool)
+signal round_resolved(engagement_id: String, round_number: int, lethality_phase: String, attacker_grid_delta: Array, defender_grid_delta: Array, formation_bonuses_active: Array)
 signal unit_incapacitated(division_id: String, cell_index: int)
 signal tactical_combat_opened(engagement_id: String)
 signal tactical_combat_closed()

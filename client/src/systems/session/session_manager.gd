@@ -66,10 +66,10 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"ROUND_RESOLVED":
 			var eng_id: String   = data.get("engagement_id", "")
 			var rn: int          = data.get("round_number", 0)
-			var lp: bool         = data.get("lethality_phase", false)
+			var lp: String       = data.get("lethality_phase", "")
 			var atk_delta: Array = data.get("attacker_grid_delta", [])
 			var def_delta: Array = data.get("defender_grid_delta", [])
-			var fb: bool         = data.get("formation_bonuses_active", false)
+			var fb: Array        = data.get("formation_bonuses_active", [])
 			EventBus.round_resolved.emit(eng_id, rn, lp, atk_delta, def_delta, fb)
 
 		"COMBAT_RESULT":

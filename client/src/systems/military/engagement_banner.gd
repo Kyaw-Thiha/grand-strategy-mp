@@ -115,8 +115,8 @@ func _on_division_updated(div_id: String) -> void:
 	if div_id == _div_a_id or div_id == _div_b_id:
 		_refresh_hp()
 
-func _on_round_resolved(eng_id: String, _rn: int, _lp: bool,
-						_ad: Array, _dd: Array, _fb: bool) -> void:
+func _on_round_resolved(eng_id: String, _rn: int, _lp: String,
+						_ad: Array, _dd: Array, _fb: Array) -> void:
 	if (eng_id.begins_with(_div_a_id + "_vs_" + _div_b_id) or
 		eng_id.begins_with(_div_b_id + "_vs_" + _div_a_id)):
 		_refresh_hp()
