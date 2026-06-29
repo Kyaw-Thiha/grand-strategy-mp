@@ -25,12 +25,7 @@ var _engagement_id: String = ""
 
 func _ready() -> void:
 	hide()
-
 	mouse_filter = MOUSE_FILTER_STOP
-
-	_apply_cream_style()
-	_tint_all_labels()
-	_style_all_buttons()
 
 	_build_grid(_atk_grid)
 	_build_grid(_def_grid)
@@ -39,6 +34,16 @@ func _ready() -> void:
 	EventBus.tactical_combat_opened.connect(_on_opened)
 	EventBus.tactical_combat_closed.connect(_on_closed)
 	EventBus.round_resolved.connect(_on_round_resolved)
+
+	# Await one frame: Godot re-propagates its own default theme after _ready() returns
+	# synchronously. Applying cream style without awaiting has no lasting effect.
+	await get_tree().process_frame
+	theme = null
+	_apply_cream_style()
+	_tint_all_labels()
+	_style_all_buttons()
+	# Pin grid separation explicitly so layout is not affected by any default theme constant
+	$PanelContent/GridRow.add_theme_constant_override("separation", 24)
 
 
 func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> void:

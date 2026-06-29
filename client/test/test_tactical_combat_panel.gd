@@ -11,6 +11,8 @@ func _ready() -> void:
 	_assert_true(_panel.has_method("setup_engagement"), "must have setup_engagement()")
 	_assert_false(_panel.visible, "panel must start hidden")
 
+	# Let panel's _ready() finish its await so cream style is applied
+	await get_tree().process_frame
 	var style = _panel.get_theme_stylebox("panel")
 	if style is StyleBoxFlat:
 		_assert_true(style.bg_color.r > 0.85, "red > 0.85 (cream, not dark)")
