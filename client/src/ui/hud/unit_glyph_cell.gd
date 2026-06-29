@@ -59,6 +59,16 @@ var is_targeted: bool = false:
 		is_targeted = v
 		queue_redraw()
 
+var xp_tier: String = "green":
+	set(v):
+		xp_tier = v
+		queue_redraw()
+
+var stealthed: bool = false:
+	set(v):
+		stealthed = v
+		queue_redraw()
+
 var _hovered: bool = false
 
 
@@ -92,6 +102,10 @@ func _gui_input(event: InputEvent) -> void:
 func _draw() -> void:
 	var pad   := 4.0
 	var inner := Rect2(Vector2(pad, pad), size - Vector2(pad * 2.0, pad * 2.0))
+
+	if stealthed and unit_type != "":
+		_draw_fog_state(inner)
+		return
 
 	if unit_type == "":
 		_draw_empty_cell(inner)
@@ -138,11 +152,32 @@ func _draw_filled_cell(inner: Rect2) -> void:
 	draw_string(font, Vector2(abbrev_x, abbrev_y), abbrev,
 		HORIZONTAL_ALIGNMENT_CENTER, -1, 9, _get_unit_color(unit_type))
 
+	if xp_tier != "green":
+		var bc: Color
+		var bl: String
+		match xp_tier:
+			"seasoned": bc = Color(0.55, 0.72, 0.25); bl = "S"
+			"veteran":  bc = Color(0.25, 0.45, 0.80); bl = "V"
+			"elite":    bc = Color(0.60, 0.20, 0.80); bl = "E"
+		if bl != "":
+			var bx := inner.end.x - 14.0
+			var by := inner.position.y + 2.0
+			draw_rect(Rect2(Vector2(bx, by), Vector2(12, 12)), bc)
+			draw_string(font, Vector2(bx + 2, by + 10), bl,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
+
 	if incapacitated:
 		draw_rect(inner, Color(0.0, 0.0, 0.0, 0.5))
 		draw_line(glyph_rect.position, glyph_rect.end, Color(0.5, 0.4, 0.3, 0.6), 2.0)
 		draw_line(Vector2(glyph_rect.end.x, glyph_rect.position.y),
 			Vector2(glyph_rect.position.x, glyph_rect.end.y), Color(0.5, 0.4, 0.3, 0.6), 2.0)
+
+
+func _draw_fog_state(inner: Rect2) -> void:
+	var fog := Color(0.50, 0.58, 0.50, 1.0)
+	_draw_dashed_rect(inner, fog, 1.5, 4.0, 4.0)
+	draw_string(get_theme_default_font(), inner.get_center() - Vector2(5, -4),
+		"?", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, fog)
 
 
 func _draw_glyph(rect: Rect2, utype: String) -> void:

@@ -92,10 +92,10 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			GameState._apply_stack_dissolved(data)
 
 		"FLANK_ATTACK":
-			EventBus.flank_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+			EventBus.flank_attack.emit(data.get("attacker_a", ""), data.get("defender_id", ""))
 
 		"REAR_ATTACK":
-			EventBus.rear_attack.emit(data.get("flanker_id", ""), data.get("defender_id", ""))
+			EventBus.rear_attack.emit(data.get("attacker_a", ""), data.get("defender_id", ""))
 
 		"RELATIONS_UPDATED":
 			GameState._apply_relations_updated(data)
