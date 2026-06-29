@@ -22,7 +22,7 @@ const ATK_WARN_HP: float = 0.20
 const DEF_WARN_HP: float = 0.40
 
 const C_BG:        Color = Color(0.92, 0.88, 0.82, 0.92)
-const C_BORDER:    Color = Color(0.45, 0.35, 0.22, 1.0)
+const C_BORDER:    Color = Color(0.08, 0.05, 0.02, 1.0)  # near-black ink
 const C_AMBER:     Color = Color(0.85, 0.55, 0.10, 1.0)
 const C_BAR_FILL:  Color = Color(0.30, 0.65, 0.35, 1.0)
 const C_BAR_EMPTY: Color = Color(0.75, 0.70, 0.63, 1.0)
@@ -54,6 +54,29 @@ func cleanup() -> void:
 		EventBus.round_resolved.disconnect(_on_round_resolved)
 	queue_free()
 
+func get_uses_dashed_border() -> bool: return true
+
+func get_border_color() -> Color:
+	return C_AMBER if _suppression_warn else C_BORDER
+
+func _draw_dashed_border(rect: Rect2, col: Color, dash: float, gap: float) -> void:
+	var corners := PackedVector2Array([
+		rect.position,
+		rect.position + Vector2(rect.size.x, 0),
+		rect.position + rect.size,
+		rect.position + Vector2(0, rect.size.y),
+	])
+	for i in range(4):
+		var a: Vector2     = corners[i]
+		var b: Vector2     = corners[(i + 1) % 4]
+		var total: float   = a.distance_to(b)
+		var dir: Vector2   = (b - a).normalized()
+		var travel: float  = 0.0
+		while travel < total:
+			var d_end: float = min(travel + dash, total)
+			draw_line(a + dir * travel, a + dir * d_end, col, 1.0)
+			travel += dash + gap
+
 
 func _process(delta: float) -> void:
 	if _icons.has(_div_a_id) and _icons.has(_div_b_id):
@@ -78,10 +101,11 @@ func _draw() -> void:
 
 	draw_rect(Rect2(Vector2(-hw, -hh), Vector2(BANNER_W, BANNER_H)), C_BG)
 
-	var border := C_AMBER if _suppression_warn else C_BORDER
+	var border_col := C_AMBER if _suppression_warn else C_BORDER
 	if _suppression_warn:
-		border.a = _pulse_alpha
-	draw_rect(Rect2(Vector2(-hw, -hh), Vector2(BANNER_W, BANNER_H)), border, false, 2.0)
+		border_col.a = _pulse_alpha
+	_draw_dashed_border(Rect2(Vector2(-hw, -hh), Vector2(BANNER_W, BANNER_H)),
+		border_col, 4.0, 4.0)
 
 	var bar_y  := -BAR_H * 0.5
 	var atk_x  := -hw + 8.0
@@ -92,8 +116,8 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2(def_x, bar_y), Vector2(BAR_W, BAR_H)), C_BAR_EMPTY)
 	draw_rect(Rect2(Vector2(def_x, bar_y), Vector2(BAR_W * _def_hp_pct, BAR_H)), C_BAR_FILL)
 
-	draw_string(ThemeDB.fallback_font, Vector2(-6.0, 6.0), "⚔",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, C_SWORD)
+	draw_line(Vector2(-5.0, -5.0), Vector2( 5.0,  5.0), C_SWORD, 1.5)
+	draw_line(Vector2( 5.0, -5.0), Vector2(-5.0,  5.0), C_SWORD, 1.5)
 
 
 func _input(event: InputEvent) -> void:

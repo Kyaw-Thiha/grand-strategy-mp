@@ -29,6 +29,17 @@ func _ready() -> void:
 
 	_assert_true(_banner.has_method("cleanup"), "must have cleanup() for signal disconnection")
 
+	# Task 3: Banner must expose dashed-border API
+	_assert_true(_banner.has_method("get_uses_dashed_border"),
+		"banner must have get_uses_dashed_border()")
+	_assert_true(_banner.has_method("get_border_color"),
+		"banner must have get_border_color()")
+	_assert_true(_banner.get_uses_dashed_border(),
+		"banner must use dashed border style (not solid)")
+	var border_col: Color = _banner.get_border_color()
+	_assert_true(border_col.r < 0.15, "border red channel must be near-black")
+	_assert_true(border_col.g < 0.10, "border green channel must be near-black")
+
 	if _failed:
 		push_error("EngagementBanner test FAILED")
 		get_tree().quit(1)
