@@ -43,8 +43,8 @@ func _build_grid(grid: GridContainer) -> void:
 
 func _on_opened(eng_id: String) -> void:
 	_engagement_id = eng_id
-	_refresh_from_game_state()
 	show()
+	_refresh_from_game_state()
 
 func _on_closed() -> void:
 	hide()

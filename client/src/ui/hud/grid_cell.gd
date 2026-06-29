@@ -14,7 +14,7 @@ const MAX_BAR_W:  float = 60.0
 
 
 func _ready() -> void:
-	_glyph_cell.custom_minimum_size = Vector2(72, 40)
+	_glyph_cell.custom_minimum_size = Vector2(72, 52)
 	_glyph_cell.mouse_filter = MOUSE_FILTER_IGNORE
 
 
