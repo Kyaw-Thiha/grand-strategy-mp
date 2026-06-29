@@ -51,6 +51,7 @@ func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
 		var visual_idx := grid_offset + i
 		var container := VBoxContainer.new()
 		container.add_theme_constant_override("separation", 0)
+		container.set("size_flags_horizontal", Control.SIZE_FILL | Control.SIZE_EXPAND)
 
 		var glyph := GLYPH_SCENE.instantiate() as Control
 		glyph.set("unit_type", "")
@@ -64,6 +65,7 @@ func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
 		var bars := StatusBarsScript.new() as Control
 		bars.set("custom_minimum_size", Vector2(0, 10))
 		bars.set("size_flags_horizontal", Control.SIZE_FILL | Control.SIZE_EXPAND)
+		bars.set("visible", false)
 		container.add_child(bars)
 		_bar_controls.append(bars)
 
@@ -73,8 +75,10 @@ func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
 func _update_cell(index: int, data: Dictionary) -> void:
 	var glyph: UnitGlyphCell = _glyph_cells[index] as UnitGlyphCell
 	var bars = _bar_controls[index]
-	glyph.unit_type = data.get("unit_type", glyph.unit_type)
+	var utype: String = data.get("unit_type", "")
+	glyph.unit_type = utype
 	glyph.incapacitated = data.get("incapacitated", false)
+	bars.set("visible", utype != "")
 	bars.hp_pct = data.get("hp", 100.0) / 100.0
 	bars.supp_pct = data.get("suppression", 0.0) / 100.0
 
