@@ -860,14 +860,21 @@ for all attack pattern logic before any Godot work.
       into Colyseus at game start
 
 ### Godot
-- [ ] `TacticalGridUI` — the 5×5 grid panel, opened via combat button on combat icon;
-      shows both grids, HP/suppression bars per cell, experience tier badge per cell,
-      formation bonus indicators (glow on active adjacency pairs), row perk labels,
-      attack pattern overlay, recon indicator, terrain modifier display, river crossing
-      penalty indicator and remaining rounds, round timer
-- [ ] Combat icon enhancements — aggregate HP bar, suppression pulse, round phase dots,
-      meeting battle vs standard Engaged icon (from Phase 4)
-- [ ] Combat button — appears over active combat icons, opens `TacticalGridUI`
+- [x] `TacticalGridUI` — the 5×5 grid panel, opened via EngagementBanner (circle + swords)
+      on combat icon; shows both grids rotated so front rows (R5) face each other,
+      HP/suppression bars per cell via `StatusBars`, experience tier badge per cell
+      (Seasoned/Veteran/Elite badges S/V/E in top-right corner), formation bonus
+      indicators (teal outline on active adjacency pairs — wired in code, data always []
+      until Branch I rules land), attack pattern overlay on hover via
+      `AttackPatternRegistry.simulate_round()`, round timer (⏱ M:SS countdown),
+      5-phase escalation pill strip (colored pills per phase), context banner
+      (attacker/defender/meeting role), nation color squares, flank chip, fog-of-war
+      stealth display (dashed border + ?), incapacitated visuals (0 HP bar + dark
+      overlay + cross-out), retreat button wired to CommandQueue.submit("RETREAT")
+- [x] Combat icon enhancements — circle + crossed swords with advantage color
+      (green=attacker winning, red=attacker losing, grey=even)
+- [x] Combat button — EngagementBanner circle with CLICK_R=20 click zone,
+      opens `TacticalGridUI` on click
 - [x] `DivisionBuilder` (MVP) — in-game full-center overlay with 5×5 grid, row role labels
       (Vanguard/Assault/Support/Reserve/Rear), cell glyphs via `UnitGlyphCell` NATO-style
       drawing; right panel switches between Overview (division type, engagement radius,
@@ -886,14 +893,23 @@ for all attack pattern logic before any Godot work.
 ### Verification gate
 Two opposing preset templates fight — grid resolves rounds, suppression builds, one division
 hits threshold and retreats at strategic layer. Open combat panel — see grid updating live
-with HP bars, suppression, experience tier badges. Force recon unit deals full damage in
-Round 1. Artillery misses more at zero recon, improves over rounds. Flamethrower in R4
+with HP bars, suppression, experience tier badges (S/V/E in top-right corner). Round timer
+(⏱ M:SS) counts down between rounds. Phase escalation strip shows current phase with
+color-coded pill. Hover any unit — see red overlay on predicted target cells on the enemy
+grid. Attacker advantage visible on map engagement banner (green circle = attacker winning,
+red = attacker losing). Incapacitated units show 0 HP bar + dark overlay + cross-out.
+Stealthed units show dashed muted-green border + "?". Force recon unit deals full damage in
+Round 1. Artillery misses more at zero recon, improves over rounds — client preview shows
+own-column approximation (server uses seeded RNG column selection). Flamethrower in R4
 reaches enemy R3 (not R4-R5 only). Infantry attacks frontmost occupied row — if enemy R5
-is empty, hits R4 and concentrates damage on occupied cells only. Place AT adjacent to MG —
-formation bonus indicator appears. Armoured division in dense_forest — column shift flanking
-disabled. Division survives multiple combats — unit tiers advance to Seasoned → Veteran.
-Research upgrade applied → movement profile recomputed → player can now enter terrain
-previously impassable for that unit type.
+is empty, hits R4 and concentrates damage on occupied cells only. AT guns fall back to
+horizontal infantry-style targeting when no armoured targets exist. Tanks search all columns
+in their direction (left-side rightward, right-side leftward, center outward both directions)
+until they find targets. Place AT adjacent to MG — formation bonus indicator appears (teal
+outline). Armoured division in dense_forest — column shift flanking disabled. Division
+survives multiple combats — unit tiers advance to Seasoned → Veteran. Research upgrade
+applied → movement profile recomputed → player can now enter terrain previously impassable
+for that unit type.
 
 ---
 
