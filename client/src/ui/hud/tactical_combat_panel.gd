@@ -2,6 +2,21 @@ extends PanelContainer
 
 const GLYPH_SCENE := preload("res://scenes/game/panels/unit_glyph_cell.tscn")
 const StatusBarsScript := preload("res://src/ui/hud/status_bars.gd")
+const PHASE_ORDER: Array = ["contact", "firefight", "intense", "decisive", "annihilation"]
+const PHASE_COLORS: Dictionary = {
+	"contact": Color(0.47, 0.53, 0.43), "firefight": Color(0.72, 0.57, 0.17),
+	"intense": Color(0.80, 0.40, 0.10), "decisive": Color(0.60, 0.25, 0.10),
+	"annihilation": Color(0.55, 0.10, 0.10),
+}
+const ROW_PERKS: Array = [
+	["VANGUARD", "+supp dealt"], ["ASSAULT", "+HP dmg"], ["SUPPORT", "+supp res"],
+	["RESERVE", "+recovery"], ["REAR", "+range/cmd"],
+]
+const NATION_COLORS: Dictionary = {
+	"germany": Color(0.29, 0.29, 0.29), "france": Color(0.0, 0.14, 0.58),
+	"united_kingdom": Color(0.0, 0.07, 0.41), "italy": Color(0.0, 0.57, 0.27),
+	"spain": Color(0.78, 0.04, 0.12), "algeria": Color(0.0, 0.38, 0.20),
+}
 
 @onready var _title_label:     Label         = $InnerMargin/VBoxContent/HeaderRow/TitleLabel
 @onready var _round_label:      Label        = $InnerMargin/VBoxContent/HeaderRow/RoundLabel
@@ -20,6 +35,12 @@ var _attacker_cell_data: Array = []  # 25 cell dicts
 var _defender_cell_data: Array = []  # 25 cell dicts
 var _engagement_id: String = ""
 var _current_round: int = 0
+var _flank_chip: Label = null
+var _nation_left: ColorRect = null
+var _nation_right: ColorRect = null
+var _context_label: Label = null
+var _phase_pills: Array = []
+var _active_phase: String = "contact"
 var _timer_remaining: float = 0.0
 var _hovered_visual_idx: int = -1
 
@@ -38,6 +59,19 @@ func _ready() -> void:
 	EventBus.round_resolved.connect(_on_round_resolved)
 
 	$InnerMargin/VBoxContent/GridRow.add_theme_constant_override("separation", 8)
+	_add_subtitle_extras()
+	_add_context_banner()
+	_add_perk_labels()
+	_build_phase_pills()
+	_phase_label.visible = false
+	EventBus.flank_attack.connect(func(_a: String, _d: String) -> void:
+		if _engagement_id.is_empty(): return
+		_flank_chip.text = "FLANK"; _flank_chip.visible = true)
+	EventBus.rear_attack.connect(func(_a: String, _d: String) -> void:
+		if _engagement_id.is_empty(): return
+		_flank_chip.text = "REAR ATTACK"; _flank_chip.visible = true)
+	EventBus.combat_resolved.connect(func(_pid: String, _outcome: Dictionary) -> void:
+		_flank_chip.visible = false)
 
 
 func _process(delta: float) -> void:
@@ -53,6 +87,130 @@ func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> voi
 	_engagement_id = eng_id
 	_atk_name.text = atk_name
 	_def_name.text = def_name
+
+
+func _add_subtitle_extras() -> void:
+	var row: HBoxContainer = $InnerMargin/VBoxContent/SubtitleRow
+	_nation_left = ColorRect.new()
+	_nation_left.name = "NationSquareLeft"
+	_nation_left.custom_minimum_size = Vector2(10, 10)
+	_nation_left.color = Color(0.4, 0.4, 0.4)
+	row.add_child(_nation_left)
+	row.move_child(_nation_left, 0)
+	_flank_chip = Label.new()
+	_flank_chip.name = "FlankChip"
+	_flank_chip.text = "FLANK"
+	_flank_chip.visible = false
+	_flank_chip.add_theme_font_size_override("font_size", 10)
+	_flank_chip.add_theme_color_override("font_color", Color(0.80, 0.35, 0.10))
+	_flank_chip.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	_flank_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	row.add_child(_flank_chip)
+	_nation_right = ColorRect.new()
+	_nation_right.name = "NationSquareRight"
+	_nation_right.custom_minimum_size = Vector2(10, 10)
+	_nation_right.color = Color(0.4, 0.4, 0.4)
+	row.add_child(_nation_right)
+
+
+func _add_context_banner() -> void:
+	var content: VBoxContainer = $InnerMargin/VBoxContent
+	var banner := PanelContainer.new()
+	banner.name = "ContextBanner"
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0.12, 0.10, 0.07, 0.9)
+	s.border_color = Color(0.45, 0.35, 0.22, 1.0)
+	s.set_border_width_all(1)
+	banner.add_theme_stylebox_override("panel", s)
+	var inner := HBoxContainer.new()
+	var tag := Label.new()
+	tag.text = "ENGAGEMENT"
+	tag.add_theme_font_size_override("font_size", 8)
+	tag.add_theme_color_override("font_color", Color(0.20, 0.55, 0.60))
+	inner.add_child(tag)
+	_context_label = Label.new()
+	_context_label.name = "ContextLabel"
+	_context_label.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	_context_label.add_theme_font_size_override("font_size", 10)
+	inner.add_child(_context_label)
+	banner.add_child(inner)
+	content.add_child(banner)
+	var sub_idx: int = content.get_node("SubtitleRow").get_index()
+	content.move_child(banner, sub_idx + 1)
+
+
+func _add_perk_labels() -> void:
+	var grid_row: HBoxContainer = $InnerMargin/VBoxContent/GridRow
+	var col := VBoxContainer.new()
+	col.name = "PerkLabels"
+	col.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
+	grid_row.add_child(col)
+	grid_row.move_child(col, 0)
+	for entry in ROW_PERKS:
+		var box := VBoxContainer.new()
+		box.size_flags_vertical = Control.SIZE_FILL | Control.SIZE_EXPAND
+		box.custom_minimum_size = Vector2(56, 0)
+		col.add_child(box)
+		var name_lbl := Label.new()
+		name_lbl.text = entry[0]
+		name_lbl.add_theme_font_size_override("font_size", 8)
+		box.add_child(name_lbl)
+		var perk_lbl := Label.new()
+		perk_lbl.text = entry[1]
+		perk_lbl.add_theme_font_size_override("font_size", 7)
+		perk_lbl.add_theme_color_override("font_color", Color(0.45, 0.35, 0.22))
+		box.add_child(perk_lbl)
+
+
+func _apply_formation_bonuses(bonuses: Array) -> void:
+	var banner: Label = $InnerMargin/VBoxContent/FormationBonusBar
+	if bonuses.is_empty():
+		banner.visible = false
+		return
+	var text_parts: Array = []
+	for b in bonuses:
+		var bt: String = b.get("bonus_type", "")
+		match bt:
+			"at_mg": text_parts.append("AT+MG")
+			"sniper_recon": text_parts.append("Sniper+Recon")
+			"flm_assault": text_parts.append("FLM+Assault")
+			"mg_mg": text_parts.append("MG+MG")
+			"arty_recon": text_parts.append("Artillery+Recon")
+	banner.text = "Formation bonuses: " + ", ".join(text_parts)
+	banner.visible = true
+
+
+func _build_phase_pills() -> void:
+	var strip: HBoxContainer = $InnerMargin/VBoxContent/EscalationStrip
+	var box := HBoxContainer.new()
+	box.name = "PhasePills"
+	box.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	box.add_theme_constant_override("separation", 4)
+	strip.add_child(box)
+	strip.move_child(box, 0)
+	for p in PHASE_ORDER:
+		var pill := Label.new()
+		pill.text = p
+		pill.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		pill.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+		pill.add_theme_font_size_override("font_size", 10)
+		box.add_child(pill)
+		_phase_pills.append(pill)
+	_refresh_pills()
+
+
+func _refresh_pills() -> void:
+	var active_idx := PHASE_ORDER.find(_active_phase)
+	for i in range(_phase_pills.size()):
+		var pill: Label = _phase_pills[i]
+		var col: Color = PHASE_COLORS.get(PHASE_ORDER[i], Color.WHITE)
+		if i == active_idx:
+			pill.text = "· %s ·" % PHASE_ORDER[i].to_upper()
+			col.a = 1.0
+		else:
+			pill.text = PHASE_ORDER[i]
+			col.a = 0.4
+		pill.add_theme_color_override("font_color", col)
 
 
 func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
@@ -121,26 +279,12 @@ func _on_round_resolved(eng_id: String, rn: int, lp: String,
 	_apply_grid_deltas(_def_grid, def_delta, 25, 2)
 	_apply_deltas_to_data(_attacker_cell_data, atk_delta)
 	_apply_deltas_to_data(_defender_cell_data, def_delta)
+	_apply_formation_bonuses(_fb)
 
 
 func _update_phase_label(lp: String) -> void:
-	var phase_names := {
-		"contact": "Contact",
-		"firefight": "Firefight",
-		"intense": "Intense",
-		"decisive": "Decisive",
-		"annihilation": "Annihilation",
-	}
-	var dots := {
-		"contact": "●○○○○",
-		"firefight": "●●○○○",
-		"intense": "●●●○○",
-		"decisive": "●●●●○",
-		"annihilation": "●●●●●",
-	}
-	var name: String = phase_names.get(lp, "Contact")
-	var dot_str: String = dots.get(lp, "●○○○○")
-	_phase_label.text = "Phase: %s %s" % [dot_str, name]
+	_active_phase = lp if lp in PHASE_ORDER else "contact"
+	_refresh_pills()
 
 
 func _apply_grid_deltas(grid: GridContainer, deltas: Array, cell_offset: int = 0, rotation: int = 0) -> void:
@@ -173,11 +317,23 @@ func _refresh_from_game_state() -> void:
 		_atk_name.text = div_a_id
 		_attacker_cell_data = div_a.get("grid", {}).get("cells", [])
 		_load_grid_from_division(_atk_grid, div_a, 0, 1)
+		_nation_left.color = NATION_COLORS.get(div_a.get("nation_id", ""), Color(0.4, 0.4, 0.4))
+		var is_meeting: bool = div_a.get("attacker_role", "") == "meeting"
+		var atk_role: String = div_a.get("attacker_role", "")
+		if is_meeting:
+			_context_label.text = "Meeting battle — no terrain bonuses"
+		elif atk_role == "attacker":
+			_context_label.text = "Attacking — defender terrain bonuses active"
+		elif atk_role == "defender":
+			_context_label.text = "Defending — your terrain bonuses active"
+		else:
+			_context_label.text = ""
 	if not div_b.is_empty():
 		_def_name.text = div_b_id
 		_defender_cell_data = div_b.get("grid", {}).get("cells", [])
 		_load_grid_from_division(_def_grid, div_b, 25, 2)
-	print("TACTICAL_GRID: atk=", _attacker_cell_data.size(), " def=", _defender_cell_data.size())
+		_nation_right.color = NATION_COLORS.get(div_b.get("nation_id", ""), Color(0.4, 0.4, 0.4))
+	$InnerMargin/VBoxContent/FormationBonusBar.visible = false
 
 
 func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_offset: int = 0, rotation: int = 0) -> void:
