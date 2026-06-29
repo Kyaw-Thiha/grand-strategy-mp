@@ -49,6 +49,11 @@ var is_selected: bool = false:
 		is_selected = v
 		queue_redraw()
 
+var incapacitated: bool = false:
+	set(v):
+		incapacitated = v
+		queue_redraw()
+
 var _hovered: bool = false
 
 
@@ -124,6 +129,12 @@ func _draw_filled_cell(inner: Rect2) -> void:
 	var abbrev_y := inner.end.y - 4.0
 	draw_string(font, Vector2(abbrev_x, abbrev_y), abbrev,
 		HORIZONTAL_ALIGNMENT_CENTER, -1, 9, _get_unit_color(unit_type))
+
+	if incapacitated:
+		draw_rect(inner, Color(0.0, 0.0, 0.0, 0.5))
+		draw_line(glyph_rect.position, glyph_rect.end, Color(0.5, 0.4, 0.3, 0.6), 2.0)
+		draw_line(Vector2(glyph_rect.end.x, glyph_rect.position.y),
+			Vector2(glyph_rect.position.x, glyph_rect.end.y), Color(0.5, 0.4, 0.3, 0.6), 2.0)
 
 
 func _draw_glyph(rect: Rect2, utype: String) -> void:
