@@ -6,6 +6,11 @@ import {
   IDENTITY_FORMATION_BONUS,
 } from "../src/systems/formation_rule_system.js";
 import type { FormationRule, FormationCellInput } from "../src/systems/formation_rule_system.js";
+import { ColyseusTestServer, boot } from "@colyseus/testing";
+import { SignJWT } from "jose";
+import appConfig from "../src/app.config.js";
+import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
+import { setRoundTicksForTesting, setCombatGraceTicksForTesting } from "../src/systems/combat_system.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -197,5 +202,107 @@ describe("formation-rule-system — unit tests", () => {
     assert.strictEqual(IDENTITY_FORMATION_BONUS.supp_dealt_mult,  1.0);
     assert.strictEqual(IDENTITY_FORMATION_BONUS.supp_resist_mult, 1.0);
     assert.strictEqual(IDENTITY_FORMATION_BONUS.supp_decay_mult,  1.0);
+  });
+});
+
+// ── Integration tests ─────────────────────────────────────────────────────────
+// These tests verify that wiring the formation rule system into combat does NOT
+// break existing combat behaviour. Since getActiveFormationRules() returns [],
+// formation bonuses are identity (1.0) and all damage/suppression is unchanged.
+
+describe("formation-rule-system — integration (no active rules = no change)", function () {
+  this.timeout(180_000);
+
+  const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
+  const jwtSecret  = new TextEncoder().encode(JWT_SECRET);
+
+  async function makeToken(sub = "test-user") {
+    return new SignJWT({ sub, steam_id: "dev_steam", has_host_pass: true })
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime("24h")
+      .sign(jwtSecret);
+  }
+
+  function waitForEngagementRound(client: any, engagementId: string, timeoutMs = 60_000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unbind();
+        reject(new Error(`Timeout waiting for ROUND_RESOLVED for ${engagementId}`));
+      }, timeoutMs);
+      const unbind = client.onMessage("ROUND_RESOLVED", (msg: any) => {
+        if (typeof msg.engagement_id === "string" && msg.engagement_id.startsWith(engagementId)) {
+          clearTimeout(timer); unbind(); resolve(msg);
+        }
+      });
+    });
+  }
+
+  let colyseus: ColyseusTestServer<typeof appConfig>;
+
+  before(async () => {
+    setRoundTicksForTesting(3);
+    setCombatGraceTicksForTesting(1);
+    colyseus = await boot(appConfig);
+  });
+  after(async () => {
+    setRoundTicksForTesting(20);
+    setCombatGraceTicksForTesting(10);
+    await new Promise(r => setTimeout(r, 300));
+    await colyseus.shutdown();
+  });
+  beforeEach(async () => { await colyseus.cleanup(); });
+
+  async function spawnCombat(
+    divAUnits: Record<number, string>,
+    divBUnits: Record<number, string>,
+  ) {
+    const token  = await makeToken();
+    const room   = await colyseus.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus.connectTo(room, { token });
+    await room.waitForNextPatch();
+
+    const divA = "div-a";
+    const divB = "div-b";
+
+    client.send("SPAWN_DIVISION", { division_id: divA, nation_id: "germany", position_lng: 0,     position_lat: 0     });
+    client.send("SPAWN_DIVISION", { division_id: divB, nation_id: "france",  position_lng: 0.001, position_lat: 0.001 });
+    await room.waitForNextPatch();
+
+    for (const [idx, utype] of Object.entries(divAUnits)) {
+      client.send("SET_CELL", { division_id: divA, cell_index: +idx, unit_type: utype });
+    }
+    for (const [idx, utype] of Object.entries(divBUnits)) {
+      client.send("SET_CELL", { division_id: divB, cell_index: +idx, unit_type: utype });
+    }
+    await room.waitForNextPatch();
+
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    await client.waitForMessage("COMBAT_STARTED", 60_000);
+
+    const engagementId = `${divA}_vs_${divB}_`;
+    return { room, client, engagementId };
+  }
+
+  it("ROUND_RESOLVED fires and defender cell takes HP damage (regression — no formation rules active)", async () => {
+    const { room, client, engagementId } = await spawnCombat({ 12: "infantry" }, { 12: "infantry" });
+    const msg = await waitForEngagementRound(client, engagementId, 60_000);
+    const hasDeltas = (msg.attacker_grid_delta?.length ?? 0) > 0 ||
+                      (msg.defender_grid_delta?.length ?? 0) > 0;
+    assert.ok(hasDeltas, "at least one grid delta should be present");
+  });
+
+  it("defender cell HP decreases after one round (regression)", async () => {
+    const { room, client, engagementId } = await spawnCombat({ 12: "infantry" }, { 12: "infantry" });
+    await waitForEngagementRound(client, engagementId, 60_000);
+    const cell = room.state.divisions.get("div-b")!.grid.cells[12];
+    assert.ok(cell.hp < 100, `defender HP should have decreased from 100, got ${cell.hp}`);
+  });
+
+  it("defender cell suppression increases after one round (regression)", async () => {
+    const { room, client, engagementId } = await spawnCombat({ 12: "infantry" }, { 12: "infantry" });
+    await waitForEngagementRound(client, engagementId, 60_000);
+    const cell = room.state.divisions.get("div-b")!.grid.cells[12];
+    assert.ok(cell.suppression > 0, `defender suppression should be > 0, got ${cell.suppression}`);
   });
 });
