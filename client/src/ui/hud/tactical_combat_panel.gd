@@ -103,8 +103,8 @@ func _on_round_resolved(eng_id: String, rn: int, lp: String,
 	var lethality_suffix := "  [LETHALITY]" if lp in ["intense", "decisive", "annihilation"] else ""
 	_round_label.text = "Round %d%s" % [rn, lethality_suffix]
 	_update_phase_label(lp)
-	_apply_grid_deltas(_atk_grid, atk_delta, 0)
-	_apply_grid_deltas(_def_grid, def_delta, 25)
+	_apply_grid_deltas(_atk_grid, atk_delta, 0, 1)
+	_apply_grid_deltas(_def_grid, def_delta, 25, 2)
 
 
 func _update_phase_label(lp: String) -> void:
@@ -127,14 +127,20 @@ func _update_phase_label(lp: String) -> void:
 	_phase_label.text = "Phase: %s %s" % [dot_str, name]
 
 
-func _apply_grid_deltas(grid: GridContainer, deltas: Array, cell_offset: int = 0) -> void:
+func _apply_grid_deltas(grid: GridContainer, deltas: Array, cell_offset: int = 0, rotation: int = 0) -> void:
 	for delta in deltas:
 		var idx: int = int(delta.get("cell_index", -1))
 		if idx < 0 or idx >= 25:
 			continue
 		var row: int    = idx / 5
 		var col: int    = idx % 5
-		var child_i:int = (4 - row) * 5 + col + cell_offset
+		var child_i: int
+		if rotation == 1:    # 90° CCW — attacker
+			child_i = (4 - col) * 5 + row + cell_offset
+		elif rotation == 2:  # 90° CW — defender
+			child_i = col * 5 + (4 - row) + cell_offset
+		else:
+			child_i = (4 - row) * 5 + col + cell_offset
 		_update_cell(child_i, delta)
 
 
@@ -150,19 +156,25 @@ func _refresh_from_game_state() -> void:
 	if not div_a.is_empty():
 		_atk_name.text = div_a_id
 		_attacker_cell_data = div_a.get("grid", {}).get("cells", [])
-		_load_grid_from_division(_atk_grid, div_a, 0)
+		_load_grid_from_division(_atk_grid, div_a, 0, 1)
 	if not div_b.is_empty():
 		_def_name.text = div_b_id
 		_defender_cell_data = div_b.get("grid", {}).get("cells", [])
-		_load_grid_from_division(_def_grid, div_b, 25)
+		_load_grid_from_division(_def_grid, div_b, 25, 2)
 
 
-func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_offset: int = 0) -> void:
+func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_offset: int = 0, rotation: int = 0) -> void:
 	var cells: Array = div_data.get("grid", {}).get("cells", [])
 	for idx in range(min(cells.size(), 25)):
 		var row: int    = idx / 5
 		var col: int    = idx % 5
-		var child_i:int = (4 - row) * 5 + col + cell_offset
+		var child_i: int
+		if rotation == 1:    # 90° CCW — attacker: R5 at RIGHT
+			child_i = (4 - col) * 5 + row + cell_offset
+		elif rotation == 2:  # 90° CW — defender: R5 at LEFT
+			child_i = col * 5 + (4 - row) + cell_offset
+		else:                # standard
+			child_i = (4 - row) * 5 + col + cell_offset
 		var cell_data   = cells[idx] if cells[idx] is Dictionary else {}
 		_update_cell(child_i, cell_data)
 
@@ -179,28 +191,27 @@ func _on_cell_hovered(visual_idx: int, is_hovering: bool) -> void:
 
 func _show_target_preview(visual_idx: int) -> void:
 	if visual_idx < 25:
-		var logical_idx := _visual_to_logical(visual_idx)
+		var logical_idx: int = _visual_to_logical(visual_idx, 0)
 		var result: Dictionary = AttackPatternRegistry.simulate_round(
 			_attacker_cell_data, _defender_cell_data, _current_round
 		)
 		var targets: Array = result.get(logical_idx, []) as Array
 		_highlight_targets(targets, 25)
 	else:
-		var def_logical := _visual_to_logical(visual_idx - 25)
+		var def_logical: int = _visual_to_logical(visual_idx - 25, 25)
 		var result: Dictionary = AttackPatternRegistry.simulate_round(
 			_attacker_cell_data, _defender_cell_data, _current_round
 		)
 		var attackers: Array = []
-		for atk_idx_str: String in result:
-			var atk_idx: int = int(atk_idx_str)
-			var tgt_arr: Array = result[atk_idx_str] as Array
+		for atk_idx in result:
+			var tgt_arr: Array = result[atk_idx] as Array
 			if def_logical in tgt_arr:
 				attackers.append(atk_idx)
 		_highlight_targets(attackers, 0)
 
 func _highlight_targets(targets: Array, offset: int) -> void:
 	for logical_idx in targets:
-		var visual_idx: int = _logical_to_visual(int(logical_idx)) + offset
+		var visual_idx: int = _logical_to_visual(int(logical_idx), offset) + offset
 		if visual_idx < _glyph_cells.size():
 			var cell = _glyph_cells[visual_idx] as UnitGlyphCell
 			if cell != null:
@@ -212,12 +223,22 @@ func _clear_target_highlights() -> void:
 		if glyph != null:
 			glyph.set("is_targeted", false)
 
-func _visual_to_logical(visual_child_index: int) -> int:
-	var row := visual_child_index / 5
-	var col := visual_child_index % 5
-	return (4 - row) * 5 + col
+func _visual_to_logical(visual_idx: int, grid_offset: int = 0) -> int:
+	var d := visual_idx / 5
+	var m := visual_idx % 5
+	if grid_offset == 0:    # attacker — reverse 90° CCW
+		return m * 5 + (4 - d)
+	elif grid_offset == 25:  # defender — reverse 90° CW
+		return (4 - m) * 5 + d
+	else:                    # standard
+		return (4 - d) * 5 + m
 
-func _logical_to_visual(logical_index: int) -> int:
-	var row := logical_index / 5
-	var col := logical_index % 5
-	return (4 - row) * 5 + col
+func _logical_to_visual(logical_idx: int, grid_offset: int = 0) -> int:
+	var r := logical_idx / 5
+	var c := logical_idx % 5
+	if grid_offset == 0:    # attacker — 90° CCW
+		return (4 - c) * 5 + r
+	elif grid_offset == 25:  # defender — 90° CW
+		return c * 5 + (4 - r)
+	else:                    # standard
+		return (4 - r) * 5 + c
