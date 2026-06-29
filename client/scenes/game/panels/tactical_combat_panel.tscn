@@ -77,6 +77,7 @@ theme_override_font_sizes/font_size = 14
 
 [node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
+theme_override_constants/margin_top = 6
 
 [node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
@@ -89,12 +90,29 @@ size_flags_horizontal = 3
 horizontal_alignment = 2
 theme_override_font_sizes/font_size = 13
 
-[node name="TerrainBanner" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+[node name="TerrainMargin" type="MarginContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="TerrainFlankRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TerrainBanner" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow"]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 1
 theme_override_colors/font_color = Color(0.85, 0.55, 0.10, 1.0)
+theme_override_font_sizes/font_size = 11
+
+[node name="FlankChip" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow"]
+visible = false
+layout_mode = 2
+text = "FLANK"
+theme_override_colors/font_color = Color(0.80, 0.35, 0.10, 1.0)
 theme_override_font_sizes/font_size = 11
 
 [node name="GridRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
@@ -128,45 +146,6 @@ columns = 5
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="AttackerColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox"]
-layout_mode = 2
-
-[node name="REAR" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "REAR"
-theme_override_font_sizes/font_size = 8
-
-[node name="RESERVE" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "RSV"
-theme_override_font_sizes/font_size = 8
-
-[node name="SUPPORT" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "SUP"
-theme_override_font_sizes/font_size = 8
-
-[node name="ASSAULT" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "ASL"
-theme_override_font_sizes/font_size = 8
-
-[node name="VANGUARD" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "VGD"
-theme_override_font_sizes/font_size = 8
-theme_override_colors/font_color = Color(0.85, 0.55, 0.10, 1.0)
-
 [node name="FrontLine" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
 custom_minimum_size = Vector2(24, 0)
 layout_mode = 2
@@ -198,45 +177,6 @@ layout_mode = 2
 columns = 5
 layout_mode = 2
 size_flags_vertical = 3
-
-[node name="DefenderColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer/CenterVBox"]
-layout_mode = 2
-
-[node name="VANGUARD" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "VGD"
-theme_override_font_sizes/font_size = 8
-theme_override_colors/font_color = Color(0.85, 0.55, 0.10, 1.0)
-
-[node name="ASSAULT" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "ASL"
-theme_override_font_sizes/font_size = 8
-
-[node name="SUPPORT" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "SUP"
-theme_override_font_sizes/font_size = 8
-
-[node name="RESERVE" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "RSV"
-theme_override_font_sizes/font_size = 8
-
-[node name="REAR" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]
-custom_minimum_size = Vector2(72, 0)
-layout_mode = 2
-horizontal_alignment = 1
-text = "REAR"
-theme_override_font_sizes/font_size = 8
 
 [node name="FormationBonusBar" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 visible = false

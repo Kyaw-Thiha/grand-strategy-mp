@@ -22,7 +22,7 @@ const NATION_COLORS: Dictionary = {
 @onready var _round_label:      Label        = $InnerMargin/VBoxContent/HeaderRow/RoundLabel
 @onready var _atk_name:        Label         = $InnerMargin/VBoxContent/SubtitleRow/AttackerNameLabel
 @onready var _def_name:        Label         = $InnerMargin/VBoxContent/SubtitleRow/DefenderNameLabel
-@onready var _terrain_banner:   Label        = $InnerMargin/VBoxContent/TerrainBanner
+@onready var _terrain_banner:   Label        = $InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow/TerrainBanner
 @onready var _atk_grid:        GridContainer = $InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox/AttackerGrid
 @onready var _def_grid:        GridContainer = $InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer/CenterVBox/DefenderGrid
 @onready var _close_btn:       Button        = $InnerMargin/VBoxContent/HeaderRow/CloseButton
@@ -64,6 +64,7 @@ func _ready() -> void:
 	_add_perk_labels()
 	_build_phase_pills()
 	_phase_label.visible = false
+	_flank_chip = $InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow/FlankChip
 	EventBus.flank_attack.connect(func(_a: String, _d: String) -> void:
 		if _engagement_id.is_empty(): return
 		_flank_chip.text = "FLANK"; _flank_chip.visible = true)
@@ -97,15 +98,7 @@ func _add_subtitle_extras() -> void:
 	_nation_left.color = Color(0.4, 0.4, 0.4)
 	row.add_child(_nation_left)
 	row.move_child(_nation_left, 0)
-	_flank_chip = Label.new()
-	_flank_chip.name = "FlankChip"
-	_flank_chip.text = "FLANK"
-	_flank_chip.visible = false
-	_flank_chip.add_theme_font_size_override("font_size", 10)
-	_flank_chip.add_theme_color_override("font_color", Color(0.80, 0.35, 0.10))
-	_flank_chip.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	_flank_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	row.add_child(_flank_chip)
+	# Flank chip is now in TerrainFlankRow (TerrainMargin), not in SubtitleRow
 	_nation_right = ColorRect.new()
 	_nation_right.name = "NationSquareRight"
 	_nation_right.custom_minimum_size = Vector2(10, 10)
@@ -121,6 +114,10 @@ func _add_context_banner() -> void:
 	s.bg_color = Color(0.12, 0.10, 0.07, 0.9)
 	s.border_color = Color(0.45, 0.35, 0.22, 1.0)
 	s.set_border_width_all(1)
+	s.content_margin_left = 10
+	s.content_margin_top = 8
+	s.content_margin_right = 10
+	s.content_margin_bottom = 8
 	banner.add_theme_stylebox_override("panel", s)
 	var inner := HBoxContainer.new()
 	var tag := Label.new()
@@ -131,7 +128,7 @@ func _add_context_banner() -> void:
 	_context_label = Label.new()
 	_context_label.name = "ContextLabel"
 	_context_label.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	_context_label.add_theme_font_size_override("font_size", 10)
+	_context_label.add_theme_font_size_override("font_size", 13)
 	inner.add_child(_context_label)
 	banner.add_child(inner)
 	content.add_child(banner)
@@ -193,7 +190,7 @@ func _build_phase_pills() -> void:
 		pill.text = p
 		pill.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		pill.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-		pill.add_theme_font_size_override("font_size", 10)
+		pill.add_theme_font_size_override("font_size", 13)
 		box.add_child(pill)
 		_phase_pills.append(pill)
 	_refresh_pills()
@@ -321,11 +318,11 @@ func _refresh_from_game_state() -> void:
 		var is_meeting: bool = div_a.get("attacker_role", "") == "meeting"
 		var atk_role: String = div_a.get("attacker_role", "")
 		if is_meeting:
-			_context_label.text = "Meeting battle — no terrain bonuses"
+			_context_label.text = "Meeting battle: no terrain bonuses"
 		elif atk_role == "attacker":
-			_context_label.text = "Attacking — defender terrain bonuses active"
+			_context_label.text = "Attacking: defender terrain bonuses active"
 		elif atk_role == "defender":
-			_context_label.text = "Defending — your terrain bonuses active"
+			_context_label.text = "Defending: your terrain bonuses active"
 		else:
 			_context_label.text = ""
 	if not div_b.is_empty():
