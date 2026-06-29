@@ -43,6 +43,7 @@ export interface RoundResolvedPayload {
   defender_grid_delta: GridCellDelta[];
   formation_bonuses_active: FormationBonusActive[];
   xp_changes: XpChangeEntry[];
+  ticks_until_next_round: number;
 }
 
 export interface GridCellDelta {

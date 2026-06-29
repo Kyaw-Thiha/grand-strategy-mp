@@ -5,6 +5,10 @@ import type { GameRoomState, DivisionState, RelationState } from "../rooms/schem
 import { UNIT_TERRAIN_COSTS, TERRAIN_KEYS } from "../data/unit_terrain_costs.js";
 import type { TemplateCell } from "../data/maps/western_europe_6/default_template.js";
 
+type RelationLookup = {
+  get(key: string): RelationState | undefined;
+};
+
 // 1° latitude ≈ 111 km. Used for speed conversion only (approximate, not haversine).
 const KM_PER_DEG_LAT = 111.0;
 
@@ -212,7 +216,7 @@ export class MovementSystem {
   private _isNeutralFor(
     waypointId: string,
     divNationId: string,
-    relations: Map<string, RelationState>,
+    relations: RelationLookup,
   ): boolean {
     const wpNation = this.waypointNation.get(waypointId) ?? "";
     if (wpNation === "" || wpNation === divNationId) return false; // unmapped/sea or own territory
@@ -233,7 +237,7 @@ export class MovementSystem {
   trimToAllowedTerritory(
     waypointIds: string[],
     divNationId: string,
-    relations: Map<string, RelationState>,
+    relations: RelationLookup,
   ): string[] {
     const allowed: string[] = [];
     for (const id of waypointIds) {
@@ -288,7 +292,7 @@ export class MovementSystem {
     lng: number,
     lat: number,
     divNationId: string,
-    relations: Map<string, RelationState>,
+    relations: RelationLookup,
   ): WaypointNode | null {
     let best: WaypointNode | null = null;
     let bestDist = Infinity;

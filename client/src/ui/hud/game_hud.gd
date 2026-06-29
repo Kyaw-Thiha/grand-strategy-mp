@@ -38,6 +38,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _friendly_prov_panel: Control = $FriendlyProvincePanel
 @onready var _friendly_stack_panel: Control = $FriendlyStackPanel
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
+@onready var _chat_panel: Control = $ChatPanel
 
 var _division_builder_panel: Control
 var _division_template_viewer_panel: Control
@@ -50,6 +51,9 @@ var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
 var _map_renderer: Node = null
+
+const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
+const _BOTTOM_PANEL_MARGIN: float = 16.0
 
 
 func _ready() -> void:
@@ -195,7 +199,7 @@ func _ready() -> void:
 
 	# Center bottom panels horizontally and on resize
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
-	_center_bottom_panels()
+	_layout_bottom_hud()
 
 
 func _make_dock_toggle(panel_name: String) -> Callable:
@@ -361,56 +365,79 @@ func _on_division_selected(div_id: String) -> void:
 	else:
 		_enemy_div_panel.populate(div_id, data)
 		_enemy_div_panel.visible = true
-	_center_bottom_panels()
+	_layout_bottom_hud()
 
 
 ## Recenter all bottom panels when the viewport is resized.
 func _on_viewport_size_changed() -> void:
-	_center_bottom_panels()
+	_layout_bottom_hud()
 
 
-## Centers all four bottom selection bar panels horizontally on screen.
+## Positions chat and selection panels along the bottom HUD edge.
 ## Call on ready, on viewport resize, and after showing a panel.
 ## Parameters: none.
 ## Returns: nothing.
-func _center_bottom_panels() -> void:
-	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel]:
-		_center_panel_deferred(panel)
+func _layout_bottom_hud() -> void:
+	_layout_bottom_hud_deferred()
 
 
-## Centers a single bottom panel horizontally using global position + size math
-## (avoids anchor manipulation that can corrupt vertical anchors).
-## Parameters: panel — Control node with existing vertical anchors (anchor_top/bottom = 1.0).
+## Waits one frame so scene-instanced minimum sizes are available before layout.
+## Parameters: none.
 ## Returns: nothing.
-func _center_panel_deferred(panel: Control) -> void:
-	if panel == null:
-		return
+func _layout_bottom_hud_deferred() -> void:
 	await get_tree().process_frame
-	_center_panel(panel)
+	_position_chat_panel()
+	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel]:
+		_position_bottom_selection_panel(panel)
 
 
-## Centers a single bottom panel horizontally on screen using pixel-space
-## positioning. Preserves existing vertical anchors (anchor_top/bottom = 1.0).
+## Positions the persistent chat panel at the lower-right viewport corner.
+## Parameters: none.
+## Returns: nothing.
+func _position_chat_panel() -> void:
+	if _chat_panel == null:
+		return
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var chat_size: Vector2 = _chat_panel.get_combined_minimum_size()
+	_chat_panel.size = chat_size
+	_chat_panel.global_position = Vector2(
+		maxf(_BOTTOM_PANEL_MARGIN, viewport_size.x - chat_size.x - _BOTTOM_PANEL_MARGIN),
+		maxf(0.0, viewport_size.y - chat_size.y - _BOTTOM_PANEL_MARGIN)
+	)
+
+
+## Places a bottom selection panel in the space left of chat when needed.
 ## Parameters: panel — Control node.
 ## Returns: nothing.
-func _center_panel(panel: Control) -> void:
+func _position_bottom_selection_panel(panel: Control) -> void:
 	if panel == null:
 		return
-	# Capture current height before resetting width
 	var panel_height: float = panel.size.y
-	# Force size update so combined_minimum_size reflects actual content width
 	panel.size = Vector2.ZERO
 	var natural_width: float = panel.get_combined_minimum_size().x
-	var vp_width: float = get_viewport().get_visible_rect().size.x
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
 	panel.size = Vector2(natural_width, panel_height)
 
-	# Compute horizontal center in viewport pixel space
-	var current_pos: Vector2 = panel.global_position
-	var vp_center_x: float = vp_width / 2.0
-	var panel_center_x: float = current_pos.x + (natural_width / 2.0)
-	var delta_x: float = vp_center_x - panel_center_x
+	var chat_left: float = viewport_size.x - _BOTTOM_PANEL_MARGIN
+	if _chat_panel != null:
+		chat_left = _chat_panel.global_position.x
+	var available_right: float = chat_left - _BOTTOM_PANEL_CHAT_GAP
+	var available_left: float = _BOTTOM_PANEL_MARGIN
+	var available_center_x: float = (available_left + available_right) / 2.0
+	var target_center_x: float = viewport_size.x / 2.0
+	var chat_width: float = _chat_panel.get_combined_minimum_size().x if _chat_panel != null else 0.0
+	if natural_width + _BOTTOM_PANEL_CHAT_GAP + chat_width + (_BOTTOM_PANEL_MARGIN * 2.0) > viewport_size.x:
+		target_center_x = available_center_x
+	target_center_x = clampf(
+		target_center_x,
+		available_left + (natural_width / 2.0),
+		maxf(available_left + (natural_width / 2.0), available_right - (natural_width / 2.0))
+	)
 
-	# Move panel to centered position (keep vertical intact via global_position)
+	var current_pos: Vector2 = panel.global_position
+	var panel_center_x: float = current_pos.x + (natural_width / 2.0)
+	var delta_x: float = target_center_x - panel_center_x
+
 	panel.global_position = Vector2(current_pos.x + delta_x, current_pos.y)
 
 
@@ -437,7 +464,7 @@ func _on_province_selected(province_id: String) -> void:
 	}
 	_friendly_prov_panel.populate(province_id, data)
 	_friendly_prov_panel.visible = true
-	_center_bottom_panels()
+	_layout_bottom_hud()
 
 
 ## Hides all bottom selection panels — triggered by division_deselected signal.

@@ -13,6 +13,13 @@ func _ready() -> void:
 	var hud: Node = preload("res://scenes/game/game_hud.tscn").instantiate()
 	add_child(hud)
 	var mgr: HUDManagerScript = hud.get_node("HUDManager")
+	var chat_panel: Control = hud.get_node("ChatPanel") as Control
+	_check(chat_panel != null, "GameHUD includes ChatPanel")
+	_check(chat_panel.theme != null, "ChatPanel has HUD theme")
+	_check(chat_panel.get_node("%ScrollContainer") != null, "ChatPanel has scroll container")
+	_check(chat_panel.get_node("%MessageInput") is TextEdit, "ChatPanel has TextEdit input")
+	var send_button: Button = chat_panel.get_node("%SendButton") as Button
+	_check(send_button != null and send_button.icon != null, "ChatPanel send button has icon")
 
 	var opened_log: Array[String] = []
 	var closed_log: Array[String] = []

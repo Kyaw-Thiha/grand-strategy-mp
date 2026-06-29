@@ -27,6 +27,7 @@
 [ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
 [ext_resource type="PackedScene" uid="uid://cbuwtcevrakg0" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
 [ext_resource type="Script" path="res://src/ui/hud/notification_feed.gd" id="34_notification_feed"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -565,6 +566,8 @@ mouse_filter = 2
 theme_override_constants/separation = 6
 alignment = 2
 script = ExtResource("34_notification_feed")
+
+[node name="ChatPanel" parent="." instance=ExtResource("35_chat_panel")]
 
 [node name="MilitaryPanel" parent="." unique_id=2101988822 instance=ExtResource("6")]
 visible = false

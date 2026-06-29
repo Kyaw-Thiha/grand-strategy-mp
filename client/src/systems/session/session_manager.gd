@@ -100,6 +100,13 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"RELATIONS_UPDATED":
 			GameState._apply_relations_updated(data)
 
+		"CHAT_MESSAGE":
+			EventBus.chat_message_received.emit(
+				data.get("time", ""),
+				data.get("email", ""),
+				data.get("message", "")
+			)
+
 		"MOVE_ORDER_REJECTED":
 			EventBus.notification_requested.emit(
 				"Move rejected: " + data.get("reason", "unknown"), "error"
