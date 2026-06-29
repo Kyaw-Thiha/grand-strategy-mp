@@ -75,31 +75,32 @@ text = "Round --"
 horizontal_alignment = 2
 theme_override_font_sizes/font_size = 14
 
-[node name="SubtitleMargin" type="MarginContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+[node name="SubtitleSpacer" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
+[node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/margin_top = 10
 
-[node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleMargin"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleMargin/SubtitleRow"]
+[node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 13
 
-[node name="DefenderNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleMargin/SubtitleRow"]
+[node name="DefenderNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 2
 theme_override_font_sizes/font_size = 13
 
+[node name="TerrainTopSpacer" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+
 [node name="TerrainMargin" type="MarginContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_bottom = 6
 
 [node name="TerrainFlankRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/TerrainMargin"]
 layout_mode = 2
@@ -119,6 +120,10 @@ layout_mode = 2
 text = "FLANK"
 theme_override_colors/font_color = Color(0.80, 0.35, 0.10, 1.0)
 theme_override_font_sizes/font_size = 11
+
+[node name="TerrainBottomSpacer" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
 
 [node name="GridRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2

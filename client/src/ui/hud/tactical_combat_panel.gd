@@ -20,8 +20,8 @@ const NATION_COLORS: Dictionary = {
 
 @onready var _title_label:     Label         = $InnerMargin/VBoxContent/HeaderRow/TitleLabel
 @onready var _round_label:      Label        = $InnerMargin/VBoxContent/HeaderRow/RoundLabel
-@onready var _atk_name:        Label         = $InnerMargin/VBoxContent/SubtitleMargin/SubtitleRow/AttackerNameLabel
-@onready var _def_name:        Label         = $InnerMargin/VBoxContent/SubtitleMargin/SubtitleRow/DefenderNameLabel
+@onready var _atk_name:        Label         = $InnerMargin/VBoxContent/SubtitleRow/AttackerNameLabel
+@onready var _def_name:        Label         = $InnerMargin/VBoxContent/SubtitleRow/DefenderNameLabel
 @onready var _terrain_banner:   Label        = $InnerMargin/VBoxContent/TerrainMargin/TerrainFlankRow/TerrainBanner
 @onready var _atk_grid:        GridContainer = $InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox/AttackerGrid
 @onready var _def_grid:        GridContainer = $InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer/CenterVBox/DefenderGrid
@@ -90,7 +90,7 @@ func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> voi
 
 
 func _add_subtitle_extras() -> void:
-	var row: HBoxContainer = $InnerMargin/VBoxContent/SubtitleMargin/SubtitleRow
+	var row: HBoxContainer = $InnerMargin/VBoxContent/SubtitleRow
 	_nation_left = ColorRect.new()
 	_nation_left.name = "NationSquareLeft"
 	_nation_left.custom_minimum_size = Vector2(10, 10)
@@ -131,7 +131,7 @@ func _add_context_banner() -> void:
 	inner.add_child(_context_label)
 	banner.add_child(inner)
 	content.add_child(banner)
-	var sub_idx: int = content.get_node("SubtitleMargin").get_index()
+	var sub_idx: int = content.get_node("SubtitleRow").get_index()
 	content.move_child(banner, sub_idx + 1)
 
 
