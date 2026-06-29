@@ -36,6 +36,7 @@ func setup(div_a: String, div_b: String, icon_dict: Dictionary, eng_id: String) 
 	_engagement_id = eng_id
 	EventBus.division_updated.connect(_on_division_updated)
 	EventBus.round_resolved.connect(_on_round_resolved)
+	queue_redraw()
 
 func get_atk_hp_pct()        -> float: return _atk_hp_pct
 func get_def_hp_pct()        -> float: return _def_hp_pct
