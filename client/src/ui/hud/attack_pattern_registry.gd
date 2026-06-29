@@ -229,7 +229,7 @@ static func _at_column_targets(att_col: int, cells: Array, n: int) -> Array[int]
                     best_dist = dist
                     target_col = c
     if target_col < 0:
-        return []
+        return _horizontal_targets(cells, n)
     var all_in_col := _column_targets(target_col, 0, cells)
     var armoured: Array[int] = []
     for idx in all_in_col:

@@ -449,7 +449,7 @@ export function getTargetCells(
     case "at_gun":
     case "at_gun_sp": {
       const atShift = _resolveATColumn(attacker_col, enemy_cells);
-      if (!atShift) return [];
+      if (!atShift) return _horizontalTargets(enemy_cells, n);
       const raw = _columnTargets(atShift.col, 0, enemy_cells)
         .filter(idx => {
           const cell = enemy_cells[idx];
