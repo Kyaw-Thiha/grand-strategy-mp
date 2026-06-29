@@ -154,10 +154,13 @@ func _ready() -> void:
 			EventBus.division_template_viewer_closed.emit()
 		)
 
-	# TacticalCombatPanel — self-manages visibility via EventBus signals
+	# TacticalCombatPanel — FULL_CENTER overlay, registered with HUDManager
 	var _tcp_scene := preload("res://scenes/game/panels/tactical_combat_panel.tscn")
 	var _tactical_combat_panel: Control = _tcp_scene.instantiate()
 	add_child(_tactical_combat_panel)
+	hud_manager.register_panel("tactical_combat", _tactical_combat_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
 	EventBus.tactical_combat_opened.connect(func(_eng_id: String) -> void:
 		if _military_system != null and _military_system.has_method("deselect"):
 			_military_system.deselect()
@@ -167,8 +170,10 @@ func _ready() -> void:
 			_map_renderer.clear_highlights()
 		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
 			_map_interaction.set_player_input_enabled(false)
+		hud_manager.show_panel("tactical_combat")
 	)
 	EventBus.tactical_combat_closed.connect(func() -> void:
+		hud_manager.hide_panel("tactical_combat")
 		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
 			_map_interaction.set_player_input_enabled(true)
 	)

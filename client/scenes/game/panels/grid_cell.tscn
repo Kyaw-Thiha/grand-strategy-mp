@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://src/ui/hud/grid_cell.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://bx2h2ojksf2u7" path="res://scenes/game/panels/unit_glyph_cell.tscn" id="2"]
 
 [node name="GridCell" type="PanelContainer"]
 custom_minimum_size = Vector2(72, 72)
@@ -12,13 +13,11 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="UnitLabel" type="Label" parent="VBoxContainer"]
+[node name="UnitGlyphCell" type="Control" parent="VBoxContainer"]
+instance = ExtResource("2")
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-horizontal_alignment = 1
-vertical_alignment = 1
-theme_override_font_sizes/font_size = 11
 
 [node name="BarsBox" type="VBoxContainer" parent="VBoxContainer"]
 layout_mode = 2

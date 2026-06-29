@@ -1,15 +1,8 @@
 extends PanelContainer
 
-@onready var _unit_label: Label     = $VBoxContainer/UnitLabel
+@onready var _glyph_cell: Control = $VBoxContainer/UnitGlyphCell
 @onready var _hp_bar:     ColorRect = $VBoxContainer/BarsBox/HpBar
 @onready var _supp_bar:   ColorRect = $VBoxContainer/BarsBox/SuppBar
-
-const ABBREV: Dictionary = {
-	"infantry": "IN", "commando": "CM", "recon_infantry": "RC", "sniper": "SN",
-	"flamethrower": "FL", "mg": "MG", "at_gun": "AT", "at_gun_sp": "SP",
-	"aa_gun": "AA", "artillery": "AR", "mortar": "MO",
-	"light_tank": "LT", "medium_tank": "MT", "heavy_tank": "HT", "armoured_car": "AC",
-}
 
 const C_EMPTY:    Color = Color(0.88, 0.83, 0.76, 1.0)
 const C_OCCUPY:   Color = Color(0.78, 0.73, 0.65, 1.0)
@@ -22,6 +15,12 @@ const C_BORDER:   Color = Color(0.45, 0.35, 0.22, 1.0)
 const C_TEXT:     Color = Color(0.20, 0.14, 0.06, 1.0)
 const MAX_BAR_W:  float = 60.0
 
+
+func _ready() -> void:
+	_glyph_cell.custom_minimum_size = Vector2(72, 40)
+	_glyph_cell.mouse_filter = MOUSE_FILTER_IGNORE
+
+
 func display(cell_data: Dictionary) -> void:
 	var utype:    String = cell_data.get("unit_type", "")
 	var hp_pct:   float  = cell_data.get("hp", 100.0) / 100.0
@@ -29,8 +28,7 @@ func display(cell_data: Dictionary) -> void:
 	var incap:    bool   = cell_data.get("incapacitated", false)
 	var stealth:  bool   = cell_data.get("stealthed", false)
 
-	_unit_label.text = ABBREV.get(utype, utype.left(2).to_upper() if utype != "" else "")
-	_unit_label.add_theme_color_override("font_color", C_TEXT)
+	_glyph_cell.set("unit_type", utype)
 
 	var bg_color: Color
 	if utype == "":       bg_color = C_EMPTY

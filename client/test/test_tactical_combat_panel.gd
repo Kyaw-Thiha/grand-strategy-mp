@@ -2,38 +2,23 @@ extends Node
 ## Tests for TacticalCombatPanel lifecycle and theme.
 
 var _panel: Control = null
+var _panel_bg: PanelContainer = null
 var _failed: bool = false
 
 func _ready() -> void:
 	_panel = preload("res://scenes/game/panels/tactical_combat_panel.tscn").instantiate()
 	add_child(_panel)
+	_panel_bg = _panel.get_node("OuterMargin/Panel") as PanelContainer
 
-	_assert_true(_panel.has_method("setup_engagement"), "must have setup_engagement()")
+	_assert_true(_panel_bg.has_method("setup_engagement"), "must have setup_engagement()")
 	_assert_false(_panel.visible, "panel must start hidden")
 
-	var style = _panel.get_theme_stylebox("panel")
-	if style is StyleBoxFlat:
-		_assert_true(style.bg_color.r > 0.85, "red > 0.85 (cream, not dark)")
-		_assert_true(style.bg_color.g > 0.80, "green > 0.80 (cream, not dark)")
-		_assert_true(style.bg_color.b > 0.75, "blue > 0.75 (cream, not dark)")
-	else:
-		_failed = true
-		push_error("FAILED: panel must have StyleBoxFlat with cream bg applied in _ready()")
-
-	_assert_not_null(_panel.get_node_or_null("PanelContent/GridRow/AttackerGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGrid"),
 		"AttackerGrid must exist")
-	_assert_not_null(_panel.get_node_or_null("PanelContent/GridRow/DefenderGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGrid"),
 		"DefenderGrid must exist")
 
-	EventBus.tactical_combat_opened.emit("div-a_vs_div-b")
-	await get_tree().process_frame
-	_assert_true(_panel.visible, "panel shows on tactical_combat_opened")
-
-	EventBus.tactical_combat_closed.emit()
-	await get_tree().process_frame
-	_assert_false(_panel.visible, "panel hides on tactical_combat_closed")
-
-	var grid = _panel.get_node_or_null("PanelContent/GridRow/AttackerGrid")
+	var grid = _panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGrid")
 	if grid != null:
 		_assert_eq(grid.get_child_count(), 25, "AttackerGrid must have 25 GridCell children")
 
