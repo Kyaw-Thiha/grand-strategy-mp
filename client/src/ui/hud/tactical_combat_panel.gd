@@ -97,8 +97,8 @@ func _on_round_resolved(eng_id: String, rn: int, lp: String,
 	var lethality_suffix := "  [LETHALITY]" if lp in ["intense", "decisive", "annihilation"] else ""
 	_round_label.text = "Round %d%s" % [rn, lethality_suffix]
 	_update_phase_label(lp)
-	_apply_grid_deltas(_atk_grid, atk_delta)
-	_apply_grid_deltas(_def_grid, def_delta)
+	_apply_grid_deltas(_atk_grid, atk_delta, 0)
+	_apply_grid_deltas(_def_grid, def_delta, 25)
 
 
 func _update_phase_label(lp: String) -> void:
@@ -121,14 +121,14 @@ func _update_phase_label(lp: String) -> void:
 	_phase_label.text = "Phase: %s %s" % [dot_str, name]
 
 
-func _apply_grid_deltas(grid: GridContainer, deltas: Array) -> void:
+func _apply_grid_deltas(grid: GridContainer, deltas: Array, cell_offset: int = 0) -> void:
 	for delta in deltas:
 		var idx: int = int(delta.get("cell_index", -1))
 		if idx < 0 or idx >= 25:
 			continue
 		var row: int    = idx / 5
 		var col: int    = idx % 5
-		var child_i:int = (4 - row) * 5 + col
+		var child_i:int = (4 - row) * 5 + col + cell_offset
 		_update_cell(child_i, delta)
 
 

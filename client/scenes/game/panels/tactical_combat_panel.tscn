@@ -132,7 +132,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "VANGUARD"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row4" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -142,7 +142,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "ASSAULT"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row3" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -152,7 +152,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "SUPPORT"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row2" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -162,7 +162,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "RESERVE"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row1" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -172,7 +172,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "REAR"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="AttackerGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody"]
 columns = 5
@@ -181,7 +181,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="FrontLine" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
-custom_minimum_size = Vector2(8, 0)
+custom_minimum_size = Vector2(24, 0)
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("3")
@@ -222,7 +222,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "VANGUARD"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row4" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -232,7 +232,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "ASSAULT"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row3" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -242,7 +242,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "SUPPORT"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row2" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -252,7 +252,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "RESERVE"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="Row1" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
 custom_minimum_size = Vector2(56, 82)
@@ -262,7 +262,7 @@ size_flags_vertical = 1
 vertical_alignment = 1
 text = "REAR"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 7
+theme_override_font_sizes/font_size = 10
 
 [node name="FormationBonusBar" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 visible = false
