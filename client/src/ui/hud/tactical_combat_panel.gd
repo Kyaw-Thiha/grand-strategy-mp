@@ -59,6 +59,7 @@ func _ready() -> void:
 	EventBus.round_resolved.connect(_on_round_resolved)
 
 	$InnerMargin/VBoxContent/GridRow.add_theme_constant_override("separation", 8)
+	_add_vertical_margins()
 	_add_subtitle_extras()
 	_add_context_banner()
 	_build_phase_pills()
@@ -87,6 +88,34 @@ func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> voi
 	_engagement_id = eng_id
 	_atk_name.text = atk_name
 	_def_name.text = def_name
+
+
+func _add_vertical_margins() -> void:
+	var vbox: VBoxContainer = $InnerMargin/VBoxContent
+	# 10px spacer above division names
+	var sub_spacer := Control.new()
+	sub_spacer.custom_minimum_size = Vector2(0, 10)
+	sub_spacer.size_flags_vertical = Control.SIZE_FILL
+	sub_spacer.mouse_filter = MOUSE_FILTER_IGNORE
+	var sub_idx: int = vbox.get_node("SubtitleRow").get_index()
+	vbox.add_child(sub_spacer)
+	vbox.move_child(sub_spacer, sub_idx)
+	# 4px spacer above terrain row
+	var terr_top := Control.new()
+	terr_top.custom_minimum_size = Vector2(0, 4)
+	terr_top.size_flags_vertical = Control.SIZE_FILL
+	terr_top.mouse_filter = MOUSE_FILTER_IGNORE
+	var terr_idx: int = vbox.get_node("TerrainMargin").get_index()
+	vbox.add_child(terr_top)
+	vbox.move_child(terr_top, terr_idx)
+	# 6px spacer below terrain row
+	var terr_bot := Control.new()
+	terr_bot.custom_minimum_size = Vector2(0, 6)
+	terr_bot.size_flags_vertical = Control.SIZE_FILL
+	terr_bot.mouse_filter = MOUSE_FILTER_IGNORE
+	var grid_idx: int = vbox.get_node("GridRow").get_index()
+	vbox.add_child(terr_bot)
+	vbox.move_child(terr_bot, grid_idx)
 
 
 func _add_subtitle_extras() -> void:
