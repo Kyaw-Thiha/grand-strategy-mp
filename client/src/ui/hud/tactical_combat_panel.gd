@@ -51,7 +51,6 @@ func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
 		var visual_idx := grid_offset + i
 		var container := VBoxContainer.new()
 		container.add_theme_constant_override("separation", 0)
-		container.set("size_flags_horizontal", Control.SIZE_FILL | Control.SIZE_EXPAND)
 
 		var glyph := GLYPH_SCENE.instantiate() as Control
 		glyph.set("unit_type", "")
