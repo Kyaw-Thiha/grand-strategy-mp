@@ -26,6 +26,7 @@ func display(cell_data: Dictionary) -> void:
 	var stealth:  bool   = cell_data.get("stealthed", false)
 
 	_glyph_cell.set("unit_type", utype)
+	_glyph_cell.queue_redraw()
 
 	# Background tint for special states — otherwise transparent (dark theme + UnitGlyphCell)
 	var bg_color := C_BG
