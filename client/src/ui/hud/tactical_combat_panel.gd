@@ -108,6 +108,8 @@ func _on_round_resolved(eng_id: String, rn: int, lp: String,
 	_update_phase_label(lp)
 	_apply_grid_deltas(_atk_grid, atk_delta, 0, 1)
 	_apply_grid_deltas(_def_grid, def_delta, 25, 2)
+	_apply_deltas_to_data(_attacker_cell_data, atk_delta)
+	_apply_deltas_to_data(_defender_cell_data, def_delta)
 
 
 func _update_phase_label(lp: String) -> void:
@@ -180,6 +182,18 @@ func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_of
 			child_i = (4 - row) * 5 + col + cell_offset
 		var cell_data   = cells[idx] if cells[idx] is Dictionary else {}
 		_update_cell(child_i, cell_data)
+
+
+func _apply_deltas_to_data(data_array: Array, deltas: Array) -> void:
+	for delta in deltas:
+		var idx: int = int(delta.get("cell_index", -1))
+		if idx < 0 or idx >= data_array.size():
+			continue
+		var cell_data: Dictionary = data_array[idx] as Dictionary
+		if cell_data.is_empty():
+			continue
+		for key in delta:
+			cell_data[key] = delta[key]
 
 
 # ── Hover attack preview ─────────────────────────────────────────────

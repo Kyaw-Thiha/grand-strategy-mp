@@ -126,7 +126,7 @@ columns = 5
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="AttackerColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea"]
+[node name="AttackerColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody"]
 layout_mode = 2
 
 [node name="REAR" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerColLabels"]
@@ -195,7 +195,7 @@ columns = 5
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="DefenderColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea"]
+[node name="DefenderColLabels" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody"]
 layout_mode = 2
 
 [node name="VANGUARD" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderColLabels"]

@@ -1,6 +1,6 @@
 class_name AttackPatternRegistry
 
-const BASE_ATTRITION := 2.5
+const BASE_ATTRITION := 50
 
 const ARMOURED_TARGET_TYPES := {
     "light_tank": true, "medium_tank": true, "heavy_tank": true,
