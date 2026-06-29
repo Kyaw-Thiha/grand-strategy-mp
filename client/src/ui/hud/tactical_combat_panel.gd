@@ -143,17 +143,17 @@ func _refresh_from_game_state() -> void:
 	var div_b: Dictionary = GameState.get_division(div_b_id)
 	if not div_a.is_empty():
 		_atk_name.text = div_a_id
-		_load_grid_from_division(_atk_grid, div_a)
-	if div_b:
+		_load_grid_from_division(_atk_grid, div_a, 0)
+	if not div_b.is_empty():
 		_def_name.text = div_b_id
-		_load_grid_from_division(_def_grid, div_b)
+		_load_grid_from_division(_def_grid, div_b, 25)
 
 
-func _load_grid_from_division(grid: GridContainer, div_data: Dictionary) -> void:
+func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_offset: int = 0) -> void:
 	var cells: Array = div_data.get("grid", {}).get("cells", [])
 	for idx in range(min(cells.size(), 25)):
 		var row: int    = idx / 5
 		var col: int    = idx % 5
-		var child_i:int = (4 - row) * 5 + col
+		var child_i:int = (4 - row) * 5 + col + cell_offset
 		var cell_data   = cells[idx] if cells[idx] is Dictionary else {}
 		_update_cell(child_i, cell_data)
