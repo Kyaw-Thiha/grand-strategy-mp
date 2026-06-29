@@ -6,12 +6,14 @@ signal logged_in(user_id: String)
 signal login_failed(message: String)
 
 var user_id: String = ""
+var user_email: String = ""
 var has_host_pass: bool = false
 
 
 func login(email: String, password: String) -> void:
+	var normalized_email: String = email.strip_edges()
 	var result := await APIClient.post("/auth/email", {
-		"email": email,
+		"email": normalized_email,
 		"password": password,
 	})
 
@@ -28,6 +30,7 @@ func login(email: String, password: String) -> void:
 	APIClient.jwt = token
 	var payload: Dictionary = _decode_payload(token)
 	user_id = payload.get("sub", "")
+	user_email = payload.get("email", normalized_email)
 	has_host_pass = payload.get("has_host_pass", false)
 	logged_in.emit(user_id)
 
@@ -39,6 +42,7 @@ func is_logged_in() -> bool:
 func logout() -> void:
 	APIClient.jwt = ""
 	user_id = ""
+	user_email = ""
 	has_host_pass = false
 
 

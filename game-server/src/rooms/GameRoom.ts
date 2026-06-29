@@ -15,6 +15,7 @@ import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template
 
 interface JwtPayload {
   sub: string;
+  email?: string;
   steam_id: string;
   has_host_pass: boolean;
 }
@@ -34,6 +35,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private combatSystem     = new CombatSystem(this.movementSystem);
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
+  private playerEmails = new Map<string, string>();
 
   async onAuth(_client: Client, options: { token?: string }) {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -66,6 +68,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
     this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
     this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
+    this.onMessage("SEND_CHAT",        (client, msg) => this.handleSendChat(client, msg));
     this.onMessage("ASSIGN_TEMPLATE", (_client, msg: {
       division_id: string;
       template_id: string;
@@ -171,6 +174,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     player.steamId = auth.steam_id;
     player.hasHostPass = auth.has_host_pass;
     this.state.players.set(client.sessionId, player);
+    this.playerEmails.set(client.sessionId, auth.email ?? "");
 
     if (this.state.players.size === 1) {
       this.hostSessionId = client.sessionId;
@@ -185,6 +189,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const userId = player?.userId ?? "";
 
     this.state.players.delete(client.sessionId);
+    this.playerEmails.delete(client.sessionId);
 
     if (userId) {
       for (const nation of this.state.nations.values()) {
@@ -264,6 +269,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     nation.is_ready = msg.ready ?? true;
     this.broadcastLobbyState();
     this.checkAutoStart();
+  }
+
+  private handleSendChat(client: Client, msg: { message?: string }) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    const message = (msg.message ?? "").trim().slice(0, 500);
+    if (message === "") return;
+
+    const now = new Date();
+    const time =
+      `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    this.broadcast("CHAT_MESSAGE", {
+      time,
+      user_id: player.userId,
+      email: this.playerEmails.get(client.sessionId) || player.userId || "unknown@example.com",
+      message,
+    });
   }
 
   private handleStartGame(client: Client) {

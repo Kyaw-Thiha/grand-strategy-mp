@@ -12,6 +12,7 @@ const JWT_TTL = 60 * 60 * 24 // 24h in seconds
 function makePayload(player: typeof players.$inferSelect) {
   return {
     sub: player.id,
+    email: player.email,
     steam_id: player.steamId ?? 'dev_steamid',
     has_host_pass: process.env.DEV_MODE === 'true' ? true : player.hasHostPass,
     exp: Math.floor(Date.now() / 1000) + JWT_TTL,

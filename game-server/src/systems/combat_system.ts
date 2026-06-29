@@ -831,7 +831,7 @@ export class CombatSystem {
 
         deltasMap.set(tIdx, {
           cell_index:    tIdx,
-          unit_type:     tCell.unit_type,
+          unit_type:     tCell.unit_type as UnitTypeValue,
           hp:            tCell.hp,
           suppression:   tCell.suppression,
           incapacitated: tCell.incapacitated,

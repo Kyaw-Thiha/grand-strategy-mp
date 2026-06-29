@@ -58,6 +58,59 @@ describe("GameRoom", () => {
     });
   });
 
+  describe("SEND_CHAT", () => {
+    it("broadcasts a trimmed chat message with sender email to all clients", async () => {
+      const tokenA = await makeToken({
+        sub: "user-a",
+        email: "alpha@example.com",
+        steam_id: "dev_steamid",
+        has_host_pass: true,
+      });
+      const tokenB = await makeToken({
+        sub: "user-b",
+        email: "bravo@example.com",
+        steam_id: "dev_steamid",
+        has_host_pass: false,
+      });
+      const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+      const clientA = await colyseus.connectTo(room, { token: tokenA });
+      const clientB = await colyseus.connectTo(room, { token: tokenB });
+
+      const receivedA = new Promise<any>(resolve => clientA.onMessage("CHAT_MESSAGE", resolve));
+      const receivedB = new Promise<any>(resolve => clientB.onMessage("CHAT_MESSAGE", resolve));
+
+      clientA.send("SEND_CHAT", { message: "  Hold the line.  " });
+
+      const [messageA, messageB] = await Promise.all([receivedA, receivedB]);
+      for (const message of [messageA, messageB]) {
+        assert.strictEqual(message.user_id, "user-a");
+        assert.strictEqual(message.email, "alpha@example.com");
+        assert.strictEqual(message.message, "Hold the line.");
+        assert.match(message.time, /^\d{2}:\d{2}$/);
+      }
+    });
+
+    it("does not broadcast blank chat messages", async () => {
+      const token = await makeToken({
+        sub: "user-a",
+        email: "alpha@example.com",
+        steam_id: "dev_steamid",
+        has_host_pass: true,
+      });
+      const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+      const client = await colyseus.connectTo(room, { token });
+      let received = false;
+      client.onMessage("CHAT_MESSAGE", () => {
+        received = true;
+      });
+
+      client.send("SEND_CHAT", { message: "   " });
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      assert.strictEqual(received, false);
+    });
+  });
+
   describe("onLeave()", () => {
     it("removes the player from room state on disconnect", async () => {
       const token = await makeToken({ sub: "user-abc", steam_id: "dev_steamid", has_host_pass: false });
