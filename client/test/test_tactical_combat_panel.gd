@@ -13,12 +13,12 @@ func _ready() -> void:
 	_assert_true(_panel_bg.has_method("setup_engagement"), "must have setup_engagement()")
 	_assert_false(_panel.visible, "panel must start hidden")
 
-	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox/AttackerGrid"),
 		"AttackerGrid must exist")
-	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/CenterContainer/CenterVBox/DefenderGrid"),
 		"DefenderGrid must exist")
 
-	var atk_grid = _panel.get_node("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerGrid")
+	var atk_grid = _panel.get_node("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/CenterContainer/CenterVBox/AttackerGrid")
 	if atk_grid != null:
 		_assert_eq(atk_grid.get_child_count(), 25, "AttackerGrid must have 25 cells")
 
