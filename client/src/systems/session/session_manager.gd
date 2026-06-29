@@ -61,6 +61,16 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 					GameState.divisions[div_id]["is_meeting_battle"] = false
 			if not winner_id.is_empty():
 				EventBus.division_updated.emit(winner_id)
+			EventBus.combat_resolved.emit("", {"winner_id": winner_id, "retreated_id": retreated_id})
+
+		"ROUND_RESOLVED":
+			var eng_id: String   = data.get("engagement_id", "")
+			var rn: int          = data.get("round_number", 0)
+			var lp: bool         = data.get("lethality_phase", false)
+			var atk_delta: Array = data.get("attacker_grid_delta", [])
+			var def_delta: Array = data.get("defender_grid_delta", [])
+			var fb: bool         = data.get("formation_bonuses_active", false)
+			EventBus.round_resolved.emit(eng_id, rn, lp, atk_delta, def_delta, fb)
 
 		"COMBAT_RESULT":
 			pass  # reserved for future tactical panel use
