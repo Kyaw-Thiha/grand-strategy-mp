@@ -37,6 +37,17 @@ func _ready() -> void:
 	if grid != null:
 		_assert_eq(grid.get_child_count(), 25, "AttackerGrid must have 25 GridCell children")
 
+	# Task 1: HP bars must appear in lower half of cell
+	var cell = preload("res://scenes/game/panels/grid_cell.tscn").instantiate()
+	add_child(cell)
+	cell.custom_minimum_size = Vector2(72, 72)
+	cell.size = Vector2(72, 72)
+	cell.display({"unit_type": "infantry", "hp": 80.0})
+	await get_tree().process_frame
+	var bars_box = cell.get_node("VBoxContainer/BarsBox")
+	_assert_true(bars_box.position.y > cell.size.y * 0.5,
+		"BarsBox must be in lower half of cell (HP bars at bottom)")
+
 	if _failed:
 		push_error("TacticalCombatPanel test FAILED")
 		get_tree().quit(1)
