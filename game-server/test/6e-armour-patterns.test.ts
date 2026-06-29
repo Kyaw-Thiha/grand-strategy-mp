@@ -124,10 +124,12 @@ describe("6e — Armour, AT, and AA attack patterns", function () {
     assert.strictEqual(_resolveArmourColumn(2, makeGrid({}), 4, ""), null);
   });
 
-  it("_resolveArmourColumn: C1 with only C4/C5 occupied → null (exceeds 2-col max)", () => {
-    // Max shift 2 cols from col=0: can reach col=1 and col=2 only
+  it("_resolveArmourColumn: C1 with only C4/C5 occupied → finds via full-range shift", () => {
+    // Full-range search from col=0: [1,2,3,4] — finds C4 (col=3) or C5 (col=4)
     const grid = makeGrid({ 18: "infantry", 19: "infantry" }); // C4 and C5 only
-    assert.strictEqual(_resolveArmourColumn(0, grid, 4, ""), null);
+    const result = _resolveArmourColumn(0, grid, 4, "");
+    assert.ok(result !== null, "should find a column via shift");
+    assert.ok(result!.shift_type === "envelopment", "shift > 1 col = envelopment");
   });
 
   it("_resolveArmourColumn: depth rule in shift — R3 tank, shift col only has below-min_row cells → null", () => {

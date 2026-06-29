@@ -198,19 +198,18 @@ static func _has_armour_in_col(col: int, cells: Array) -> bool:
 static func _armour_column_targets(att_row: int, att_col: int, cells: Array, n: int) -> Array[int]:
     var min_row: int = 4 - att_row
     var own := _column_targets(att_col, min_row, cells)
-    if own.size() > 0:
+    if not own.is_empty():
         return own.slice(0, n) if n > 0 else own
     var search: Array[int] = []
-    if att_col == 0 or att_col == 1:
-        search = [att_col + 1, att_col + 2]
-    elif att_col == 3 or att_col == 4:
-        search = [att_col - 1, att_col - 2]
+    if att_col <= 1:
+        for c in range(att_col + 1, 5): search.append(c)
+    elif att_col >= 3:
+        for c in range(att_col - 1, -1, -1): search.append(c)
     else:
-        search = [att_col - 1, att_col + 1]
-    search = search.filter(func(c): return c >= 0 and c <= 4)
+        search = [1, 3, 0, 4]
     for shifted_col in search:
         var col_targets := _column_targets(shifted_col, min_row, cells)
-        if col_targets.size() > 0:
+        if not col_targets.is_empty():
             return col_targets.slice(0, n) if n > 0 else col_targets
     return []
 
