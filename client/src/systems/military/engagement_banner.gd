@@ -94,8 +94,17 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, CIRCLE_R, color)
 	draw_arc(Vector2.ZERO, CIRCLE_R, 0.0, TAU, 24, C_BORDER, 1.5)
 
-	draw_line(Vector2(-5.0, -5.0), Vector2( 5.0,  5.0), Color.WHITE, 2.0)
-	draw_line(Vector2( 5.0, -5.0), Vector2(-5.0,  5.0), Color.WHITE, 2.0)
+	var sw := Color(0.08, 0.05, 0.02, 1.0)
+	# Sword 1 (top-right to bottom-left)
+	draw_line(Vector2( 4, -6), Vector2( 4,  3), sw, 1.5)
+	draw_line(Vector2( 1,  1), Vector2( 7,  1), sw, 1.5)
+	draw_line(Vector2( 4,  3), Vector2( 4,  5), sw, 1.0)
+	draw_circle(Vector2( 4,  6), 1.0, sw)
+	# Sword 2 (top-left to bottom-right)
+	draw_line(Vector2(-4, -6), Vector2(-4,  3), sw, 1.5)
+	draw_line(Vector2(-7,  1), Vector2(-1,  1), sw, 1.5)
+	draw_line(Vector2(-4,  3), Vector2(-4,  5), sw, 1.0)
+	draw_circle(Vector2(-4,  6), 1.0, sw)
 
 
 func _input(event: InputEvent) -> void:
