@@ -266,4 +266,89 @@ describe("terrain-modifier-system — integration (no active rules = no change)"
     const cell = room.state.divisions.get("div-b")!.grid.cells[12];
     assert.ok(cell.suppression > 0, `suppression should be > 0, got ${cell.suppression}`);
   });
+
+  // ── Suppression bridge verification tests ─────────────────────────────────
+
+  it("(bridge) stealthed cell excluded from suppression average — Suppressed not triggered", async () => {
+    const { room, client, engagementId } = await spawnCombat(
+      { 12: "sniper", 13: "mg" },
+      { 12: "infantry" },
+    );
+
+    const divA = room.state.divisions.get("div-a")!;
+    (divA.grid.cells[12] as any).stealthed    = true;
+    (divA.grid.cells[12] as any).suppression  = 80;
+    (divA.grid.cells[13] as any).suppression  = 40;
+
+    await waitForEngagementRound(client, engagementId);
+
+    assert.strictEqual(divA.combat_state, "engaged",
+      `stealthed exclusion should keep combat_state "engaged", got ${divA.combat_state}`);
+    assert.ok(divA.suppression < 60,
+      `div.suppression should be < 60 with stealthed excluded, got ${divA.suppression}`);
+  });
+
+  it("(bridge) incapacitated cell excluded from suppression average — Suppressed not triggered", async () => {
+    const { room, client, engagementId } = await spawnCombat(
+      { 12: "infantry", 13: "mg" },
+      { 12: "infantry" },
+    );
+
+    const divA = room.state.divisions.get("div-a")!;
+    (divA.grid.cells[12] as any).hp            = 19;
+    (divA.grid.cells[12] as any).incapacitated = true;
+    (divA.grid.cells[12] as any).suppression   = 80;
+    (divA.grid.cells[13] as any).suppression   = 40;
+
+    await waitForEngagementRound(client, engagementId);
+
+    assert.strictEqual(divA.combat_state, "engaged",
+      `incapacitated exclusion should keep combat_state "engaged", got ${divA.combat_state}`);
+    assert.ok(divA.suppression < 60,
+      `div.suppression should be < 60 with incapacitated excluded, got ${divA.suppression}`);
+  });
+
+  it("(bridge) suppression ≥ threshold after decay → combat_state 'suppressed'", async () => {
+    const { room, client, engagementId } = await spawnCombat(
+      { 12: "infantry" },
+      { 12: "infantry" },
+    );
+
+    const divB = room.state.divisions.get("div-b")!;
+    (divB.grid.cells[12] as any).suppression = 75;
+
+    await waitForEngagementRound(client, engagementId);
+
+    assert.strictEqual(divB.combat_state, "suppressed",
+      `defender with suppression ≥ threshold should be "suppressed", got ${divB.combat_state}`);
+  });
+
+  it("(bridge) attacker suppression ≥ 80 threshold after non-meeting pair mutation → combat_state 'suppressed'", async () => {
+    const { room, client, engagementId } = await spawnCombat(
+      { 12: "infantry" },
+      { 12: "infantry" },
+    );
+
+    // After COMBAT_STARTED, mutate the meeting battle into a non-meeting battle
+    // so the attacker uses the 80% threshold instead of 60%.
+    const combatSystem = (room as any).combatSystem;
+    const pair = combatSystem.activePairs.get("div-a|div-b");
+    pair.is_meeting = false;
+    pair.attacker_id = "div-a";
+    pair.defender_id = "div-b";
+
+    const divA = room.state.divisions.get("div-a")!;
+    const divB = room.state.divisions.get("div-b")!;
+    divA.attacker_role = "attacker";
+    divB.attacker_role = "defender";
+
+    // Set attacker suppression high enough that after decay (8) and incoming
+    // suppression (~1) the cell-level avg stays ≥ 80.
+    (divA.grid.cells[12] as any).suppression = 95;
+
+    await waitForEngagementRound(client, engagementId);
+
+    assert.strictEqual(divA.combat_state, "suppressed",
+      `attacker with suppression ≥ 80 should be "suppressed", got ${divA.combat_state}`);
+  });
 });
