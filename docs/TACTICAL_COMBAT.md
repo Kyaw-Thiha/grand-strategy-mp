@@ -483,16 +483,16 @@ for the artillery rather than passively contributing the base rate.
 The pattern is: historical combined-arms tactics → mechanic. If no historical precedent exists
 for an adjacency, no bonus is designed.*
 
-> **Implementation status (Branch I):** The formation bonus engine is fully implemented
-> and wired into combat, but ships with **zero active rules**. `getActiveFormationRules()`
-> returns `[]`, so `evaluateFormationRules` produces an empty Map and all lookups fall
-> through to the identity modifier (1.0× — no effect). The engine supports all five
-> proximity types (`adjacent`, `same_row`, `same_col`, `distance`, `self_in_row`),
-> per-cell modifier stacking, and incapacitated-cell exclusion. Concrete rules for the
-> specific synergies listed above (AT+MG, Sniper+Recon inf, etc.) require the perk
-> research system to define and activate them — expected in a future Phase 6 branch.
-> The `ROUND_RESOLVED` event carries the `formation_bonuses_active` field (currently
-> empty) for UI display when rules are added.
+> **Implementation status (Branches I & J):** Both the formation bonus engine (Branch I)
+> and the terrain modifier engine (Branch J) are fully implemented and wired into combat,
+> but ship with **zero active rules**. `getActiveFormationRules()` returns `[]` and
+> `getActiveTerrainModifierRules()` returns `[]`, so both evaluators produce empty Maps
+> and all lookups fall through to identity modifiers. The terrain engine supports per-cell,
+> per-unit-type modifiers (`hp_dealt_mult`, `supp_dealt_mult`, `supp_resist_mult`,
+> `supp_decay_mult`, `stealth_delta`, `flanking_enabled`) with multiplicative/AND/stacking
+> rules. Concrete rules for both systems are added later via perk research. The
+> `ROUND_RESOLVED` event carries the `formation_bonuses_active` field (currently empty)
+> for UI display when rules are added.
 
 ---
 
@@ -1008,6 +1008,23 @@ the cap.
 
 ---
 
+### Per-Cell Terrain Modifier Engine
+
+In addition to the strategic-layer terrain bonuses above, a per-cell, per-unit-type modifier engine evaluates each combat round via `terrain_modifier_system.ts`. It ships with **zero active rules** — `getActiveTerrainModifierRules()` returns `[]`, so `evaluateTerrainModifiers()` returns an empty Map and all cells use the identity modifier. Concrete rules are added later via perk research.
+
+| Field | Type | Stacking | Description |
+|---|---|---|---|
+| `hp_dealt_mult` | number | Multiplicative | Multiplier on outgoing HP damage |
+| `supp_dealt_mult` | number | Multiplicative | Multiplier on outgoing suppression |
+| `supp_resist_mult` | number | Multiplicative | Multiplier on incoming suppression (< 1 = receive less) |
+| `supp_decay_mult` | number | Multiplicative | Multiplier on suppression decay rate |
+| `stealth_delta` | number | Additive | Bonus to base stealth_level per cell's unit type |
+| `flanking_enabled` | boolean | AND (one false disables) | Gate on armour column shift flanking |
+
+The engine mirrors `formation_rule_system.ts` in structure. `stealth_delta` values are folded into the existing perk-based stealth bonus records each round via `augmentedBonuses`. The `flanking_enabled` gate wraps `_resolveArmourColumn` — already short-circuited for dense_forest/urban at the function level, but kept as an extensibility point for future perks that may disable flanking for other terrain types.
+
+---
+
 ## Attacker and Defender Determination
 
 Combat initiates when two engagement area circles fully overlap. Attacker/defender status is
@@ -1221,7 +1238,13 @@ Visible on the strategic map combat icon at all times:
   whether a river crossing penalty is in effect
 
 ### Opening the grid panel
-A combat button appears over the active combat icon. Clicking opens the full 5×5 grid view:
+An **EngagementBanner** floats on the strategic map at the midpoint between the two engaged
+division icons. It shows a tug-of-war HP bar: the left half fills green proportional to the
+attacker's average HP; the right half fills green proportional to the defender's average HP.
+A ⚔ symbol sits at the centre as the click target. The banner's border pulses amber when
+either side's HP drops below the suppression warning threshold (attacker < 20%, defender < 40%).
+
+Clicking ⚔ opens the full 5×5 grid view:
 - All living units in both grids with current HP and suppression bars
 - Experience tier badge per unit (Green/Seasoned/Veteran/Elite)
 - Active formation bonus indicators (glow on cells with active adjacency synergies)
