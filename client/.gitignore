@@ -13,6 +13,9 @@ export_credentials.cfg
 *.exe
 *.dmg
 
+# Local endpoint override. Copy server_config.example.json to this path.
+server_config.json
+
 # OS noise
 .DS_Store
 Thumbs.db

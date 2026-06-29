@@ -1,0 +1,5 @@
+{
+  "environment": "staging",
+  "api_url": "https://api-server-production-ae7e.up.railway.app",
+  "colyseus_url": "wss://game-server-production-fdea.up.railway.app"
+}
