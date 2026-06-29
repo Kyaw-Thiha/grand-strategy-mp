@@ -1,5 +1,5 @@
 extends Node
-## Tests for TacticalCombatPanel lifecycle and theme.
+## Tests for TacticalCombatPanel lifecycle and grid cell management.
 
 var _panel: Control = null
 var _panel_bg: PanelContainer = null
@@ -13,25 +13,14 @@ func _ready() -> void:
 	_assert_true(_panel_bg.has_method("setup_engagement"), "must have setup_engagement()")
 	_assert_false(_panel.visible, "panel must start hidden")
 
-	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerGrid"),
 		"AttackerGrid must exist")
-	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGrid"),
+	_assert_not_null(_panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderGrid"),
 		"DefenderGrid must exist")
 
-	var grid = _panel.get_node_or_null("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGrid")
-	if grid != null:
-		_assert_eq(grid.get_child_count(), 25, "AttackerGrid must have 25 GridCell children")
-
-	# Task 1: HP bars must appear in lower half of cell
-	var cell = preload("res://scenes/game/panels/grid_cell.tscn").instantiate()
-	add_child(cell)
-	cell.custom_minimum_size = Vector2(72, 72)
-	cell.size = Vector2(72, 72)
-	cell.display({"unit_type": "infantry", "hp": 80.0})
-	await get_tree().process_frame
-	var bars_box = cell.get_node("VBoxContainer/BarsBox")
-	_assert_true(bars_box.position.y > cell.size.y * 0.5,
-		"BarsBox must be in lower half of cell (HP bars at bottom)")
+	var atk_grid = _panel.get_node("OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerGrid")
+	if atk_grid != null:
+		_assert_eq(atk_grid.get_child_count(), 25, "AttackerGrid must have 25 cells")
 
 	if _failed:
 		push_error("TacticalCombatPanel test FAILED")

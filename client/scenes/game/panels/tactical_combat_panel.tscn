@@ -66,11 +66,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "TACTICAL COMBAT"
 horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
 
 [node name="RoundLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/HeaderRow"]
 layout_mode = 2
-text = "Round –"
+text = "Round --"
 horizontal_alignment = 2
+theme_override_font_sizes/font_size = 14
 
 [node name="SubtitleRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
@@ -78,41 +80,183 @@ layout_mode = 2
 [node name="AttackerNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
 
 [node name="DefenderNameLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/SubtitleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 2
+theme_override_font_sizes/font_size = 13
+
+[node name="TerrainBanner" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.85, 0.55, 0.10, 1.0)
+theme_override_font_sizes/font_size = 11
 
 [node name="GridRow" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="AttackerGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+[node name="AttackerGridArea" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AttackerHeader" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ATTACKER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.15, 0.10, 1.0)
+
+[node name="AttackerGridBody" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AttackerRowLabels" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody"]
+layout_mode = 2
+
+[node name="Row5" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "VANGUARD"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row4" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ASSAULT"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row3" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "SUPPORT"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row2" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "RESERVE"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row1" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody/AttackerRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "REAR"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="AttackerGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/AttackerGridArea/AttackerGridBody"]
 columns = 5
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="DefenderGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+[node name="FrontLine" type="Control" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+custom_minimum_size = Vector2(8, 0)
+layout_mode = 2
+
+[node name="DefenderGridArea" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DefenderHeader" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "DEFENDER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.15, 0.10, 1.0)
+
+[node name="DefenderGridBody" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DefenderGrid" type="GridContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody"]
 columns = 5
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="EscalationStrip" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+[node name="DefenderRowLabels" type="VBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody"]
 layout_mode = 2
 
-[node name="WithdrawButton" type="Button" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+[node name="Row5" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
+custom_minimum_size = Vector2(56, 14)
 layout_mode = 2
-text = "WITHDRAW"
+size_flags_horizontal = 3
+text = "VANGUARD"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
 
-[node name="EscLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+[node name="Row4" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ASSAULT"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row3" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "SUPPORT"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row2" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "RESERVE"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="Row1" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/GridRow/DefenderGridArea/DefenderGridBody/DefenderRowLabels"]
+custom_minimum_size = Vector2(56, 14)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "REAR"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 7
+
+[node name="FormationBonusBar" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
+visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
 
-[node name="CommitButton" type="Button" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+[node name="EscalationStrip" type="HBoxContainer" parent="OuterMargin/Panel/InnerMargin/VBoxContent"]
 layout_mode = 2
-text = "COMMIT"
+size_flags_horizontal = 3
+
+[node name="RetreatButton" type="Button" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+layout_mode = 2
+text = "RETREAT"
+
+[node name="PhaseLabel" type="Label" parent="OuterMargin/Panel/InnerMargin/VBoxContent/EscalationStrip"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 1
+text = "Phase: ●○○○○ Contact"
+theme_override_font_sizes/font_size = 12
