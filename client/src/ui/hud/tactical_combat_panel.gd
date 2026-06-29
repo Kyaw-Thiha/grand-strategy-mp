@@ -51,7 +51,7 @@ func _on_closed() -> void:
 
 func _on_round_resolved(eng_id: String, rn: int, lp: String,
 						atk_delta: Array, def_delta: Array, _fb: Array) -> void:
-	if eng_id != _engagement_id:
+	if not eng_id.begins_with(_engagement_id):
 		return
 	var lethality_suffix := "  [LETHALITY]" if lp in ["intense", "decisive", "annihilation"] else ""
 	_round_label.text = "Round %d%s" % [rn, lethality_suffix]
@@ -75,7 +75,7 @@ func _refresh_from_game_state() -> void:
 	if parts.size() < 2:
 		return
 	var div_a_id := parts[0]
-	var div_b_id := parts[1].split("_")[0]
+	var div_b_id := parts[1]
 
 	var div_a = GameState.get_division(div_a_id)
 	var div_b = GameState.get_division(div_b_id)

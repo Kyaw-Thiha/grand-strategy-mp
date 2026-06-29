@@ -4,15 +4,12 @@ extends PanelContainer
 @onready var _hp_bar:     ColorRect = $VBoxContainer/BarsBox/HpBar
 @onready var _supp_bar:   ColorRect = $VBoxContainer/BarsBox/SuppBar
 
-const C_EMPTY:    Color = Color(0.88, 0.83, 0.76, 1.0)
-const C_OCCUPY:   Color = Color(0.78, 0.73, 0.65, 1.0)
-const C_SUPP_BG:  Color = Color(0.80, 0.72, 0.55, 1.0)
-const C_INCAP:    Color = Color(0.68, 0.62, 0.58, 1.0)
-const C_STEALTH:  Color = Color(0.55, 0.62, 0.55, 1.0)
-const C_HP_BAR:   Color = Color(0.30, 0.65, 0.35, 1.0)
+const C_BG:       Color = Color(0.0, 0.0, 0.0, 0.0)  # transparent — dark theme + UnitGlyphCell
+const C_SUPP:     Color = Color(0.25, 0.18, 0.05, 0.6)  # amber tint
+const C_INCAP:    Color = Color(0.12, 0.10, 0.08, 0.7)  # darker/grey
+const C_STEALTH:  Color = Color(0.05, 0.15, 0.10, 0.6)  # green tint
+const C_HP_BAR:   Color = Color(0.35, 0.75, 0.40, 1.0)
 const C_SUPP_BAR: Color = Color(0.85, 0.55, 0.10, 1.0)
-const C_BORDER:   Color = Color(0.45, 0.35, 0.22, 1.0)
-const C_TEXT:     Color = Color(0.20, 0.14, 0.06, 1.0)
 const MAX_BAR_W:  float = 60.0
 
 
@@ -30,17 +27,14 @@ func display(cell_data: Dictionary) -> void:
 
 	_glyph_cell.set("unit_type", utype)
 
-	var bg_color: Color
-	if utype == "":       bg_color = C_EMPTY
-	elif incap:           bg_color = C_INCAP
-	elif stealth:         bg_color = C_STEALTH
-	elif supp_pct > 0.5:  bg_color = C_SUPP_BG
-	else:                 bg_color = C_OCCUPY
+	# Background tint for special states — otherwise transparent (dark theme + UnitGlyphCell)
+	var bg_color := C_BG
+	if incap:           bg_color = C_INCAP
+	elif stealth:       bg_color = C_STEALTH
+	elif supp_pct > 0.5: bg_color = C_SUPP
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = bg_color
-	style.set_border_width_all(1)
-	style.border_color = C_BORDER
 	add_theme_stylebox_override("panel", style)
 
 	_hp_bar.color = C_HP_BAR
