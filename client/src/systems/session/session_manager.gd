@@ -70,7 +70,8 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			var atk_delta: Array = data.get("attacker_grid_delta", [])
 			var def_delta: Array = data.get("defender_grid_delta", [])
 			var fb: Array        = data.get("formation_bonuses_active", [])
-			EventBus.round_resolved.emit(eng_id, rn, lp, atk_delta, def_delta, fb)
+			var tur: int          = data.get("ticks_until_next_round", 20)
+			EventBus.round_resolved.emit(eng_id, rn, lp, atk_delta, def_delta, fb, tur)
 
 		"COMBAT_RESULT":
 			pass  # reserved for future tactical panel use

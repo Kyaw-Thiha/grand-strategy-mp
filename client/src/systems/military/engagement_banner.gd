@@ -141,7 +141,7 @@ func _on_division_updated(div_id: String) -> void:
 		_refresh_hp()
 
 func _on_round_resolved(eng_id: String, _rn: int, _lp: String,
-						_ad: Array, _dd: Array, _fb: Array) -> void:
+						_ad: Array, _dd: Array, _fb: Array, _tur: int) -> void:
 	if (eng_id.begins_with(_div_a_id + "_vs_" + _div_b_id) or
 		eng_id.begins_with(_div_b_id + "_vs_" + _div_a_id)):
 		_refresh_hp()

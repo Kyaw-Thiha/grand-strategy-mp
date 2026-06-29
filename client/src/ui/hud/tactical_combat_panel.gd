@@ -20,6 +20,7 @@ var _attacker_cell_data: Array = []  # 25 cell dicts
 var _defender_cell_data: Array = []  # 25 cell dicts
 var _engagement_id: String = ""
 var _current_round: int = 0
+var _timer_remaining: float = 0.0
 var _hovered_visual_idx: int = -1
 
 
@@ -37,6 +38,15 @@ func _ready() -> void:
 	EventBus.round_resolved.connect(_on_round_resolved)
 
 	$InnerMargin/VBoxContent/GridRow.add_theme_constant_override("separation", 8)
+
+
+func _process(delta: float) -> void:
+	if _timer_remaining > 0:
+		_timer_remaining -= delta
+		if _timer_remaining < 0:
+			_timer_remaining = 0
+		var secs: int = int(_timer_remaining)
+		_round_label.text = "Round %d  ⏱ %d:%02d" % [_current_round, secs / 60, secs % 60]
 
 
 func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> void:
@@ -99,12 +109,11 @@ func _on_closed() -> void:
 	hide()
 
 func _on_round_resolved(eng_id: String, rn: int, lp: String,
-						atk_delta: Array, def_delta: Array, _fb: Array) -> void:
+						atk_delta: Array, def_delta: Array, _fb: Array, tur: int) -> void:
 	if not eng_id.begins_with(_engagement_id):
 		return
 	_current_round = rn
-	var lethality_suffix := "  [LETHALITY]" if lp in ["intense", "decisive", "annihilation"] else ""
-	_round_label.text = "Round %d%s" % [rn, lethality_suffix]
+	_timer_remaining = float(tur)
 	_update_phase_label(lp)
 	_apply_grid_deltas(_atk_grid, atk_delta, 0, 1)
 	_apply_grid_deltas(_def_grid, def_delta, 25, 2)

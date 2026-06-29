@@ -644,6 +644,7 @@ export class CombatSystem {
         defender_grid_delta:     pair._lastDeltaDefender,
         formation_bonuses_active: [],   // Populated by formation_rule_system in future branches
         xp_changes:              [],
+        ticks_until_next_round:  ROUND_TICKS,
       } satisfies RoundResolvedPayload);
 
       // Reset for next round
