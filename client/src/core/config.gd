@@ -99,3 +99,33 @@ func _apply_server_config(config_data: Dictionary, source_path: String) -> bool:
 	API_URL = api_url
 	COLYSEUS_URL = colyseus_url
 	return true
+
+
+## Reports whether the active endpoints target deployed/non-local servers.
+## Parameters: none.
+## Returns: true when either API_URL or COLYSEUS_URL is not a localhost/loopback URL.
+func is_online_environment() -> bool:
+	return not _is_local_endpoint(API_URL) or not _is_local_endpoint(COLYSEUS_URL)
+
+
+## Provides the user-facing environment label for menus.
+## Parameters: none.
+## Returns: "Online" for deployed endpoints, otherwise "Local".
+func get_environment_label() -> String:
+	return "Online" if is_online_environment() else "Local"
+
+
+## Checks whether a URL points at a local development endpoint.
+## Parameters:
+## - endpoint_url: URL string to classify.
+## Returns: true when the endpoint host is localhost or loopback.
+func _is_local_endpoint(endpoint_url: String) -> bool:
+	var lower_url: String = endpoint_url.to_lower()
+	return (
+		lower_url.contains("://localhost")
+		or lower_url.contains("://127.0.0.1")
+		or lower_url.contains("://0.0.0.0")
+		or lower_url.begins_with("localhost:")
+		or lower_url.begins_with("127.0.0.1:")
+		or lower_url.begins_with("0.0.0.0:")
+	)

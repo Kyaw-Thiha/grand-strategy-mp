@@ -6,9 +6,11 @@ extends Control
 @onready var _status_label: Label      = %StatusLabel
 @onready var _post_login: VBoxContainer = %PostLogin
 @onready var _code_field: LineEdit     = %JoinCodeField
+@onready var _title_label: Label       = $Center/Card/VBox/Title
 
 
 func _ready() -> void:
+	_update_environment_title()
 	_post_login.hide()
 	AuthManager.logged_in.connect(_on_login_succeeded)
 	AuthManager.login_failed.connect(_on_login_failed)
@@ -85,3 +87,10 @@ func _set_busy(busy: bool) -> void:
 	%JoinBtn.disabled = busy
 	%BrowseBtn.disabled = busy
 	_status_label.text = "Connecting..." if busy else ""
+
+
+## Updates the title with the active network environment.
+## Parameters: none.
+## Returns: void.
+func _update_environment_title() -> void:
+	_title_label.text = "Grand Strategy (%s)" % Config.get_environment_label()
