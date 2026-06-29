@@ -166,6 +166,7 @@ func _refresh_from_game_state() -> void:
 		_def_name.text = div_b_id
 		_defender_cell_data = div_b.get("grid", {}).get("cells", [])
 		_load_grid_from_division(_def_grid, div_b, 25, 2)
+	print("TACTICAL_GRID: atk=", _attacker_cell_data.size(), " def=", _defender_cell_data.size())
 
 
 func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_offset: int = 0, rotation: int = 0) -> void:
@@ -213,6 +214,8 @@ func _show_target_preview(visual_idx: int) -> void:
 			_attacker_cell_data, _defender_cell_data, _current_round
 		)
 		var targets: Array = result.get(logical_idx, []) as Array
+		print("TACTICAL_HOVER: atk=", _attacker_cell_data.size(), " def=", _defender_cell_data.size(),
+			" round=", _current_round, " targets=", targets.size())
 		_highlight_targets(targets, 25)
 	else:
 		var def_logical: int = _visual_to_logical(visual_idx - 25, 25)
