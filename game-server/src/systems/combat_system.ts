@@ -31,6 +31,11 @@ import {
   getActiveFormationRules,
   IDENTITY_FORMATION_BONUS,
 } from "./formation_rule_system.js";
+import {
+  evaluateTerrainModifiers,
+  getActiveTerrainModifierRules,
+  IDENTITY_TERRAIN_MODIFIERS,
+} from "./terrain_modifier_system.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -552,10 +557,33 @@ export class CombatSystem {
         const perksB     = Array.from(state.nations.get(divB.nation_id)?.researched_perks ?? []);
         const bonusesA   = resolveTerrainStealthBonuses(terrain, perksA);
         const bonusesB   = resolveTerrainStealthBonuses(terrain, perksB);
+        const _activeTerrainRulesS = getActiveTerrainModifierRules();
+        const terrainModsStealthA  = evaluateTerrainModifiers(
+          [...divA.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+          terrain, _activeTerrainRulesS,
+        );
+        const terrainModsStealthB  = evaluateTerrainModifiers(
+          [...divB.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+          terrain, _activeTerrainRulesS,
+        );
+        const augmentedBonusesA = { ...bonusesA };
+        terrainModsStealthA.forEach((mods, cellIdx) => {
+          if (mods.stealth_delta !== 0) {
+            const utype = divA.grid.cells[cellIdx]?.unit_type ?? "";
+            if (utype) augmentedBonusesA[utype] = (augmentedBonusesA[utype] ?? 0) + mods.stealth_delta;
+          }
+        });
+        const augmentedBonusesB = { ...bonusesB };
+        terrainModsStealthB.forEach((mods, cellIdx) => {
+          if (mods.stealth_delta !== 0) {
+            const utype = divB.grid.cells[cellIdx]?.unit_type ?? "";
+            if (utype) augmentedBonusesB[utype] = (augmentedBonusesB[utype] ?? 0) + mods.stealth_delta;
+          }
+        });
         const cellsA     = Array.from(divA.grid.cells);
         const cellsB     = Array.from(divB.grid.cells);
-        _resolveStealthForRound(cellsA, this._computeMaxAntiStealth(cellsB), this._computeEffectiveStealths(cellsA, bonusesA));
-        _resolveStealthForRound(cellsB, this._computeMaxAntiStealth(cellsA), this._computeEffectiveStealths(cellsB, bonusesB));
+        _resolveStealthForRound(cellsA, this._computeMaxAntiStealth(cellsB), this._computeEffectiveStealths(cellsA, augmentedBonusesA));
+        _resolveStealthForRound(cellsB, this._computeMaxAntiStealth(cellsA), this._computeEffectiveStealths(cellsB, augmentedBonusesB));
       }
 
       // Advance round (pair.round starts at 0; broadcast uses 1-indexed)
@@ -651,9 +679,14 @@ export class CombatSystem {
     return max;
   }
 
-  private _decayCellSuppression(div: DivisionState, isRetreating: boolean): void {
+  private _decayCellSuppression(div: DivisionState, isRetreating: boolean, battle_cover: string): void {
     if (!div.grid) return;
     const baseDecay = isRetreating ? CELL_SUPP_DECAY_RETREAT : CELL_SUPP_DECAY_BASE;
+    const decayTerrainMods = evaluateTerrainModifiers(
+      [...div.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      battle_cover,
+      getActiveTerrainModifierRules(),
+    );
     const decayFormationBonuses = evaluateFormationRules(
       [...div.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
       getActiveFormationRules(),
@@ -663,7 +696,8 @@ export class CombatSystem {
       const cellRow = Math.floor(cellIdx / 5);
       const decayPerk = getRowPerkModifiers(cellRow);
       const formationBonus = decayFormationBonuses.get(cellIdx) ?? IDENTITY_FORMATION_BONUS;
-      cell.suppression = Math.max(0, cell.suppression - baseDecay * decayPerk.supp_decay_mult * formationBonus.supp_decay_mult);
+      const terrainDecayMod = decayTerrainMods.get(cellIdx) ?? IDENTITY_TERRAIN_MODIFIERS;
+      cell.suppression = Math.max(0, cell.suppression - baseDecay * decayPerk.supp_decay_mult * formationBonus.supp_decay_mult * terrainDecayMod.supp_decay_mult);
     });
   }
 
@@ -701,10 +735,23 @@ export class CombatSystem {
       _activeRules,
     );
 
+    const _activeTerrainRules = getActiveTerrainModifierRules();
+    const attackerTerrainMods = evaluateTerrainModifiers(
+      [...attacker.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      pair.battle_cover,
+      _activeTerrainRules,
+    );
+    const defenderTerrainMods = evaluateTerrainModifiers(
+      [...defender.grid.cells].map(c => ({ unit_type: c.unit_type, incapacitated: c.incapacitated })),
+      pair.battle_cover,
+      _activeTerrainRules,
+    );
+
     for (const { cell: attCell, idx } of fireOrder) {
       const attRow      = Math.floor(idx / 5);
       const attackerRowPerk = getRowPerkModifiers(attRow);
       const attackerFormationBonus = attackerFormationBonuses.get(idx) ?? IDENTITY_FORMATION_BONUS;
+      const attackerTerrainMod = attackerTerrainMods.get(idx) ?? IDENTITY_TERRAIN_MODIFIERS;
       const attCol      = idx % 5;
       const profile     = getDamageProfile(attCell.unit_type, roundNumber);
 
@@ -735,9 +782,11 @@ export class CombatSystem {
       let tacticalHpBonus  = 1.0;
       const utype = attCell.unit_type;
       if (utype === "light_tank" || utype === "medium_tank" || utype === "heavy_tank" || utype === "armoured_car") {
-        const shift = _resolveArmourColumn(attCol, defender.grid.cells, attRow, cover);
-        if (shift?.shift_type === "flank")       { sideArmourActive = true; tacticalHpBonus = TACTICAL_FLANK_BONUS; }
-        else if (shift?.shift_type === "envelopment") { sideArmourActive = true; tacticalHpBonus = TACTICAL_ENVELOPMENT_BONUS; }
+        if (attackerTerrainMod.flanking_enabled) {
+          const shift = _resolveArmourColumn(attCol, defender.grid.cells, attRow, cover);
+          if (shift?.shift_type === "flank")            { sideArmourActive = true; tacticalHpBonus = TACTICAL_FLANK_BONUS; }
+          else if (shift?.shift_type === "envelopment") { sideArmourActive = true; tacticalHpBonus = TACTICAL_ENVELOPMENT_BONUS; }
+        }
       } else if (utype === "at_infantry" || utype === "at_gun" || utype === "at_gun_sp") {
         if (_resolveATColumn(attCol, defender.grid.cells)?.is_side) sideArmourActive = true;
       }
@@ -762,9 +811,10 @@ export class CombatSystem {
         const defRow = Math.floor(tIdx / 5);
         const defenderRowPerk = getRowPerkModifiers(defRow);
         const defenderFormationBonus = defenderFormationBonuses.get(tIdx) ?? IDENTITY_FORMATION_BONUS;
+        const defenderTerrainMod = defenderTerrainMods.get(tIdx) ?? IDENTITY_TERRAIN_MODIFIERS;
         const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
-        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult * attackerFormationBonus.hp_dealt_mult) / xpHpMult);
-        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * attackerFormationBonus.supp_dealt_mult * defenderRowPerk.supp_resist_mult * defenderFormationBonus.supp_resist_mult) / xpSuppResist);
+        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult * attackerFormationBonus.hp_dealt_mult * attackerTerrainMod.hp_dealt_mult) / xpHpMult);
+        tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * attackerFormationBonus.supp_dealt_mult * attackerTerrainMod.supp_dealt_mult * defenderRowPerk.supp_resist_mult * defenderFormationBonus.supp_resist_mult * defenderTerrainMod.supp_resist_mult) / xpSuppResist);
 
         const floor = _getIncapFloor(tCell.unit_type);
         if (floor > 0 && tCell.hp <= floor && !tCell.incapacitated) {
@@ -837,11 +887,11 @@ export class CombatSystem {
     }
 
     // Per-cell damage (returns deltas for ROUND_RESOLVED; stored on pair for collection)
-    this._decayCellSuppression(divB, divB.combat_state === "retreating");
+    this._decayCellSuppression(divB, divB.combat_state === "retreating", pair.battle_cover);
     const aNation1 = state.nations.get(divA.nation_id);
     const aPerks1  = aNation1 ? Array.from(aNation1.researched_perks) : [];
     const deltasB  = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast, aPerks1);
-    this._decayCellSuppression(divA, divA.combat_state === "retreating");
+    this._decayCellSuppression(divA, divA.combat_state === "retreating", pair.battle_cover);
     const aNation2 = state.nations.get(divB.nation_id);
     const aPerks2  = aNation2 ? Array.from(aNation2.researched_perks) : [];
     const deltasA  = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast, aPerks2);

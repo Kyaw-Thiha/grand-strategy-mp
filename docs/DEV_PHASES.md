@@ -797,7 +797,7 @@ for all attack pattern logic before any Godot work.
 - [x] `game-server/test/6-assign-template.test.ts` — 6 tests (sets template_id, populates cells, clears prior cells,
       recomputes division_type, rejects when engaged, no-op for missing division)
 
-- [ ] Row positional perks applied per round:
+- [x] Row positional perks applied per round:
       R5 Vanguard: +% suppression dealt; R4 Assault: +% HP damage dealt;
       R3 Support: +% suppression resistance; R2 Reserve: faster suppression decay;
       R1: no bonus
@@ -838,9 +838,12 @@ for all attack pattern logic before any Godot work.
 - [ ] Recon value accumulation per round per unit type; formation bonus (Artillery+Recon inf)
       increases recon rate; artillery targeting weight shifts with recon
 - [x] Force recon units bypass lethality ramp — deal full damage from Round 1
-- [ ] Terrain modifiers feeding into grid combat (from Phase 4 terrain detection):
-      unit-type specific bonuses by cover_combat (infantry suppression resistance in forests,
-      armour flanking bonus in plains, AT ambush bonus in forest, etc.)
+- [x] Terrain modifiers feeding into grid combat (from Phase 4 terrain detection):
+      per-cell, per-unit-type engine in `terrain_modifier_system.ts` with
+      `getActiveTerrainModifierRules()` returning `[]` (zero active rules);
+      stealth delta folds into existing perks; flanking gate for armour.
+      Ships as pure no-op when rule list is empty. 18 unit tests + 3 integration
+      tests + 4 suppression bridge tests in `6j-terrain-modifiers.test.ts`.
 - [x] Grid locked during combat — no template switching while engaged
 - [ ] Movement profile recomputed whenever template is saved or unit research changes
 - [x] `ROUND_RESOLVED` event broadcast each round with full grid delta including experience
