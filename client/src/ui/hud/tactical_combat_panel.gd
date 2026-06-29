@@ -220,14 +220,10 @@ func _show_target_preview(visual_idx: int) -> void:
 	else:
 		var def_logical: int = _visual_to_logical(visual_idx - 25, 25)
 		var result: Dictionary = AttackPatternRegistry.simulate_round(
-			_attacker_cell_data, _defender_cell_data, _current_round
+			_defender_cell_data, _attacker_cell_data, _current_round
 		)
-		var attackers: Array = []
-		for atk_idx in result:
-			var tgt_arr: Array = result[atk_idx] as Array
-			if def_logical in tgt_arr:
-				attackers.append(atk_idx)
-		_highlight_targets(attackers, 0)
+		var targets: Array = result.get(def_logical, []) as Array
+		_highlight_targets(targets, 0)
 
 func _highlight_targets(targets: Array, offset: int) -> void:
 	for logical_idx in targets:
