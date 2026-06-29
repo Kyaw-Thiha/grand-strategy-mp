@@ -16,16 +16,19 @@ const StatusBarsScript := preload("res://src/ui/hud/status_bars.gd")
 
 var _glyph_cells: Array = []  # UnitGlyphCell[]
 var _bar_controls: Array = []  # StatusBars[]
+var _attacker_cell_data: Array = []  # 25 cell dicts
+var _defender_cell_data: Array = []  # 25 cell dicts
 var _engagement_id: String = ""
 var _current_round: int = 0
+var _hovered_visual_idx: int = -1
 
 
 func _ready() -> void:
 	hide()
 	mouse_filter = MOUSE_FILTER_STOP
 
-	_build_grid(_atk_grid)
-	_build_grid(_def_grid)
+	_build_grid(_atk_grid, 0)
+	_build_grid(_def_grid, 25)
 
 	_close_btn.pressed.connect(func(): EventBus.tactical_combat_closed.emit())
 	_retreat_btn.pressed.connect(_on_retreat_pressed)
@@ -42,9 +45,10 @@ func setup_engagement(eng_id: String, atk_name: String, def_name: String) -> voi
 	_def_name.text = def_name
 
 
-func _build_grid(grid: GridContainer) -> void:
+func _build_grid(grid: GridContainer, grid_offset: int = 0) -> void:
 	grid.columns = 5
-	for _i in range(25):
+	for i in range(25):
+		var visual_idx := grid_offset + i
 		var container := VBoxContainer.new()
 		container.add_theme_constant_override("separation", 0)
 
@@ -52,6 +56,8 @@ func _build_grid(grid: GridContainer) -> void:
 		glyph.set("unit_type", "")
 		glyph.set("size_flags_horizontal", Control.SIZE_FILL | Control.SIZE_EXPAND)
 		glyph.set("size_flags_vertical", Control.SIZE_FILL | Control.SIZE_EXPAND)
+		glyph.mouse_entered.connect(_on_cell_hovered.bind(visual_idx, true))
+		glyph.mouse_exited.connect(_on_cell_hovered.bind(visual_idx, false))
 		container.add_child(glyph)
 		_glyph_cells.append(glyph)
 
@@ -143,9 +149,11 @@ func _refresh_from_game_state() -> void:
 	var div_b: Dictionary = GameState.get_division(div_b_id)
 	if not div_a.is_empty():
 		_atk_name.text = div_a_id
+		_attacker_cell_data = div_a.get("grid", {}).get("cells", [])
 		_load_grid_from_division(_atk_grid, div_a, 0)
 	if not div_b.is_empty():
 		_def_name.text = div_b_id
+		_defender_cell_data = div_b.get("grid", {}).get("cells", [])
 		_load_grid_from_division(_def_grid, div_b, 25)
 
 
@@ -157,3 +165,59 @@ func _load_grid_from_division(grid: GridContainer, div_data: Dictionary, cell_of
 		var child_i:int = (4 - row) * 5 + col + cell_offset
 		var cell_data   = cells[idx] if cells[idx] is Dictionary else {}
 		_update_cell(child_i, cell_data)
+
+
+# ── Hover attack preview ─────────────────────────────────────────────
+
+func _on_cell_hovered(visual_idx: int, is_hovering: bool) -> void:
+	if not is_hovering:
+		_clear_target_highlights()
+		_hovered_visual_idx = -1
+		return
+	_hovered_visual_idx = visual_idx
+	_show_target_preview(visual_idx)
+
+func _show_target_preview(visual_idx: int) -> void:
+	if visual_idx < 25:
+		var logical_idx := _visual_to_logical(visual_idx)
+		var result: Dictionary = AttackPatternRegistry.simulate_round(
+			_attacker_cell_data, _defender_cell_data, _current_round
+		)
+		var targets: Array = result.get(logical_idx, []) as Array
+		_highlight_targets(targets, 25)
+	else:
+		var def_logical := _visual_to_logical(visual_idx - 25)
+		var result: Dictionary = AttackPatternRegistry.simulate_round(
+			_attacker_cell_data, _defender_cell_data, _current_round
+		)
+		var attackers: Array = []
+		for atk_idx_str: String in result:
+			var atk_idx: int = int(atk_idx_str)
+			var tgt_arr: Array = result[atk_idx_str] as Array
+			if def_logical in tgt_arr:
+				attackers.append(atk_idx)
+		_highlight_targets(attackers, 0)
+
+func _highlight_targets(targets: Array, offset: int) -> void:
+	for logical_idx in targets:
+		var visual_idx: int = _logical_to_visual(int(logical_idx)) + offset
+		if visual_idx < _glyph_cells.size():
+			var cell = _glyph_cells[visual_idx] as UnitGlyphCell
+			if cell != null:
+				cell.set("is_targeted", true)
+
+func _clear_target_highlights() -> void:
+	for cell in _glyph_cells:
+		var glyph: UnitGlyphCell = cell as UnitGlyphCell
+		if glyph != null:
+			glyph.set("is_targeted", false)
+
+func _visual_to_logical(visual_child_index: int) -> int:
+	var row := visual_child_index / 5
+	var col := visual_child_index % 5
+	return (4 - row) * 5 + col
+
+func _logical_to_visual(logical_index: int) -> int:
+	var row := logical_index / 5
+	var col := logical_index % 5
+	return (4 - row) * 5 + col

@@ -223,7 +223,7 @@ static func _at_column_targets(att_col: int, cells: Array, n: int) -> Array[int]
         var best_dist := 999
         for c in range(5):
             if c == att_col: continue
-            var dist := abs(c - att_col)
+            var dist: int = abs(c - att_col)
             if _has_armour_in_col(c, cells):
                 if dist < best_dist or (dist == best_dist and (target_col < 0 or c < target_col)):
                     best_dist = dist
@@ -261,8 +261,8 @@ static func _artillery_area_targets(att_cell_index: int, cells: Array, n: int) -
     # Default: show own column as potential target area (radius=0 approximation)
     var center_col := att_cell_index % 5
     var area_radius := 0  # TODO: pass researched area_radius from client state in Branch K
-    var min_col := max(0, center_col - area_radius)
-    var max_col := min(4, center_col + area_radius)
+    var min_col: int = max(0, center_col - area_radius)
+    var max_col: int = min(4, center_col + area_radius)
     var result: Array[int] = []
     for col in range(min_col, max_col + 1):
         for row in range(4, -1, -1):  # R5 first

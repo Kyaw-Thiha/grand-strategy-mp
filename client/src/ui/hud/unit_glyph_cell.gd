@@ -54,6 +54,11 @@ var incapacitated: bool = false:
 		incapacitated = v
 		queue_redraw()
 
+var is_targeted: bool = false:
+	set(v):
+		is_targeted = v
+		queue_redraw()
+
 var _hovered: bool = false
 
 
@@ -116,6 +121,9 @@ func _draw_filled_cell(inner: Rect2) -> void:
 	else:
 		border = BORDER_FILLED
 	draw_rect(inner, border, false, 2.0 if is_selected else 1.5)
+
+	if is_targeted:
+		draw_rect(inner, Color(0.8, 0.2, 0.1, 0.3))
 
 	var glyph_rect := Rect2(
 		inner.position + Vector2(8, 6),
