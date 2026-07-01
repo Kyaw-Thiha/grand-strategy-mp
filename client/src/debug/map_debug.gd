@@ -21,18 +21,26 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _pause_menu = $PauseMenu
 @onready var _game_hud   = $GameHUD
 
+var _chat_input_focused: bool = false
+
 
 func _ready() -> void:
 	_pause_menu.set_restore_clear_color(RenderingServer.get_default_clear_color())
 	RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0))
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
+	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
+		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
 	_map_loader.load_map(MAP_ID) 
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _chat_input_focused and event is InputEventKey:
+		get_viewport().set_input_as_handled()
+		return
+
 	if _pause_menu.visible:
 		if event is InputEventKey:
 			var key: InputEventKey = event
@@ -67,10 +75,20 @@ func _unhandled_input(event: InputEvent) -> void:
 func _input(event: InputEvent) -> void:
 	if _pause_menu.visible:
 		return
+	if _chat_input_focused:
+		return
 
 	# Keys only — mouse is handled in _unhandled_input
 	if event is InputEventKey:
 		_military_system.handle_input(event)
+
+
+## Tracks whether chat text entry owns keyboard input.
+## Parameters:
+## - focused: true while the chat TextEdit is focused.
+## Returns: nothing.
+func _on_chat_input_focus_changed(focused: bool) -> void:
+	_chat_input_focused = focused
 
 
 func _on_map_loaded(province_count: int) -> void:

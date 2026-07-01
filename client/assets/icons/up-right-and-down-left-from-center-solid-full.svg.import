@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cuvkcr4ohyy2h"
-path="res://.godot/imported/setting-gear.png-266c57c15a64aa51ca5a990500de1a74.ctex"
+uid="uid://g5ygyyletar8"
+path="res://.godot/imported/up-right-and-down-left-from-center-solid-full.svg-215bf988039dd5e7d3035ddb049851da.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/setting-gear.png"
-dest_files=["res://.godot/imported/setting-gear.png-266c57c15a64aa51ca5a990500de1a74.ctex"]
+source_file="res://assets/icons/up-right-and-down-left-from-center-solid-full.svg"
+dest_files=["res://.godot/imported/up-right-and-down-left-from-center-solid-full.svg-215bf988039dd5e7d3035ddb049851da.ctex"]
 
 [params]
 
@@ -38,3 +38,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
+svg/scale=1.0
+editor/scale_with_editor_scale=false
+editor/convert_colors_with_editor_theme=false

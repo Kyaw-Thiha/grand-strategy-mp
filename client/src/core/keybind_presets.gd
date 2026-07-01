@@ -71,7 +71,7 @@ const ACTIONS: Array = [
 	{"action": "map_mode_backward",   "display": "Map Mode Backward",      "category": "Map"},
 	{"action": "map_relation_ring",   "display": "Show Relation Ring (hold)","category": "Map"},
 	# --- Chat ---
-	{"action": "chat_team",           "display": "Chat (Team / Allies)",   "category": "Chat"},
+	{"action": "chat_team",           "display": "Open Chat",              "category": "Chat"},
 	{"action": "chat_all",            "display": "Chat (All)",             "category": "Chat"},
 ]
 

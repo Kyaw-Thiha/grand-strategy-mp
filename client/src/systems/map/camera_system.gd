@@ -26,6 +26,8 @@ var _move_speed: float = 0.0
 var _target_zoom: float = 1.0
 var _edge_scroll_enabled: bool = true
 var _player_input_enabled: bool = true
+var _pause_input_blocked: bool = false
+var _chat_input_blocked: bool = false
 var _map_loader: Node = null
 var _label_region_active: bool = false  # true when zoom < threshold
 var _map_bounds: Rect2 = Rect2()
@@ -38,6 +40,8 @@ func setup(camera: Camera2D, map_loader: Node) -> void:
 	_target_zoom = camera.zoom.x
 	if not EventBus.pause_menu_blocking_changed.is_connected(_on_pause_menu_blocking_changed):
 		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
+	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
+		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 
 
 func _process(delta: float) -> void:
@@ -258,4 +262,21 @@ func _clamp_position() -> void:
 ## - blocking: true when gameplay-facing player input should be ignored.
 ## Returns: nothing.
 func _on_pause_menu_blocking_changed(blocking: bool) -> void:
-	set_player_input_enabled(not blocking)
+	_pause_input_blocked = blocking
+	_refresh_player_input_enabled()
+
+
+## Responds to chat text input ownership changes.
+## Parameters:
+## - focused: true when chat text entry owns keyboard input.
+## Returns: nothing.
+func _on_chat_input_focus_changed(focused: bool) -> void:
+	_chat_input_blocked = focused
+	_refresh_player_input_enabled()
+
+
+## Recomputes whether player-driven camera controls should be active.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_player_input_enabled() -> void:
+	set_player_input_enabled(not (_pause_input_blocked or _chat_input_blocked))

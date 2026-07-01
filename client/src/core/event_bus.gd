@@ -66,6 +66,7 @@ signal pause_menu_blocking_changed(blocking: bool)
 signal move_mode_cancelled()
 signal notification_cycle_next()
 signal chat_message_received(time: String, email: String, message: String)
+signal chat_input_focus_changed(focused: bool)
 
 # ── Division Builder ───────────────────────────────────────────────────────
 signal division_builder_open_requested(template_id: String)  # "" = new blank template
