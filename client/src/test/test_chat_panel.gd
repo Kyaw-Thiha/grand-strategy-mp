@@ -20,16 +20,21 @@ func _ready() -> void:
 	var minimized_top_row: HBoxContainer = panel.get_node("%MinimizedTopRow") as HBoxContainer
 	var header: HBoxContainer = panel.get_node("%Header") as HBoxContainer
 	var title_label: Label = panel.get_node("Margin/VBox/Header/Title") as Label
-	var hint_label: Label = panel.get_node("Margin/VBox/Header/Hint") as Label
 	var input_row: HBoxContainer = panel.get_node("%InputRow") as HBoxContainer
 	var message_input: TextEdit = panel.get_node("%MessageInput") as TextEdit
 	var send_button: Button = panel.get_node("%SendButton") as Button
-	var toggle_button: Button = panel.get_node("%MaximizeMinimizeToggleButton") as Button
+	var toggle_button: Button = panel.find_child("MaximizeMinimizeToggleButton", true, false) as Button
 	_check(toggle_button != null, "chat panel includes maximize/minimize toggle button")
-	_check(bool(toggle_button.get("is_maximized")), "chat toggle starts maximized")
-	_check(bool(panel.get("is_maximized")), "chat panel starts maximized")
-	_check(scroll_container.visible, "scrollback is visible when maximized")
-	_check(not latest_preview.is_visible_in_tree(), "latest preview hidden when maximized")
+	_check(not bool(toggle_button.get("is_maximized")), "chat toggle starts minimized")
+	_check(not bool(panel.get("is_maximized")), "chat panel starts minimized")
+	_check(not header.visible, "header row hidden by default")
+	_check(not title_label.is_visible_in_tree(), "ROOM CHAT title hidden by default")
+	_check(not scroll_container.visible, "scrollback hidden by default")
+	_check(latest_preview.visible, "latest preview visible by default")
+	_check(panel.get_combined_minimum_size().y <= 104.0, "default minimized panel has compact height")
+	_check(input_row.visible, "input row visible by default")
+	_check(message_input.visible, "message input visible by default")
+	_check(send_button.visible, "send button visible by default")
 	await panel.add_message("12:23", "simon@example.com", "I need some backup.")
 	_check(message_list.get_child_count() == 1, "non-empty message creates one entry")
 
@@ -41,23 +46,22 @@ func _ready() -> void:
 	_check(entry.text.contains("I need some backup."), "entry includes message body")
 	await panel.add_message("12:25", "nora@example.com", "Second message.")
 	_check(message_list.get_child_count() == 2, "second non-empty message is retained in scrollback")
-
-	toggle_button.call("toggle")
-	await get_tree().process_frame
-	_check(not bool(panel.get("is_maximized")), "toggle minimizes chat panel")
-	_check(not header.visible, "header row hidden when minimized")
-	_check(not title_label.is_visible_in_tree(), "ROOM CHAT title hidden when minimized")
-	_check(not hint_label.is_visible_in_tree(), "ENTER hint hidden when minimized")
-	_check(not scroll_container.visible, "scrollback hidden when minimized")
-	_check(latest_preview.visible, "latest preview visible when minimized")
-	_check(latest_time_label.text == "12:25", "latest preview uses newest message time")
-	_check(latest_email_label.text == "[no*.com]", "latest preview uses masked newest message email")
-	_check(latest_message_label.text == "Second message.", "latest preview uses newest message body")
+	_check(latest_time_label.text == "12:25", "default preview uses newest message time")
+	_check(latest_email_label.text == "[no*.com]", "default preview uses masked newest message email")
+	_check(latest_message_label.text == "Second message.", "default preview uses newest message body")
 	_check(latest_message_label.autowrap_mode == TextServer.AUTOWRAP_OFF, "latest preview does not wrap")
 	_check(
 		latest_message_label.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS,
 		"latest preview trims overflow with ellipsis"
 	)
+
+	_check(not header.visible, "header row hidden when minimized")
+	_check(not title_label.is_visible_in_tree(), "ROOM CHAT title hidden when minimized")
+	_check(not scroll_container.visible, "scrollback hidden when minimized")
+	_check(latest_preview.visible, "latest preview visible when minimized")
+	_check(latest_time_label.text == "12:25", "latest preview uses newest message time")
+	_check(latest_email_label.text == "[no*.com]", "latest preview uses masked newest message email")
+	_check(latest_message_label.text == "Second message.", "latest preview uses newest message body")
 	_check(panel.get_combined_minimum_size().y <= 104.0, "minimized panel has compact height")
 	_check(input_row.visible, "input row remains visible when minimized")
 	_check(message_input.visible, "message input remains visible when minimized")

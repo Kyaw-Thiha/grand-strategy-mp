@@ -9,6 +9,9 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var hud_manager: _HUDManagerClass = $HUDManager
 @onready var overlay_dim: ColorRect = %OverlayDim
 
+@onready var _top_bar: PanelContainer = $HUDRoot/TopBar
+@onready var _left_dock_rail: PanelContainer = $HUDRoot/LeftDockRail
+@onready var _map_mode_tabs: PanelContainer = $HUDRoot/MapModeTabs
 @onready var _side_panel_anchor: MarginContainer  = %SidePanelAnchor
 @onready var _center_panel_anchor: Control = %CenterPanelAnchor
 @onready var _toast_container: VBoxContainer       = %ToastContainer
@@ -51,9 +54,15 @@ var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
 var _map_renderer: Node = null
+var _ui_pointer_blocker_roots: Array[Control] = []
+var _ui_text_focus_controls: Dictionary = {}
+var _is_ui_pointer_blocking: bool = false
+var _is_ui_text_input_focused: bool = false
 
 const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
+const _BOTTOM_SELECTION_PANEL_BOTTOM_GAP: float = 28.0
+const _BOTTOM_SELECTION_PANEL_DOCK_GAP: float = 16.0
 
 
 func _ready() -> void:
@@ -63,6 +72,7 @@ func _ready() -> void:
 	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
 	_map_renderer = get_node_or_null("/root/MapDebug/MapRenderer")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
+	_register_initial_ui_input_ownership()
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
 	_btn_map_cov.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("cover"))
@@ -107,6 +117,7 @@ func _ready() -> void:
 	# Division Builder — full-center, opened from military panel template list
 	_division_builder_panel = _DivisionBuilderScene.instantiate()
 	add_child(_division_builder_panel)
+	_register_ui_input_ownership_root(_division_builder_panel)
 	hud_manager.register_panel("division_builder", _division_builder_panel, HUDManager.PlacementMode.FULL_CENTER)
 	EventBus.division_builder_open_requested.connect(func(_template_id: String) -> void:
 		if _military_system != null and _military_system.has_method("deselect"):
@@ -134,6 +145,7 @@ func _ready() -> void:
 	# Division Template Viewer — full-center, opened from mini-comp grid click
 	_division_template_viewer_panel = _DivisionTemplateViewerScene.instantiate()
 	add_child(_division_template_viewer_panel)
+	_register_ui_input_ownership_root(_division_template_viewer_panel)
 	hud_manager.register_panel("division_template_viewer", _division_template_viewer_panel,
 		HUDManager.PlacementMode.FULL_CENTER
 	)
@@ -162,6 +174,7 @@ func _ready() -> void:
 	var _tcp_scene := preload("res://scenes/game/panels/tactical_combat_panel.tscn")
 	var _tactical_combat_panel: Control = _tcp_scene.instantiate()
 	add_child(_tactical_combat_panel)
+	_register_ui_input_ownership_root(_tactical_combat_panel)
 	hud_manager.register_panel("tactical_combat", _tactical_combat_panel,
 		HUDManager.PlacementMode.FULL_CENTER
 	)
@@ -204,6 +217,10 @@ func _ready() -> void:
 	_layout_bottom_hud()
 
 
+func _process(_delta: float) -> void:
+	_refresh_ui_pointer_blocking()
+
+
 func _make_dock_toggle(panel_name: String) -> Callable:
 	return func() -> void:
 		hud_manager.toggle_panel(panel_name)
@@ -242,6 +259,137 @@ func _close_chat_input_when_clicking_outside(mouse_event: InputEventMouseButton)
 		return
 	if _chat_panel.has_method("close_chat_input"):
 		_chat_panel.close_chat_input()
+
+
+## Registers HUD controls that should own pointer or text input over the map.
+## Parameters: none.
+## Returns: nothing.
+func _register_initial_ui_input_ownership() -> void:
+	for root: Control in [
+		_top_bar,
+		_left_dock_rail,
+		_map_mode_tabs,
+		_side_panel_anchor,
+		_center_panel_anchor,
+		overlay_dim,
+		_military_panel,
+		_economy_panel,
+		_diplomacy_panel,
+		_research_panel,
+		_research_tree_panel,
+		_friendly_div_panel,
+		_friendly_prov_panel,
+		_friendly_stack_panel,
+		_enemy_div_panel,
+		_chat_panel,
+	]:
+		_register_ui_input_ownership_root(root)
+
+
+## Registers one interactive UI root and its text descendants for map input ownership.
+## Parameters:
+## - root: Control whose visible rect should suppress pointer-driven map controls.
+## Returns: nothing.
+func _register_ui_input_ownership_root(root: Control) -> void:
+	if root == null:
+		return
+	if not _ui_pointer_blocker_roots.has(root):
+		_ui_pointer_blocker_roots.append(root)
+	if root.mouse_filter == Control.MOUSE_FILTER_IGNORE:
+		root.mouse_filter = Control.MOUSE_FILTER_STOP
+	if not root.visibility_changed.is_connected(_on_ui_pointer_blocker_visibility_changed.bind(root)):
+		root.visibility_changed.connect(_on_ui_pointer_blocker_visibility_changed.bind(root))
+	_register_text_focus_descendants(root)
+
+
+## Rechecks pointer ownership when a UI root visibility changes.
+## Parameters:
+## - _control: UI root whose visibility changed.
+## Returns: nothing.
+func _on_ui_pointer_blocker_visibility_changed(_control: Control) -> void:
+	_refresh_ui_pointer_blocking()
+
+
+## Emits pointer blocking only when the aggregate UI hover state changes.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_ui_pointer_blocking() -> void:
+	var blocking: bool = _is_pointer_over_registered_ui()
+	if _is_ui_pointer_blocking == blocking:
+		return
+	_is_ui_pointer_blocking = blocking
+	EventBus.ui_pointer_blocking_changed.emit(blocking)
+
+
+## Checks whether the viewport pointer is inside a visible registered HUD root.
+## Parameters: none.
+## Returns: true when pointer-driven map camera controls should be suppressed.
+func _is_pointer_over_registered_ui() -> bool:
+	var viewport_mouse_position: Vector2 = get_viewport().get_mouse_position()
+	return _is_position_over_registered_ui(viewport_mouse_position)
+
+
+## Checks whether a viewport position is inside a visible registered HUD root.
+## Parameters:
+## - viewport_position: pointer position in viewport coordinates.
+## Returns: true when pointer-driven map camera controls should be suppressed.
+func _is_position_over_registered_ui(viewport_position: Vector2) -> bool:
+	for control: Control in _ui_pointer_blocker_roots:
+		if control != null and control.is_visible_in_tree():
+			if control.get_global_rect().has_point(viewport_position):
+				return true
+	return false
+
+
+## Registers text controls below a UI root so keyboard camera movement pauses while typing.
+## Parameters:
+## - node: root node to scan.
+## Returns: nothing.
+func _register_text_focus_descendants(node: Node) -> void:
+	if node is LineEdit or node is TextEdit:
+		var control: Control = node as Control
+		if not control.focus_entered.is_connected(_on_ui_text_focus_entered.bind(control)):
+			control.focus_entered.connect(_on_ui_text_focus_entered.bind(control))
+		if not control.focus_exited.is_connected(_on_ui_text_focus_exited.bind(control)):
+			control.focus_exited.connect(_on_ui_text_focus_exited.bind(control))
+	for child: Node in node.get_children():
+		_register_text_focus_descendants(child)
+
+
+## Marks a text control as owning keyboard input.
+## Parameters:
+## - control: text input that gained focus.
+## Returns: nothing.
+func _on_ui_text_focus_entered(control: Control) -> void:
+	if control == null:
+		return
+	_ui_text_focus_controls[control] = true
+	_refresh_ui_text_input_focus()
+
+
+## Clears keyboard input ownership for a text control.
+## Parameters:
+## - control: text input that lost focus.
+## Returns: nothing.
+func _on_ui_text_focus_exited(control: Control) -> void:
+	_ui_text_focus_controls.erase(control)
+	_refresh_ui_text_input_focus()
+
+
+## Emits text-input focus state only when the aggregate focus state changes.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_ui_text_input_focus() -> void:
+	var focused: bool = false
+	for key: Variant in _ui_text_focus_controls.keys():
+		var control: Control = key as Control
+		if control != null and control.has_focus() and control.is_visible_in_tree():
+			focused = true
+			break
+	if _is_ui_text_input_focused == focused:
+		return
+	_is_ui_text_input_focused = focused
+	EventBus.ui_text_input_focus_changed.emit(focused)
 
 
 ## Connects a side drawer close signal to HUDManager so drawer state stays centralized.
@@ -456,33 +604,43 @@ func _position_chat_panel() -> void:
 func _position_bottom_selection_panel(panel: Control) -> void:
 	if panel == null:
 		return
-	var panel_height: float = panel.size.y
+	var panel_height: float = maxf(panel.size.y, panel.get_combined_minimum_size().y)
 	panel.size = Vector2.ZERO
 	var natural_width: float = panel.get_combined_minimum_size().x
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
-	panel.size = Vector2(natural_width, panel_height)
 
 	var chat_left: float = viewport_size.x - _BOTTOM_PANEL_MARGIN
 	if _chat_panel != null:
 		chat_left = _chat_panel.global_position.x
 	var available_right: float = chat_left - _BOTTOM_PANEL_CHAT_GAP
-	var available_left: float = _BOTTOM_PANEL_MARGIN
+	var available_left: float = _get_bottom_panel_available_left()
+	var available_width: float = maxf(0.0, available_right - available_left)
+	var panel_width: float = minf(natural_width, available_width)
+	panel.size = Vector2(panel_width, panel_height)
+
 	var available_center_x: float = (available_left + available_right) / 2.0
 	var target_center_x: float = viewport_size.x / 2.0
-	var chat_width: float = _chat_panel.get_combined_minimum_size().x if _chat_panel != null else 0.0
-	if natural_width + _BOTTOM_PANEL_CHAT_GAP + chat_width + (_BOTTOM_PANEL_MARGIN * 2.0) > viewport_size.x:
+	if target_center_x + (panel_width / 2.0) > available_right or target_center_x - (panel_width / 2.0) < available_left:
 		target_center_x = available_center_x
 	target_center_x = clampf(
 		target_center_x,
-		available_left + (natural_width / 2.0),
-		maxf(available_left + (natural_width / 2.0), available_right - (natural_width / 2.0))
+		available_left + (panel_width / 2.0),
+		maxf(available_left + (panel_width / 2.0), available_right - (panel_width / 2.0))
 	)
 
-	var current_pos: Vector2 = panel.global_position
-	var panel_center_x: float = current_pos.x + (natural_width / 2.0)
-	var delta_x: float = target_center_x - panel_center_x
+	panel.global_position = Vector2(
+		target_center_x - (panel_width / 2.0),
+		maxf(0.0, viewport_size.y - panel_height - _BOTTOM_SELECTION_PANEL_BOTTOM_GAP)
+	)
 
-	panel.global_position = Vector2(current_pos.x + delta_x, current_pos.y)
+
+## Returns the left edge available to bottom selection panels.
+## Parameters: none.
+## Returns: viewport x coordinate after the left dock plus reserved gap.
+func _get_bottom_panel_available_left() -> float:
+	if _left_dock_rail != null:
+		return maxf(_BOTTOM_PANEL_MARGIN, _left_dock_rail.get_global_rect().end.x + _BOTTOM_SELECTION_PANEL_DOCK_GAP)
+	return _BOTTOM_PANEL_MARGIN
 
 
 ## Handles province selection — shows FriendlyProvincePanel in bottom bar.

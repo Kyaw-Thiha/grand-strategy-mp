@@ -22,7 +22,7 @@ const MASKED_EMAIL_SUFFIX_LENGTH: int = 4
 @onready var _input: TextEdit = %MessageInput
 @onready var _send_button: Button = %SendButton
 
-var is_maximized: bool = true
+var is_maximized: bool = false
 var _latest_message_time: String = ""
 var _latest_message_email: String = ""
 var _latest_message_body: String = ""
@@ -36,6 +36,7 @@ func _ready() -> void:
 	_input.gui_input.connect(_on_message_input_gui_input)
 	_input.focus_entered.connect(_on_message_input_focus_entered)
 	_input.focus_exited.connect(_on_message_input_focus_exited)
+	_toggle_button.set("is_maximized", is_maximized)
 	if not _toggle_button.toggled.is_connected(set_maximized):
 		_toggle_button.toggled.connect(set_maximized)
 	set_maximized(bool(_toggle_button.get("is_maximized")))

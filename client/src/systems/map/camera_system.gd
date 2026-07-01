@@ -9,7 +9,8 @@ signal zoom_changed(level: float)
 const BASE_SPEED     := 600.0
 const MAX_SPEED      := 3000.0
 const ACCELERATION   := 1000.0
-const EDGE_SCROLL_BAND := 120.0
+const EDGE_SCROLL_DETECTION_BAND := 180.0
+const EDGE_SCROLL_STRENGTH_BAND := 120.0
 const EDGE_MIN_SPEED := 180.0
 const EDGE_MAX_SPEED := 1400.0
 const EDGE_SPEED_CURVE := 1.35
@@ -28,6 +29,8 @@ var _edge_scroll_enabled: bool = true
 var _player_input_enabled: bool = true
 var _pause_input_blocked: bool = false
 var _chat_input_blocked: bool = false
+var _ui_pointer_blocking: bool = false
+var _ui_text_input_focused: bool = false
 var _map_loader: Node = null
 var _label_region_active: bool = false  # true when zoom < threshold
 var _map_bounds: Rect2 = Rect2()
@@ -42,6 +45,10 @@ func setup(camera: Camera2D, map_loader: Node) -> void:
 		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
 	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
+	if not EventBus.ui_pointer_blocking_changed.is_connected(_on_ui_pointer_blocking_changed):
+		EventBus.ui_pointer_blocking_changed.connect(_on_ui_pointer_blocking_changed)
+	if not EventBus.ui_text_input_focus_changed.is_connected(_on_ui_text_input_focus_changed):
+		EventBus.ui_text_input_focus_changed.connect(_on_ui_text_input_focus_changed)
 
 
 func _process(delta: float) -> void:
@@ -66,6 +73,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton:
+		if _ui_pointer_blocking:
+			return
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -128,14 +137,15 @@ func _handle_movement(delta: float) -> void:
 		return
 
 	var wasd_dir: Vector2 = Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		wasd_dir.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		wasd_dir.y += 1.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		wasd_dir.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		wasd_dir.x += 1.0
+	if not _ui_text_input_focused:
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			wasd_dir.y -= 1.0
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			wasd_dir.y += 1.0
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			wasd_dir.x -= 1.0
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			wasd_dir.x += 1.0
 
 	var wasd_active: bool = wasd_dir != Vector2.ZERO
 
@@ -149,7 +159,7 @@ func _handle_movement(delta: float) -> void:
 
 	_move_speed = 0.0
 
-	if _edge_scroll_enabled:
+	if _edge_scroll_enabled and not _ui_pointer_blocking:
 		var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 		var viewport_size: Vector2 = _camera.get_viewport().get_visible_rect().size
 		var edge_velocity: Vector2 = _get_edge_scroll_velocity(mouse, viewport_size)
@@ -190,15 +200,24 @@ func _get_edge_scroll_velocity(viewport_mouse: Vector2, viewport_size: Vector2) 
 ## - viewport_axis_size: viewport size on the axis.
 ## Returns: -1.0 to 1.0, where sign is scroll direction.
 func _get_axis_edge_strength(mouse_axis: float, viewport_axis_size: float) -> float:
-	var band_size: float = minf(EDGE_SCROLL_BAND, viewport_axis_size * 0.5)
-	if band_size <= 0.0:
+	var detection_band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, viewport_axis_size * 0.5)
+	if detection_band_size <= 0.0:
 		return 0.0
+	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, detection_band_size)
 
-	if mouse_axis < band_size:
-		var left_strength: float = clampf((band_size - mouse_axis) / band_size, 0.0, 1.0)
+	if mouse_axis < detection_band_size:
+		var left_strength: float = clampf(
+			(detection_band_size - mouse_axis) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return -pow(left_strength, EDGE_SPEED_CURVE)
-	if mouse_axis > viewport_axis_size - band_size:
-		var right_strength: float = clampf((mouse_axis - (viewport_axis_size - band_size)) / band_size, 0.0, 1.0)
+	if mouse_axis > viewport_axis_size - detection_band_size:
+		var right_strength: float = clampf(
+			(mouse_axis - (viewport_axis_size - detection_band_size)) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return pow(right_strength, EDGE_SPEED_CURVE)
 	return 0.0
 
@@ -209,9 +228,10 @@ func _get_axis_edge_strength(mouse_axis: float, viewport_axis_size: float) -> fl
 ## - viewport_size: visible viewport size in pixels.
 ## Returns: signed vector whose length is the corner scroll strength.
 func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -> Vector2:
-	var band_size: float = minf(EDGE_SCROLL_BAND, minf(viewport_size.x, viewport_size.y) * 0.5)
+	var band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, minf(viewport_size.x, viewport_size.y) * 0.5)
+	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, band_size)
 	var radius: float = minf(EDGE_CORNER_RADIUS, minf(viewport_size.x, viewport_size.y) * 0.5 - band_size)
-	if band_size <= 0.0 or radius <= 0.0:
+	if band_size <= 0.0 or strength_band_size <= 0.0 or radius <= 0.0:
 		return Vector2.ZERO
 
 	var corner_centers: Array[Vector2] = [
@@ -242,8 +262,11 @@ func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -
 			0.0 if corner_center.x < viewport_size.x * 0.5 else viewport_size.x,
 			0.0 if corner_center.y < viewport_size.y * 0.5 else viewport_size.y
 		)
-		var maximum_distance: float = maxf((viewport_corner - corner_center).length() - radius, 1.0)
-		var corner_strength: float = clampf((distance_from_corner_center - radius) / maximum_distance, 0.0, 1.0)
+		var corner_strength: float = clampf(
+			(distance_from_corner_center - radius) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return from_corner_center.normalized() * pow(corner_strength, EDGE_SPEED_CURVE)
 
 	return Vector2.ZERO
@@ -280,3 +303,21 @@ func _on_chat_input_focus_changed(focused: bool) -> void:
 ## Returns: nothing.
 func _refresh_player_input_enabled() -> void:
 	set_player_input_enabled(not (_pause_input_blocked or _chat_input_blocked))
+
+
+## Responds to HUD/UI hover ownership changes.
+## Parameters:
+## - blocking: true when pointer-driven map camera controls should ignore the mouse.
+## Returns: nothing.
+func _on_ui_pointer_blocking_changed(blocking: bool) -> void:
+	_ui_pointer_blocking = blocking
+
+
+## Responds to text input focus changes in HUD/UI.
+## Parameters:
+## - focused: true when a text input owns keyboard input.
+## Returns: nothing.
+func _on_ui_text_input_focus_changed(focused: bool) -> void:
+	_ui_text_input_focused = focused
+	if focused:
+		_move_speed = 0.0
