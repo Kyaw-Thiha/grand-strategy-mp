@@ -54,13 +54,15 @@ var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
 var _map_renderer: Node = null
-var _ui_pointer_blockers: Dictionary = {}
+var _ui_pointer_blocker_roots: Array[Control] = []
 var _ui_text_focus_controls: Dictionary = {}
 var _is_ui_pointer_blocking: bool = false
 var _is_ui_text_input_focused: bool = false
 
 const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
+const _BOTTOM_SELECTION_PANEL_BOTTOM_GAP: float = 28.0
+const _BOTTOM_SELECTION_PANEL_DOCK_GAP: float = 16.0
 
 
 func _ready() -> void:
@@ -215,6 +217,10 @@ func _ready() -> void:
 	_layout_bottom_hud()
 
 
+func _process(_delta: float) -> void:
+	_refresh_ui_pointer_blocking()
+
+
 func _make_dock_toggle(panel_name: String) -> Callable:
 	return func() -> void:
 		hud_manager.toggle_panel(panel_name)
@@ -287,15 +293,52 @@ func _register_initial_ui_input_ownership() -> void:
 func _register_ui_input_ownership_root(root: Control) -> void:
 	if root == null:
 		return
+	if not _ui_pointer_blocker_roots.has(root):
+		_ui_pointer_blocker_roots.append(root)
 	if root.mouse_filter == Control.MOUSE_FILTER_IGNORE:
 		root.mouse_filter = Control.MOUSE_FILTER_STOP
-	if not root.mouse_entered.is_connected(_on_ui_pointer_blocker_entered.bind(root)):
-		root.mouse_entered.connect(_on_ui_pointer_blocker_entered.bind(root))
-	if not root.mouse_exited.is_connected(_on_ui_pointer_blocker_exited.bind(root)):
-		root.mouse_exited.connect(_on_ui_pointer_blocker_exited.bind(root))
 	if not root.visibility_changed.is_connected(_on_ui_pointer_blocker_visibility_changed.bind(root)):
 		root.visibility_changed.connect(_on_ui_pointer_blocker_visibility_changed.bind(root))
 	_register_text_focus_descendants(root)
+
+
+## Rechecks pointer ownership when a UI root visibility changes.
+## Parameters:
+## - _control: UI root whose visibility changed.
+## Returns: nothing.
+func _on_ui_pointer_blocker_visibility_changed(_control: Control) -> void:
+	_refresh_ui_pointer_blocking()
+
+
+## Emits pointer blocking only when the aggregate UI hover state changes.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_ui_pointer_blocking() -> void:
+	var blocking: bool = _is_pointer_over_registered_ui()
+	if _is_ui_pointer_blocking == blocking:
+		return
+	_is_ui_pointer_blocking = blocking
+	EventBus.ui_pointer_blocking_changed.emit(blocking)
+
+
+## Checks whether the viewport pointer is inside a visible registered HUD root.
+## Parameters: none.
+## Returns: true when pointer-driven map camera controls should be suppressed.
+func _is_pointer_over_registered_ui() -> bool:
+	var viewport_mouse_position: Vector2 = get_viewport().get_mouse_position()
+	return _is_position_over_registered_ui(viewport_mouse_position)
+
+
+## Checks whether a viewport position is inside a visible registered HUD root.
+## Parameters:
+## - viewport_position: pointer position in viewport coordinates.
+## Returns: true when pointer-driven map camera controls should be suppressed.
+func _is_position_over_registered_ui(viewport_position: Vector2) -> bool:
+	for control: Control in _ui_pointer_blocker_roots:
+		if control != null and control.is_visible_in_tree():
+			if control.get_global_rect().has_point(viewport_position):
+				return true
+	return false
 
 
 ## Registers text controls below a UI root so keyboard camera movement pauses while typing.
@@ -311,53 +354,6 @@ func _register_text_focus_descendants(node: Node) -> void:
 			control.focus_exited.connect(_on_ui_text_focus_exited.bind(control))
 	for child: Node in node.get_children():
 		_register_text_focus_descendants(child)
-
-
-## Marks a UI control as currently hovered by the pointer.
-## Parameters:
-## - control: hovered UI root.
-## Returns: nothing.
-func _on_ui_pointer_blocker_entered(control: Control) -> void:
-	if control == null or not control.is_visible_in_tree():
-		return
-	_ui_pointer_blockers[control] = true
-	_refresh_ui_pointer_blocking()
-
-
-## Clears hover ownership for a UI control.
-## Parameters:
-## - control: UI root that no longer contains the pointer.
-## Returns: nothing.
-func _on_ui_pointer_blocker_exited(control: Control) -> void:
-	_ui_pointer_blockers.erase(control)
-	_refresh_ui_pointer_blocking()
-
-
-## Clears stale hover ownership when a UI root is hidden.
-## Parameters:
-## - control: UI root whose visibility changed.
-## Returns: nothing.
-func _on_ui_pointer_blocker_visibility_changed(control: Control) -> void:
-	if control == null or control.is_visible_in_tree():
-		return
-	_ui_pointer_blockers.erase(control)
-	_refresh_ui_pointer_blocking()
-
-
-## Emits pointer blocking only when the aggregate UI hover state changes.
-## Parameters: none.
-## Returns: nothing.
-func _refresh_ui_pointer_blocking() -> void:
-	var blocking: bool = false
-	for key: Variant in _ui_pointer_blockers.keys():
-		var control: Control = key as Control
-		if control != null and control.is_visible_in_tree():
-			blocking = true
-			break
-	if _is_ui_pointer_blocking == blocking:
-		return
-	_is_ui_pointer_blocking = blocking
-	EventBus.ui_pointer_blocking_changed.emit(blocking)
 
 
 ## Marks a text control as owning keyboard input.
@@ -608,33 +604,43 @@ func _position_chat_panel() -> void:
 func _position_bottom_selection_panel(panel: Control) -> void:
 	if panel == null:
 		return
-	var panel_height: float = panel.size.y
+	var panel_height: float = maxf(panel.size.y, panel.get_combined_minimum_size().y)
 	panel.size = Vector2.ZERO
 	var natural_width: float = panel.get_combined_minimum_size().x
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
-	panel.size = Vector2(natural_width, panel_height)
 
 	var chat_left: float = viewport_size.x - _BOTTOM_PANEL_MARGIN
 	if _chat_panel != null:
 		chat_left = _chat_panel.global_position.x
 	var available_right: float = chat_left - _BOTTOM_PANEL_CHAT_GAP
-	var available_left: float = _BOTTOM_PANEL_MARGIN
+	var available_left: float = _get_bottom_panel_available_left()
+	var available_width: float = maxf(0.0, available_right - available_left)
+	var panel_width: float = minf(natural_width, available_width)
+	panel.size = Vector2(panel_width, panel_height)
+
 	var available_center_x: float = (available_left + available_right) / 2.0
 	var target_center_x: float = viewport_size.x / 2.0
-	var chat_width: float = _chat_panel.get_combined_minimum_size().x if _chat_panel != null else 0.0
-	if natural_width + _BOTTOM_PANEL_CHAT_GAP + chat_width + (_BOTTOM_PANEL_MARGIN * 2.0) > viewport_size.x:
+	if target_center_x + (panel_width / 2.0) > available_right or target_center_x - (panel_width / 2.0) < available_left:
 		target_center_x = available_center_x
 	target_center_x = clampf(
 		target_center_x,
-		available_left + (natural_width / 2.0),
-		maxf(available_left + (natural_width / 2.0), available_right - (natural_width / 2.0))
+		available_left + (panel_width / 2.0),
+		maxf(available_left + (panel_width / 2.0), available_right - (panel_width / 2.0))
 	)
 
-	var current_pos: Vector2 = panel.global_position
-	var panel_center_x: float = current_pos.x + (natural_width / 2.0)
-	var delta_x: float = target_center_x - panel_center_x
+	panel.global_position = Vector2(
+		target_center_x - (panel_width / 2.0),
+		maxf(0.0, viewport_size.y - panel_height - _BOTTOM_SELECTION_PANEL_BOTTOM_GAP)
+	)
 
-	panel.global_position = Vector2(current_pos.x + delta_x, current_pos.y)
+
+## Returns the left edge available to bottom selection panels.
+## Parameters: none.
+## Returns: viewport x coordinate after the left dock plus reserved gap.
+func _get_bottom_panel_available_left() -> float:
+	if _left_dock_rail != null:
+		return maxf(_BOTTOM_PANEL_MARGIN, _left_dock_rail.get_global_rect().end.x + _BOTTOM_SELECTION_PANEL_DOCK_GAP)
+	return _BOTTOM_PANEL_MARGIN
 
 
 ## Handles province selection — shows FriendlyProvincePanel in bottom bar.

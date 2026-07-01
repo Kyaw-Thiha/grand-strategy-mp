@@ -9,7 +9,8 @@ signal zoom_changed(level: float)
 const BASE_SPEED     := 600.0
 const MAX_SPEED      := 3000.0
 const ACCELERATION   := 1000.0
-const EDGE_SCROLL_BAND := 120.0
+const EDGE_SCROLL_DETECTION_BAND := 180.0
+const EDGE_SCROLL_STRENGTH_BAND := 120.0
 const EDGE_MIN_SPEED := 180.0
 const EDGE_MAX_SPEED := 1400.0
 const EDGE_SPEED_CURVE := 1.35
@@ -199,15 +200,24 @@ func _get_edge_scroll_velocity(viewport_mouse: Vector2, viewport_size: Vector2) 
 ## - viewport_axis_size: viewport size on the axis.
 ## Returns: -1.0 to 1.0, where sign is scroll direction.
 func _get_axis_edge_strength(mouse_axis: float, viewport_axis_size: float) -> float:
-	var band_size: float = minf(EDGE_SCROLL_BAND, viewport_axis_size * 0.5)
-	if band_size <= 0.0:
+	var detection_band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, viewport_axis_size * 0.5)
+	if detection_band_size <= 0.0:
 		return 0.0
+	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, detection_band_size)
 
-	if mouse_axis < band_size:
-		var left_strength: float = clampf((band_size - mouse_axis) / band_size, 0.0, 1.0)
+	if mouse_axis < detection_band_size:
+		var left_strength: float = clampf(
+			(detection_band_size - mouse_axis) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return -pow(left_strength, EDGE_SPEED_CURVE)
-	if mouse_axis > viewport_axis_size - band_size:
-		var right_strength: float = clampf((mouse_axis - (viewport_axis_size - band_size)) / band_size, 0.0, 1.0)
+	if mouse_axis > viewport_axis_size - detection_band_size:
+		var right_strength: float = clampf(
+			(mouse_axis - (viewport_axis_size - detection_band_size)) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return pow(right_strength, EDGE_SPEED_CURVE)
 	return 0.0
 
@@ -218,9 +228,10 @@ func _get_axis_edge_strength(mouse_axis: float, viewport_axis_size: float) -> fl
 ## - viewport_size: visible viewport size in pixels.
 ## Returns: signed vector whose length is the corner scroll strength.
 func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -> Vector2:
-	var band_size: float = minf(EDGE_SCROLL_BAND, minf(viewport_size.x, viewport_size.y) * 0.5)
+	var band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, minf(viewport_size.x, viewport_size.y) * 0.5)
+	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, band_size)
 	var radius: float = minf(EDGE_CORNER_RADIUS, minf(viewport_size.x, viewport_size.y) * 0.5 - band_size)
-	if band_size <= 0.0 or radius <= 0.0:
+	if band_size <= 0.0 or strength_band_size <= 0.0 or radius <= 0.0:
 		return Vector2.ZERO
 
 	var corner_centers: Array[Vector2] = [
@@ -251,8 +262,11 @@ func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -
 			0.0 if corner_center.x < viewport_size.x * 0.5 else viewport_size.x,
 			0.0 if corner_center.y < viewport_size.y * 0.5 else viewport_size.y
 		)
-		var maximum_distance: float = maxf((viewport_corner - corner_center).length() - radius, 1.0)
-		var corner_strength: float = clampf((distance_from_corner_center - radius) / maximum_distance, 0.0, 1.0)
+		var corner_strength: float = clampf(
+			(distance_from_corner_center - radius) / strength_band_size,
+			0.0,
+			1.0
+		)
 		return from_corner_center.normalized() * pow(corner_strength, EDGE_SPEED_CURVE)
 
 	return Vector2.ZERO

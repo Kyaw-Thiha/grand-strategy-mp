@@ -22,15 +22,11 @@ func _ready() -> void:
 	_check(chat_panel.get_node("%MessageInput") is TextEdit, "ChatPanel has TextEdit input")
 	var send_button: Button = chat_panel.get_node("%SendButton") as Button
 	_check(send_button != null and send_button.icon != null, "ChatPanel send button has icon")
-	var chat_toggle_button: Button = chat_panel.get_node("%MaximizeMinimizeToggleButton") as Button
+	var chat_toggle_button: Button = chat_panel.find_child("MaximizeMinimizeToggleButton", true, false) as Button
 	var chat_input: TextEdit = chat_panel.get_node("%MessageInput") as TextEdit
-	var maximized_chat_size: Vector2 = chat_panel.size
-	chat_toggle_button.call("toggle")
-	await get_tree().process_frame
-	await get_tree().process_frame
 	var minimized_chat_size: Vector2 = chat_panel.size
 	var viewport_size: Vector2 = hud.get_viewport().get_visible_rect().size
-	_check(minimized_chat_size.y < maximized_chat_size.y, "minimizing chat reduces assigned height")
+	_check(not bool(chat_panel.get("is_maximized")), "ChatPanel starts minimized")
 	_check(
 		is_equal_approx(chat_panel.global_position.y + minimized_chat_size.y, viewport_size.y - 16.0),
 		"minimized chat stays anchored to bottom margin"
@@ -43,6 +39,8 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_check(bool(chat_panel.get("is_maximized")), "chat keybind maximizes minimized chat")
 	_check(chat_input.has_focus(), "chat keybind focuses message input")
+	var maximized_chat_size: Vector2 = chat_panel.size
+	_check(minimized_chat_size.y < maximized_chat_size.y, "maximizing chat increases assigned height")
 
 	var inside_chat_click: InputEventMouseButton = InputEventMouseButton.new()
 	inside_chat_click.pressed = true
@@ -61,18 +59,45 @@ func _ready() -> void:
 	_check(not chat_input.has_focus(), "clicking outside chat exits chat typing focus")
 	chat_input.release_focus()
 
-	var pointer_blocking_log: Array[bool] = []
 	var text_focus_log: Array[bool] = []
-	EventBus.ui_pointer_blocking_changed.connect(func(blocking: bool) -> void:
-		pointer_blocking_log.append(blocking)
-	)
 	EventBus.ui_text_input_focus_changed.connect(func(focused: bool) -> void:
 		text_focus_log.append(focused)
 	)
-	chat_panel.mouse_entered.emit()
-	_check(pointer_blocking_log == [true], "ChatPanel hover blocks pointer-driven camera input")
-	chat_panel.mouse_exited.emit()
-	_check(pointer_blocking_log == [true, false], "ChatPanel exit restores pointer-driven camera input")
+	var left_dock_rail: Control = hud.get_node("HUDRoot/LeftDockRail") as Control
+	var dock_button_q: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_Q") as Control
+	var dock_button_u: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_U") as Control
+	var dock_button_i: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_I") as Control
+	_check(
+		bool(hud.call("_is_position_over_registered_ui", _center_of_control(left_dock_rail))),
+		"LeftDockRail rect blocks pointer-driven camera input"
+	)
+	_check(
+		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_q))),
+		"nested active dock button rect blocks pointer-driven camera input"
+	)
+	_check(
+		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_u))),
+		"disabled U dock button rect blocks pointer-driven camera input"
+	)
+	_check(
+		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_i))),
+		"disabled I dock button rect blocks pointer-driven camera input"
+	)
+	_check(
+		bool(hud.call("_is_position_over_registered_ui", _center_of_control(chat_panel))),
+		"ChatPanel rect blocks pointer-driven camera input"
+	)
+	_check(
+		not bool(hud.call("_is_position_over_registered_ui", viewport_size * 0.5)),
+		"empty map area does not block pointer-driven camera input"
+	)
+	hud.call("_layout_bottom_hud")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check_bottom_panel_layout(hud, hud.get_node("FriendlyDivisionPanel") as Control, "FriendlyDivisionPanel")
+	_check_bottom_panel_layout(hud, hud.get_node("FriendlyProvincePanel") as Control, "FriendlyProvincePanel")
+	_check_bottom_panel_layout(hud, hud.get_node("FriendlyStackPanel") as Control, "FriendlyStackPanel")
+	_check_bottom_panel_layout(hud, hud.get_node("EnemyDivisionPanel") as Control, "EnemyDivisionPanel")
 	chat_input.grab_focus()
 	await get_tree().process_frame
 	_check(text_focus_log == [true], "Chat input focus blocks keyboard camera input")
@@ -174,6 +199,33 @@ func _check(cond: bool, label: String) -> void:
 	else:
 		_fail_count += 1
 		print("FAIL: ", label)
+
+
+## Returns the center point of a Control in viewport coordinates.
+## Parameters:
+## - control: Control whose visible rect should be sampled.
+## Returns: global center point for pointer-ownership checks.
+func _center_of_control(control: Control) -> Vector2:
+	var global_rect: Rect2 = control.get_global_rect()
+	return global_rect.position + (global_rect.size * 0.5)
+
+
+## Verifies a bottom selection panel stays inside the reserved HUD layout area.
+## Parameters:
+## - hud: GameHUD test instance.
+## - panel: bottom selection panel to inspect.
+## - label: display name for failure output.
+## Returns: nothing.
+func _check_bottom_panel_layout(hud: Node, panel: Control, label: String) -> void:
+	var viewport_size: Vector2 = hud.get_viewport().get_visible_rect().size
+	var left_dock: Control = hud.get_node("HUDRoot/LeftDockRail") as Control
+	var chat_panel: Control = hud.get_node("ChatPanel") as Control
+	var expected_left: float = left_dock.get_global_rect().end.x + 16.0
+	var expected_right: float = chat_panel.global_position.x - 12.0
+	var rect: Rect2 = panel.get_global_rect()
+	_check(rect.position.x >= expected_left - 0.5, "%s stays right of left dock" % label)
+	_check(rect.end.x <= expected_right + 0.5, "%s stays left of chat" % label)
+	_check(is_equal_approx(rect.end.y, viewport_size.y - 28.0), "%s leaves bottom scroll gap" % label)
 
 
 func _report() -> void:

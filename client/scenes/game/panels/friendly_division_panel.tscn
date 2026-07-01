@@ -32,20 +32,20 @@ script = ExtResource("1")
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 8
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
 
 [node name="HBox" type="HBoxContainer" parent="Margin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 16
+theme_override_constants/separation = 12
 
 [node name="IdentityBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(160, 0)
+custom_minimum_size = Vector2(132, 0)
 theme_override_constants/separation = 4
 
 [node name="NameRow" type="HBoxContainer" parent="Margin/HBox/IdentityBlock"]
@@ -77,7 +77,7 @@ text = "STATE · IDLE"
 [node name="BarsBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(180, 0)
 theme_override_constants/separation = 10
 
 [node name="HpGroup" type="VBoxContainer" parent="Margin/HBox/BarsBlock"]
@@ -139,7 +139,7 @@ show_percentage = false
 [node name="CompBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
 alignment = 1
-custom_minimum_size = Vector2(62, 0)
+custom_minimum_size = Vector2(54, 0)
 theme_override_constants/separation = 2
 
 [node name="CompLabel" type="Label" parent="Margin/HBox/CompBlock"]
@@ -157,7 +157,7 @@ mouse_filter = 0
 
 [node name="ActionsBlock" type="VBoxContainer" parent="Margin/HBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(168, 0)
 theme_override_constants/separation = 6
 
 [node name="Row1" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]

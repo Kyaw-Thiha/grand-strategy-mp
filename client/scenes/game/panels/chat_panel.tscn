@@ -23,7 +23,7 @@ corner_radius_bottom_left = 2
 
 [node name="ChatPanel" type="PanelContainer" unique_id=1452576137]
 modulate = Color(1, 1, 1, 0.86)
-custom_minimum_size = Vector2(360, 260)
+custom_minimum_size = Vector2(360, 90)
 theme = ExtResource("2")
 theme_override_styles/panel = SubResource("SB_panel_chat")
 script = ExtResource("1")
