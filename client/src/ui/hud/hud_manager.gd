@@ -26,6 +26,8 @@ var _shortcut_map: Dictionary = {}
 # Previously-open side-docked panel — saved before a FULL_CENTER panel opens, restored on close
 var _previous_side_docked: String = ""
 var _player_input_blocked: bool = false
+var _pause_input_blocked: bool = false
+var _chat_input_blocked: bool = false
 
 # Escape state machine
 var _escape_state_stack: Array[String] = []
@@ -41,6 +43,8 @@ func setup(
 	overlay_dim = dim
 	if not EventBus.pause_menu_blocking_changed.is_connected(_on_pause_menu_blocking_changed):
 		EventBus.pause_menu_blocking_changed.connect(_on_pause_menu_blocking_changed)
+	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
+		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 
 
 func _input(event: InputEvent) -> void:
@@ -95,7 +99,24 @@ func _handle_escape() -> void:
 ## - blocking: true when HUD keyboard shortcuts should be ignored.
 ## Returns: nothing.
 func _on_pause_menu_blocking_changed(blocking: bool) -> void:
-	_player_input_blocked = blocking
+	_pause_input_blocked = blocking
+	_refresh_player_input_blocked()
+
+
+## Responds to chat text input ownership changes.
+## Parameters:
+## - focused: true when chat text entry owns keyboard input.
+## Returns: nothing.
+func _on_chat_input_focus_changed(focused: bool) -> void:
+	_chat_input_blocked = focused
+	_refresh_player_input_blocked()
+
+
+## Recomputes whether HUD keyboard shortcuts should be ignored.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_player_input_blocked() -> void:
+	_player_input_blocked = _pause_input_blocked or _chat_input_blocked
 
 
 func set_move_mode_active(active: bool) -> void:

@@ -12,6 +12,8 @@ var _fail_count := 0
 func _ready() -> void:
 	var hud: Node = preload("res://scenes/game/game_hud.tscn").instantiate()
 	add_child(hud)
+	await get_tree().process_frame
+	await get_tree().process_frame
 	var mgr: HUDManagerScript = hud.get_node("HUDManager")
 	var chat_panel: Control = hud.get_node("ChatPanel") as Control
 	_check(chat_panel != null, "GameHUD includes ChatPanel")
@@ -20,6 +22,44 @@ func _ready() -> void:
 	_check(chat_panel.get_node("%MessageInput") is TextEdit, "ChatPanel has TextEdit input")
 	var send_button: Button = chat_panel.get_node("%SendButton") as Button
 	_check(send_button != null and send_button.icon != null, "ChatPanel send button has icon")
+	var chat_toggle_button: Button = chat_panel.get_node("%MaximizeMinimizeToggleButton") as Button
+	var chat_input: TextEdit = chat_panel.get_node("%MessageInput") as TextEdit
+	var maximized_chat_size: Vector2 = chat_panel.size
+	chat_toggle_button.call("toggle")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var minimized_chat_size: Vector2 = chat_panel.size
+	var viewport_size: Vector2 = hud.get_viewport().get_visible_rect().size
+	_check(minimized_chat_size.y < maximized_chat_size.y, "minimizing chat reduces assigned height")
+	_check(
+		is_equal_approx(chat_panel.global_position.y + minimized_chat_size.y, viewport_size.y - 16.0),
+		"minimized chat stays anchored to bottom margin"
+	)
+	var chat_key: InputEventKey = InputEventKey.new()
+	chat_key.pressed = true
+	chat_key.physical_keycode = KEY_ENTER
+	hud._input(chat_key)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check(bool(chat_panel.get("is_maximized")), "chat keybind maximizes minimized chat")
+	_check(chat_input.has_focus(), "chat keybind focuses message input")
+
+	var inside_chat_click: InputEventMouseButton = InputEventMouseButton.new()
+	inside_chat_click.pressed = true
+	inside_chat_click.button_index = MOUSE_BUTTON_LEFT
+	inside_chat_click.position = chat_panel.global_position + Vector2(8.0, 8.0)
+	hud._input(inside_chat_click)
+	await get_tree().process_frame
+	_check(chat_input.has_focus(), "clicking inside chat keeps chat typing focus")
+
+	var outside_chat_click: InputEventMouseButton = InputEventMouseButton.new()
+	outside_chat_click.pressed = true
+	outside_chat_click.button_index = MOUSE_BUTTON_LEFT
+	outside_chat_click.position = Vector2(4.0, 4.0)
+	hud._input(outside_chat_click)
+	await get_tree().process_frame
+	_check(not chat_input.has_focus(), "clicking outside chat exits chat typing focus")
+	chat_input.release_focus()
 
 	var opened_log: Array[String] = []
 	var closed_log: Array[String] = []
@@ -33,12 +73,27 @@ func _ready() -> void:
 	mgr.register_panel("mock_a", mock_a, HUDManagerScript.PlacementMode.SIDE_DOCKED)
 	mgr.register_panel("mock_b", mock_b, HUDManagerScript.PlacementMode.FULL_CENTER)
 	mgr.register_panel("mock_c", mock_c, HUDManagerScript.PlacementMode.SIDE_DOCKED)
+	mgr.set_panel_shortcut("mock_a", KEY_Z)
 
 	# --- initial state ---
 	_check(not mgr.is_panel_open("mock_a"), "mock_a initially closed")
 	_check(not mgr.is_panel_open("mock_b"), "mock_b initially closed")
 	_check(not mgr.is_panel_open("mock_c"), "mock_c initially closed")
 	_check(mgr.get_open_panel() == "", "get_open_panel empty initially")
+
+	# --- chat input blocks HUD shortcuts ---
+	EventBus.chat_input_focus_changed.emit(true)
+	var shortcut_key: InputEventKey = InputEventKey.new()
+	shortcut_key.pressed = true
+	shortcut_key.physical_keycode = KEY_Z
+	mgr._input(shortcut_key)
+	_check(not mgr.is_panel_open("mock_a"), "chat focus blocks HUD panel shortcut")
+	EventBus.chat_input_focus_changed.emit(false)
+	mgr._input(shortcut_key)
+	_check(mgr.is_panel_open("mock_a"), "HUD panel shortcut works after chat blur")
+	mgr.hide_panel("mock_a")
+	opened_log.clear()
+	closed_log.clear()
 
 	# --- show_panel ---
 	mgr.show_panel("mock_a")

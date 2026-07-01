@@ -199,12 +199,49 @@ func _ready() -> void:
 
 	# Center bottom panels horizontally and on resize
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
+	if _chat_panel.has_signal("layout_changed"):
+		_chat_panel.connect("layout_changed", _on_chat_panel_layout_changed)
 	_layout_bottom_hud()
 
 
 func _make_dock_toggle(panel_name: String) -> Callable:
 	return func() -> void:
 		hud_manager.toggle_panel(panel_name)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		_close_chat_input_when_clicking_outside(event as InputEventMouseButton)
+		return
+	if not event is InputEventKey:
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	if _chat_panel != null and _chat_panel.has_method("is_message_input_focused"):
+		if _chat_panel.is_message_input_focused():
+			return
+	if event.is_action_pressed("chat_team", false, true):
+		if _chat_panel != null and _chat_panel.has_method("open_chat_input"):
+			_chat_panel.open_chat_input()
+			get_viewport().set_input_as_handled()
+
+
+## Releases chat text focus when the player clicks outside the chat panel.
+## Parameters:
+## - mouse_event: viewport mouse button input.
+## Returns: nothing.
+func _close_chat_input_when_clicking_outside(mouse_event: InputEventMouseButton) -> void:
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if _chat_panel == null or not _chat_panel.has_method("is_message_input_focused"):
+		return
+	if not _chat_panel.is_message_input_focused():
+		return
+	if _chat_panel.get_global_rect().has_point(mouse_event.position):
+		return
+	if _chat_panel.has_method("close_chat_input"):
+		_chat_panel.close_chat_input()
 
 
 ## Connects a side drawer close signal to HUDManager so drawer state stays centralized.
@@ -370,6 +407,13 @@ func _on_division_selected(div_id: String) -> void:
 
 ## Recenter all bottom panels when the viewport is resized.
 func _on_viewport_size_changed() -> void:
+	_layout_bottom_hud()
+
+
+## Relays chat size changes back into the bottom HUD layout.
+## Parameters: none.
+## Returns: nothing.
+func _on_chat_panel_layout_changed() -> void:
 	_layout_bottom_hud()
 
 

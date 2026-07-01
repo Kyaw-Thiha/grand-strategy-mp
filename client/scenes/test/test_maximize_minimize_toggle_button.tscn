@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/test/test_maximize_minimize_toggle_button.gd" id="1"]
+
+[node name="TestRoot" type="Node"]
+script = ExtResource("1")
