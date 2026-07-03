@@ -192,7 +192,7 @@ stretch_mode = 5
 [node name="SessionTimer" type="Label" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=436346241]
 unique_name_in_owner = true
 layout_mode = 2
-text = "SESSION --:--:--"
+text = "00:00:00"
 vertical_alignment = 1
 
 [node name="RightSep" type="VSeparator" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=2051491216]

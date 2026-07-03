@@ -15,6 +15,10 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var mgr: HUDManagerScript = hud.get_node("HUDManager")
+	var session_timer: Label = hud.get_node("HUDRoot/TopBar/HBox/RightBlock/SessionTimer") as Label
+	_check(session_timer.text == "00:00:00", "SessionTimer starts at 00:00:00")
+	hud._process(1.0)
+	_check(session_timer.text == "00:00:01", "SessionTimer advances in hh:mm:ss format")
 	var chat_panel: Control = hud.get_node("ChatPanel") as Control
 	_check(chat_panel != null, "GameHUD includes ChatPanel")
 	_check(chat_panel.theme != null, "ChatPanel has HUD theme")
