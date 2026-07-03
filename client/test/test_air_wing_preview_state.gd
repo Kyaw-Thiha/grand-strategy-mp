@@ -28,6 +28,21 @@ func _ready() -> void:
 		"home_airbase_province_id": "berlin",
 		"weapon_ready": true,
 	}
+	GameState.air_wings["test-wing-2"] = {
+		"wing_id": "test-wing-2",
+		"nation_id": "germany",
+		"aircraft_type": "fighter",
+		"count": 10,
+		"combat_readiness": 1.0,
+		"position_lng": 15.0,
+		"position_lat": 54.0,
+		"heading_deg": 0.0,
+		"lifecycle_state": "transit",
+		"mission": "interception",
+		"target_id": "",
+		"home_airbase_province_id": "berlin",
+		"weapon_ready": true,
+	}
 
 	var air_layer: Node2D = Node2D.new()
 	var map_loader: Node = StubMapLoader.new()
@@ -66,21 +81,34 @@ func _ready() -> void:
 	_assert_eq(air_system.get("_pending_milestones").size(), 1, "shift-right-click must append a pending milestone")
 	_assert_eq(air_system.get("_pending_chain").size(), 1, "shift-right-click must extend the pending chain")
 	_assert_true(air_system.get("_shift_chain_started"), "shift-chain flag must turn on after appending milestones")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_milestones").size(), 1, "overlay must show one ghost marker")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_chain").size(), 1, "overlay must show one route point")
 
 	var second_right_click: InputEventMouseButton = _make_right_click_event(true)
 	_assert_true(air_system.handle_mouse_input(second_right_click, Vector2(20.0, 20.0)), "second shift-right-click must be handled")
 	_assert_eq(air_system.get("_pending_milestones").size(), 2, "shift-right-click must append again")
 	_assert_eq(air_system.get("_pending_chain").size(), 2, "shift-right-click must keep the chain in sync")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_milestones").size(), 2, "overlay must show two ghost markers")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_chain").size(), 2, "overlay must show two route points")
 
 	var plain_right_click: InputEventMouseButton = _make_right_click_event(false)
 	_assert_true(air_system.handle_mouse_input(plain_right_click, Vector2(20.0, 20.0)), "right-click must be handled when pending state exists")
 	_assert_eq(air_system.get("_pending_milestones").size(), 1, "right-click must remove the most recent pending milestone")
 	_assert_eq(air_system.get("_pending_chain").size(), 1, "right-click must shrink the pending chain")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_milestones").size(), 1, "overlay must remove the last ghost marker")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_chain").size(), 1, "overlay must shrink with the chain")
 
-	_assert_true(air_system.handle_mouse_input(plain_right_click, Vector2(20.0, 20.0)), "right-click must clear the last pending milestone")
+	_assert_true(air_system.handle_mouse_input(plain_right_click, Vector2(10.0, 10.0)), "right-click near the last ghost must clear the last pending milestone")
 	_assert_eq(air_system.get("_pending_milestones"), [], "clear must empty milestones")
 	_assert_eq(air_system.get("_pending_chain"), [], "clear must empty pending chain")
 	_assert_true(not air_system.get("_shift_chain_started"), "clear must reset shift-chain flag")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_milestones").size(), 0, "overlay must clear ghost markers")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_chain").size(), 2, "overlay must preserve the cached wing route after clearing the edit chain")
+
+	air_system.call("_select", "test-wing-2")
+	_assert_eq(air_system.get("_pending_milestones"), [], "switching wings must clear the previous preview state")
+	_assert_true(not air_system.get("_shift_chain_started"), "switching wings must reset the shift-chain flag")
+	_assert_eq(air_system.get("_pending_route_overlay").get("_milestones").size(), 0, "switching wings must clear ghost markers")
 
 	air_system.call("cleanup")
 	air_system.free()

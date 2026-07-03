@@ -107,15 +107,14 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 	if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
 		if _selected_wing_id.is_empty():
 			return false
-		var milestone_id: String = "%0.3f,%0.3f" % [world_pos.x, world_pos.y]
 		if mouse_button.shift_pressed:
-			_append_pending_milestone(milestone_id)
+			_append_pending_milestone(_encode_pending_point(world_pos))
 			return true
-		if _pending_milestones.size() > 1:
+		if _pending_milestones.is_empty():
+			return false
+		var last_point: Vector2 = _get_last_pending_point()
+		if last_point != Vector2.INF and world_pos.distance_to(last_point) <= HIT_THRESHOLD_PX * 2.0:
 			_remove_last_pending_milestone()
-			return true
-		if _pending_milestones.size() == 1:
-			_clear_pending()
 			return true
 		return false
 
@@ -158,6 +157,7 @@ func _select(wing_id: String) -> void:
 func _deselect() -> void:
 	if _selected_wing_id.is_empty():
 		return
+	_clear_pending()
 	var icon = _icons.get(_selected_wing_id)
 	if icon != null:
 		icon.set_selected(false)
@@ -188,6 +188,9 @@ func _remove_last_pending_milestone() -> void:
 	if _pending_milestones.is_empty():
 		return
 	_pending_milestones.pop_back()
+	if _pending_milestones.is_empty():
+		_clear_pending()
+		return
 	if not _pending_chain.is_empty():
 		_pending_chain.pop_back()
 	_update_ghost()
@@ -226,13 +229,12 @@ func _update_ghost() -> void:
 	var icon: Node2D = _icons.get(_selected_wing_id) as Node2D
 	_pending_route_overlay.start_node = icon
 
-	var route_points: Array[Vector2] = _get_selected_wing_path_points()
+	var route_points: Array[Vector2] = _get_preview_route_points()
 	if route_points.is_empty():
 		_pending_route_overlay.clear()
 		return
 
-	var empty_milestones: Array[Vector2] = []
-	_pending_route_overlay.set_path(route_points, empty_milestones, _get_selected_wing_color())
+	_pending_route_overlay.set_path(route_points, _get_pending_milestone_positions(), _get_selected_wing_color())
 
 
 func _get_selected_wing_color() -> Color:
@@ -268,3 +270,48 @@ func _get_selected_wing_path_points() -> Array[Vector2]:
 		if segment.has("end_lng") and segment.has("end_lat"):
 			points.append(_map_loader.project_lng_lat(float(segment.get("end_lng", 0.0)), float(segment.get("end_lat", 0.0))))
 	return points
+
+
+func _get_preview_route_points() -> Array[Vector2]:
+	if not _pending_chain.is_empty():
+		return _get_pending_chain_positions()
+	return _get_selected_wing_path_points()
+
+
+func _get_pending_chain_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	for milestone_id: String in _pending_chain:
+		var position: Vector2 = _decode_pending_point(milestone_id)
+		if position != Vector2.INF:
+			positions.append(position)
+	return positions
+
+
+func _get_pending_milestone_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	for milestone_id: String in _pending_milestones:
+		var position: Vector2 = _decode_pending_point(milestone_id)
+		if position != Vector2.INF:
+			positions.append(position)
+	return positions
+
+
+func _get_last_pending_point() -> Vector2:
+	if _pending_milestones.is_empty():
+		return Vector2.INF
+	return _decode_pending_point(_pending_milestones.back())
+
+
+func _encode_pending_point(world_pos: Vector2) -> String:
+	return "%0.3f,%0.3f" % [world_pos.x, world_pos.y]
+
+
+func _decode_pending_point(point_id: String) -> Vector2:
+	var parts: PackedStringArray = point_id.split(",")
+	if parts.size() != 2:
+		return Vector2.INF
+	var x_text: String = parts[0].strip_edges()
+	var y_text: String = parts[1].strip_edges()
+	if x_text.is_empty() or y_text.is_empty():
+		return Vector2.INF
+	return Vector2(x_text.to_float(), y_text.to_float())
