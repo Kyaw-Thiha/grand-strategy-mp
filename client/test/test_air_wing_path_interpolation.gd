@@ -38,6 +38,7 @@ func _ready() -> void:
 			"path_elapsed_ms": 25,
 		}]
 	})
+	air_system.call("_select", "test-wing-1")
 
 	_assert_true(air_system.get("_icons").has("test-wing-1"), "air wing icon must be created")
 
@@ -68,9 +69,11 @@ func _ready() -> void:
 	var path_b: Dictionary = _make_straight_path("test-wing-1", "path-2", Vector2(0.0, 0.0), Vector2(0.0, 10.0))
 	EventBus.air_wing_path.emit(path_b)
 	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 2.5), "newer path generation must replace the visible position")
+	_assert_eq(air_system.call("_get_selected_wing_path_points"), [Vector2(0.0, 0.0), Vector2(0.0, 10.0)], "newer path generation must replace the visible preview route")
 
 	EventBus.air_wing_path.emit(path_a)
 	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 2.5), "stale path_gen_id must not overwrite the newer path")
+	_assert_eq(air_system.call("_get_selected_wing_path_points"), [Vector2(0.0, 0.0), Vector2(0.0, 10.0)], "stale path_gen_id must not overwrite the visible preview route")
 
 	if _failed:
 		print("TESTS FAILED - see errors above")
@@ -122,6 +125,13 @@ func _assert_true(value: bool, message: String) -> void:
 		return
 	_failed = true
 	push_error("ASSERT TRUE FAILED: " + message)
+
+
+func _assert_eq(actual: Variant, expected: Variant, message: String) -> void:
+	if actual == expected:
+		return
+	_failed = true
+	push_error("ASSERT EQ FAILED: %s actual=%s expected=%s" % [message, str(actual), str(expected)])
 
 
 func _assert_vec2_eq(actual: Vector2, expected: Vector2, message: String) -> void:

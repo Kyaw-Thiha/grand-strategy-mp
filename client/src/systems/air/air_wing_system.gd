@@ -164,6 +164,9 @@ func _on_air_wing_path(path_data: Dictionary) -> void:
 	var path_gen_id: String = path_data.get("path_gen_id", "")
 	if wing_id.is_empty():
 		return
+	var current_path_gen_id: String = str(GameState.get_air_wing(wing_id).get("path_gen_id", ""))
+	if not current_path_gen_id.is_empty() and not path_gen_id.is_empty() and path_gen_id != current_path_gen_id:
+		return
 	_wing_path_by_id[wing_id] = path_data.duplicate()
 	if not path_gen_id.is_empty():
 		if not _wing_path_generations_by_id.has(wing_id):
