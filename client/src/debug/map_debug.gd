@@ -18,6 +18,8 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _military_system: Node  = $MilitarySystem
 @onready var _division_layer: Node2D = $DivisionLayer
 @onready var _vision_system: Node    = $VisionSystem
+@onready var _air_wing_system: Node   = $AirWingSystem
+@onready var _air_wing_layer: Node2D  = $AirWingLayer
 @onready var _pause_menu = $PauseMenu
 @onready var _game_hud   = $GameHUD
 
@@ -68,6 +70,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			event_position = (event as InputEventMouseMotion).position
 		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
+		if _air_wing_system.handle_mouse_input(event, world_pos):
+			get_viewport().set_input_as_handled()
+			return
 		if _military_system.handle_mouse_input(event, world_pos):
 			get_viewport().set_input_as_handled()
 
@@ -110,9 +115,12 @@ func _on_map_loaded(province_count: int) -> void:
 
 	# Wire MilitarySystem — inject stub divisions for visual testing
 	_military_system.setup(_map_loader, _division_layer, _vision_system)
+	_air_wing_system.setup(_map_loader, _air_wing_layer)
 	#frontline_overlay.set_icons_ref(_military_system.get_icons())
 	if GameState.divisions.is_empty():
 		_inject_debug_divisions()
+	if GameState.air_wings.is_empty():
+		_inject_debug_air_wings()
 
 	# Setup VisionSystem after debug state is injected so first refresh sees correct data
 	_vision_system.setup(_map_loader)
@@ -220,6 +228,42 @@ func _inject_debug_divisions() -> void:
 	if AuthManager.user_id.is_empty():
 		AuthManager.user_id = "debug_player"
 	GameState.nations["germany"] = {"player_id": "debug_player", "is_ready": true}
+
+
+func _inject_debug_air_wings() -> void:
+	var aircraft_types: Array[String] = [
+		"fighter", "tactical_bomber", "cas_plane", "strategic_bomber", "recon_plane"
+	]
+	var readiness_values: Array[float] = [1.0, 0.8, 0.6, 0.35, 0.15]
+	var capitals: Array[Dictionary] = [
+		{ "nation_id": "germany",        "lng": 13.385771,  "lat": 52.483566 },
+		{ "nation_id": "france",         "lng": 2.335453,   "lat": 48.896725 },
+		{ "nation_id": "united_kingdom", "lng": -0.209940,  "lat": 51.538663 },
+		{ "nation_id": "italy",          "lng": 12.443317,  "lat": 41.979254 },
+		{ "nation_id": "spain",          "lng": -3.675196,  "lat": 40.373968 },
+		{ "nation_id": "algeria",        "lng": 3.080039,   "lat": 36.747008 },
+	]
+	for cap: Dictionary in capitals:
+		var nation_id: String = cap["nation_id"]
+		for i: int in range(5):
+			var wing_id: String = "%s_wing_%02d" % [nation_id, i + 1]
+			var wing_data: Dictionary = {
+				"wing_id":                  wing_id,
+				"nation_id":                nation_id,
+				"aircraft_type":            aircraft_types[i],
+				"count":                    10,
+				"combat_readiness":         readiness_values[i],
+				"position_lng":             float(cap["lng"]) + i * 0.18,
+				"position_lat":             float(cap["lat"]) + i * 0.06,
+				"heading_deg":              0.0,
+				"lifecycle_state":          "transit",
+				"mission":                  "interception",
+				"target_id":                "",
+				"home_airbase_province_id": "",
+				"weapon_ready":             true,
+			}
+			GameState.air_wings[wing_id] = wing_data.duplicate()
+			EventBus.air_wing_added.emit(wing_id)
 
 
 # ── thin data source wrapper ──────────────────────────────────────────────────

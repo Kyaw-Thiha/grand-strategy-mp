@@ -148,6 +148,32 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (process.env.DEV_MODE === "true") {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
       this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
+      this.onMessage("SPAWN_WING", (_client, msg: {
+        wing_id: string;
+        nation_id: string;
+        aircraft_type?: string;
+        count?: number;
+        position_lng?: number;
+        position_lat?: number;
+        heading_deg?: number;
+        lifecycle_state?: string;
+        mission?: string;
+        home_airbase_province_id?: string;
+      }) => {
+        const wing = new AirWingState();
+        wing.wing_id   = msg.wing_id;
+        wing.nation_id = msg.nation_id;
+        if (msg.aircraft_type            !== undefined) wing.aircraft_type            = msg.aircraft_type;
+        if (msg.count                    !== undefined) wing.count                    = msg.count;
+        if (msg.position_lng             !== undefined) wing.position_lng             = msg.position_lng;
+        if (msg.position_lat             !== undefined) wing.position_lat             = msg.position_lat;
+        if (msg.heading_deg              !== undefined) wing.heading_deg              = msg.heading_deg;
+        if (msg.lifecycle_state          !== undefined) wing.lifecycle_state          = msg.lifecycle_state;
+        if (msg.mission                  !== undefined) wing.mission                  = msg.mission;
+        if (msg.home_airbase_province_id !== undefined) wing.home_airbase_province_id = msg.home_airbase_province_id;
+        this.state.air_wings.set(msg.wing_id, wing);
+        this.broadcast("AIR_WING_UPDATES", { wings: [this._serializeWing(wing)] });
+      });
     }
     if (process.env.NODE_ENV === "test") {
       this.onMessage("SPAWN_DIVISION", (_client, msg: {
@@ -226,6 +252,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.mission                    !== undefined) wing.mission                    = msg.mission;
         if (msg.home_airbase_province_id   !== undefined) wing.home_airbase_province_id   = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
+        this.broadcast("AIR_WING_UPDATES", { wings: [this._serializeWing(wing)] });
       });
     }
 
@@ -1293,6 +1320,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           stealthed: c.stealthed,
         })),
       },
+    };
+  }
+
+  private _serializeWing(wing: AirWingState): Record<string, unknown> {
+    return {
+      wing_id:                  wing.wing_id,
+      nation_id:                wing.nation_id,
+      aircraft_type:            wing.aircraft_type,
+      count:                    wing.count,
+      combat_readiness:         wing.combat_readiness,
+      position_lng:             wing.position_lng,
+      position_lat:             wing.position_lat,
+      heading_deg:              wing.heading_deg,
+      lifecycle_state:          wing.lifecycle_state,
+      mission:                  wing.mission,
+      target_id:                wing.target_id,
+      home_airbase_province_id: wing.home_airbase_province_id,
+      weapon_ready:             wing.weapon_ready,
     };
   }
 

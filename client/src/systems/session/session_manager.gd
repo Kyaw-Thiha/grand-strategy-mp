@@ -123,3 +123,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			EventBus.notification_requested.emit(
 				"Move rejected: " + data.get("reason", "unknown"), "error"
 			)
+
+		"AIR_WING_UPDATES":
+			GameState._apply_air_wing_updates(data)
+
+		"AIR_WING_DESTROYED":
+			GameState._apply_air_wing_destroyed(data)

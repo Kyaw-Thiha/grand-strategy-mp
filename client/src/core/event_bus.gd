@@ -79,3 +79,10 @@ signal division_builder_closed()
 # ── Division Template Viewer ─────────────────────────────────────────────
 signal division_template_viewer_open_requested(division_id: String)
 signal division_template_viewer_closed()
+
+# ── Air Wings ─────────────────────────────────────────────────────────────────
+signal air_wing_added(wing_id: String)
+signal air_wing_updated(wing_id: String)
+signal air_wing_removed(wing_id: String)
+signal air_wing_selected(wing_id: String)
+signal air_wing_deselected()

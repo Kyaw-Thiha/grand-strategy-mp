@@ -28,6 +28,10 @@ var relations: Dictionary = {}
 var proposals: Dictionary = {}
 # stacks: { stack_id → Array[division_id] ordered by stack_position }
 var stacks: Dictionary = {}
+# air_wings: { wing_id → {wing_id, nation_id, aircraft_type, count, combat_readiness,
+#   position_lng, position_lat, heading_deg, lifecycle_state, mission,
+#   target_id, home_airbase_province_id, weapon_ready} }
+var air_wings: Dictionary = {}
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -255,3 +259,34 @@ func get_my_nation_id() -> String:
 func is_host() -> bool:
 	# Match host_session_id against the session the local client holds in NetManager
 	return NetManager.session_id == host_session_id
+
+# ── Air wing accessors ────────────────────────────────────────────────────────
+
+func get_air_wing(wing_id: String) -> Dictionary:
+	return air_wings.get(wing_id, {})
+
+func get_air_wings_for_nation(nation_id: String) -> Array:
+	var result: Array = []
+	for w in air_wings.values():
+		if w.get("nation_id", "") == nation_id:
+			result.append(w)
+	return result
+
+func _apply_air_wing_updates(data: Dictionary) -> void:
+	for wing_data in data.get("wings", []):
+		var id: String = wing_data.get("wing_id", "")
+		if id.is_empty():
+			continue
+		var is_new: bool = not air_wings.has(id)
+		air_wings[id] = wing_data
+		if is_new:
+			EventBus.air_wing_added.emit(id)
+		else:
+			EventBus.air_wing_updated.emit(id)
+
+func _apply_air_wing_destroyed(data: Dictionary) -> void:
+	var id: String = data.get("wing_id", "")
+	if id.is_empty() or not air_wings.has(id):
+		return
+	air_wings.erase(id)
+	EventBus.air_wing_removed.emit(id)
