@@ -10,6 +10,7 @@ var _fail_count := 0
 
 
 func _ready() -> void:
+	_setup_mock_diplomacy_state()
 	var hud: Node = preload("res://scenes/game/game_hud.tscn").instantiate()
 	add_child(hud)
 	await get_tree().process_frame
@@ -26,6 +27,65 @@ func _ready() -> void:
 	_check(chat_panel.get_node("%MessageInput") is TextEdit, "ChatPanel has TextEdit input")
 	var send_button: Button = chat_panel.get_node("%SendButton") as Button
 	_check(send_button != null and send_button.icon != null, "ChatPanel send button has icon")
+	var diplomacy_panel: Control = hud.find_child("DiplomacyPanel", true, false) as Control
+	_check(_has_label_text(diplomacy_panel, "ALLIANCE 2 / 5"), "Diplomacy Nations page shows alliance section")
+	_check(_has_label_text(diplomacy_panel, "ENEMY"), "Diplomacy Nations page shows enemy section")
+	_check(_has_button_text(diplomacy_panel, "Kick"), "Diplomacy Nations page has Kick action")
+	_check(_has_button_text(diplomacy_panel, "Peace"), "Diplomacy Nations page has Peace action")
+	_check(_has_label_text(diplomacy_panel, "MY ALLIANCE 2 / 5"), "Diplomacy Alliance page shows my alliance")
+	var submitted_diplomacy_actions: Array[String] = []
+	DiplomacySystem.action_submitted.connect(func(action: String, target_nation_id: String) -> void:
+		submitted_diplomacy_actions.append(action + ":" + target_nation_id)
+	)
+	var ally_button: Button = _find_button_text(diplomacy_panel, "Ally")
+	_check(ally_button != null, "Diplomacy panel has Ally action")
+	if ally_button != null:
+		ally_button.pressed.emit()
+		_check(
+			not submitted_diplomacy_actions.is_empty()
+				and submitted_diplomacy_actions[0].begins_with("invite:"),
+			"Diplomacy Ally action submits invite command through DiplomacySystem"
+		)
+	var notification_feed: VBoxContainer = hud.get_node("HUDRoot/ToastContainer") as VBoxContainer
+	var submitted_vote_responses: Array[String] = []
+	DiplomacySystem.vote_response_submitted.connect(func(vote_id: String, accepted: bool) -> void:
+		submitted_vote_responses.append(vote_id + ":" + str(accepted))
+	)
+	EventBus.interactive_notification_requested.emit({
+		"notification_id": "test_vote_notice",
+		"vote_id": "test_vote",
+		"notification_type": "diplomacy",
+		"message": "Vote to invite France into your alliance.",
+		"requires_response": true,
+		"deadline_at": Time.get_unix_time_from_system() * 1000.0 + 15000.0,
+		"duration_ms": 15000,
+		"yes_label": "Yes",
+		"no_label": "No",
+		"voters": [
+			{"nation_id": "germany", "status": "pending"},
+			{"nation_id": "france", "status": "pending"},
+		],
+	})
+	await get_tree().process_frame
+	_check(_has_label_text(notification_feed, "Vote to invite France into your alliance."), "Interactive diplomacy notification shows message")
+	_check(_has_button_text(notification_feed, "Yes"), "Interactive diplomacy notification has Yes button")
+	_check(_has_button_text(notification_feed, "No"), "Interactive diplomacy notification has No button")
+	_check(_count_vote_rectangles(notification_feed) == 2, "Interactive diplomacy notification shows voter rectangles")
+	var yes_vote_button: Button = _find_button_text(notification_feed, "Yes")
+	if yes_vote_button != null:
+		yes_vote_button.pressed.emit()
+		_check(submitted_vote_responses == ["test_vote:true"], "Interactive Yes button submits vote response")
+	EventBus.interactive_notification_updated.emit({
+		"notification_id": "test_vote_notice",
+		"requires_response": false,
+		"voters": [
+			{"nation_id": "germany", "status": "yes"},
+			{"nation_id": "france", "status": "no"},
+		],
+	})
+	await get_tree().process_frame
+	_check(_has_vote_rectangle_color(notification_feed, Color(0.28, 0.72, 0.36, 1.0)), "Vote update colors yes rectangle green")
+	_check(_has_vote_rectangle_color(notification_feed, Color(0.86, 0.26, 0.22, 1.0)), "Vote update colors no rectangle red")
 	var chat_toggle_button: Button = chat_panel.find_child("MaximizeMinimizeToggleButton", true, false) as Button
 	var chat_input: TextEdit = chat_panel.get_node("%MessageInput") as TextEdit
 	var minimized_chat_size: Vector2 = chat_panel.size
@@ -45,6 +105,10 @@ func _ready() -> void:
 	_check(chat_input.has_focus(), "chat keybind focuses message input")
 	var maximized_chat_size: Vector2 = chat_panel.size
 	_check(minimized_chat_size.y < maximized_chat_size.y, "maximizing chat increases assigned height")
+	hud.call("_layout_bottom_hud")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check(_toast_is_above_chat(hud), "ToastContainer appears above maximized chat")
 
 	var inside_chat_click: InputEventMouseButton = InputEventMouseButton.new()
 	inside_chat_click.pressed = true
@@ -102,6 +166,25 @@ func _ready() -> void:
 	_check_bottom_panel_layout(hud, hud.get_node("FriendlyProvincePanel") as Control, "FriendlyProvincePanel")
 	_check_bottom_panel_layout(hud, hud.get_node("FriendlyStackPanel") as Control, "FriendlyStackPanel")
 	_check_bottom_panel_layout(hud, hud.get_node("EnemyDivisionPanel") as Control, "EnemyDivisionPanel")
+	var friendly_division_panel: Control = hud.get_node("FriendlyDivisionPanel") as Control
+	friendly_division_panel.visible = true
+	mgr.show_panel("military")
+	await get_tree().process_frame
+	_check(not friendly_division_panel.visible, "Opening side panel closes bottom selection panel")
+	GameState.divisions = {
+		"test_div": {
+			"nation_id": "germany",
+			"division_type": "infantry",
+			"hp": 100.0,
+			"max_hp": 100.0,
+			"suppression": 0.0,
+			"combat_state": "idle",
+		},
+	}
+	EventBus.division_selected.emit("test_div")
+	await get_tree().process_frame
+	_check(not _any_bottom_panel_visible(hud), "Division selection does not reopen bottom panel while side panel is open")
+	mgr.close_all()
 	chat_input.grab_focus()
 	await get_tree().process_frame
 	_check(text_focus_log == [true], "Chat input focus blocks keyboard camera input")
@@ -205,6 +288,122 @@ func _check(cond: bool, label: String) -> void:
 		print("FAIL: ", label)
 
 
+## Seeds GameState with a deterministic relation snapshot for HUD tests.
+## Parameters: none.
+## Returns: nothing.
+func _setup_mock_diplomacy_state() -> void:
+	AuthManager.user_id = "user-a"
+	GameState.players = {
+		"session-a": {"user_id": "user-a"},
+	}
+	GameState.nations = {
+		"germany": {"player_id": "user-a", "is_ready": true},
+		"france": {"player_id": "user-b", "is_ready": true},
+		"spain": {"player_id": "user-c", "is_ready": true},
+		"italy": {"player_id": "", "is_ready": false},
+		"algeria": {"player_id": "", "is_ready": false},
+		"united_kingdom": {"player_id": "", "is_ready": false},
+	}
+	GameState.relations = {
+		"germany:france": {"stance": "alliance"},
+		"france:germany": {"stance": "alliance"},
+		"germany:spain": {"stance": "war"},
+		"spain:germany": {"stance": "war"},
+	}
+
+
+## Returns true when any descendant Label has the given text.
+## Parameters:
+## - root: node subtree to inspect.
+## - text: exact label text to find.
+## Returns: whether the text exists in the subtree.
+func _has_label_text(root: Node, text: String) -> bool:
+	return _find_label_text(root, text) != null
+
+
+## Finds the first descendant Label with matching text.
+## Parameters:
+## - root: node subtree to inspect.
+## - text: exact label text to find.
+## Returns: matching Label, or null.
+func _find_label_text(root: Node, text: String) -> Label:
+	if root == null:
+		return null
+	if root is Label and (root as Label).text == text:
+		return root as Label
+	for child: Node in root.get_children():
+		var found: Label = _find_label_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
+## Returns true when any descendant Button has the given text.
+## Parameters:
+## - root: node subtree to inspect.
+## - text: exact button text to find.
+## Returns: whether the button exists in the subtree.
+func _has_button_text(root: Node, text: String) -> bool:
+	return _find_button_text(root, text) != null
+
+
+## Finds the first descendant Button with matching text.
+## Parameters:
+## - root: node subtree to inspect.
+## - text: exact button text to find.
+## Returns: matching Button, or null.
+func _find_button_text(root: Node, text: String) -> Button:
+	if root == null:
+		return null
+	if root is Button and (root as Button).text == text:
+		return root as Button
+	for child: Node in root.get_children():
+		var found: Button = _find_button_text(child, text)
+		if found != null:
+			return found
+	return null
+
+
+## Counts vote indicator TextureRects under notification vote rows.
+## Parameters:
+## - root: node subtree to inspect.
+## Returns: number of vote rectangles found.
+func _count_vote_rectangles(root: Node) -> int:
+	var count: int = 0
+	if root != null and root.name == "VoteRectangles":
+		for child: Node in root.get_children():
+			if child is TextureRect:
+				count += 1
+	if root == null:
+		return count
+	for child: Node in root.get_children():
+		count += _count_vote_rectangles(child)
+	return count
+
+
+## Returns whether any vote indicator TextureRect uses the expected color.
+## Parameters:
+## - root: node subtree to inspect.
+## - expected_color: exact modulate color to find.
+## Returns: whether a matching vote rectangle exists.
+func _has_vote_rectangle_color(root: Node, expected_color: Color) -> bool:
+	if root == null:
+		return false
+	if root.name == "VoteRectangles":
+		for child: Node in root.get_children():
+			if child is TextureRect:
+				var actual_color: Color = (child as TextureRect).modulate
+				if is_equal_approx(actual_color.r, expected_color.r) \
+						and is_equal_approx(actual_color.g, expected_color.g) \
+						and is_equal_approx(actual_color.b, expected_color.b) \
+						and is_equal_approx(actual_color.a, expected_color.a):
+					return true
+	for child: Node in root.get_children():
+		if _has_vote_rectangle_color(child, expected_color):
+			return true
+	return false
+
+
 ## Returns the center point of a Control in viewport coordinates.
 ## Parameters:
 ## - control: Control whose visible rect should be sampled.
@@ -230,6 +429,30 @@ func _check_bottom_panel_layout(hud: Node, panel: Control, label: String) -> voi
 	_check(rect.position.x >= expected_left - 0.5, "%s stays right of left dock" % label)
 	_check(rect.end.x <= expected_right + 0.5, "%s stays left of chat" % label)
 	_check(is_equal_approx(rect.end.y, viewport_size.y - 28.0), "%s leaves bottom scroll gap" % label)
+
+
+## Returns whether the toast stack sits above the current chat panel.
+## Parameters:
+## - hud: GameHUD test instance.
+## Returns: true when the toast bottom is above the chat top.
+func _toast_is_above_chat(hud: Node) -> bool:
+	var toast_container: Control = hud.get_node("HUDRoot/ToastContainer") as Control
+	var chat_panel: Control = hud.get_node("ChatPanel") as Control
+	var toast_rect: Rect2 = toast_container.get_global_rect()
+	var chat_rect: Rect2 = chat_panel.get_global_rect()
+	return toast_rect.end.y <= chat_rect.position.y - 11.0
+
+
+## Returns whether any bottom selection panel is visible.
+## Parameters:
+## - hud: GameHUD test instance.
+## Returns: true when a bottom panel is visible.
+func _any_bottom_panel_visible(hud: Node) -> bool:
+	for panel_name: String in ["FriendlyDivisionPanel", "FriendlyProvincePanel", "FriendlyStackPanel", "EnemyDivisionPanel"]:
+		var panel: Control = hud.get_node(panel_name) as Control
+		if panel.visible:
+			return true
+	return false
 
 
 func _report() -> void:

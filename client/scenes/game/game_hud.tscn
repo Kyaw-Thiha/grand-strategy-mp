@@ -27,7 +27,7 @@
 [ext_resource type="Texture2D" uid="uid://cucfe632o54mw" path="res://assets/icons/atom-solid-full.svg" id="32_atom"]
 [ext_resource type="PackedScene" uid="uid://cbuwtcevrakg0" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
 [ext_resource type="Script" uid="uid://cvo1aqjm17xk4" path="res://src/ui/hud/notification_feed.gd" id="34_notification_feed"]
-[ext_resource type="PackedScene" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
+[ext_resource type="PackedScene" uid="uid://c8q605jnjdup1" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -576,9 +576,9 @@ visible = false
 visible = false
 
 [node name="DiplomacyPanel" parent="." unique_id=403663427 instance=ExtResource("8")]
-visible = false
 
 [node name="ResearchPanel" parent="." unique_id=1521783562 instance=ExtResource("9")]
+visible = false
 
 [node name="ResearchTreePanel" parent="." unique_id=1128497234 instance=ExtResource("33_research_tree")]
 visible = false

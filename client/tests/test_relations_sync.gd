@@ -41,5 +41,15 @@ func _ready() -> void:
     assert(res.get("logical", []).is_empty(), "FAIL: path through neutral gamma must be blocked")
     print("PASS test_neutral_blocked_with_relations")
 
+    GameState._apply_relations_updated({
+        "relations": {
+            "alpha:gamma": "alliance",
+            "gamma:alpha": "alliance",
+        }
+    })
+    var allied_res = pf.find_path("A", "C", profile, 1.0, "alpha", GameState.relations)
+    assert(not allied_res.get("logical", []).is_empty(), "FAIL: path through allied gamma must be allowed")
+    print("PASS test_alliance_allowed_with_relations")
+
     print("=== test_relations_sync: all passed ===")
     get_tree().quit(0)

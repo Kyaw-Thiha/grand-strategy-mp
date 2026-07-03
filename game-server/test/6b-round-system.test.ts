@@ -16,6 +16,13 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
+function setStance(room: any, nationA: string, nationB: string, stance: string): void {
+  const relation = room.state.relations.get(`${nationA}|${nationB}`)
+    ?? room.state.relations.get(`${nationB}|${nationA}`);
+  assert.ok(relation, `missing relation ${nationA}|${nationB}`);
+  relation.stance = stance;
+}
+
 /** Wait for a ROUND_RESOLVED message matching the expected engagement_id. */
 function waitForEngagementRound(
   client: any,
@@ -71,6 +78,7 @@ async function startCombat(
   // It also spawns default divisions but their ROUND_RESOLVED messages have
   // different engagement_ids so our filter will ignore them.
   await (room as any).startGame();
+  setStance(room, "germany", "france", "war");
   await room.waitForNextPatch();
 
   // Wait for COMBAT_STARTED to know our divisions engaged, then derive engagement_id

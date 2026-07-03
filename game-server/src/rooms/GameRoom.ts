@@ -20,9 +20,42 @@ interface JwtPayload {
   has_host_pass: boolean;
 }
 
+type DiplomacyAction =
+  | "invite"
+  | "declare_war"
+  | "make_peace"
+  | "quit_alliance"
+  | "kick";
+
+type DiplomacyVoteStage =
+  | "target_response"
+  | "actor_alliance_vote"
+  | "target_alliance_vote";
+
+type DiplomacyVoteChoice = "yes" | "no";
+
+interface DiplomacyVote {
+  id: string;
+  notificationId: string;
+  action: Exclude<DiplomacyAction, "quit_alliance">;
+  actorNationId: string;
+  targetNationId: string;
+  actorAllianceAtStart: string[];
+  targetAllianceAtStart: string[];
+  involvedNationIds: Set<string>;
+  stage: DiplomacyVoteStage;
+  deadlineAt: number;
+  durationMs: number;
+  eligibleVoterIds: string[];
+  votes: Map<string, DiplomacyVoteChoice>;
+  timeout?: { clear: () => void };
+}
+
 const API_SERVER_URL = process.env.API_SERVER_URL ?? "http://localhost:3000";
 const MIN_PLAYERS_TO_START = 1;
 const TICK_MS = 1000;
+const DIPLOMACY_TARGET_RESPONSE_MS = 10_000;
+const DIPLOMACY_ALLIANCE_VOTE_MS = 15_000;
 
 export class GameRoom extends Room<{ state: GameRoomState }> {
   maxClients = 6;
@@ -36,6 +69,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
   private playerEmails = new Map<string, string>();
+  private diplomacyVotes = new Map<string, DiplomacyVote>();
+  private activeDiplomacyVoteByNation = new Map<string, string>();
+  private nextDiplomacyVoteNumber = 1;
 
   async onAuth(_client: Client, options: { token?: string }) {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -69,6 +105,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
     this.onMessage("REORDER_STACK",    (client, msg) => this.handleReorderStack(client, msg));
     this.onMessage("SEND_CHAT",        (client, msg) => this.handleSendChat(client, msg));
+    this.onMessage("DIPLOMACY_ACTION", (client, msg) => this.handleDiplomacyAction(client, msg));
+    this.onMessage("DIPLOMACY_VOTE_RESPONSE", (client, msg) => this.handleDiplomacyVoteResponse(client, msg));
     this.onMessage("ASSIGN_TEMPLATE", (_client, msg: {
       division_id: string;
       template_id: string;
@@ -199,13 +237,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           break;
       }
     }
-    // Broadcast to all clients using colon-separated key (matches client's _is_neutral_for)
-    const relationsPayload: Record<string, string> = {};
-    for (const [, rel] of this.state.relations) {
-      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
-      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;  // both directions
-    }
-    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
+    this.broadcastRelations();
   }
 
     if (this.hostSessionId === client.sessionId && this.state.players.size > 0) {
@@ -218,6 +250,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   onDispose() {
+    for (const vote of this.diplomacyVotes.values()) {
+      vote.timeout?.clear();
+    }
+    this.diplomacyVotes.clear();
+    this.activeDiplomacyVoteByNation.clear();
     console.log(`[GameRoom] ${this.roomId} disposed`);
   }
 
@@ -287,6 +324,101 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       email: this.playerEmails.get(client.sessionId) || player.userId || "unknown@example.com",
       message,
     });
+  }
+
+  private handleDiplomacyAction(client: Client, msg: { action?: string; target_nation_id?: string }) {
+    if (this.state.phase !== "running") return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const actorNation = this.getNationForPlayer(player.userId);
+    if (!actorNation) {
+      client.send("ERROR", { message: "Select a nation before using diplomacy" });
+      return;
+    }
+
+    const action = msg.action as DiplomacyAction;
+    if (!this.isDiplomacyAction(action)) {
+      client.send("ERROR", { message: "Unknown diplomacy action" });
+      return;
+    }
+
+    const actorNationId = actorNation.nation_id;
+    const targetNationId = msg.target_nation_id ?? "";
+    const actorAllianceBefore = this.getAllianceFor(actorNationId);
+
+    if (action === "quit_alliance") {
+      for (const nationId of this.nationIds) {
+        if (nationId !== actorNationId) {
+          this.setRelationStance(actorNationId, nationId, "neutral");
+        }
+      }
+      this.finishDiplomacyRelationChange(
+        new Set(actorAllianceBefore),
+        `${actorNationId} quit their alliance.`,
+      );
+      return;
+    }
+
+    if (!this.validateTargetNation(client, targetNationId, actorNationId)) return;
+    const targetAllianceBefore = this.getAllianceFor(targetNationId);
+    const involvedNationIds = new Set<string>([...actorAllianceBefore, ...targetAllianceBefore, targetNationId]);
+
+    if (this.hasActiveDiplomacyOverlap(involvedNationIds)) {
+      client.send("ERROR", { message: "Another diplomacy vote is already active for these nations" });
+      return;
+    }
+
+    if (action === "invite" && actorAllianceBefore.has(targetNationId)) {
+      client.send("ERROR", { message: "Nation is already in your alliance" });
+      return;
+    }
+    if (action === "declare_war" && actorAllianceBefore.has(targetNationId)) {
+      client.send("ERROR", { message: "Cannot declare war on an ally" });
+      return;
+    }
+    if (action === "make_peace" && actorAllianceBefore.has(targetNationId)) {
+      client.send("ERROR", { message: "Nation is already in your alliance" });
+      return;
+    }
+    if (action === "kick" && !actorAllianceBefore.has(targetNationId)) {
+      client.send("ERROR", { message: "Nation is not in your alliance" });
+      return;
+    }
+
+    client.send("DIPLOMACY_NOTIFICATION", {
+      message: this.getDiplomacyActionStartedMessage(action, actorNationId, targetNationId),
+      notification_type: "diplomacy",
+    });
+    this.createDiplomacyVote(action, actorNationId, targetNationId, actorAllianceBefore, targetAllianceBefore, involvedNationIds);
+  }
+
+  private handleDiplomacyVoteResponse(client: Client, msg: { vote_id?: string; accept?: boolean }) {
+    if (this.state.phase !== "running") return;
+
+    const voteId = msg.vote_id ?? "";
+    const vote = this.diplomacyVotes.get(voteId);
+    if (!vote) {
+      client.send("ERROR", { message: "Diplomacy vote is no longer active" });
+      return;
+    }
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation) return;
+
+    if (!vote.eligibleVoterIds.includes(nation.nation_id)) {
+      client.send("ERROR", { message: "You cannot vote on this proposal" });
+      return;
+    }
+
+    vote.votes.set(nation.nation_id, msg.accept === true ? "yes" : "no");
+    this.sendDiplomacyVoteUpdate(vote, false);
+
+    if (vote.votes.size >= vote.eligibleVoterIds.length) {
+      this.resolveDiplomacyVoteStage(vote, false);
+    }
   }
 
   private handleStartGame(client: Client) {
@@ -511,12 +643,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
     this._initRelations();
-    const relationsPayload: Record<string, string> = {};
-    for (const [, rel] of this.state.relations) {
-      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
-      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;
-    }
-    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
+    this.broadcastRelations();
 
     // Spawn all divisions
     this.spawnDivisions();
@@ -631,6 +758,455 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
+  private isDiplomacyAction(action: string): action is DiplomacyAction {
+    return [
+      "invite",
+      "declare_war",
+      "make_peace",
+      "quit_alliance",
+      "kick",
+    ].includes(action);
+  }
+
+  private createDiplomacyVote(
+    action: Exclude<DiplomacyAction, "quit_alliance">,
+    actorNationId: string,
+    targetNationId: string,
+    actorAllianceBefore: Set<string>,
+    targetAllianceBefore: Set<string>,
+    involvedNationIds: Set<string>,
+  ): void {
+    const voteId = `diplo_vote_${this.nextDiplomacyVoteNumber++}`;
+    const vote: DiplomacyVote = {
+      id: voteId,
+      notificationId: `${voteId}_notice`,
+      action,
+      actorNationId,
+      targetNationId,
+      actorAllianceAtStart: Array.from(actorAllianceBefore),
+      targetAllianceAtStart: Array.from(targetAllianceBefore),
+      involvedNationIds,
+      stage: action === "invite" ? "target_response" : "actor_alliance_vote",
+      deadlineAt: 0,
+      durationMs: 0,
+      eligibleVoterIds: [],
+      votes: new Map<string, DiplomacyVoteChoice>(),
+    };
+
+    this.diplomacyVotes.set(vote.id, vote);
+    for (const nationId of involvedNationIds) {
+      this.activeDiplomacyVoteByNation.set(nationId, vote.id);
+    }
+
+    if (vote.stage === "target_response") {
+      this.startDiplomacyVoteStage(vote, [targetNationId], DIPLOMACY_TARGET_RESPONSE_MS, false);
+    } else {
+      this.startActorAllianceVote(vote);
+    }
+  }
+
+  private startActorAllianceVote(vote: DiplomacyVote): void {
+    const excluded = vote.action === "kick"
+      ? new Set<string>([vote.actorNationId, vote.targetNationId])
+      : new Set<string>();
+    const eligibleVoters = this.getPlayerControlledNationIds(vote.actorAllianceAtStart)
+      .filter(nationId => !excluded.has(nationId));
+    const defaultYes = vote.action === "kick" ? false : true;
+    this.startDiplomacyVoteStage(vote, eligibleVoters, DIPLOMACY_ALLIANCE_VOTE_MS, defaultYes);
+  }
+
+  private startTargetAllianceVote(vote: DiplomacyVote): void {
+    const eligibleVoters = this.getPlayerControlledNationIds(vote.targetAllianceAtStart);
+    this.startDiplomacyVoteStage(vote, eligibleVoters, DIPLOMACY_ALLIANCE_VOTE_MS, false);
+  }
+
+  private startDiplomacyVoteStage(
+    vote: DiplomacyVote,
+    eligibleVoterIds: string[],
+    durationMs: number,
+    actorDefaultsYes: boolean,
+  ): void {
+    vote.timeout?.clear();
+    vote.durationMs = durationMs;
+    vote.deadlineAt = Date.now() + durationMs;
+    vote.eligibleVoterIds = eligibleVoterIds;
+    vote.votes.clear();
+
+    if (actorDefaultsYes && eligibleVoterIds.includes(vote.actorNationId)) {
+      vote.votes.set(vote.actorNationId, "yes");
+    }
+
+    if (eligibleVoterIds.length === 0) {
+      this.resolveDiplomacyVoteStage(vote, false);
+      return;
+    }
+
+    if (vote.votes.size >= eligibleVoterIds.length) {
+      this.resolveDiplomacyVoteStage(vote, false);
+      return;
+    }
+
+    this.sendDiplomacyVoteUpdate(vote, true);
+    vote.timeout = this.clock.setTimeout(() => this.resolveDiplomacyVoteStage(vote, true), durationMs);
+  }
+
+  private resolveDiplomacyVoteStage(vote: DiplomacyVote, timedOut: boolean): void {
+    vote.timeout?.clear();
+    vote.timeout = undefined;
+    this.sendDiplomacyVoteUpdate(vote, false);
+
+    const passed = this.didDiplomacyVoteStagePass(vote);
+    if (vote.stage === "target_response") {
+      if (!passed) {
+        this.finishDiplomacyVote(vote, false, `${vote.targetNationId} rejected the alliance invitation from ${vote.actorNationId}.`);
+        return;
+      }
+      this.sendDiplomacyVoteResolved(vote, true);
+      vote.stage = "actor_alliance_vote";
+      this.startActorAllianceVote(vote);
+      return;
+    }
+
+    if (vote.stage === "actor_alliance_vote") {
+      if (!passed) {
+        this.finishDiplomacyVote(vote, false, this.getDiplomacyFailureMessage(vote, timedOut));
+        return;
+      }
+      if (vote.action === "make_peace") {
+        this.sendDiplomacyVoteResolved(vote, true);
+        vote.stage = "target_alliance_vote";
+        this.startTargetAllianceVote(vote);
+        return;
+      }
+      this.applyPassedDiplomacyVote(vote);
+      return;
+    }
+
+    if (!passed) {
+      this.finishDiplomacyVote(vote, false, this.getDiplomacyFailureMessage(vote, timedOut));
+      return;
+    }
+    this.applyPassedDiplomacyVote(vote);
+  }
+
+  private didDiplomacyVoteStagePass(vote: DiplomacyVote): boolean {
+    if (vote.eligibleVoterIds.length === 0) return true;
+    let yesVotes = 0;
+    for (const choice of vote.votes.values()) {
+      if (choice === "yes") yesVotes++;
+    }
+    return yesVotes > vote.eligibleVoterIds.length / 2;
+  }
+
+  private applyPassedDiplomacyVote(vote: DiplomacyVote): void {
+    if (vote.action === "invite") {
+      this.applyInvite(vote.actorNationId, vote.targetNationId, new Set(vote.actorAllianceAtStart));
+      this.finishDiplomacyRelationChange(
+        new Set([...vote.actorAllianceAtStart, ...vote.targetAllianceAtStart, vote.targetNationId]),
+        `${vote.actorNationId} invited ${vote.targetNationId} into their alliance.`,
+      );
+    } else if (vote.action === "kick") {
+      this.applyKick(vote.targetNationId);
+      this.finishDiplomacyRelationChange(
+        new Set([...vote.actorAllianceAtStart, vote.targetNationId]),
+        `${vote.actorNationId} kicked ${vote.targetNationId} from their alliance.`,
+      );
+    } else if (vote.action === "declare_war") {
+      this.setGroupRelation(new Set(vote.actorAllianceAtStart), new Set(vote.targetAllianceAtStart), "war");
+      this.finishDiplomacyRelationChange(
+        new Set([...vote.actorAllianceAtStart, ...vote.targetAllianceAtStart]),
+        `${vote.actorNationId} declared war on ${vote.targetNationId}.`,
+      );
+    } else if (vote.action === "make_peace") {
+      this.setGroupRelation(new Set(vote.actorAllianceAtStart), new Set(vote.targetAllianceAtStart), "neutral");
+      this.finishDiplomacyRelationChange(
+        new Set([...vote.actorAllianceAtStart, ...vote.targetAllianceAtStart]),
+        `${vote.actorNationId} made peace with ${vote.targetNationId}.`,
+      );
+    }
+    this.finishDiplomacyVote(vote, true, "");
+  }
+
+  private applyInvite(actorNationId: string, targetNationId: string, actorAlliance: Set<string>): void {
+    const inheritedStances = new Map<string, string>();
+    for (const nationId of this.nationIds) {
+      if (nationId === targetNationId || actorAlliance.has(nationId)) continue;
+      inheritedStances.set(nationId, this.getRelationStance(actorNationId, nationId));
+    }
+
+    for (const nationId of this.nationIds) {
+      if (nationId !== targetNationId) {
+        this.setRelationStance(targetNationId, nationId, "neutral");
+      }
+    }
+    for (const allyId of actorAlliance) {
+      this.setRelationStance(targetNationId, allyId, "alliance");
+    }
+    for (const [nationId, stance] of inheritedStances) {
+      this.setRelationStance(targetNationId, nationId, stance);
+    }
+  }
+
+  private applyKick(targetNationId: string): void {
+    for (const nationId of this.nationIds) {
+      if (nationId !== targetNationId) {
+        this.setRelationStance(targetNationId, nationId, "neutral");
+      }
+    }
+  }
+
+  private finishDiplomacyRelationChange(affectedNations: Set<string>, message: string): void {
+    this.broadcastRelations();
+    const changed = new Set<string>();
+    this.combatSystem.clearInvalidDiplomaticEngagements(
+      this.state,
+      changed,
+      (type, payload) => this.broadcast(type, payload),
+    );
+    if (changed.size > 0) {
+      const updates = Array.from(changed)
+        .map(id => this.state.divisions.get(id))
+        .filter((division): division is DivisionState => division !== undefined)
+        .map(division => this.serializeDivision(division));
+      this.broadcast("DIVISION_UPDATES", { divisions: updates });
+    }
+    this.notifyAffectedDiplomacyPlayers(affectedNations, message);
+  }
+
+  private finishDiplomacyVote(vote: DiplomacyVote, passed: boolean, failureMessage: string): void {
+    vote.timeout?.clear();
+    this.sendDiplomacyVoteResolved(vote, passed);
+    this.diplomacyVotes.delete(vote.id);
+    for (const nationId of vote.involvedNationIds) {
+      if (this.activeDiplomacyVoteByNation.get(nationId) === vote.id) {
+        this.activeDiplomacyVoteByNation.delete(nationId);
+      }
+    }
+    if (!passed && failureMessage !== "") {
+      this.notifyAffectedDiplomacyPlayers(this.getFailureNotificationAudience(vote), failureMessage);
+    }
+  }
+
+  private getDiplomacyFailureMessage(vote: DiplomacyVote, timedOut: boolean): string {
+    const suffix = timedOut ? " after the vote timed out" : "";
+    if (vote.action === "invite") {
+      return `${vote.actorNationId}'s alliance rejected inviting ${vote.targetNationId}${suffix}.`;
+    }
+    if (vote.action === "kick") {
+      return `${vote.actorNationId}'s alliance rejected kicking ${vote.targetNationId}${suffix}.`;
+    }
+    if (vote.action === "declare_war") {
+      return `${vote.actorNationId}'s alliance rejected declaring war on ${vote.targetNationId}${suffix}.`;
+    }
+    return `${vote.actorNationId}'s peace proposal with ${vote.targetNationId} was rejected${suffix}.`;
+  }
+
+  private getFailureNotificationAudience(vote: DiplomacyVote): Set<string> {
+    if (vote.action === "declare_war") {
+      return new Set(vote.actorAllianceAtStart);
+    }
+    if (vote.action === "make_peace" && vote.stage === "target_alliance_vote") {
+      return new Set([...vote.actorAllianceAtStart, ...vote.targetAllianceAtStart]);
+    }
+    return new Set([...vote.actorAllianceAtStart, vote.targetNationId]);
+  }
+
+  private hasActiveDiplomacyOverlap(nationIds: Set<string>): boolean {
+    for (const nationId of nationIds) {
+      if (this.activeDiplomacyVoteByNation.has(nationId)) return true;
+    }
+    return false;
+  }
+
+  private getPlayerControlledNationIds(nationIds: string[]): string[] {
+    return nationIds.filter(nationId => {
+      const nation = this.state.nations.get(nationId);
+      return nation !== undefined && nation.player_id !== "";
+    });
+  }
+
+  private sendDiplomacyVoteUpdate(vote: DiplomacyVote, isStart: boolean): void {
+    const type = isStart ? "DIPLOMACY_INTERACTIVE_NOTIFICATION" : "DIPLOMACY_VOTE_UPDATED";
+    const voters = vote.eligibleVoterIds.map(nationId => ({
+      nation_id: nationId,
+      status: vote.votes.get(nationId) ?? "pending",
+    }));
+
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation || !vote.eligibleVoterIds.includes(nation.nation_id)) continue;
+      client.send(type, {
+        notification_id: vote.notificationId,
+        vote_id: vote.id,
+        notification_type: "diplomacy",
+        message: this.getDiplomacyStageMessage(vote),
+        stage: vote.stage,
+        requires_response: !vote.votes.has(nation.nation_id),
+        deadline_at: vote.deadlineAt,
+        duration_ms: vote.durationMs,
+        yes_label: "Yes",
+        no_label: "No",
+        voters,
+      });
+    }
+  }
+
+  private sendDiplomacyVoteResolved(vote: DiplomacyVote, passed: boolean): void {
+    const payload = {
+      notification_id: vote.notificationId,
+      vote_id: vote.id,
+      resolved: true,
+      passed,
+      requires_response: false,
+      voters: vote.eligibleVoterIds.map(nationId => ({
+        nation_id: nationId,
+        status: vote.votes.get(nationId) ?? "pending",
+      })),
+    };
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation || !vote.eligibleVoterIds.includes(nation.nation_id)) continue;
+      client.send("DIPLOMACY_VOTE_UPDATED", payload);
+    }
+  }
+
+  private getDiplomacyStageMessage(vote: DiplomacyVote): string {
+    if (vote.stage === "target_response") {
+      return `${vote.actorNationId} invited you to join their alliance.`;
+    }
+    if (vote.action === "invite") {
+      return `Vote to invite ${vote.targetNationId} into your alliance.`;
+    }
+    if (vote.action === "kick") {
+      return `Vote to kick ${vote.targetNationId} from your alliance.`;
+    }
+    if (vote.action === "declare_war") {
+      return `Vote to declare war on ${vote.targetNationId}.`;
+    }
+    if (vote.stage === "target_alliance_vote") {
+      return `${vote.actorNationId} proposed peace with your alliance.`;
+    }
+    return `Vote to propose peace with ${vote.targetNationId}.`;
+  }
+
+  private getDiplomacyActionStartedMessage(
+    action: Exclude<DiplomacyAction, "quit_alliance">,
+    actorNationId: string,
+    targetNationId: string,
+  ): string {
+    if (action === "invite") {
+      return `${actorNationId} sent an alliance invitation to ${targetNationId}.`;
+    }
+    if (action === "kick") {
+      return `${actorNationId} started a vote to kick ${targetNationId} from the alliance.`;
+    }
+    if (action === "declare_war") {
+      return `${actorNationId} started a vote to declare war on ${targetNationId}.`;
+    }
+    return `${actorNationId} started a vote to make peace with ${targetNationId}.`;
+  }
+
+  private validateTargetNation(client: Client, targetNationId: string, actorNationId: string): boolean {
+    if (targetNationId === "" || !this.state.nations.has(targetNationId)) {
+      client.send("ERROR", { message: "Unknown diplomacy target" });
+      return false;
+    }
+    if (targetNationId === actorNationId) {
+      client.send("ERROR", { message: "Cannot target your own nation" });
+      return false;
+    }
+    return true;
+  }
+
+  private getAllianceFor(nationId: string): Set<string> {
+    const alliance = new Set<string>([nationId]);
+    const queue = [nationId];
+
+    while (queue.length > 0) {
+      const current = queue.shift() ?? "";
+      for (const rel of this.state.relations.values()) {
+        if (rel.stance !== "alliance") continue;
+        const neighbor = rel.from_id === current ? rel.to_id : rel.to_id === current ? rel.from_id : "";
+        if (neighbor !== "" && !alliance.has(neighbor)) {
+          alliance.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return alliance;
+  }
+
+  private setGroupRelation(groupA: Set<string>, groupB: Set<string>, stance: "war" | "neutral" | "alliance"): void {
+    for (const nationA of groupA) {
+      for (const nationB of groupB) {
+        this.setRelationStance(nationA, nationB, stance);
+      }
+    }
+  }
+
+  private getRelationStance(nationA: string, nationB: string): string {
+    if (nationA === nationB) return "alliance";
+    const rel = this.state.relations.get(`${nationA}|${nationB}`)
+      ?? this.state.relations.get(`${nationB}|${nationA}`);
+    return rel?.stance ?? "neutral";
+  }
+
+  private setRelationStance(nationA: string, nationB: string, stance: "war" | "neutral" | "alliance" | string): void {
+    if (nationA === nationB) return;
+    const key = this.getRelationKey(nationA, nationB);
+    let rel = this.state.relations.get(key);
+    if (!rel) {
+      rel = new RelationState();
+      const [fromId, toId] = key.split("|");
+      rel.from_id = fromId;
+      rel.to_id = toId;
+      this.state.relations.set(key, rel);
+    }
+    rel.stance = stance;
+  }
+
+  private getRelationKey(nationA: string, nationB: string): string {
+    const directKey = `${nationA}|${nationB}`;
+    const reverseKey = `${nationB}|${nationA}`;
+    if (this.state.relations.has(directKey)) return directKey;
+    if (this.state.relations.has(reverseKey)) return reverseKey;
+
+    const indexA = this.nationIds.indexOf(nationA);
+    const indexB = this.nationIds.indexOf(nationB);
+    if (indexA >= 0 && indexB >= 0) {
+      return indexA < indexB ? directKey : reverseKey;
+    }
+    return nationA < nationB ? directKey : reverseKey;
+  }
+
+  private broadcastRelations(): void {
+    const relationsPayload: Record<string, string> = {};
+    for (const [, rel] of this.state.relations) {
+      relationsPayload[`${rel.from_id}:${rel.to_id}`] = rel.stance;
+      relationsPayload[`${rel.to_id}:${rel.from_id}`] = rel.stance;
+    }
+    this.broadcast("RELATIONS_UPDATED", { relations: relationsPayload });
+  }
+
+  private notifyAffectedDiplomacyPlayers(affectedNationIds: Set<string>, message: string): void {
+    if (message === "") return;
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation || !affectedNationIds.has(nation.nation_id)) continue;
+      client.send("DIPLOMACY_NOTIFICATION", {
+        message,
+        notification_type: "diplomacy",
+      });
+    }
+  }
+
   private clearNationForPlayer(userId: string) {
     for (const nation of this.state.nations.values()) {
       if (nation.player_id === userId) {
@@ -744,16 +1320,19 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
   }
 
-  /** Populate state.relations: all 6 playable nations at war with each other. */
+  /** Populate state.relations: all playable nations start neutral with each other. */
   private _initRelations(): void {
-    const playerNations = ["germany", "france", "united_kingdom", "spain", "algeria", "italy"];
+    this.state.relations.clear();
+    const playerNations = this.nationIds.length > 0
+      ? this.nationIds
+      : ["germany", "france", "united_kingdom", "spain", "algeria", "italy"];
     for (let i = 0; i < playerNations.length; i++) {
       for (let j = i + 1; j < playerNations.length; j++) {
         const key = `${playerNations[i]}|${playerNations[j]}`;
         const rel = new RelationState();
         rel.from_id = playerNations[i];
         rel.to_id   = playerNations[j];
-        rel.stance  = "war";
+        rel.stance  = "neutral";
         this.state.relations.set(key, rel);
       }
     }

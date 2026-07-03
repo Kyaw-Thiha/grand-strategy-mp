@@ -175,8 +175,20 @@ func _apply_stack_dissolved(data: Dictionary) -> void:
 ## Called by SessionManager when server sends RELATIONS_UPDATED.
 func _apply_relations_updated(data: Dictionary) -> void:
 	var raw: Dictionary = data.get("relations", {})
+	var previous_relations: Dictionary = relations.duplicate(true)
+	relations.clear()
 	for key: String in raw:
 		relations[key] = {"stance": str(raw[key])}
+		var previous_entry: Dictionary = previous_relations.get(key, {})
+		if str(previous_entry.get("stance", "")) != str(raw[key]):
+			var parts: PackedStringArray = key.split(":")
+			if parts.size() == 2:
+				EventBus.relation_changed.emit(parts[0], parts[1])
+	for previous_key: String in previous_relations:
+		if not relations.has(previous_key):
+			var previous_parts: PackedStringArray = previous_key.split(":")
+			if previous_parts.size() == 2:
+				EventBus.relation_changed.emit(previous_parts[0], previous_parts[1])
 
 
 # ── Getters ──────────────────────────────────────────────────────────────────

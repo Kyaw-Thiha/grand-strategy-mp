@@ -50,6 +50,13 @@ const infantryPreset: [number, string][] = [
   [15, "infantry"], [16, "infantry"], [20, "infantry"],
 ];
 
+function setStance(room: any, nationA: string, nationB: string, stance: string): void {
+  const relation = room.state.relations.get(`${nationA}|${nationB}`)
+    ?? room.state.relations.get(`${nationB}|${nationA}`);
+  assert.ok(relation, `missing relation ${nationA}|${nationB}`);
+  relation.stance = stance;
+}
+
 describe("Phase 6 gate", function () {
   this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
@@ -99,6 +106,7 @@ describe("Phase 6 gate", function () {
     });
 
     (room as any).startGame();
+    setStance(room, "germany", "france", "war");
     await room.waitForNextPatch();
 
     for (let i = 0; i < 3; i++) {
@@ -156,6 +164,7 @@ describe("Phase 6 gate", function () {
     client.onMessage("COMBAT_ENDED", (msg: any) => combatEnded.push(msg));
 
     (room as any).startGame();
+    setStance(room, "germany", "france", "war");
     await room.waitForNextPatch();
 
     await waitForMessage(client, "COMBAT_ENDED", 30_000);
@@ -203,6 +212,7 @@ describe("Phase 6 gate", function () {
     });
 
     (room as any).startGame();
+    setStance(room, "germany", "france", "war");
     await room.waitForNextPatch();
 
     await waitForEngagementRound(client, "div_a_vs_div_b_", 30_000);
