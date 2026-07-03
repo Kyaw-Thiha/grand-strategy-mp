@@ -1341,44 +1341,144 @@ mistake.
 
 ## Phase 12 — Air Combat
 
-**Goal:** Air wings exist, can be assigned missions, and affect land combat and supply.
-Air-to-air combat drives off enemy wings. CAS damage lands on the tactical grid.
+> **Rewritten July 2026** to match AIR_COMBAT.md's full replacement: individually
+> selectable, real-time, pathfinding wings (Call-of-War-style, not HoI4-style
+> province-assigned abstraction). The task list below supersedes the original version of
+> this phase in full — do not build against the old 3×5-grid, round-resolved design.
 
-**Testing:** Bot clients assigning air wings to the same province and fighting for air
-superiority. Unit tests for all damage pattern calculations.
+**Goal:** Homogeneous air wings exist as real-time, selectable, pathfinding units. Missions
+resolve continuously, not per-round. CAS/tactical-bombing damage lands on the land tactical
+grid. Air-to-air combat, detection, three-layer AA, and naval air integration all work
+end-to-end.
 
-### Colyseus
-- [ ] Air wing state — 3×5 grid composition, current mission, province assignment, strength
-- [ ] Mission assignment handler — CAS, logistics strike, infra strike, air superiority,
-      interception
-- [ ] Air-to-air resolution — detection-proportional attacks between opposing wings each round;
-      5% damage floor; winning wing drives off losing wing
-- [ ] CAS damage patterns against land tactical grid:
-  - [ ] 1×1 / 2×2 bomb hit — recon-proportional target cell
-  - [ ] Row bombing — TAC bomber row targeting
-  - [ ] Column strafing — rocket/MG strafing column targeting
-  - [ ] Dive bomber — high precision single-cell high damage
-- [ ] Logistics strike handler — reduces road segment throughput in province (integrates
-      with Phase 7 supply graph)
-- [ ] Infra strike handler — reduces building levels / province infrastructure value
-- [ ] Detection accumulation — radar buildings, recon planes, passive air unit detection
-- [ ] Distance penalty — damage reduction at extreme range from home air base
-- [ ] AA gun integration — AA units in land division grid defend against air attack;
-      low-altitude air takes AA damage when striking
-- [ ] `AIR_COMBAT_STARTED`, `AIR_SUPERIORITY_LOST`, `AIR_WING_DRIVEN_OFF` events
+**Testing:** Bot clients launching wings on every mission type against each other and against
+bot land divisions/flotillas. Unit tests for the Attack/Defense damage rule, target
+deconfliction, and every damage-pattern shape. Load-test with realistic wing counts per the
+Server Architecture & Scaling numbers in AIR_COMBAT.md before considering this phase done —
+this is a genuinely different simulation shape from every other phase, worth its own
+dedicated perf pass rather than assuming it inherits land's headroom for free.
+
+### Colyseus — wing state and lifecycle
+- [ ] Wing state schema — aircraft type (homogeneous per wing), count (HP pool), combat
+      readiness, position, heading, current mission, current target id (nullable), home
+      airbase, weapon/ordnance-ready state
+- [ ] Wing lifecycle state machine — Idle → Transit → Engaged → (Loiter → Transit | RTB →
+      Refuel → Idle); single-sortie default, multi-sortie perk unlocks the Loiter branch
+- [ ] Readiness decay while airborne (with floor, never zero) and recovery at home base,
+      proportional to supply — same mechanic drives distance-penalty, loiter-penalty, and a
+      legible research-perk axis; no separate distance-penalty formula needed
+- [ ] Wing template schema — aircraft type + count only (no internal grid); nation presets,
+      custom saved templates, mid-game creation when not engaged
+
+### Colyseus — pathfinding (new subsystem, distinct from land/naval A*)
+- [ ] Dubins-path generator — straight legs + minimum-turn-radius arcs; used for Transit, RTB
+      (respects current heading, no instant flip), and Loiter/orbit
+- [ ] Pursuit-path generator (lead pursuit) for Interception/Air Superiority once a target is
+      detected — recomputed periodically, not per-frame
+- [ ] Default Interception/Air Superiority behaviour with no visible target: generate an
+      orbit path over a patrol area (reuses the Loiter orbit code) and hold until a target
+      enters detection
+- [ ] Server-authoritative position simulation — server owns the tick, client interpolates;
+      broadcast path-generation id + elapsed time, not raw positions (mirrors land's
+      dead-reckoning bandwidth trick)
+- [ ] Swept collision/contact check per existing 500ms room tick — analytic "did these paths
+      cross within engagement range during this window" check, scoped via spatial bucketing;
+      no separate faster tick
+
+### Colyseus — mission handlers, one per aircraft type
+- [ ] Tactical bombing — CAS plane / Dive bomber / Tactical bomber / CAS bomber / Fighter
+      (research perk); auto-target weighting = `base_priority × distance_falloff + noise_floor`
+- [ ] Interception — prioritises enemy bombers; Air Superiority — prioritises enemy fighters;
+      target deconfliction via greedy unique-assignment across all engaged friendlies in a
+      cluster, overflow doubles on highest-value remaining target
+- [ ] Escort — binds a wing to a specific friendly bomber wing; path follows the bomber;
+      engagement trigger is "enemy currently attacking my assigned bomber," not
+      nearest-enemy; auto-follows bomber home on RTB/destruction
+- [ ] Strategic bombing sub-missions — Logistics (road/supply-hub throughput, N ticks),
+      Area (population/infrastructure), Industry (`industry` scalar — already flagged
+      "Affected by bombing" in MAP_DATA_CONTRACT.md), Oil (extraction output, N ticks);
+      all four available to Strategic bomber and Tactical bomber
+- [ ] Recon — extends detection/observation coverage; non-persistent, lapses when the wing
+      leaves the area
+- [ ] Naval bomber missions — Trade interdiction (feeds existing cargo-sinking-event
+      machinery), Anti-submarine, Anti-ship (highest-value-first auto-priority, reusing the
+      carrier Strike preset's existing rule)
+
+### Colyseus — damage patterns
+- [ ] Dive bomber — single-cell, recon-weighted (perk: fixed priority list / multi-target)
+- [ ] Tactical bomber — row, soft-target-priority carpet bombing; starts 2–3 cells from one
+      side, perk expands to full row
+- [ ] CAS bomber — column, IL-2-style; same partial→full progression, mirrored for columns
+- [ ] Fighter strafing perk — column (not row) — deliberately distinct from Tactical
+      bomber's pattern
+- [ ] All land-directed patterns re-check live tactical-grid state at resolution time
+      (verify against Phase 6's existing attack-pattern implementation — they already read
+      current living units, not a cached snapshot, so this should already be compatible)
+- [ ] Naval bomber — single-target base; splash-to-flotilla-membership via research perk
+      (no internal ship grid exists, so splash spreads across flotilla composition)
+
+### Colyseus — combat resolution
+- [ ] Attack/Defense damage rule: `damage = weapon_ready ? Attack_value : Defense_value`;
+      pure bombers have `Attack_vs_air = 0` as a data value, no special-cased branch
+- [ ] Weapon-ready/reload cooldown state per wing
+- [ ] Naval bomber fuzzy-contact-marker system — randomized-radius, time-boxed target marker
+      per detected contact; precision/duration scale with detection source (maritime patrol
+      tight + continuous, triangulated sinking-event wide + short); strike only resolves if
+      the wing physically reaches the marker before expiry
+
+### Colyseus — detection and AA (three distinct layers)
+- [ ] Air detection reuses land's observation-radius model (binary, continuous) — not
+      naval's opaque/fuzzy model; radar building, friendly wings, and land division
+      observation radius all contribute
+- [ ] Radar building — area air detection + naval detection boost; siting independent of
+      city point (like supply hub); functional effect only, full building design deferred
+- [ ] Province fixed AA (new) — full damage on city-point missions (Area/Industry/Oil);
+      distance-decayed (reuse existing non-linear distance-penalty curve shape) on
+      Logistics/Tactical bombing; light/heavy altitude split retained
+- [ ] Flotilla pooled AA (new, in Phase 13's naval scope but consumed here) — summed across
+      AA-capable ships in target flotilla, cruiser-weighted, gated by Active/Held Back
+      posture, single check per attack run
+- [ ] `AIR_COMBAT_STARTED`, `AIR_SUPERIORITY_LOST`, `AIR_WING_DRIVEN_OFF`,
+      `WING_RTB`, `WING_DESTROYED` events
+
+### Colyseus — command layer
+- [ ] Air Fleet grouping and directive auto-assignment (extends STRATEGIC_COMBAT.md's
+      Macro/Micro pattern to air — see that document's Air Fleets subsection)
+
+### Networking
+- [ ] Use `StateView`/`@view()` for air wing interest management, not `@filter()`/
+      `@filterChildren()` — Colyseus's own docs flag `@filter()` as unsuitable for
+      fast-paced games, which this is
+- [ ] Pull `NetworkScalingSystem`/AOI forward in the build order — combined land + air +
+      naval entity counts exceed the original ~150-unit trigger before air is even factored
+      in at realistic player counts
 
 ### Godot
-- [ ] `AirSystem` — air wing icons on provinces, mission assignment UI, wing strength display
-- [ ] Air combat notification integration — air superiority lost, wing driven off, CAS
-      active over combat toasts
-- [ ] Nation preset air wing templates (historically flavoured per nation)
+- [ ] `AirSystem` — individual wing icons (not province-level badges), real-time movement
+      rendering, selection, manual retask/override UI
+- [ ] Flight path visualisation — hidden by default, shown on wing select or in a dedicated
+      Air Mode map view, same clutter-avoidance pattern as land's ghost-dot waypoints
+- [ ] Wing stacking at strategic zoom — wings based at the same airfield collapse to one
+      icon until selected/zoomed, mirroring land's road-column stacking
+- [ ] Air combat notification integration — air superiority lost, wing driven off/RTB,
+      strike resolved toasts
+- [ ] Nation preset air wing templates (aircraft type + count, historically flavoured)
+- [ ] Air Fleet panel UI
 
 ### Verification gate
-Assign CAS wing to province with active land combat → tactical grid takes air damage each
-round in correct pattern → assign enemy interceptor wing → CAS wing is forced into air
-combat → CAS damage drops → interceptor wins → CAS wing driven off → land combat proceeds
-without air support. Logistics strike dims a supply road segment. Radar building increases
-detection value for air-to-air in its province.
+Launch a Tactical-bombing wing at a province with active land combat → tactical grid takes
+damage in the correct shape for its aircraft type each engagement → assign an enemy
+Interception wing with no initial detection → it loiters until a friendly recon wing reveals
+the bomber → interceptor breaks off, pursues, engages → Attack/Defense rule resolves damage
+correctly based on weapon-ready state → bomber driven off or destroyed. Naval bomber vectored
+onto a maritime-patrol-held contact → reaches the marker within its window → strike resolves
+against real flotilla composition, pooled AA (cruiser-weighted, Held Back ships excluded)
+fires back in one check. Strategic bomber hits a city with Area bombing → full province
+fixed-AA exposure; same bomber hits a road segment with Logistics bombing → distance-decayed
+AA exposure instead. Escort wing follows its assigned bomber's path and engages only wings
+attacking that bomber. Bot-client load test at the wing counts modelled in AIR_COMBAT.md's
+Server Architecture & Scaling section confirms bandwidth and tick-budget headroom before
+sign-off.
 
 ---
 
@@ -1432,10 +1532,15 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
       sinking events or location intelligence for the defending player
 
 ### Colyseus — carrier aircraft presets
-- [ ] Six presets per carrier: CAP, Strike, Anti-submarine, CAS, Logistics Strike,
-      Infrastructure Strike — all confirmed in scope for carrier aircraft
-- [ ] CAS, logistics strike, and infrastructure strike: effective only against coastal
-      provinces within flotilla zone range; recon-proportional for high-altitude delivery
+> Depends on Phase 12's wing system — a carrier is a mobile airbase, its wings are ordinary
+> Phase 12 wings with a preset auto-behaviour layered on top, not a separate implementation.
+- [ ] Presets per carrier: CAP, Strike, Anti-submarine, CAS, Logistics Strike, and now
+      Area/Industry/Oil Strike (added alongside Phase 12's strategic bombing sub-missions) —
+      each preset assigns underlying wings the matching Phase 12 mission and target
+- [ ] CAS and Logistics Strike: effective only against coastal provinces within flotilla
+      zone range, distance-decayed AA per Phase 12's province-fixed-AA rule
+- [ ] Area/Industry/Oil Strike: full province-fixed-AA exposure, same as land-launched
+      strikes on these targets (see Phase 12)
 - [ ] Preset switchable between rounds when not in Strike zone
 - [ ] AA defence from light cruisers scales damage to attacking carrier aircraft
 
@@ -1558,7 +1663,8 @@ Active/Silent transitions. Bot trade pacts testing route disruption.
 - [ ] Doctrine template panel — set loadout per class; bulk push button
 - [ ] Ship detail panel — individual module override; refit status
 - [ ] Submarine mode toggle UI — Active / Silent per submarine or flotilla
-- [ ] Carrier preset selector — six presets per carrier
+- [ ] Carrier preset selector — presets per carrier, updated set per Phase 12 (adds
+      Area/Industry/Oil Strike, retires the old standalone Infrastructure Strike naming)
 - [ ] Trade route UI — draw route line from own port to partner's port; route rendered as
       sea-lane on map; income and disruption status shown on hover
 - [ ] Port panel — three independent upgrade tracks per port (port level, naval base,
