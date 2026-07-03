@@ -1,6 +1,7 @@
 extends Node
 
 const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tscn")
+const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 
 const NATION_COLORS: Dictionary = {
@@ -24,6 +25,7 @@ var _pending_chain: Array[String] = []
 var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
 var _wing_path_by_id: Dictionary = {}
+var _wing_path_generations_by_id: Dictionary = {}
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -59,13 +61,9 @@ func _on_air_wing_added(wing_id: String) -> void:
 	var icon: Node2D = AIR_WING_ICON_SCENE.instantiate()
 	var color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 	icon.setup(data, color)
-	icon.position = _map_loader.project_lng_lat(
-		float(data.get("position_lng", 0.0)),
-		float(data.get("position_lat", 0.0))
-	)
-	_target_positions[wing_id] = icon.position
 	_icon_layer.add_child(icon)
 	_icons[wing_id] = icon
+	_refresh_wing_icon_position(wing_id)
 
 
 func _on_air_wing_updated(wing_id: String) -> void:
@@ -76,13 +74,7 @@ func _on_air_wing_updated(wing_id: String) -> void:
 	if data.is_empty():
 		return
 	icon.update_data(data)
-	# Snap to server position — smooth interpolation is Branch C's job
-	var pos: Vector2 = _map_loader.project_lng_lat(
-		float(data.get("position_lng", 0.0)),
-		float(data.get("position_lat", 0.0))
-	)
-	icon.position = pos
-	_target_positions[wing_id] = pos
+	_refresh_wing_icon_position(wing_id)
 
 
 func _on_air_wing_removed(wing_id: String) -> void:
@@ -92,6 +84,7 @@ func _on_air_wing_removed(wing_id: String) -> void:
 		_icons.erase(wing_id)
 	_target_positions.erase(wing_id)
 	_wing_path_by_id.erase(wing_id)
+	_wing_path_generations_by_id.erase(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
@@ -168,9 +161,16 @@ func _deselect() -> void:
 
 func _on_air_wing_path(path_data: Dictionary) -> void:
 	var wing_id: String = path_data.get("wing_id", "")
+	var path_gen_id: String = path_data.get("path_gen_id", "")
 	if wing_id.is_empty():
 		return
 	_wing_path_by_id[wing_id] = path_data.duplicate()
+	if not path_gen_id.is_empty():
+		if not _wing_path_generations_by_id.has(wing_id):
+			_wing_path_generations_by_id[wing_id] = {}
+		var generations: Dictionary = _wing_path_generations_by_id[wing_id]
+		generations[path_gen_id] = path_data.duplicate()
+	_refresh_wing_icon_position(wing_id)
 	if wing_id == _selected_wing_id:
 		_update_ghost()
 
@@ -220,6 +220,7 @@ func cleanup() -> void:
 	if _pending_route_overlay != null:
 		_pending_route_overlay.free()
 		_pending_route_overlay = null
+	_wing_path_generations_by_id.clear()
 
 
 func _update_ghost() -> void:
@@ -235,6 +236,39 @@ func _update_ghost() -> void:
 		return
 
 	_pending_route_overlay.set_path(route_points, _get_pending_milestone_positions(), _get_selected_wing_color())
+
+
+func _refresh_wing_icon_position(wing_id: String) -> void:
+	var icon = _icons.get(wing_id)
+	if icon == null:
+		return
+	var data: Dictionary = GameState.get_air_wing(wing_id)
+	if data.is_empty():
+		return
+
+	var projected_position: Vector2 = _get_interpolated_wing_position(wing_id, data)
+	if projected_position != Vector2.INF:
+		icon.position = _map_loader.project_lng_lat(projected_position.x, projected_position.y)
+		_target_positions[wing_id] = icon.position
+		return
+
+	var fallback_position: Vector2 = _map_loader.project_lng_lat(
+		float(data.get("position_lng", 0.0)),
+		float(data.get("position_lat", 0.0))
+	)
+	icon.position = fallback_position
+	_target_positions[wing_id] = fallback_position
+
+
+func _get_interpolated_wing_position(wing_id: String, data: Dictionary) -> Vector2:
+	var path_gen_id: String = data.get("path_gen_id", "")
+	if path_gen_id.is_empty():
+		return Vector2.INF
+	var generations: Dictionary = _wing_path_generations_by_id.get(wing_id, {})
+	var path_data: Dictionary = generations.get(path_gen_id, {})
+	if path_data.is_empty():
+		return Vector2.INF
+	return DubinsInterpolator.evaluate_position(path_data, int(data.get("path_elapsed_ms", 0)))
 
 
 func _get_selected_wing_color() -> Color:
