@@ -40,6 +40,7 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	# Hydrate any wings already in GameState (late join / scene reload)
 	for wing_id in GameState.air_wings:
 		_on_air_wing_added(wing_id)
+	_update_ghost()
 
 
 func _exit_tree() -> void:
@@ -100,13 +101,29 @@ func _on_air_wing_removed(wing_id: String) -> void:
 func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 	if not event is InputEventMouseButton:
 		return false
-	if not (event as InputEventMouseButton).pressed:
+	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+	if not mouse_button.pressed:
 		return false
-	if (event as InputEventMouseButton).button_index != MOUSE_BUTTON_LEFT:
+	if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
+		if _selected_wing_id.is_empty():
+			return false
+		var milestone_id: String = "%0.3f,%0.3f" % [world_pos.x, world_pos.y]
+		if mouse_button.shift_pressed:
+			_append_pending_milestone(milestone_id)
+			return true
+		if _pending_milestones.size() > 1:
+			_remove_last_pending_milestone()
+			return true
+		if _pending_milestones.size() == 1:
+			_clear_pending()
+			return true
 		return false
 
-	var best_id   := ""
-	var best_dist := HIT_THRESHOLD_PX
+	if mouse_button.button_index != MOUSE_BUTTON_LEFT:
+		return false
+
+	var best_id: String = ""
+	var best_dist: float = HIT_THRESHOLD_PX
 	for wing_id in _icons:
 		var icon = _icons[wing_id]
 		if not icon.visible:
@@ -214,7 +231,8 @@ func _update_ghost() -> void:
 		_pending_route_overlay.clear()
 		return
 
-	_pending_route_overlay.set_path(route_points, [], _get_selected_wing_color())
+	var empty_milestones: Array[Vector2] = []
+	_pending_route_overlay.set_path(route_points, empty_milestones, _get_selected_wing_color())
 
 
 func _get_selected_wing_color() -> Color:
