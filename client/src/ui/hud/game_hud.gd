@@ -58,6 +58,8 @@ var _ui_pointer_blocker_roots: Array[Control] = []
 var _ui_text_focus_controls: Dictionary = {}
 var _is_ui_pointer_blocking: bool = false
 var _is_ui_text_input_focused: bool = false
+var _session_elapsed_seconds: float = 0.0
+var _last_displayed_session_seconds: int = -1
 
 const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
@@ -66,6 +68,8 @@ const _BOTTOM_SELECTION_PANEL_DOCK_GAP: float = 16.0
 
 
 func _ready() -> void:
+	set_session_time(0)
+
 	# MapLoader is a sibling of GameHUD in the MapDebug scene tree
 	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
 	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
@@ -217,7 +221,11 @@ func _ready() -> void:
 	_layout_bottom_hud()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_session_elapsed_seconds += delta
+	var display_seconds: int = int(_session_elapsed_seconds)
+	if display_seconds != _last_displayed_session_seconds:
+		set_session_time(display_seconds)
 	_refresh_ui_pointer_blocking()
 
 
@@ -684,7 +692,8 @@ func _hide_all_bottom_panels() -> void:
 
 ## Called each tick to update session timer display.
 func set_session_time(seconds: int) -> void:
-	var h := seconds / 3600
-	var m := (seconds % 3600) / 60
-	var s := seconds % 60
-	_session_timer.text = "SESSION %02d:%02d:%02d" % [h, m, s]
+	var h: int = seconds / 3600
+	var m: int = (seconds % 3600) / 60
+	var s: int = seconds % 60
+	_last_displayed_session_seconds = seconds
+	_session_timer.text = "%02d:%02d:%02d" % [h, m, s]

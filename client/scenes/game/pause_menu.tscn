@@ -55,6 +55,7 @@ script = ExtResource("1")
 
 [node name="BlurOverlay" type="ColorRect" parent="." unique_id=215253639]
 unique_name_in_owner = true
+visible = false
 material = SubResource("ShaderMaterial_pause_blur")
 anchors_preset = 15
 anchor_right = 1.0
