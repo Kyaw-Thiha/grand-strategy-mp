@@ -137,6 +137,32 @@ export type AirWingEvent =
   | WingRtbEvent
   | WingDestroyedEvent;
 
+// ── Serialize air wing for room broadcasts ────────────────────────────────────
+
+export function serializeWing(wing: AirWingState): Record<string, unknown> {
+  return {
+    wing_id:                  wing.wing_id,
+    nation_id:                wing.nation_id,
+    aircraft_type:            wing.aircraft_type,
+    count:                    wing.count,
+    combat_readiness:         wing.combat_readiness,
+    position_lng:             wing.position_lng,
+    position_lat:             wing.position_lat,
+    heading_deg:              wing.heading_deg,
+    lifecycle_state:          wing.lifecycle_state,
+    mission:                  wing.mission,
+    target_id:                wing.target_id,
+    home_airbase_province_id: wing.home_airbase_province_id,
+    path_gen_id:              wing.path_gen_id,
+    path_elapsed_ms:          wing.path_elapsed_ms,
+    weapon_ready:             wing.weapon_ready,
+    perk_multi_sortie:        wing.perk_multi_sortie,
+    perk_strafing:            wing.perk_strafing,
+    perk_extended_range:      wing.perk_extended_range,
+    perk_precision_bombing:   wing.perk_precision_bombing,
+  };
+}
+
 // ── MapSchema type alias used by GameRoomState ────────────────────────────────
 
 export type AirWingsMap = MapSchema<AirWingState>;

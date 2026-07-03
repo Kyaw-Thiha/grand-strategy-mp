@@ -110,6 +110,7 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 
 func _select(wing_id: String) -> void:
 	if _selected_wing_id == wing_id:
+		_deselect()
 		return
 	_deselect()
 	_selected_wing_id = wing_id

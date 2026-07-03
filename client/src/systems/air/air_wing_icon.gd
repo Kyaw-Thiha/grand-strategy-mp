@@ -57,6 +57,16 @@ func _should_show_count_badge() -> bool:
 	return wing_count > 1
 
 
+func _lifecycle_color() -> Color:
+	match lifecycle_state:
+		"transit":  return Color(0.267, 0.533, 1.0)
+		"engaged":  return Color(1.0, 0.267, 0.267)
+		"loiter":   return Color(1.0, 0.533, 0.0)
+		"rtb":      return Color(0.667, 0.267, 1.0)
+		"refuel":   return Color(0.0, 0.8, 0.8)
+		_:          return Color(0.5, 0.5, 0.5)
+
+
 func set_selected(selected: bool) -> void:
 	if is_selected != selected:
 		is_selected = selected
@@ -71,9 +81,10 @@ func _draw() -> void:
 		Vector2(-DIAMOND_HALF, 0),
 	])
 	draw_colored_polygon(points, nation_color)
+	var border_color: Color = _lifecycle_color() if lifecycle_state != "idle" else Color(0.1, 0.1, 0.1, 0.9)
 	draw_polyline(
 		PackedVector2Array([points[0], points[1], points[2], points[3], points[0]]),
-		Color(0.1, 0.1, 0.1, 0.9), 1.5
+		border_color, 2.5
 	)
 	_draw_aircraft_symbol()
 

@@ -221,7 +221,7 @@ Unit tests for movement profile computation and A* path validity.
       current map uses balanced config (cavalry available to all, no unique modifiers,
       same research starting points); engine reads config and never hardcodes nation identity
 - [x] `_initRelations()` in `GameRoom.ts` — initializes all 6 playable nations ("germany",
-      "france", "united_kingdom", "spain", "algeria", "italy") as `stance: "war"` with
+      "france", "united_kingdom", "spain", "algeria", "italy") as `stance: "neutral"` with
       each other at game start. Replaced by real diplomacy in Phase 10.
 - [x] Division type classification — three types only (no Defensive type):
       armoured (>=40% armoured cells), motorised (15-39% armoured), infantry (remainder)
@@ -1359,12 +1359,12 @@ this is a genuinely different simulation shape from every other phase, worth its
 dedicated perf pass rather than assuming it inherits land's headroom for free.
 
 ### Colyseus — wing state and lifecycle
-- [ ] Wing state schema — aircraft type (homogeneous per wing), count (HP pool), combat
+- [x] Wing state schema — aircraft type (homogeneous per wing), count (HP pool), combat
       readiness, position, heading, current mission, current target id (nullable), home
       airbase, weapon/ordnance-ready state
-- [ ] Wing lifecycle state machine — Idle → Transit → Engaged → (Loiter → Transit | RTB →
+- [x] Wing lifecycle state machine — Idle → Transit → Engaged → (Loiter → Transit | RTB →
       Refuel → Idle); single-sortie default, multi-sortie perk unlocks the Loiter branch
-- [ ] Readiness decay while airborne (with floor, never zero) and recovery at home base,
+- [x] Readiness decay while airborne (with floor, never zero) and recovery at home base,
       proportional to supply — same mechanic drives distance-penalty, loiter-penalty, and a
       legible research-perk axis; no separate distance-penalty formula needed
 - [ ] Wing template schema — aircraft type + count only (no internal grid); nation presets,
