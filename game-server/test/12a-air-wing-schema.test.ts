@@ -174,6 +174,35 @@ describe("12a — Air Wing Schema", function () {
     }
   });
 
+  it("SPAWN_WING broadcasts AIR_WING_UPDATES with correct wing data", async () => {
+    const { client, room } = await joinRoom();
+
+    const broadcastReceived = new Promise<any>((resolve) => {
+      client.onMessage("AIR_WING_UPDATES", resolve);
+    });
+
+    client.send("SPAWN_WING", {
+      wing_id:       "wing-broadcast-test",
+      nation_id:     "france",
+      aircraft_type: AIR_UNIT_TYPES.FIGHTER,
+      count:         18,
+      position_lng:  2.35,
+      position_lat:  48.85,
+    });
+
+    const msg = await broadcastReceived;
+    assert.ok(Array.isArray(msg.wings), "AIR_WING_UPDATES.wings must be an array");
+    assert.strictEqual(msg.wings.length, 1);
+    const w = msg.wings[0];
+    assert.strictEqual(w.wing_id,       "wing-broadcast-test");
+    assert.strictEqual(w.nation_id,     "france");
+    assert.strictEqual(w.aircraft_type, AIR_UNIT_TYPES.FIGHTER);
+    assert.strictEqual(w.count,         18);
+    assert.strictEqual(w.position_lng,  2.35);
+    assert.strictEqual(w.position_lat,  48.85);
+    assert.strictEqual(w.weapon_ready,  true);
+  });
+
   it("multiple wings coexist in air_wings without colliding", async () => {
     const { client, room } = await joinRoom();
     client.send("SPAWN_WING", { wing_id: "wing-a", nation_id: "germany", aircraft_type: AIR_UNIT_TYPES.FIGHTER });
