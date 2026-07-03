@@ -127,5 +127,8 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"AIR_WING_UPDATES":
 			GameState._apply_air_wing_updates(data)
 
+		"AIR_WING_PATH":
+			EventBus.air_wing_path.emit(data)
+
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)
