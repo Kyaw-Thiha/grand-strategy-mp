@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
-import { AirWingState } from "./schema/AirWingState.js";
+import { AirWingState, WING_LIFECYCLE, serializeWing } from "./schema/AirWingState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
@@ -172,7 +172,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.mission                  !== undefined) wing.mission                  = msg.mission;
         if (msg.home_airbase_province_id !== undefined) wing.home_airbase_province_id = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
-        this.broadcast("AIR_WING_UPDATES", { wings: [this._serializeWing(wing)] });
+        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       });
     }
     if (process.env.NODE_ENV === "test") {
@@ -252,7 +252,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.mission                    !== undefined) wing.mission                    = msg.mission;
         if (msg.home_airbase_province_id   !== undefined) wing.home_airbase_province_id   = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
-        this.broadcast("AIR_WING_UPDATES", { wings: [this._serializeWing(wing)] });
+        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       });
     }
 
@@ -1320,24 +1320,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           stealthed: c.stealthed,
         })),
       },
-    };
-  }
-
-  private _serializeWing(wing: AirWingState): Record<string, unknown> {
-    return {
-      wing_id:                  wing.wing_id,
-      nation_id:                wing.nation_id,
-      aircraft_type:            wing.aircraft_type,
-      count:                    wing.count,
-      combat_readiness:         wing.combat_readiness,
-      position_lng:             wing.position_lng,
-      position_lat:             wing.position_lat,
-      heading_deg:              wing.heading_deg,
-      lifecycle_state:          wing.lifecycle_state,
-      mission:                  wing.mission,
-      target_id:                wing.target_id,
-      home_airbase_province_id: wing.home_airbase_province_id,
-      weapon_ready:             wing.weapon_ready,
     };
   }
 
