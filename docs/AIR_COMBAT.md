@@ -1,7 +1,11 @@
 # Grand Strategy Multiplayer — Air Combat Design
 
 > Confirmed design decisions for the air combat layer.
-> Last updated: June 2026.
+> Last updated: July 2026.
+> **This is a full replacement of the previous province-assigned, round-resolved air combat
+> design.** Air wings are now individually selectable, real-time, pathfinding units — closer
+> to naval flotillas than to the old abstracted model. See "Relationship to Other Combat
+> Layers" at the end of this document for what changed and why.
 > Air combat interacts with land tactical combat (see TACTICAL_COMBAT.md),
 > strategic supply (see STRATEGIC_COMBAT.md), and naval combat (see NAVAL_COMBAT.md).
 
@@ -9,250 +13,462 @@
 
 ## Design Philosophy
 
-Air combat runs as a **parallel system** alongside land and naval combat. Players assign air
-wings to provinces and set missions. Resolution happens automatically each round. Players who
-never open the air panel still benefit from their air assignments — they just extract less
-value from them than players who optimise formation, mission timing, and counter-air doctrine.
+Air combat moves from HoI4-style abstraction to something closer to Call of War: **wings are
+individual, selectable, map-pathfinding units**, not values assigned to a province and
+resolved in the background. A wing has a position, a heading, a mission, and moves in real
+time.
 
-Air is the layer that rewards investment in map-wide awareness. A player who tracks where
-enemy air wings are assigned can intercept them, strip their CAS support, and interdict their
-supply lines — all without a single land unit moving. A player who ignores air entirely is
-vulnerable to all of the above.
+This is a genuine departure from this game's tactical grid (`TACTICAL_COMBAT.md`'s explicit
+"never add real-time grid micromanagement" rule) and from naval's zone-abstraction — but it
+does not import Wargame: Red Dragon's real-time-twitch demands along with it. The distinction
+that makes this safe: **real-time simulation clock, not real-time control requirement.** A
+wing given a mission needs zero further clicks to behave sensibly indefinitely — it finds
+targets, attacks, returns to refuel, and relaunches on its own. Manual override (retasking, a
+specific target, pulling a wing home early) is always available and rewards map-aware
+players, but is never required to get a reasonable outcome. Same floor/ceiling philosophy as
+everywhere else in this game, applied to a genuinely real-time layer for the first time.
+
+The atomic unit is the **wing**, not the individual aircraft — mirroring the naval flotilla
+precedent (`NAVAL_COMBAT.md`), not a literal per-plane roster. A wing is **homogeneous**: one
+aircraft type, one count. This keeps entity count sane at scale (a wing is a strategic
+commitment, the same order of magnitude as a land division or naval flotilla, not a swarm of
+individually-tracked planes) and matches how real air forces were actually organised —
+squadrons flew one type.
 
 ---
 
-## Air Wing Formation — The 3×5 Grid
+## The Air Wing
 
-Each air wing is represented as a **3×5 grid**:
-- **Rows = altitude bands** (3 rows: Low, Medium, High)
-- **Columns = formation slots** (5 columns)
+**State:** aircraft type, count (doubles as HP pool), combat readiness, position, heading,
+current mission, current target (if any), home airbase, weapon/ordnance-ready state.
+
+**Combat readiness** decays continuously while airborne and recovers on the ground at the
+home base. Readiness scales outgoing damage — a freshly launched wing hits hard; a wing
+that's been loitering or flying long-range hits progressively less hard. This single
+mechanic does three jobs at once: it's the reason distant missions are naturally weaker than
+close ones (no separate distance-penalty formula needed — it falls out of longer transit
+time), it's the reason loitering wings are worse than fresh ones, and it's a legible
+research-perk axis (lower decay rate is a real, readable upgrade).
+
+**Wings are raised and templated like land/naval units** — nation presets, custom saved
+templates, mid-game creation when not engaged. A template is just aircraft type + count,
+since composition depth now lives in mission choice and positioning rather than in a grid.
+
+---
+
+## Wing Lifecycle
 
 ```
-        C1     C2     C3     C4     C5
-Low  [ -- ][ -- ][ -- ][ -- ][ -- ]   ← deck altitude: CAS, dive bombers, low fighters
-Med  [ -- ][ -- ][ -- ][ -- ][ -- ]   ← medium altitude: escort fighters, heavy fighters
-High [ -- ][ -- ][ -- ][ -- ][ -- ]   ← high altitude: strategic bombers, TAC bombers, recon
+Idle (at base) → Transit (to target) → Engaged (mission/combat)
+                                            │
+                        ┌───────────────────┴───────────────────┐
+                  multi-sortie perk                        base case
+                        │                                       │
+                  Loiter (orbit target, cooldown)          RTB (curved return)
+                        │                                       │
+                        └──────► back to Transit             Refuel/rearm at base
+                                 (next target)                      │
+                                                                     └──► Idle
 ```
 
-**Why altitude rows matter:**
-Aircraft effectiveness, survivability, and mission capability are all altitude-dependent.
-A dive bomber placed in the High row is out of its effective altitude — it deals reduced damage.
-A heavy fighter placed in the Low row is exposed to ground AA fire it was not designed to absorb.
-The 3×5 formation is preset in the template builder, just like the land 5×5 grid. Players
-who understand altitude doctrine extract significantly more from the same aircraft types.
+Single-sortie wings (the default) fly one engagement, then must RTB and refuel before
+launching again. A multi-sortie perk lets a wing loiter near its last target for a short
+cooldown (10–20s, exact value playtesting-bound) instead of immediately returning — long
+enough that a target isn't struck twice almost instantly, short enough to matter tactically.
+This is the same orbit-path logic used for Interception's default wait-for-a-target state
+below — one piece of pathfinding, two uses.
 
-### Template system
-Air wing templates follow the same three-tier system as land division templates:
-- **Nation presets** — historically appropriate air wing configurations per nation
-- **Custom saved templates** — built in the main menu template builder, persisted to account
-- **Mid-game creation** — editable when the wing is not actively engaged in combat
-
-Redeployment to a new template requires the wing to be stood down from its current mission.
-Flat 1-minute redeployment time, same as land.
+Only wings not in `Idle` need a rendered icon/path at all — a base-camped reserve fleet never
+touches the map, which is most of the answer to the UI-clutter risk of individually-tracked
+wings at scale.
 
 ---
 
-## Air Wing Missions
+## Pathfinding
 
-An air wing is assigned to a **province** with a **mission type**. Mission assignment is the
-primary player action for air — not micromanaging individual aircraft.
+Land/naval pathfinding is A* over a terrain-and-road graph (`PATHFINDING.md`). Air doesn't
+touch terrain — it's a kinematics problem, and a well-established one: **Dubins paths**
+(straight legs joined by minimum-turn-radius arcs) give a flyable route from any position and
+heading to any target, and that same technique's arc-only special case is exactly the
+loiter/orbit pattern used for cooldowns and for Interception's wait state. RTB uses a Dubins
+path back to base respecting current heading — it turns around, it doesn't flip.
 
-### Ground attack missions
+**Interception without a visible target:** since enemy wings are only visible when inside
+someone's detection coverage (see Detection & Visibility), a wing on Interception or Air
+Superiority with nothing currently spotted doesn't sit idle — it flies to a patrol area and
+loiters (same orbit code) until a target is spotted, then breaks off to intercept. This is
+the intended lever for skilled play: a player can send an obvious threat toward one flank to
+pull enemy interceptors there, then commit the real strike through the gap. Default
+behaviour needs no player input; reading and exploiting it is the skill ceiling.
 
-**Close Air Support (CAS)**
-- Assigned to a province with active or expected land combat
-- Low-altitude aircraft (CAS planes, dive bombers in Low row) deal full damage
-- High-altitude aircraft deal damage proportional to current recon value
-- Targets are chosen randomly from divisions in combat in the province;
-  divisions currently in active tactical combat are prioritised over idle divisions
-- Without active land combat in the province: CAS deals only a reduced percentage of normal
-  damage (aircraft cannot identify targets without a ground battle to orient on)
-- Damage lands on the **land tactical grid** using the patterns below (see Air-Land Damage
-  Patterns)
+**Chasing a moving target:** once a target is spotted, an interceptor generates a pursuit
+path (lead pursuit, a standard missile-guidance technique) toward the target's current or
+predicted position, recomputed periodically — not continuously — to keep this server-cheap.
 
-**Logistics Strike**
-- Attacks the road supply network in the province
-- Low-altitude logistics strike: does not depend on recon value. Simulates direct attack on
-  a supply convoy — reduces the throughput capacity of one road segment in the province for
-  N ticks (exact value set by playtesting)
-- High-altitude logistics strike: depends on recon value. Simulates bridge/road damage —
-  reduces the supply flow rate of the road segment proportionally to recon. At zero recon,
-  minimal effect. At maximum recon, significant throughput reduction for longer duration
+**Server-authoritative movement.** Land pathfinding is client-computed and server-validated
+after the fact; air needs to be **server-authoritative from the start**, because combat
+outcomes now hinge on exact intercept timing in a way land's discrete rounds never did.
+Positions stay closed-form (deterministic Dubins/pursuit curves), so this doesn't cost
+meaningful bandwidth — the client extrapolates the same curve the server computes, and the
+server only needs to broadcast a path-generation ID and elapsed time, not raw positions,
+exactly the same trick land's dead-reckoning already uses for waypoint chains.
 
-**Infrastructure Strike**
-- Attacks buildings and province infrastructure directly
-- Low-altitude infra strike: does not depend on recon. Deals targeted damage to specific
-  buildings with priority on fortifications (fort level reduction). Limited total damage per
-  strike — not capable of destroying a fully fortified province in one pass
-- High-altitude infra strike: depends on recon value. Deals more significant infrastructure
-  damage (industry reduction, building damage) but requires recon to locate specific targets.
-  At zero recon, bombs fall on generic infrastructure. At maximum recon, hits priority targets
-
-### Air superiority missions
-
-**Air Superiority**
-- Prioritises attacking enemy fighters (low-altitude fighters and high-altitude heavy fighters)
-- Wing enters combat with all enemy air wings assigned to the same province
-- Does not prioritise bombers — leaves them to conduct their missions while fighters duel
-
-**Interception**
-- Prioritises attacking enemy bombers rather than fighters
-- Forces enemy bombing wings to divert and deal reduced damage on their current mission
-- Specialised interception aircraft have reduced detection signatures (harder for enemy to
-  target them before they reach the bombers)
-
-### Naval missions
-See NAVAL_COMBAT.md for port strike and naval strike mission details.
+**Contact detection stays on the existing 500ms room tick** — no new faster subsystem
+needed. Because positions are analytic curves, the server can run a *swept* check each tick
+("did these two paths come within engagement range at any point during this window") instead
+of sampling more frequently. Cheap, and scoped only to wings already near each other via
+spatial bucketing.
 
 ---
 
-## Air-Land Damage Patterns
+## Aircraft Types & Missions
 
-When a CAS or ground attack mission strikes a land division in combat, the damage lands on
-the tactical 5×5 grid using specific patterns. These patterns mirror the land unit attack
-patterns by design — air is an extension of the combined-arms system, not a separate layer.
+Two altitude bands, not three — the original three-row split collapsed cleanly once AA
+effectiveness was checked: heavy AA already treats medium and high altitude identically, so
+a third band added no defensive distinction, only formation-building overhead.
 
-**CAS bomb (low-altitude precision strike)**
-- Hits a 1×1 or 2×2 cell cluster in the enemy grid
-- Target cell is chosen proportional to recon value (same system as land artillery)
-- At zero recon: random cell
-- At maximum recon: weighted toward high-value targets (same priority list as sniper)
-- Deals high HP damage to the targeted cell(s). Moderate suppression.
-- Low-altitude aircraft are exposed to enemy AA guns during this attack
+**Exact aircraft variants, research archetypes, and perk trees are later modules** (see Out
+of Scope) — this section defines the confirmed roster of archetypes and their eligible
+missions, not final unit stats.
 
-**Tactical bombing run (medium/high altitude horizontal)**
-- Hits an entire **row** of the enemy grid
-- Row targeting: defaults to the front row (R5). With sufficient recon, can be directed to
-  a specific row (e.g. targeting R2 where artillery typically sits)
-- Deals moderate HP damage and moderate suppression across all units in the row
-- High-altitude aircraft are not exposed to small arms AA but are vulnerable to heavy AA guns
+### Low altitude
 
-**Rocket and MG strafing run (low-altitude)**
-- Hits an entire **column** of the enemy grid
-- Column is chosen randomly, weighted toward occupied columns proportional to recon
-- Deals moderate HP damage and high suppression to all units in the column
-- Models historical fighter-bomber strafing of vehicle columns
-- Exposed to all AA gun types due to low altitude and slow attack run
-
-**Dive bomber (high-to-low attack)**
-- Operates from High row but drops to Low altitude during the attack run
-- Hits a 1×1 cell with high precision (high recon weighting even at moderate recon values)
-- Deals very high HP damage to the target cell
-- Vulnerable to AA guns during the attack dive despite starting at high altitude
-
----
-
-## Air-to-Air Combat
-
-When two or more nations have air wings assigned to the same province, air-to-air combat
-resolves as a **shadow combat** — parallel to the land battle, not interrupting it.
-
-### Detection and attack scaling
-All air-to-air attacks are proportional to **detection value**:
-
-| Detection | Attack dealt |
+| Type | Missions |
 |---|---|
-| 100% | 100% |
-| 50% | ~50% (linear decay) |
-| 0% | 5% minimum |
+| CAS plane | Tactical bombing, Interception, Air Superiority |
+| Dive bomber | Tactical bombing, Interception, Air Superiority |
+| Fighter | Interception, Air Superiority, (Tactical bombing via research perk) |
+| Naval bomber | Trade interdiction, Anti-submarine, Anti-ship |
 
-The 5% floor ensures that even completely undetected air wings still pose some threat —
-a lone recon plane over a province is never completely safe, just much harder to hit.
+### High altitude
 
-**Detection sources:**
-- Radar buildings in the province: significant detection bonus (most reliable source)
-- Recon planes assigned to the province: generate detection each round
-- Other air units have small passive detection values — they see each other to a degree
-- Maritime patrol aircraft over coastal provinces contribute detection
+| Type | Missions |
+|---|---|
+| Heavy fighter | Interception, Air Superiority, Escort, (Tactical bombing via research perk) |
+| Strategic bomber | Logistics / Area / Industry / Oil bombing |
+| Tactical bomber | Logistics / Area / Industry / Oil bombing, Tactical bombing |
+| Recon plane | Recon |
 
-### Distance penalty
-Damage dealt by aircraft is reduced proportionally to distance from their home air base:
-- Near and medium range: mild to negligible penalty
-- Very long range: significant damage reduction (aircraft arrive low on fuel, less effective)
-- The penalty is not linear — it only becomes significant at extreme range. Most tactical
-  situations within a theatre are unaffected.
-
-### Air combat location
-The position where air combat is resolved corresponds to where the land battle is happening:
-- Over provinces with active land combat: air combat happens over the combat zone
-- For infra strike missions: combat happens near the targeted city/building
-- For logistics strike without land combat: combat happens randomly within the province
-- For CAS without active land combat: combat happens randomly within the province
-- For naval missions: see NAVAL_COMBAT.md
-
-### Mission priority interactions
-When an Air Superiority wing engages an enemy CAS wing over a province:
-- The enemy CAS wing is forced into air-to-air combat
-- Each round the enemy CAS wing spends fighting reduces that round's ground attack output
-- If the enemy CAS wing loses enough strength, it is driven off and the ground attack mission
-  fails for that round
-- A player who establishes air superiority over a province effectively neutralises enemy CAS
-  over that province for as long as they maintain it
+**Escort eligibility is range-gated, not type-gated.** Heavy Fighter reaches deep
+strategic-bomber missions by design (longer range, lower readiness decay); standard Fighter
+is not hard-blocked from Escort, but its shorter range and faster readiness decay make it
+naturally unsuited to deep escort and well suited to short-range tactical escort near the
+front — the readiness/range mechanic above does this gating for free, matching the real
+history of short-ranged fighters failing at deep escort (the Bf 109 over Britain, ~10 minutes
+loiter time before having to turn back) without needing a hardcoded rule. A future
+drop-tank-style research perk is one plausible way Fighter later reaches deep-escort
+viability; a Heavy-Fighter-style archetype is the other route (slower, worse in a straight
+dogfight against enemy Fighters, but long-ranged from the start, mirroring the historical
+Bf 110) — research specifics are deferred, per this document's scope (mechanics before
+perks).
 
 ---
 
-## Recon and Detection System (Air Layer)
+## Damage Patterns
 
-**Detection** is the air equivalent of land recon. Both feed into the same unified recon value
-for their respective engagement contexts — land recon affects land tactical targeting, air
-detection affects air combat effectiveness and high-altitude bombing accuracy.
+**Dive bomber** — single-cell precision target on the enemy tactical grid. Base priority is
+recon-weighted (same shape as artillery); a research perk can swap in a fixed priority list
+(sniper's targeting model) or raise target count per engagement.
 
-**Air recon sources:**
-- Dedicated recon planes assigned to a province: generate detection value each round
-- Other air units contribute small passive detection
-- Radar buildings: province-level detection bonus, persistent (not per-round)
+**Tactical bomber (Tactical bombing mission)** — hits the **front-occupied row**,
+prioritising soft (non-armoured) targets — carpet bombing. Starts covering only 2–3 cells
+from one side of the row; a research perk expands coverage to the full row.
 
-**What high detection enables:**
-- Air-to-air attacks deal closer to full damage
-- High-altitude CAS bombing becomes more accurate (fewer wasted bombs on empty cells)
-- High-altitude logistics strike deals proportionally more damage
-- High-altitude infra strike hits priority targets rather than generic infrastructure
+**CAS bomber (Tactical bombing mission)** — hits a **column** (IL-2-style anti-column
+strafing/rocket run), same partial-then-full-coverage research progression as tactical
+bomber, mirrored for columns instead of rows.
 
-**Maritime patrol aircraft** over sea zones generate naval detection rather than land recon.
-See NAVAL_COMBAT.md for how naval detection differs from land/air recon.
+**Fighter's strafing perk (Tactical bombing mission)** — also a **column** pattern, not row —
+a deliberate divergence from Tactical bomber's carpet-bombing row, keeping Fighter's light
+ordnance mechanically distinct from a dedicated bomber's heavier pattern rather than a
+weaker copy of the same attack.
+
+**Naval bomber** — see Naval Missions below; flotillas have no internal grid, so its damage
+shape is a different axis (single-target vs. splash) rather than cell/row/column.
+
+All of the above land damage on the **land tactical grid** using the existing attack-pattern
+machinery in `TACTICAL_COMBAT.md` — air is an extension of the combined-arms system, not a
+separate resolution path. CAS/tactical-bombing damage injected mid-round is safe against
+`TACTICAL_COMBAT.md`'s existing attack patterns, since those already re-check live grid state
+at resolution time (e.g. infantry "targets first row with at least one living unit") rather
+than a cached start-of-round snapshot — verify this holds once the round loop is
+implemented, but no redesign should be needed there.
 
 ---
 
-## AA Gun Interaction
+## Combat Resolution
 
-AA guns in a land division's 5×5 grid defend against air attacks targeting that division.
+**Attack vs. Defense — one rule covers bombers, fighters, and the reload-vulnerability case:**
 
-**AA effectiveness:**
-- Light AA guns: effective against low-altitude aircraft (CAS, dive bombers, strafing fighters)
-- Heavy AA guns: effective against medium and high-altitude aircraft
-- AA guns deal damage to air units attacking the division, reducing their strength over
-  multiple missions
-- A division with well-placed AA is significantly more resistant to air attack than one without
-- AA guns do not contribute meaningfully to land-vs-land combat (see TACTICAL_COMBAT.md)
+```
+damage_dealt_this_tick = weapon_ready ? Attack_value : Defense_value
+```
 
-**Air unit survivability:**
-- Low-altitude missions are inherently riskier — exposed to both light and heavy AA
-- High-altitude missions avoid light AA but remain vulnerable to heavy AA and interceptors
-- Air unit strength lost to AA is recovered between missions at a rate proportional to supply
-  reaching the home air base
+Every wing has an Attack-vs-air value (its main offensive punch, gated by weapon-ready/
+reload cooldown) and a small, always-available Defense-vs-air value (passive return fire —
+tail gunner, deflection shot). A pure bomber simply has `Attack_vs_air = 0` — a data value,
+not a special-cased code path, the same pattern `TACTICAL_COMBAT.md` already uses for AA guns
+having no ground-attack role.
+
+- **Two fresh fighters dogfighting:** both weapons ready → both deal full Attack
+  simultaneously.
+- **Fighter caught mid-reload:** falls into the Defense branch — still dangerous to attack,
+  just far less so. Catching a reloading wing is good play, not a free kill; there's no
+  zero-counterplay outcome.
+- **Bombers:** always in the Defense branch against fighters, no special logic needed.
+
+**Target deconfliction.** When multiple friendly wings could each independently pick the same
+"best" enemy target, greedy unique-target assignment prevents pile-ups: sort engaged
+friendlies, each claims its highest-scoring **still-unclaimed** enemy contact, removing it
+from the pool. If attackers outnumber targets, overflow doubles up on the highest-value
+remaining target rather than sitting idle. Cheap (O(n log n)), no new infrastructure.
+
+**Auto-target weighting** (for Tactical bombing / CAS-style ground attack with no manually
+selected target): utility score = `base_priority(target_type, mission) × distance_falloff(from
+base) + noise_floor`. The noise floor matters for the same reason the old detection formula
+kept a 5% minimum — a purely greedy nearest-target algorithm is predictable and gameable.
+
+---
+
+## Escort
+
+A wing on Escort is assigned to a specific friendly bomber wing, not a fixed destination or
+target category. Its path follows the bomber's path; its engagement trigger is "an enemy wing
+is currently attacking my assigned bomber," not nearest-enemy targeting. This is genuinely
+different logic from Air Superiority/Interception (which hunt categories) and needs its own
+code path. If the assigned bomber is destroyed or completes its mission and RTBs, the escort
+wing follows it home automatically rather than needing a fresh order.
+
+---
+
+## Detection & Visibility
+
+Air reuses **land's observation-radius model**, not naval's opaque/fuzzy-contact model — a
+plane in open sky has no physical hiding mechanism equivalent to a submerged submarine, so
+there's no reason to duplicate naval's fog-of-war shape here. An enemy wing is visible to you
+if it is currently inside the detection coverage of a radar building, a friendly wing, or a
+land division's observation radius — binary, continuously updated, not time-boxed.
+
+**Sources:**
+- **Radar building** — reveals all air units in a region; also boosts naval detection chance
+  in the same area. Not tied to the city point (sited independently, like the supply hub).
+  Full building design (levels, cost, perk tree) is deferred to the "military buildings" pass
+  flagged in `ECONOMY_BUILDINGS.md`; this document defines only its functional effect on air
+  detection.
+- **Recon plane** — extends observation/scouting visibility, literally revealing new targets
+  to other wings. Detection is **not persistent** — a recon plane must keep hovering over a
+  target area for the detection (and therefore the ability of other wings to path toward it)
+  to hold; break contact and the target goes dark again.
+- **Other air units** — small passive detection, same as before.
+
+This also answers how a strike wing "finds" a target it didn't spot itself: recon holds
+visibility on an area, a bombing wing already inbound (or retasked) completes the kill —
+mirroring how real strike missions were vectored onto contacts held by a separate spotter.
+
+---
+
+## Strategic Bombing
+
+Four sub-targets, all confirmed:
+
+| Mission | Hits | Geography |
+|---|---|---|
+| **Logistics** | Road segment throughput, for N ticks | Real road/supply-hub geometry — distance-decayed AA exposure |
+| **Area** *(renamed from "civilian")* | Population / infrastructure | City point — full AA exposure |
+| **Industry** | The province's `industry` scalar (`MAP_DATA_CONTRACT.md` already flags this field "Affected by bombing") | City point — full AA exposure |
+| **Oil** | Provincial oil extraction output, for N ticks (mirrors Logistics Strike's existing throughput-reduction shape, not a stockpile kill) | City point — full AA exposure |
+
+"Area" replaces "civilian bombing" as a name — it's the actual historical term (RAF Bomber
+Command's area-bombing campaign, distinct from precision industrial bombing) and avoids the
+loaded framing of the old label.
+
+Industry and Oil deliberately target the same city point as Area bombing rather than
+inventing separate rural geography — no building in the current map schema has a position
+distinct from the city (`MAP_DATA_CONTRACT.md`: only `city.position` is a literal point;
+every other building, including every resource-extraction building, is a flat province
+scalar). If a later map-authoring pass gives buildings point-placed positions, this can be
+revisited; it isn't blocking today.
+
+---
+
+## AA Interaction — three distinct layers
+
+| Layer | Defends | Triggers on | Defined in |
+|---|---|---|---|
+| Division grid AA | A specific engaged land division | CAS/dive-bomber attack on that division | `TACTICAL_COMBAT.md` (existing) |
+| **Province fixed AA** | The city / province itself | Any strategic bombing mission | This document (new) |
+| **Flotilla pooled AA** | Ships at sea | Naval Strike mission | `NAVAL_COMBAT.md` (new) |
+
+**Province fixed AA** (the "anti-air network" building flagged as deferred in
+`ECONOMY_BUILDINGS.md`'s military-buildings pass — this document defines only its functional
+behaviour, not its full build/level/perk design):
+- **City-point missions (Area, Industry, Oil)** — full damage. Historically, direct strikes
+  on a defended city/industrial target faced the densest flak belts (the Ruhr, Berlin); this
+  mechanic makes hitting the highest-value strategic target the highest-risk one, by design.
+- **Logistics and Tactical bombing** (real geography away from the city — road segments, or
+  wherever the front actually is) — damage decays with distance from the city centre, reusing
+  the same non-linear "mild near, steep only at extreme range" curve shape already defined
+  for the wing distance-penalty mechanic, rather than inventing a second falloff formula.
+- Retains the existing light/heavy split by target altitude, same as division-grid AA.
+
+**Flotilla pooled AA** — full mechanic defined in `NAVAL_COMBAT.md`; summarised here for
+completeness. AA damage against an attacking air wing is **pooled across every AA-capable
+ship currently in the target flotilla**, weighted toward light cruisers (already stated in
+`NAVAL_COMBAT.md`: "best AA output per ship of any surface class... primary fleet role: AA
+coverage for carriers") — not just whatever ship is being targeted. This matches real
+carrier task force doctrine: ships arranged in a circular screen specifically so each ship's
+AA fire covers the others in company, credited historically with results like the Philippine
+Sea's 90%+ interception rate against a single large raid. A ship class set to Held Back
+posture (existing toggle) does not contribute to the pool — out of formation, no mutual
+coverage. Resolved as a single check at the moment of the attack run, same framing as land
+CAS's AA exposure, not a continuous per-tick drain.
+
+---
+
+## Naval Missions
+
+**Naval bomber** — Trade interdiction, Anti-submarine, Anti-ship. All sea-zone assignments,
+gated by the same fog-of-war rules as the rest of naval combat (`NAVAL_COMBAT.md`): no
+detection, no target.
+
+- **Trade interdiction** reuses the existing cargo-sinking-event machinery submarines already
+  trigger — no new mechanic, a second unit type feeding the same event.
+- **Anti-ship / Anti-submarine** auto-target the highest-value contact first (reusing the
+  carrier Strike preset's existing "capital ships first" priority) — no manual
+  target-type filtering, consistent with every other auto-battler-style targeting rule in
+  this game.
+
+**Finding a target in real time, under naval fog of war:** a detected contact generates a
+strike-able marker — a randomized-radius position, valid for a limited time window — rather
+than the flotilla's exact true position. Precision and duration scale with what generated the
+contact: a maritime patrol wing actively on-station gives a tight, continuously-refreshed
+marker; a cargo-sinking-triangulated contact gives a wide radius and a short window. If the
+bomber physically reaches the marker before it expires, the strike resolves against the
+flotilla's true composition; if not, the sortie whiffs — mechanically honest to how real
+contact-report strikes sometimes found empty ocean.
+
+**Damage shape:**
+- **Base:** single target (the highest-value ship found).
+- **Splash** (research perk): primary target takes full damage, a percentage splashes to
+  other ships in the same flotilla — flotillas have no internal grid, so "splash" means
+  spreading across flotilla membership, the only spatial container that exists for naval
+  units. This creates a genuine tension with the AA-pooling mechanic above: a tightly packed
+  formation maximises mutual AA coverage but also maximises splash exposure — the tradeoff
+  falls out of the two systems already designed, no extra mechanic needed.
+- **Multi-sortie** (generic perk, not naval-specific — see Wing Lifecycle) lets a single
+  flight engage additional targets, potentially a different ship or a different flotilla
+  entirely, before RTB.
+
+**Port strike** — targets ships in port; anchored ships have no zone-based or pooled-AA
+defence, fully exposed. Naval base level reduces damage to docked ships (existing rule).
+
+---
+
+## Carrier Integration
+
+Carrier-launched wings use the **same real-time wing system** as land-based wings — the
+carrier is a mobile airbase, not a separate control model. `NAVAL_COMBAT.md`'s automated
+mission presets (CAP, Strike, Anti-sub, CAS, Logistics Strike, Infra Strike, and now
+Area/Industry/Oil) remain the casual-floor default — a player who never opens the air panel
+still gets sensible automatic carrier air behaviour — but the same wings are individually
+selectable and overridable exactly like land-based wings, for players who want to. See
+`NAVAL_COMBAT.md` for the full preset list and naval-specific detail.
+
+---
+
+## Command Layer — Air Fleets
+
+Extends `STRATEGIC_COMBAT.md`'s existing Macro/Micro command layer (originally land-only) to
+air: a player groups wings into an **Air Fleet** and issues it a strategic directive ("hold
+air superiority over this front," "interdict this supply network"); the system auto-assigns
+individual wings to fulfil it, the same division of labour as an Army Group's advance axis.
+Per-wing override is always available and never required — this is the actual answer to
+commanding a late-game air force of dozens of wings without it becoming a second job, and it
+reuses a pattern this game has already validated for land rather than inventing new command
+UX for air specifically.
+
+---
+
+## Server Architecture & Scaling
+
+Wing-as-atomic-unit plus deterministic flight paths means real-time air combat generalises
+land's existing dead-reckoning-plus-delta-diff architecture almost for free — bandwidth and
+dollar cost stay flat across tested scales (30 to 100 concurrent players, thousands of total
+entities across a full game lifecycle), because payload size tracks *state changes*, not
+*entity count* or *visual smoothness*. Two concrete implementation notes worth carrying into
+the build:
+
+- **Use `StateView`/`@view()` for interest management, not the older `@filter()`/
+  `@filterChildren()` named in `NetworkScalingSystem`'s original note** — Colyseus's own docs
+  state `@filter()` "is not recommended for fast-paced games," which is exactly the category
+  real-time air combat falls into.
+- **AOI/interest management should be pulled forward, not left `[LATER]`.** Combined land +
+  air + naval entity counts exceed the original ~150-unit trigger well before air is even
+  factored in, once realistic player counts and late-game division growth are considered.
 
 ---
 
 ## Open Questions (To Be Resolved in Playtesting)
 
-- Exact round duration for air combat rounds relative to land rounds (same cadence or different)
-- Base recon contribution rate per recon plane per round
-- Detection decay rate when recon planes are not present (does detection persist between rounds
-  or must it be maintained?)
-- Exact damage reduction percentages for CAS without active land combat
-- Specific AA damage values per gun type against each aircraft altitude band
-- Distance penalty curve — at exactly what range does the significant penalty begin?
-- Logistics strike throughput reduction values per road level per strike type
+- Combat readiness decay rate while airborne, and its floor (never zero)
+- Combat readiness recovery rate at home base, proportional to supply
+- Multi-sortie loiter/cooldown duration (target: 10–20s)
+- Redeployment/template-change stand-down time (previously 1 minute, flat, same as land —
+  confirm this still holds under real-time resolution)
+- Defense-value magnitude relative to Attack-value (target: small, ~10–15% of Attack — enough
+  that catching a reloading wing is still clearly correct play, not enough to be a free kill)
+- Weapon-ready/reload cooldown duration per aircraft type
+- Distance-falloff curve constants for province fixed AA (shape confirmed, numbers pending
+  alongside the existing wing distance-penalty curve they're reused from)
+- Naval bomber splash-damage percentage and falloff by ship proximity within the flotilla
+- Contact-marker radius and duration per detection source quality (maritime patrol vs.
+  triangulated sinking-event contact vs. own-flotilla scouting)
+- Recon plane's detection-generation rate and how quickly visibility lapses after it leaves
+- Pursuit-path recompute interval for interceptors chasing a moving target
+- Fighter vs. Heavy Fighter dogfight modifier (Heavy Fighter's proposed vulnerability in a
+  straight dogfight against standard Fighters, mirroring the historical Bf 110 pattern)
+- Air Fleet directive vocabulary and auto-assignment heuristic (mirrors the land Army Group
+  advance-axis heuristic; exact matching logic from playtesting)
+- Wing withdrawal threshold — HP/readiness floor at which a wing auto-RTBs rather than
+  fighting to zero, mirroring naval's zone-based withdrawal pattern; manual Retreat always
+  available as an override
+- Airbase capacity — whether airbase level caps simultaneous stationed wings and/or governs
+  refuel/rearm speed, mirroring naval base level's role for ship repair
 
 ---
 
 ## Out of Scope for This Document
 
-**Naval air missions** (port strike, naval strike, carrier operations) — see NAVAL_COMBAT.md.
+**Exact aircraft variants, research archetypes, and perk trees** (e.g. the German-heavy-
+fighter vs. American-drop-tank escort-range archetypes discussed during design) — deferred
+until after mechanics are implemented and playtested, per explicit direction for this
+rewrite: mechanics before perks.
 
-**Tech tree unlocks** — aircraft variant stats, specialisation trees, and era-appropriate
-aircraft types are later modules. The attack patterns and mission types defined here are
-stable across all aircraft generations.
+**Radar and anti-air network building design** (cost, levels, perk tree) — deferred to the
+"military buildings" pass flagged in `ECONOMY_BUILDINGS.md`. This document defines only their
+functional effect on air combat.
 
-**Strategic bombing of cities and industry** — not yet designed. Infra strike as defined here
-covers tactical-level building damage. City-level economic bombing is a later module scope.
+**Rural/point-placed building geography** — if a future map-authoring pass gives buildings
+positions distinct from the city point, Industry and Oil bombing's shared-city-point
+targeting should be revisited.
+
+---
+
+## Relationship to Other Combat Layers
+
+This design replaces the previous version of this document in full. What changed and why,
+for anyone diffing against the old design:
+
+- **Province-assigned, round-resolved wings → individually selectable, real-time, pathfinding
+  wings.** The old model matched HoI4's abstraction; the new model is closer to Call of War,
+  chosen deliberately over Wargame: Red Dragon's real-time-twitch model specifically because
+  Call of War proves the same "individual entities, real-time simulation, zero required
+  per-tick input" pattern this game already uses for naval flotillas.
+- **3×5 internal wing grid → homogeneous wings.** Composition depth moved from "what's in
+  this wing" to "which mission, which target, how well do you manage range and readiness
+  across many wings" — the same floor/ceiling shift naval already made by dropping a grid in
+  favour of flotilla-composition choices.
+- **Abstract detection-proportional air-to-air damage → physical contact plus the Attack/
+  Defense model.** Detection now gates *whether a path can be generated toward a target at
+  all*, not a damage multiplier layered on top of an abstract "both wings are in this
+  province" assumption.

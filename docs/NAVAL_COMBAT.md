@@ -1,7 +1,8 @@
 # Grand Strategy Multiplayer — Naval Combat Design
 
 > Confirmed design decisions for the naval combat layer.
-> Last updated: June 2026.
+> Last updated: July 2026 — carrier aircraft and flotilla AA sections updated to match
+> AIR_COMBAT.md's real-time wing redesign (see those sections for what changed).
 > Naval combat interacts with the strategic supply system (see STRATEGIC_COMBAT.md),
 > air combat (see AIR_COMBAT.md), and the research/refit system (this document).
 
@@ -273,6 +274,43 @@ preservation.
 
 ---
 
+## Flotilla AA Defence Against Air Attack
+
+> Referenced from AIR_COMBAT.md's AA Interaction section as one of three distinct AA layers
+> in the game (division-grid AA, province fixed AA, and this one). Full mechanic lives here;
+> AIR_COMBAT.md only summarises it.
+
+AA damage against an attacking air wing (Naval Strike, or a carrier's own Strike/CAS wings
+returning enemy fire) is **pooled across every AA-capable ship currently in the target
+flotilla** — not just whichever ship the attacker happens to be aiming at. Light cruisers
+contribute the most per ship ("best AA output per ship of any surface class... primary
+fleet role: AA coverage for carriers" — see Cruisers above); other classes contribute a
+smaller amount each, rather than zero, so a flotilla's total AA output scales with its full
+composition, not just its cruiser count in isolation.
+
+**This mirrors real carrier task force doctrine.** The standard formation was a literal
+circular screen — carriers at the centre, cruisers and destroyers ringed around them
+specifically so each ship's AA fire covered the others in company. The payoff was real: at
+the Battle of the Philippine Sea (1944), coordinated fleet AA plus fighter defence destroyed
+over 90% of a 450-plane Japanese strike. A pooled, escort-weighted AA mechanic is the
+historically accurate outcome, not a simplification of one.
+
+**Held Back posture excludes a ship class from the pool.** A ship class pulled to the rear
+(see Ship Class Posture above) is out of formation and does not contribute AA coverage,
+consistent with the same posture toggle already gating whether that class takes battery fire
+or contributes to blockade duties.
+
+**Resolution timing:** a single pooled-AA check at the moment the attacking wing executes its
+attack run — not a continuous per-tick drain. Same framing as land CAS being "exposed to
+enemy AA guns during this attack" in AIR_COMBAT.md; one roll per pass, using the pooled
+value.
+
+**In-port ships remain a special case:** per Air-Naval Integration below, ships in port have
+no zone-based *or* pooled-AA defence — fully exposed. The pooling mechanic only applies to a
+flotilla at sea.
+
+---
+
 ## Submarine System
 
 Submarines have two modes, toggled by the player on the strategic map.
@@ -321,40 +359,58 @@ surface ship support.
 
 ---
 
-## Carrier Aircraft — Automated Mission Presets
+## Carrier Aircraft — Mobile Airbase, Same Wing System as Land
 
-Carrier aircraft are automated. Players set a mission preset per carrier; aircraft execute
-it every round without further input.
+> **Updated July 2026 to match AIR_COMBAT.md's real-time wing redesign.** Carrier aircraft
+> are no longer a separate, simpler abstraction — see AIR_COMBAT.md's "Carrier Integration"
+> section for the full rationale. A carrier is a **mobile airbase**: its stationed wings are
+> ordinary, individually-selectable, real-time wings using exactly the same aircraft types,
+> mission set, pathfinding, and combat resolution as land-based air. Nothing below is a
+> separate system — it is the casual-floor default layered on top of the same wings.
+
+**Automated presets remain the default control mode.** Players set a mission preset per
+carrier; its wings execute it continuously without further input, exactly matching the
+"zero required clicks for sensible behaviour" floor AIR_COMBAT.md establishes for land-based
+wings. A player who wants finer control can select any carrier-launched wing directly and
+override it — retask it, pull it home, hand-pick its target — the same way a land-based wing
+can be overridden. Casual and sweaty players get the same underlying system at different
+levels of engagement, not two different systems.
 
 **Presets:**
 
-**Combat Air Patrol (CAP):** Intercept enemy aircraft attacking the flotilla. No offensive
-output. The defensive default.
+**Combat Air Patrol (CAP):** Fighter/Heavy Fighter wings set to Interception, loitering over
+the flotilla by default (reusing AIR_COMBAT.md's default Interception wait-state) rather
+than a fixed destination. No offensive output. The defensive default.
 
-**Strike:** Target highest-value enemy ships (capital ships first). Full offensive damage.
-No air defence for own flotilla.
+**Strike:** Naval bomber wings on Anti-ship, auto-targeting highest-value enemy ships
+(capital ships first) per AIR_COMBAT.md's Naval Missions targeting rule. Full offensive
+damage. No air defence for own flotilla while wings are away.
 
-**Anti-submarine:** Hunt submarines in the current zone. Significantly increases naval
+**Anti-submarine:** Naval bomber wings on Anti-submarine. Significantly increases naval
 detection value each round.
 
-**Close Air Support (CAS):** Attack land divisions in an adjacent coastal province. Carrier
-aircraft historically conducted infrastructure strikes (Operations Meridian, Robson, Lentil
-against Sumatran oil refineries) as well as tactical ground support. CAS damage lands on the
-land tactical grid using the same patterns as land-based CAS (see AIR_COMBAT.md). Effective
-only against coastal provinces within the flotilla's zone range.
+**Close Air Support (CAS):** Wings on Tactical bombing against land divisions in an adjacent
+coastal province. Carrier aircraft historically conducted infrastructure strikes (Operations
+Meridian, Robson, Lentil against Sumatran oil refineries) as well as tactical ground support.
+Damage lands on the land tactical grid using the same patterns as land-based Tactical
+bombing (see AIR_COMBAT.md's Damage Patterns). Effective only against coastal provinces
+within the flotilla's zone range.
 
-**Logistics Strike:** Target supply infrastructure in a coastal province within range.
+**Logistics Strike:** Wings on Logistics bombing against a coastal province within range.
 Historically confirmed — British Pacific Fleet carrier aircraft specifically targeted oil
-refineries and supply installations. Reduces road segment throughput in the target province
-for N ticks. Recon-proportional effectiveness for high-altitude delivery.
+refineries and supply installations. Reduces road segment throughput for N ticks, same
+distance-decayed AA exposure rule as land-based Logistics bombing.
 
-**Infrastructure Strike:** Target buildings in a coastal city within range. Recon-proportional
-targeting for high-altitude; direct targeting at low altitude. Priority on fortifications and
-port buildings.
+**Area / Industry / Oil Strike:** Wings on the corresponding Strategic bombing sub-mission
+against a coastal city within range — full province-fixed-AA exposure, same as land-based
+strikes on these targets (see AIR_COMBAT.md's Strategic Bombing and AA Interaction
+sections). Newly in scope for carriers as part of this update; previously only CAS and
+Logistics/Infrastructure Strike were confirmed.
 
 **AA defence from cruisers:** Ships in the target flotilla with AA armament (light cruisers
-especially) deal damage to attacking carrier aircraft proportional to AA ship count. A
-cruiser-heavy flotilla is significantly harder to strike than a battleship-heavy one.
+especially) deal damage to attacking wings proportional to AA ship count — the pooled,
+cruiser-weighted mechanic now fully specified in AA Interaction below. A cruiser-heavy
+flotilla is significantly harder to strike than a battleship-heavy one.
 
 ---
 
@@ -762,17 +818,19 @@ Notifications (toast system):
 ## Air-Naval Integration
 
 ### Carrier aircraft
-See Carrier Aircraft — Automated Mission Presets section above for the full list including
-CAS, logistics strike, and infrastructure strike missions confirmed historically and now in
-scope for carrier aircraft.
+See Carrier Aircraft — Mobile Airbase, Same Wing System as Land above for the full preset
+list, including Area/Industry/Oil strike now confirmed in scope for carriers.
 
 ### Land-based air wing naval missions
-**Port strike:** Targets ships in port. Anchored ships have no zone-based defence — fully
-exposed to air attack. Naval base level reduces damage to docked ships. Most efficient way
-to damage capital ships without a naval engagement.
+**Port strike:** Targets ships in port. Anchored ships have no zone-based **or pooled-AA**
+defence — fully exposed to air attack. Naval base level reduces damage to docked ships. Most
+efficient way to damage capital ships without a naval engagement.
 
-**Naval strike:** Targets a flotilla at sea. Ships can manoeuvre and use AA defence.
-Detection determines targeting accuracy.
+**Naval strike:** Targets a flotilla at sea, flown by Naval bomber wings on the Anti-ship
+mission. Full targeting, detection, and damage-shape mechanics (fuzzy contact markers, the
+highest-value-first auto-priority, single/splash/multi-sortie damage) are defined in
+AIR_COMBAT.md's Naval Missions section — this entry is a pointer, not a duplicate. Ships can
+manoeuvre and use the pooled AA defence defined above.
 
 ### Submarine vs maritime patrol
 Maritime patrol wings over a sea zone increase submarine detection each round. Active

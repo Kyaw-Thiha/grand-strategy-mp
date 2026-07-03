@@ -97,14 +97,14 @@ moves harder (the flanking division clips the enemy's engagement area too early)
 
 **Engagement radius formula (composition-based, tunable):**
 ```
-base_radius        = 25  # infantry floor (km)
+base_radius        = 50  # infantry floor (map units)
 armoured_fraction  = armoured_cells / total_filled_cells
 cavalry_fraction   = cavalry_cells  / total_filled_cells
 
 radius = base_radius
-       - (max(0, armoured_fraction - 0.15) / 0.10) * 0.5   # -0.5 km per 10% armour above 15%
-       - (cavalry_fraction / 0.10) * 0.25                   # -0.25 km per 10% cavalry
-radius = clamp(radius, 22, 25)                              # floor 22, ceiling 25
+       - (max(0, armoured_fraction - 0.15) / 0.10) * 5   # -5 per 10% armour above 15%
+       - (cavalry_fraction / 0.10) * 2                    # -2 per 10% cavalry
+radius = clamp(radius, 30, 50)                            # floor 30, ceiling 50
 ```
 
 Approximate results:
@@ -132,18 +132,6 @@ complexity (~11 km), dense/complex (~7.5 km). Each node stores `cover_combat` an
 `edge_cost = base_cost × division_movement_profile[terrain]`. Impassable terrain
 (`profile_cost == INF`) is excluded from the search entirely.
 
-**Synthetic goal (pixel-perfect destination):** The client inserts a temporary `_synthetic_goal`
-node at the exact click position before routing, connected to the K=8 nearest non-neutral
-waypoints. A* routes to this node, then the path is post-processed to replace it with the
-original waypoint ID. The exact click coordinates are preserved as `_dr_final_goal` for the
-dead reckoning last mile.
-
-**Neutral territory exclusion:** Both forward and backward A* neighbor expansions exclude
-nodes belonging to nations the player is not at war with (`_is_neutral_for`). Only
-`stance: "war"` allows passage; neutral, allied, and absent relations all block routing.
-The target node itself is exempt — the search must be able to reach it.
-See `docs/PATHFINDING.md` for the full relation-stance resolution table.
-
 **Two-phase routing:** Pathfinding runs an off-road purity pre-check, then a road entry
 pre-check (route to the nearest road node, then road-only to goal). Only if both fail
 does it fall back to the full unified graph. This is explicit routing logic, not just
@@ -160,26 +148,9 @@ this — if a road naturally lies between waypoints, the normal algorithm is use
 **River crossing:** Edges crossing a river LineString are flagged at pipeline time with
 a multiplier (minor 1.8×, moderate 3.0×, major 4.5×). Road crossings (bridges) exempt.
 
-**HPA* cluster abstraction:** The pipeline partitions waypoints into province-based clusters
-and pre-computes border-crossing costs. Client-side HPA* search runs a cheap abstract-graph
-Dijkstra first, then full-precision A* only within the clusters the abstract path crosses.
-Synthetic goal targets bypass HPA* (not in cluster data) and fall through to flat A*.
-
-**Path smoothing:** A centripetal Catmull-Rom spline is fit through the string-pulled
-waypoint list client-side, producing smooth heading transitions at turns. Deviation from
-the original polyline is clamped to ~750m to prevent cutting across blocked terrain.
-
-**Server validation:** The client submits the ordered waypoint list plus `final_lng`/`final_lat`
-(the exact click position). The server validates each waypoint step against the division's
-server-side movement profile and the authoritative graph. After all waypoints are consumed,
-the server advances toward `final_position_lng/lat` in `_advanceFinalPosition()` using the
-same terrain-speed formula as the client's last-mile DR. Invalid paths are rejected and the
-client receives a correction.
-
-**Consumed waypoint tracking:** The server broadcasts `consumed_waypoint_ids` each tick.
-The client trims its local DR order by matching consumed IDs from the front. When the
-client's DR is ahead of the server, a suffix-match comparison prevents unnecessary resets
-(see `docs/PATHFINDING.md` — Dead Reckoning).
+**Server validation:** The client submits the ordered waypoint list. The server validates
+each step against the division's server-side movement profile and the authoritative graph.
+Invalid paths are rejected and the client receives a correction.
 
 ---
 
@@ -208,6 +179,28 @@ forcing the player to micromanage.
 divisions) are naturally managed at micro level. Wide fronts (late game, e.g. Eastern Front
 scale with 30–40 divisions) create organic pressure toward macro command. The game does not
 lock the player into either mode — friction teaches strategy.
+
+### Air Fleets — the same two-tier pattern extended to air
+
+> Added July 2026 alongside AIR_COMBAT.md's real-time wing redesign. Air wings are
+> individually selectable, real-time, pathfinding units (see AIR_COMBAT.md) — the same
+> command-layer scaling pressure land divisions create at 30–40 units applies even sooner to
+> a late-game air force of dozens of wings.
+
+**Macro (Air Fleet level):** a player groups wings into an Air Fleet and issues it a
+strategic directive — "hold air superiority over this front," "interdict this supply
+network" — and the system auto-assigns individual wings to fulfil it, the same division of
+labour as an Army Group's advance axis handling column logistics automatically.
+
+**Micro (wing level):** any individual wing can be selected and overridden at any time —
+retasked, given a specific target, pulled home early. Micro is always available but never
+required, matching AIR_COMBAT.md's floor/ceiling principle for air specifically.
+
+**Why this matters more for air than it first appears:** land divisions are deliberately kept
+to a low count per player (see Design intent below); air wings have no equivalent hard
+ceiling in the current design, and a maxed air-doctrine nation could plausibly field several
+dozen. Air Fleets are the actual answer to commanding that scale without it becoming a second
+job, reusing this exact pattern rather than inventing new command UX for air.
 
 ---
 
@@ -294,8 +287,8 @@ Each division is represented as a dot on the strategic map with three concentric
 
 **Engagement area (composition-based radius, circular):**
 - Radius computed from template composition at save time (see Division Movement Profile
-  section for the formula). Infantry division: ~25 km. Armoured division: ~22 km.
-  Smaller armoured radius gives the player precise control over when the
+  section for the formula). Infantry division: ~50 map units. Armoured division: ~30
+  map units. Smaller armoured radius gives the player precise control over when the
   division commits — avoiding accidental engagements mid-flanking-manoeuvre
 - **Visible to both own and enemy players** — own engagement area shown as a solid
   circle; enemy engagement areas shown as a faded/dashed circle. This is essential
@@ -562,65 +555,6 @@ it simply has a queued destination it will head to after the fight.
 
 ---
 
-## Territory Movement Restriction
-
-### Design: neutral territory blocks movement
-
-Units cannot move into territory belonging to nations they are not at war with or allied to.
-Neutral waypoints are stripped from move orders; if the very first waypoint is neutral, the
-order is rejected entirely. Retreat paths also avoid neutral territory.
-
-This applies to both player-issued move orders and auto-generated retreat paths.
-
-### Initialization: war matrix at game start
-
-All 6 playable nations (germany, france, united_kingdom, spain, algeria, italy) are
-initialised with `stance: "war"` against each other at game start via `_initRelations()`
-in `GameRoom.ts`. Non-playable nations (belgium, netherlands, switzerland, etc.) are
-never added to the relations map — they default to "neutral" stance.
-
-This is a dev convenience; real diplomacy replaces this in Phase 10.
-
-### Waypoint → nation mapping
-
-At game start, `MovementSystem.loadMapData(mapId)` reads `map_data.json` and runs
-point-in-polygon (ray casting) for every waypoint node against every province's polygon
-rings. A bounding-box pre-filter reduces the number of full polygon checks. The resulting
-`waypointNation: Map<string, string>` maps each waypoint ID to its owning nation ID.
-Unmapped waypoints (sea, no province) default to "not neutral" (allowed).
-
-### Move order trimming in `handleSubmitMoveOrder()`
-
-After `validateMoveOrder()` passes (all waypoint IDs exist), the server calls
-`movementSystem.trimToAllowedTerritory()` which iterates the waypoint array and stops
-at the first neutral-territory waypoint:
-
-```
-if (isNeutralFor(wpId, divNationId, relations)) break;
-allowed.push(wpId);
-```
-
-The allowed prefix replaces the original path. If the prefix is empty (first waypoint
-is neutral), the server sends `MOVE_ORDER_REJECTED` with reason `"neutral_territory"`.
-
-### Retreat avoidance
-
-`_initiateRetreat()` uses `movementSystem.getNearestNonNeutralWaypoint()` instead of
-`getNearestWaypoint()`, ensuring the retreat target is not in neutral territory. Falls
-back to the original `getNearestWaypoint()` if all waypoints are neutral (should not
-occur in a populated map).
-
-### `COMBAT_ENDED` event
-
-Broadcast when one division retreats and the surviving opponent is reset. Payload:
-```json
-{ "winner_id": string, "retreated_id": string }
-```
-The client handler clears `is_meeting_battle` on both divisions and emits
-`division_updated` for the winner so the panel and icon update immediately.
-
----
-
 ## Movement UX and Hotkeys
 
 ### Move Order Flow
@@ -787,14 +721,6 @@ tooltips on all UI buttons ("Move [Space]", "Hold [G]").
 runtime via the settings UI built in Phase 5. GDScript handles keyboard input cleanly
 through `InputMap`. A left-handed mirror preset ships as a second named default mapping,
 not a runtime-computed mirror.
-
-### Combat State Label (Bottom Selection Panel)
-
-The friendly division bottom panel displays the current combat state as a label in the
-IdentityBlock: `STATE · IDLE`, `STATE · ENGAGED`, `STATE · SUPPRESSED`, `STATE · RETREATING`.
-Updated live via `division_updated` EventBus signals (the same mechanism that keeps
-HP and suppression bars current). Located at `friendly_division_panel.tscn#CombatStateLabel`,
-font_size 11, matching the existing "TEMPLATE · INFANTRY" style.
 
 ---
 
@@ -1269,9 +1195,9 @@ number — it is the difference between losing one division and losing the front
   encirclement pressure)
 - Division type classification thresholds (confirmed: armoured >= 40%, motorised
   15–39%; no Defensive type; exact boundary values from playtesting)
-- Engagement radius formula constants (current: base 25 km infantry, -0.5 km per 10%
-  armoured above 15%, -0.25 km per 10% cavalry, clamp [22, 25]; values subject to
-  playtesting — particularly the floor and ceiling)
+- Engagement radius formula constants (confirmed: base 50 infantry, -5 per 10%
+  armoured above 15%, -2 per 10% cavalry, clamp [30, 50]; exact values from
+  playtesting — particularly the floor of 30 and ceiling of 50)
 - Flanking angle bonus percentages (standard flank bonus % and enhanced rear
   attack bonus % — qualitatively confirmed, exact values from playtesting)
 - Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
