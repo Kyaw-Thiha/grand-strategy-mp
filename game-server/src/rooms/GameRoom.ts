@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
+import { AirWingState } from "./schema/AirWingState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
@@ -200,6 +201,31 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (!nation) return;
         nation.researched_perks.clear();
         for (const id of msg.perk_ids) nation.researched_perks.push(id);
+      });
+      this.onMessage("SPAWN_WING", (_client, msg: {
+        wing_id: string;
+        nation_id: string;
+        aircraft_type?: string;
+        count?: number;
+        position_lng?: number;
+        position_lat?: number;
+        heading_deg?: number;
+        lifecycle_state?: string;
+        mission?: string;
+        home_airbase_province_id?: string;
+      }) => {
+        const wing = new AirWingState();
+        wing.wing_id      = msg.wing_id;
+        wing.nation_id    = msg.nation_id;
+        if (msg.aircraft_type              !== undefined) wing.aircraft_type              = msg.aircraft_type;
+        if (msg.count                      !== undefined) wing.count                      = msg.count;
+        if (msg.position_lng               !== undefined) wing.position_lng               = msg.position_lng;
+        if (msg.position_lat               !== undefined) wing.position_lat               = msg.position_lat;
+        if (msg.heading_deg                !== undefined) wing.heading_deg                = msg.heading_deg;
+        if (msg.lifecycle_state            !== undefined) wing.lifecycle_state            = msg.lifecycle_state;
+        if (msg.mission                    !== undefined) wing.mission                    = msg.mission;
+        if (msg.home_airbase_province_id   !== undefined) wing.home_airbase_province_id   = msg.home_airbase_province_id;
+        this.state.air_wings.set(msg.wing_id, wing);
       });
     }
 

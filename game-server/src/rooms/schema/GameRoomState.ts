@@ -1,4 +1,5 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
+import { AirWingState } from "./AirWingState";
 
 export class GridCellState extends Schema {
   @type("string")  unit_type: string      = "";
@@ -91,6 +92,7 @@ export class GameRoomState extends Schema {
   @type({ map: NationState })   nations   = new MapSchema<NationState>();
   @type({ map: ProvinceState }) provinces = new MapSchema<ProvinceState>();
   @type({ map: DivisionState }) divisions = new MapSchema<DivisionState>();
-  @type({ map: RelationState }) relations = new MapSchema<RelationState>();
-  @type({ map: ProposalState }) proposals = new MapSchema<ProposalState>();
+  @type({ map: RelationState }) relations  = new MapSchema<RelationState>();
+  @type({ map: ProposalState }) proposals  = new MapSchema<ProposalState>();
+  @type({ map: AirWingState })  air_wings  = new MapSchema<AirWingState>();
 }
