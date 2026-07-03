@@ -11,6 +11,7 @@ import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
+import { AirWingLifecycleSystem } from "../systems/air_wing_lifecycle_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
@@ -69,6 +70,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private combatSystem     = new CombatSystem(this.movementSystem);
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
+  private airWingLifecycleSystem = new AirWingLifecycleSystem();
   private playerEmails = new Map<string, string>();
   private diplomacyVotes = new Map<string, DiplomacyVote>();
   private activeDiplomacyVoteByNation = new Map<string, string>();
@@ -145,6 +147,65 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       );
       this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(div)] });
     });
+
+    // ── Air wing production handlers ────────────────────────────────────────────
+
+    this.onMessage("ASSIGN_WING_MISSION", (client, msg: {
+      wing_id: string;
+      mission: string;
+      target_id: string;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const wing = this.state.air_wings.get(msg.wing_id);
+      if (!wing || wing.nation_id !== nation.nation_id) return;
+
+      const didChange = this.airWingLifecycleSystem.assignMission(
+        msg.wing_id,
+        msg.mission,
+        msg.target_id,
+        this.state
+      );
+      if (!didChange) return;
+      const updated = this.state.air_wings.get(msg.wing_id);
+      if (updated) this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
+    });
+
+    this.onMessage("DISBAND_WING", (client, msg: { wing_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const wing = this.state.air_wings.get(msg.wing_id);
+      if (!wing || wing.nation_id !== nation.nation_id) return;
+
+      this.airWingLifecycleSystem.disbandWing(msg.wing_id, this.state,
+        (type, m) => this.broadcast(type, m));
+    });
+
+    this.onMessage("SET_WING_PERK", (client, msg: {
+      wing_id: string;
+      perk: string;
+      value: boolean;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const wing = this.state.air_wings.get(msg.wing_id);
+      if (!wing || wing.nation_id !== nation.nation_id) return;
+
+      const didChange = this.airWingLifecycleSystem.setPerk(msg.wing_id, msg.perk, msg.value, this.state);
+      if (!didChange) return;
+      const updated = this.state.air_wings.get(msg.wing_id);
+      if (updated) this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
+    });
+
     if (process.env.DEV_MODE === "true") {
       this.onMessage("DEV_TELEPORT",   (_client, msg) => this.handleDevTeleport(msg));
       this.onMessage("DEV_SET_SUPPLY", (_client, msg) => this.handleDevSetSupply(msg));
@@ -253,6 +314,43 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.home_airbase_province_id   !== undefined) wing.home_airbase_province_id   = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
         this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+      });
+
+      this.onMessage("SET_WING_LIFECYCLE", (_client, msg: {
+        wing_id: string;
+        lifecycle_state: string;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.lifecycle_state = msg.lifecycle_state;
+      });
+
+      this.onMessage("SET_WING_READINESS", (_client, msg: {
+        wing_id: string;
+        combat_readiness: number;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.combat_readiness = Math.max(0, Math.min(1, msg.combat_readiness));
+      });
+
+      this.onMessage("SET_WING_TARGET", (_client, msg: {
+        wing_id: string;
+        target_id: string;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.target_id = msg.target_id;
+      });
+
+      this.onMessage("SIMULATE_ENGAGEMENT_START", (_client, msg: {
+        wing_id: string;
+        target_wing_id: string;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+        this.airWingLifecycleSystem.triggerContact(msg.wing_id, msg.target_wing_id, this.state);
       });
     }
 
@@ -781,6 +879,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      this.airWingLifecycleSystem.tick(this.state, this.tickCount,
+        (type, msg) => this.broadcast(type, msg));
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
       const updates = [];

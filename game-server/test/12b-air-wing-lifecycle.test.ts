@@ -434,9 +434,15 @@ describe("12b — Air Wing Lifecycle", function () {
   it("lifecycle tick broadcasts AIR_WING_UPDATES with accurate wing state after lifecycle change", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
+    // Drain the SPAWN_WING broadcast before registering the listener.
+    await new Promise(r => setTimeout(r, 100));
 
     const updateReceived = new Promise<any>((resolve) => {
-      client.onMessage("AIR_WING_UPDATES", resolve);
+      client.onMessage("AIR_WING_UPDATES", (msg: any) => {
+        if (msg.wings?.some((w: any) => w.lifecycle_state === WING_LIFECYCLE.TRANSIT)) {
+          resolve(msg);
+        }
+      });
     });
 
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.TRANSIT });
