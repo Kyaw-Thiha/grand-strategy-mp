@@ -93,6 +93,11 @@ layout_mode = 2
 [node name="Separator" type="HSeparator" parent="Center/Card/VBox/PostLogin" unique_id=101332026]
 layout_mode = 2
 
+[node name="SettingsBtn" type="Button" parent="Center/Card/VBox/PostLogin" unique_id=1716261577]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Settings"
+
 [node name="CreateGameBtn" type="Button" parent="Center/Card/VBox/PostLogin" unique_id=1540792571]
 unique_name_in_owner = true
 layout_mode = 2
@@ -119,6 +124,7 @@ layout_mode = 2
 text = "Browse Public Games"
 
 [connection signal="pressed" from="Center/Card/VBox/LoginBtn" to="." method="_on_login_btn_pressed"]
+[connection signal="pressed" from="Center/Card/VBox/PostLogin/SettingsBtn" to="." method="_on_settings_btn_pressed"]
 [connection signal="pressed" from="Center/Card/VBox/PostLogin/CreateGameBtn" to="." method="_on_create_game_btn_pressed"]
 [connection signal="pressed" from="Center/Card/VBox/PostLogin/JoinRow/JoinBtn" to="." method="_on_join_btn_pressed"]
 [connection signal="pressed" from="Center/Card/VBox/PostLogin/BrowseBtn" to="." method="_on_browse_btn_pressed"]

@@ -1,5 +1,7 @@
 extends Control
 
+const _SettingsScene: PackedScene = preload("res://scenes/game/settings_keybind.tscn")
+
 @onready var _email_field: LineEdit    = %EmailField
 @onready var _pass_field: LineEdit     = %PassField
 @onready var _login_btn: Button        = %LoginBtn
@@ -7,6 +9,8 @@ extends Control
 @onready var _post_login: VBoxContainer = %PostLogin
 @onready var _code_field: LineEdit     = %JoinCodeField
 @onready var _title_label: Label       = $Center/Card/VBox/Title
+
+var _settings_panel: Node = null
 
 
 func _ready() -> void:
@@ -55,6 +59,13 @@ func _on_create_game_btn_pressed() -> void:
 	await LobbySystem.create_lobby()
 
 
+func _on_settings_btn_pressed() -> void:
+	if _settings_panel == null:
+		_settings_panel = _SettingsScene.instantiate()
+		add_child(_settings_panel)
+	_settings_panel.show_panel()
+
+
 func _on_join_btn_pressed() -> void:
 	var code: String = _code_field.text.strip_edges().to_upper()
 	if code.length() != 6:
@@ -83,6 +94,7 @@ func _on_lobby_join_failed(reason: String) -> void:
 
 
 func _set_busy(busy: bool) -> void:
+	%SettingsBtn.disabled = busy
 	%CreateGameBtn.disabled = busy
 	%JoinBtn.disabled = busy
 	%BrowseBtn.disabled = busy
