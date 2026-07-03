@@ -41,6 +41,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _friendly_prov_panel: Control = $FriendlyProvincePanel
 @onready var _friendly_stack_panel: Control = $FriendlyStackPanel
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
+@onready var _friendly_air_wing_panel: Control = $FriendlyAirWingPanel
 @onready var _chat_panel: Control = $ChatPanel
 
 var _division_builder_panel: Control
@@ -210,8 +211,10 @@ func _ready() -> void:
 	# Bottom selection bar — reactive to EventBus selection signals
 	EventBus.division_selected.connect(_on_division_selected)
 	EventBus.province_selected.connect(_on_province_selected)
+	EventBus.air_wing_selected.connect(_on_air_wing_selected)
 	EventBus.division_deselected.connect(_on_bottom_bar_deselected)
 	EventBus.province_deselected.connect(_on_bottom_bar_deselected)
+	EventBus.air_wing_deselected.connect(_on_bottom_bar_deselected)
 	EventBus.research_started.connect(_on_research_started)
 	EventBus.research_progress_changed.connect(_on_research_progress_changed)
 	EventBus.research_completed.connect(_on_research_completed)
@@ -569,6 +572,19 @@ func _on_division_selected(div_id: String) -> void:
 	_layout_bottom_hud()
 
 
+## Handles air wing selection — shows FriendlyAirWingPanel for own wings.
+func _on_air_wing_selected(wing_id: String) -> void:
+	var data: Dictionary = GameState.get_air_wing(wing_id)
+	if data.is_empty():
+		return
+	_hide_all_bottom_panels()
+	if _is_side_panel_open():
+		return
+	_friendly_air_wing_panel.populate(wing_id, data)
+	_friendly_air_wing_panel.visible = true
+	_layout_bottom_hud()
+
+
 ## Recenter all bottom panels when the viewport is resized.
 func _on_viewport_size_changed() -> void:
 	_layout_bottom_hud()
@@ -596,7 +612,7 @@ func _layout_bottom_hud_deferred() -> void:
 	await get_tree().process_frame
 	_position_chat_panel()
 	_position_toast_container()
-	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel]:
+	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel, _friendly_air_wing_panel]:
 		_position_bottom_selection_panel(panel)
 
 
@@ -721,6 +737,7 @@ func _hide_all_bottom_panels() -> void:
 	_friendly_prov_panel.visible = false
 	_friendly_stack_panel.visible = false
 	_enemy_div_panel.visible = false
+	_friendly_air_wing_panel.visible = false
 
 
 ## Reports whether any side-docked panel is currently open.

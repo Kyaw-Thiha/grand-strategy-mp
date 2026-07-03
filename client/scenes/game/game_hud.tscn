@@ -28,6 +28,7 @@
 [ext_resource type="PackedScene" uid="uid://cbuwtcevrakg0" path="res://scenes/systems/research/research_tree.tscn" id="33_research_tree"]
 [ext_resource type="Script" uid="uid://cvo1aqjm17xk4" path="res://src/ui/hud/notification_feed.gd" id="34_notification_feed"]
 [ext_resource type="PackedScene" uid="uid://c8q605jnjdup1" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_air_wing_panel.tscn" id="36"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -611,6 +612,15 @@ grow_horizontal = 2
 grow_vertical = 0
 
 [node name="EnemyDivisionPanel" parent="." unique_id=247769611 instance=ExtResource("18")]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="FriendlyAirWingPanel" parent="." instance=ExtResource("36")]
 visible = false
 anchors_preset = 2
 anchor_top = 1.0
