@@ -604,7 +604,7 @@ func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dicti
 		var rel_entry = relations.get(key, {})
 		if typeof(rel_entry) == TYPE_DICTIONARY:
 			var stance: String = rel_entry.get("stance", "neutral")
-			return stance != "war"
+			return stance != "war" and stance != "alliance"
 	return true  # relations loaded but nation absent → treat as neutral (blocked)
 
 

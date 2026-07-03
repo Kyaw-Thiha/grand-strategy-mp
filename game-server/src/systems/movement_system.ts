@@ -212,7 +212,7 @@ export class MovementSystem {
     return inside;
   }
 
-  /** Returns true if the waypoint belongs to a nation that is not at war or allied with divNationId. */
+  /** Returns true if the waypoint belongs to a nation that is neither at war nor allied with divNationId. */
   private _isNeutralFor(
     waypointId: string,
     divNationId: string,
@@ -223,7 +223,7 @@ export class MovementSystem {
     const rel = relations.get(`${divNationId}|${wpNation}`)
             ?? relations.get(`${wpNation}|${divNationId}`);
     const stance = rel?.stance ?? "neutral";
-    return stance !== "war" && stance !== "allied";
+    return stance !== "war" && stance !== "alliance";
   }
 
   /**

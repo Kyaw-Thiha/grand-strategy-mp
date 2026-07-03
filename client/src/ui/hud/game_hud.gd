@@ -65,6 +65,9 @@ const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
 const _BOTTOM_SELECTION_PANEL_BOTTOM_GAP: float = 28.0
 const _BOTTOM_SELECTION_PANEL_DOCK_GAP: float = 16.0
+const _TOAST_CHAT_GAP: float = 12.0
+const _TOAST_WIDTH: float = 328.0
+const _TOAST_HEIGHT: float = 280.0
 
 
 func _ready() -> void:
@@ -417,6 +420,9 @@ func _on_panel_opened(panel_name: String) -> void:
 	var btn: Button = _get_dock_button_for_panel(panel_name)
 	if btn != null:
 		_set_dock_button_active(btn)
+	var entry: Dictionary = hud_manager._registry.get(panel_name, {})
+	if entry.get("placement", -1) == HUDManager.PlacementMode.SIDE_DOCKED:
+		_hide_all_bottom_panels()
 
 
 func _on_panel_closed(panel_name: String) -> void:
@@ -551,6 +557,8 @@ func _on_division_selected(div_id: String) -> void:
 	if data.is_empty():
 		return
 	_hide_all_bottom_panels()
+	if _is_side_panel_open():
+		return
 	var my_nation: String = GameState.get_my_nation_id()
 	if data.get("nation_id", "") == my_nation:
 		_friendly_div_panel.populate(div_id, data)
@@ -587,6 +595,7 @@ func _layout_bottom_hud() -> void:
 func _layout_bottom_hud_deferred() -> void:
 	await get_tree().process_frame
 	_position_chat_panel()
+	_position_toast_container()
 	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel]:
 		_position_bottom_selection_panel(panel)
 
@@ -603,6 +612,28 @@ func _position_chat_panel() -> void:
 	_chat_panel.global_position = Vector2(
 		maxf(_BOTTOM_PANEL_MARGIN, viewport_size.x - chat_size.x - _BOTTOM_PANEL_MARGIN),
 		maxf(0.0, viewport_size.y - chat_size.y - _BOTTOM_PANEL_MARGIN)
+	)
+
+
+## Places notifications above the chat panel so they never cover chat controls.
+## Parameters: none.
+## Returns: nothing.
+func _position_toast_container() -> void:
+	if _toast_container == null:
+		return
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var chat_rect: Rect2 = Rect2(
+		Vector2(viewport_size.x - _BOTTOM_PANEL_MARGIN - _TOAST_WIDTH, viewport_size.y - _BOTTOM_PANEL_MARGIN),
+		Vector2(_TOAST_WIDTH, 0.0)
+	)
+	if _chat_panel != null:
+		chat_rect = _chat_panel.get_global_rect()
+	var toast_width: float = minf(_TOAST_WIDTH, maxf(160.0, viewport_size.x - (_BOTTOM_PANEL_MARGIN * 2.0)))
+	var toast_height: float = minf(_TOAST_HEIGHT, maxf(80.0, chat_rect.position.y - _TOAST_CHAT_GAP - _BOTTOM_PANEL_MARGIN))
+	_toast_container.size = Vector2(toast_width, toast_height)
+	_toast_container.global_position = Vector2(
+		clampf(chat_rect.end.x - toast_width, _BOTTOM_PANEL_MARGIN, maxf(_BOTTOM_PANEL_MARGIN, viewport_size.x - toast_width - _BOTTOM_PANEL_MARGIN)),
+		maxf(_BOTTOM_PANEL_MARGIN, chat_rect.position.y - toast_height - _TOAST_CHAT_GAP)
 	)
 
 
@@ -654,6 +685,8 @@ func _get_bottom_panel_available_left() -> float:
 ## Handles province selection — shows FriendlyProvincePanel in bottom bar.
 func _on_province_selected(province_id: String) -> void:
 	_hide_all_bottom_panels()
+	if _is_side_panel_open():
+		return
 
 	# Try MapLoader first (has name, nation_id), fall back to GameState
 	var map_data: Dictionary = {}
@@ -688,6 +721,17 @@ func _hide_all_bottom_panels() -> void:
 	_friendly_prov_panel.visible = false
 	_friendly_stack_panel.visible = false
 	_enemy_div_panel.visible = false
+
+
+## Reports whether any side-docked panel is currently open.
+## Parameters: none.
+## Returns: true when a side drawer is visible.
+func _is_side_panel_open() -> bool:
+	var open_panel_name: String = hud_manager.get_open_panel()
+	if open_panel_name.is_empty() or not hud_manager._registry.has(open_panel_name):
+		return false
+	var entry: Dictionary = hud_manager._registry.get(open_panel_name, {})
+	return entry.get("placement", -1) == HUDManager.PlacementMode.SIDE_DOCKED
 
 
 ## Called each tick to update session timer display.

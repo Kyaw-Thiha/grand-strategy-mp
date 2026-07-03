@@ -100,6 +100,18 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"RELATIONS_UPDATED":
 			GameState._apply_relations_updated(data)
 
+		"DIPLOMACY_NOTIFICATION":
+			EventBus.notification_requested.emit(
+				data.get("message", "Diplomacy updated"),
+				data.get("notification_type", "diplomacy")
+			)
+
+		"DIPLOMACY_INTERACTIVE_NOTIFICATION":
+			EventBus.interactive_notification_requested.emit(data)
+
+		"DIPLOMACY_VOTE_UPDATED":
+			EventBus.interactive_notification_updated.emit(data)
+
 		"CHAT_MESSAGE":
 			EventBus.chat_message_received.emit(
 				data.get("time", ""),

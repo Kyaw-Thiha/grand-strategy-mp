@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { randomUUID } from "crypto";
-import type { GameRoomState, DivisionState, GridCellState } from "../rooms/schema/GameRoomState.js";
+import type { GameRoomState, DivisionState, GridCellState, RelationState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
@@ -240,6 +240,53 @@ export class CombatSystem {
     this.movementSystem = movementSystem;
   }
 
+  /**
+   * Ends active combat pairs whose nations are no longer at war.
+   * Called by GameRoom immediately after diplomacy changes.
+   */
+  clearInvalidDiplomaticEngagements(
+    state: GameRoomState,
+    changed: Set<string>,
+    broadcast: (type: string, msg: unknown) => void,
+  ): void {
+    const pairsToRemove: string[] = [];
+
+    for (const [key] of this.activePairs) {
+      const [idA, idB] = key.split("|");
+      const divA = state.divisions.get(idA);
+      const divB = state.divisions.get(idB);
+      if (!divA || !divB) {
+        pairsToRemove.push(key);
+        continue;
+      }
+      if (!this._areNationsAtWar(divA.nation_id, divB.nation_id, state.relations)) {
+        pairsToRemove.push(key);
+      }
+    }
+
+    for (const key of pairsToRemove) {
+      const [idA, idB] = key.split("|");
+      const divA = state.divisions.get(idA);
+      const divB = state.divisions.get(idB);
+      this.activePairs.delete(key);
+      if (!divA || !divB) continue;
+
+      this._removeEngagedOpponent(divA, divB.division_id);
+      this._removeEngagedOpponent(divB, divA.division_id);
+      this._resetDivisionIfNoActivePairs(divA, changed);
+      this._resetDivisionIfNoActivePairs(divB, changed);
+      this._finalizeEngagementXp(divA, true, state);
+      this._finalizeEngagementXp(divB, true, state);
+      broadcast("COMBAT_ENDED", {
+        winner_id: "",
+        retreated_id: "",
+        reason: "diplomacy",
+        division_a: divA.division_id,
+        division_b: divB.division_id,
+      });
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // loadMapData
   // ---------------------------------------------------------------------------
@@ -316,8 +363,9 @@ export class CombatSystem {
         const a = divList[i];
         const b = divList[j];
 
-        // Skip same-nation, destroyed
+        // Skip same-nation, non-enemies, destroyed
         if (a.nation_id === b.nation_id) continue;
+        if (!this._areNationsAtWar(a.nation_id, b.nation_id, state.relations)) continue;
         if (
         a.combat_state === "destroyed" ||
         a.combat_state === "retreating" ||
@@ -1065,6 +1113,7 @@ export class CombatSystem {
         let contested = false;
         for (const enemy of divList) {
           if (enemy.nation_id === div.nation_id) continue;
+          if (!this._areNationsAtWar(div.nation_id, enemy.nation_id, state.relations)) continue;
           if (enemy.combat_state === "destroyed") continue;
           const enemyToCity = this._distKm(enemy.position_lng, enemy.position_lat, prov.city_lng, prov.city_lat);
           if (enemyToCity <= CONTEST_RADIUS_KM) {
@@ -1098,6 +1147,40 @@ export class CombatSystem {
       }
       // "engaged" and "suppressed" divisions do NOT decay suppression
     }
+  }
+
+  private _areNationsAtWar(
+    nationA: string,
+    nationB: string,
+    relations: { get(key: string): RelationState | undefined },
+  ): boolean {
+    if (nationA === nationB) return false;
+    const rel = relations.get(`${nationA}|${nationB}`)
+      ?? relations.get(`${nationB}|${nationA}`);
+    return (rel?.stance ?? "neutral") === "war";
+  }
+
+  private _removeEngagedOpponent(division: DivisionState, opponentId: string): void {
+    const index = division.engaged_with.indexOf(opponentId);
+    if (index >= 0) {
+      division.engaged_with.splice(index, 1);
+    }
+  }
+
+  private _resetDivisionIfNoActivePairs(division: DivisionState, changed: Set<string>): void {
+    if (this._hasActivePairForDivision(division.division_id)) return;
+    if (division.combat_state === "engaged" || division.combat_state === "suppressed") {
+      division.combat_state = "idle";
+    }
+    division.attacker_role = "";
+    division.reposition_order.splice(0, division.reposition_order.length);
+    changed.add(division.division_id);
+  }
+
+  private _hasActivePairForDivision(divisionId: string): boolean {
+    return Array.from(this.activePairs.keys()).some(
+      key => key.startsWith(divisionId + "|") || key.endsWith("|" + divisionId)
+    );
   }
 
   // ---------------------------------------------------------------------------
