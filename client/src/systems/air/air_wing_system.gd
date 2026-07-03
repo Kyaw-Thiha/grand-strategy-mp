@@ -1,6 +1,7 @@
 extends Node
 
 const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tscn")
+const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 
 const NATION_COLORS: Dictionary = {
 	"germany":        Color(0.29, 0.29, 0.29),
@@ -18,6 +19,11 @@ var _icon_layer: Node2D   = null
 var _icons: Dictionary    = {}             # wing_id → AirWingIcon node
 var _target_positions: Dictionary = {}    # wing_id → Vector2 screen-space
 var _selected_wing_id: String = ""
+var _pending_milestones: Array[String] = []
+var _pending_chain: Array[String] = []
+var _shift_chain_started: bool = false
+var _pending_route_overlay: Node2D = null
+var _wing_path_by_id: Dictionary = {}
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -26,9 +32,18 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	EventBus.air_wing_added.connect(_on_air_wing_added)
 	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 	EventBus.air_wing_removed.connect(_on_air_wing_removed)
+	if not EventBus.air_wing_path.is_connected(_on_air_wing_path):
+		EventBus.air_wing_path.connect(_on_air_wing_path)
+	if _pending_route_overlay == null:
+		_pending_route_overlay = MoveOrderOverlay.new()
+		_icon_layer.add_child(_pending_route_overlay)
 	# Hydrate any wings already in GameState (late join / scene reload)
 	for wing_id in GameState.air_wings:
 		_on_air_wing_added(wing_id)
+
+
+func _exit_tree() -> void:
+	cleanup()
 
 
 func _on_air_wing_added(wing_id: String) -> void:
@@ -75,9 +90,11 @@ func _on_air_wing_removed(wing_id: String) -> void:
 		icon.queue_free()
 		_icons.erase(wing_id)
 	_target_positions.erase(wing_id)
+	_wing_path_by_id.erase(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
+		_update_ghost()
 
 
 func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
@@ -118,6 +135,7 @@ func _select(wing_id: String) -> void:
 	if icon != null:
 		icon.set_selected(true)
 	EventBus.air_wing_selected.emit(wing_id)
+	_update_ghost()
 
 
 func _deselect() -> void:
@@ -128,3 +146,107 @@ func _deselect() -> void:
 		icon.set_selected(false)
 	_selected_wing_id = ""
 	EventBus.air_wing_deselected.emit()
+	_update_ghost()
+
+
+func _on_air_wing_path(path_data: Dictionary) -> void:
+	var wing_id: String = path_data.get("wing_id", "")
+	if wing_id.is_empty():
+		return
+	_wing_path_by_id[wing_id] = path_data.duplicate()
+	if wing_id == _selected_wing_id:
+		_update_ghost()
+
+
+func _append_pending_milestone(milestone_id: String) -> void:
+	if milestone_id.is_empty():
+		return
+	_pending_milestones.append(milestone_id)
+	_pending_chain.append(milestone_id)
+	_shift_chain_started = true
+	_update_ghost()
+
+
+func _remove_last_pending_milestone() -> void:
+	if _pending_milestones.is_empty():
+		return
+	_pending_milestones.pop_back()
+	if not _pending_chain.is_empty():
+		_pending_chain.pop_back()
+	_update_ghost()
+
+
+func _recompute_chain() -> void:
+	_pending_chain = _pending_milestones.duplicate()
+	_update_ghost()
+
+
+func _clear_pending() -> void:
+	_pending_milestones.clear()
+	_pending_chain.clear()
+	_shift_chain_started = false
+	_update_ghost()
+
+
+func cleanup() -> void:
+	if EventBus.air_wing_added.is_connected(_on_air_wing_added):
+		EventBus.air_wing_added.disconnect(_on_air_wing_added)
+	if EventBus.air_wing_updated.is_connected(_on_air_wing_updated):
+		EventBus.air_wing_updated.disconnect(_on_air_wing_updated)
+	if EventBus.air_wing_removed.is_connected(_on_air_wing_removed):
+		EventBus.air_wing_removed.disconnect(_on_air_wing_removed)
+	if EventBus.air_wing_path.is_connected(_on_air_wing_path):
+		EventBus.air_wing_path.disconnect(_on_air_wing_path)
+	if _pending_route_overlay != null:
+		_pending_route_overlay.free()
+		_pending_route_overlay = null
+
+
+func _update_ghost() -> void:
+	if _pending_route_overlay == null:
+		return
+
+	var icon: Node2D = _icons.get(_selected_wing_id) as Node2D
+	_pending_route_overlay.start_node = icon
+
+	var route_points: Array[Vector2] = _get_selected_wing_path_points()
+	if route_points.is_empty():
+		_pending_route_overlay.clear()
+		return
+
+	_pending_route_overlay.set_path(route_points, [], _get_selected_wing_color())
+
+
+func _get_selected_wing_color() -> Color:
+	if _selected_wing_id.is_empty():
+		return NEUTRAL_COLOR
+	var data: Dictionary = GameState.get_air_wing(_selected_wing_id)
+	return NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
+
+
+func _get_selected_wing_path_points() -> Array[Vector2]:
+	if _selected_wing_id.is_empty():
+		return []
+	var path_data: Dictionary = _wing_path_by_id.get(_selected_wing_id, {})
+	if path_data.is_empty():
+		return []
+
+	var points: Array[Vector2] = []
+	var segments: Array = path_data.get("segments", [])
+	if segments.is_empty():
+		if path_data.has("start_lng") and path_data.has("start_lat"):
+			points.append(_map_loader.project_lng_lat(float(path_data.get("start_lng", 0.0)), float(path_data.get("start_lat", 0.0))))
+		if path_data.has("end_lng") and path_data.has("end_lat"):
+			points.append(_map_loader.project_lng_lat(float(path_data.get("end_lng", 0.0)), float(path_data.get("end_lat", 0.0))))
+		return points
+
+	var first_segment: Dictionary = segments[0]
+	if first_segment.has("start_lng") and first_segment.has("start_lat"):
+		points.append(_map_loader.project_lng_lat(float(first_segment.get("start_lng", 0.0)), float(first_segment.get("start_lat", 0.0))))
+	for segment_variant: Variant in segments:
+		if not segment_variant is Dictionary:
+			continue
+		var segment: Dictionary = segment_variant
+		if segment.has("end_lng") and segment.has("end_lat"):
+			points.append(_map_loader.project_lng_lat(float(segment.get("end_lng", 0.0)), float(segment.get("end_lat", 0.0))))
+	return points
