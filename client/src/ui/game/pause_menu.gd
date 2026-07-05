@@ -4,7 +4,7 @@ extends CanvasLayer
 const _KeybindScene: PackedScene = preload("res://scenes/game/settings_keybind.tscn")
 const OPEN_ANIMATION_SECONDS: float = 0.18
 const CLOSE_ANIMATION_SECONDS: float = 0.14
-const TARGET_BLUR_STRENGTH: float = 15.0
+const TARGET_BLUR_STRENGTH: float = 3.0
 const TARGET_DIM_ALPHA: float = 0.52
 const PANEL_CLOSED_SCALE: Vector2 = Vector2(0.96, 0.96)
 
