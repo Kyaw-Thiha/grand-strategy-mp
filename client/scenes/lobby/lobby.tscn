@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://baagwye0hv82y"]
+[gd_scene format=3 uid="uid://baagwye0hv82y"]
 
 [ext_resource type="Script" uid="uid://j3m8bgujt7wn" path="res://src/ui/lobby/lobby_ui.gd" id="1"]
 [ext_resource type="Theme" uid="uid://bxm46dfawg64w" path="res://assets/themes/hud_dark.tres" id="2"]
@@ -8,6 +8,8 @@ layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 theme = ExtResource("2")
 script = ExtResource("1")
 
@@ -109,7 +111,6 @@ stretch_mode = 5
 [node name="SelectedFlagLabel" type="Label" parent="SelectedFlagPanel/FlagVBox" unique_id=957530289]
 unique_name_in_owner = true
 layout_mode = 2
-mouse_filter = 2
 text = "Select a nation"
 horizontal_alignment = 1
 
