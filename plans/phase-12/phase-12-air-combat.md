@@ -104,6 +104,27 @@ decays airborne, recovers at base; weapon_ready toggles on cooldown schedule.
 
 ---
 
+## Branch B-patch — `feat/air-wing-lifecycle-patch`
+**Applies after Branch B merges. Adds two missing handlers to the existing `AirWingLifecycleSystem`.**
+
+Branch B is complete but two handlers from `AIR_COMBAT.md` were not included:
+
+- **`REDEPLOY_WING` handler:** transfers a wing's home base to a different friendly airbase
+  province. Wing must be IDLE (not airborne). On receipt: set lifecycle → TRANSIT, generate a
+  Dubins path (Branch C) to the new province's airbase position. On arrival: update
+  `home_airbase_province_id` to the new province, transition → REFUEL → IDLE at the new base.
+  The wing does NOT RTB to its old base — the new base is now home.
+- **`RETREAT_WING` handler:** manual early-RTB override. From any airborne lifecycle state
+  (TRANSIT, ENGAGED, LOITER), immediately forces lifecycle → RTB. This is the "pull a wing
+  home early" control `AIR_COMBAT.md` says is always available as a manual override alongside
+  the auto-RTB readiness-floor. Wings already in RTB or REFUEL/IDLE: silently no-op.
+
+**Tests:** REDEPLOY_WING updates `home_airbase_province_id` on arrival and transitions to
+REFUEL/IDLE at the new province (not the old one); RETREAT_WING from TRANSIT → RTB; from
+ENGAGED → RTB; from LOITER → RTB; from IDLE → no-op; from RTB → no-op.
+
+---
+
 ## Branch C — `feat/air-dubins-pathfinding`
 **Starts after A merges. Can run parallel with K-stubs, B, D.**
 
@@ -135,14 +156,22 @@ decays airborne, recovers at base; weapon_ready toggles on cooldown schedule.
   frame; icons now move smoothly instead of snapping to schema position
 - Dashed arc overlay on wing selection: visualises the current Dubins curve shape; hidden by
   default; consistent with land ghost-dot waypoint pattern
+- **Right-click-to-move (same pattern as land combat):** select a wing icon, then:
+  - Right-click on empty map position → sends `ASSIGN_WING_MISSION` with the clicked lat/lng
+    as target; server generates a Dubins transit path to that point
+  - Right-click on a friendly province → sends `REDEPLOY_WING` with that province_id (from
+    Branch B-patch); server generates a Dubins transit path and updates home base on arrival
+  - This is the primary interactive way to trigger paths during Branch C's visual verification
+    pass; without it there is no way to test path generation interactively
 
 **Tests (server):** Dubins path connects start to goal with correct heading at both ends; RTB
 respects current heading (no instant flip); Loiter generates a closed arc; pursuit path
 converges on a moving target over successive recomputes; swept contact detects two paths
 crossing within range, misses paths passing outside range; spatial bucketing prunes distant
 wings correctly.
-**Visual check:** launch two wings, select one, confirm dashed arc matches the smooth
-animated movement.
+**Visual check:** select a wing, right-click a map position — confirm icon begins smooth
+movement along the dashed arc overlay toward the target; select a different wing, right-click
+a friendly province — confirm wing transits and icon moves to new airbase.
 
 ---
 
@@ -287,10 +316,22 @@ appears; open province info panel — confirm industry scalar is reduced.
 - **Anti-submarine:** auto-targets detected sub contacts (fog of war applies)
 - **Anti-ship:** auto-targets highest-value detected ship contact; stubs to mock data
   (Phase 13 wires real flotilla composition)
+- **Port strike:** targets ships anchored in a friendly or contested port province; no
+  zone-based or pooled-AA defence (anchored ships are fully exposed); naval base level on
+  the target province reduces damage to docked ships (existing field — reuse it, don't add
+  a new one); resolved the same way as Anti-ship but triggered on a port province target
+  rather than a fuzzy contact marker
 - **Fuzzy contact marker system:** `NavalContactMarker` — position marker with randomized
   radius + expiry window; precision/duration scale by detection source quality; naval bomber
   generates Dubins transit path to marker centre; strike resolves if wing reaches marker
   before expiry; whiffs if expired; marker cleared on expiry
+- **Splash damage perk** (`perk_splash = true`): primary target takes full damage; a
+  percentage splashes to other ships in the same flotilla (flotilla membership is the only
+  spatial container for naval units — no internal grid); splash percentage is a tunable
+  constant, exact value from playtesting. Stub the constant at a reasonable default (15%).
+  Creates a genuine tension with the AA-pooling mechanic from Branch G: tight formation
+  maximises mutual AA but also maximises splash exposure — tradeoff falls out of the two
+  systems, no extra mechanic needed.
 - New schema: `NavalContactMarkerState` added to `GameRoomState` (position, radius_deg,
   expires_at_ms, nation_id) — needed so client can render it
 - Events: `NAVAL_BOMBER_STRIKE_HIT`, `NAVAL_BOMBER_STRIKE_MISSED`, `CONTACT_MARKER_EXPIRED`
@@ -304,10 +345,9 @@ appears; open province info panel — confirm industry scalar is reduced.
 
 **Tests:** marker radius within spec per detection source tier; bomber arrives before expiry
 → strike resolves (mock flotilla); arrives after expiry → sortie whiffs; trade interdiction
-reaches existing cargo-sinking pipeline; anti-ship targets highest-value first.
-**Visual check:** trigger a maritime patrol detection — confirm translucent circle appears at
-sea; send a naval bomber to it — confirm circle fades as time runs out; bomber arrives in
-time → circle disappears on hit.
+reaches existing cargo-sinking pipeline; anti-ship targets highest-value first; port strike
+resolves with no AA and applies naval base level damage reduction; splash perk distributes
+damage across flotilla members, non-perk wing deals no splash.
 
 ---
 
@@ -362,7 +402,14 @@ reappear when viewport covers them; own wings always visible.
 - Nation preset air wing templates in lobby/game-start (type + count; historically flavoured)
 - Air combat notification toasts: air superiority lost, wing driven off/RTB, strike resolved;
   feeds existing `NotificationSystem`
-- Manual wing retask: click wing icon → side panel shows current mission + override controls
+- Manual wing retask: click wing icon → bottom panel shows current mission + override controls
+- **Move button on bottom panel:** explicit "Move" button in the wing selection bottom panel;
+  enters target-pick mode; player clicks a map position or province to confirm; sends
+  `ASSIGN_WING_MISSION` (empty position) or `REDEPLOY_WING` (friendly province) — same
+  commands as right-click-to-move from Branch C, just a button-driven alternative for
+  players who prefer it over right-click
+- **Retreat button on bottom panel:** sends `RETREAT_WING` (Branch B-patch) to immediately
+  force the selected wing to RTB; shown only when wing is airborne (TRANSIT/ENGAGED/LOITER)
 
 ---
 
@@ -392,16 +439,16 @@ reappear when viewport covers them; own wings always visible.
 ```
 A
 ├── K-stubs (after A — unblocks visual verification for all branches below)
-├── B ──────────────────────────────────────────────┐
-├── C (+ DubinsInterpolator client) ───────────────┤
-└── D (+ detection visibility client) ──────────────┴──── E (+ combat indicator client) ──┐
-                                                          ├──── F (verify via Phase 6 panel)┤
-                                                          ├──── G (+ AA flak + province UI) ┤
-                                                          └──── H (+ contact marker client) ─┴── I ──┐
-                                                                                                      │
-J (after A, parallel; needs K-stubs running for viewport AOI check)                                  │
-K-ui (after I — pure panels)                                                                          │
-                                                          M ◄──────────────────────────────────────── ┘
+├── B ── B-patch (REDEPLOY_WING + RETREAT_WING handlers) ──────────────────┐
+├── C (+ DubinsInterpolator + right-click-to-move client) ──────────────────┤
+└── D (+ detection visibility client) ──────────────────────────────────────┴── E (+ combat indicator client) ──┐
+                                                                                ├──── F (verify via Phase 6 panel)┤
+                                                                                ├──── G (+ AA flak + province UI) ┤
+                                                                                └──── H (+ contact marker client) ─┴── I ──┐
+                                                                                                                            │
+J (after A, parallel; needs K-stubs running for viewport AOI check)                                                        │
+K-ui (after I — move + retreat buttons, full panels)                                                                        │
+                                                                                M ◄──────────────────────────────────────── ┘
 ```
 
 ---
