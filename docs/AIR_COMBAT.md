@@ -44,8 +44,10 @@ heading, current mission, current target (if any), home airbase, weapon/ordnance
 
 **Fuel** decays fast while airborne (faster than readiness) and is the primary range limiter.
 When fuel drops to a threshold, the wing is forced to RTB regardless of its current mission.
-Fuel refills quickly at base (~5 ticks to full). Ferry flights (RELOCATE state) do not consume
-fuel — modelling real-world extended-range ferry operations. Fuel is the mechanic that makes
+Fuel refills quickly at base (~5 ticks to full). Ferry flights (RELOCATE state) consume fuel
+normally — a wing ferrying to a distant staging base may arrive depleted and must refuel
+before it can execute a queued mission. RTB is suppressed during RELOCATE so the wing always
+completes the ferry leg regardless of remaining fuel. Fuel is the mechanic that makes
 distant missions more costly than close ones; a wing sent far from base may not have enough
 fuel for the return leg, and the dynamic range ellipse (see Pathfinding) makes this visible
 to the player in real time.
@@ -128,14 +130,19 @@ behaviour needs no player input; reading and exploiting it is the skill ceiling.
 path (lead pursuit, a standard missile-guidance technique) toward the target's current or
 predicted position, recomputed periodically — not continuously — to keep this server-cheap.
 
-**Dynamic range ellipse.** When a wing is selected, a live ellipse overlay shows the set of
-all reachable strike positions given current fuel and distance from home base. The ellipse
-has two foci — the wing's current position and its airbase — and its size is determined by
-remaining fuel expressed as distance. As the wing flies further from base, the forward bulge
-of the ellipse shrinks (more fuel committed to the return leg). At the point of no return
-(fuel remaining equals the direct distance back to base) the ellipse collapses to a warning
-ring. The overlay updates every frame via client-side fuel interpolation, giving smooth
-continuous feedback rather than tick-rate steps.
+**Dynamic range circle.** When a wing is selected, a live circle overlay centred on the wing
+shows how far it can travel from its current position given remaining fuel. The radius shrinks
+in real time as fuel decays (client-side interpolation gives smooth sub-tick updates). When
+fuel drops to the RTB threshold, the circle collapses to a small warning ring. The circle
+represents one-way reach from the wing's current position; the server's RTB threshold
+reserves enough fuel for the return leg automatically.
+
+**Auto-staging.** If a transit order targets a point beyond the wing's max range from its
+home airbase, the server automatically finds the nearest friendly airbase that is itself
+within range of the target, relocates the wing there first (RELOCATE state), and fires the
+original transit order after the wing lands and refuels. A brief notification confirms the
+staging. If no such airbase exists, the order falls through as a normal transit (wing will
+RTB when fuel runs low before reaching the target).
 
 **Server-authoritative movement.** Land pathfinding is client-computed and server-validated
 after the fact; air needs to be **server-authoritative from the start**, because combat
