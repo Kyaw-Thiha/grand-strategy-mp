@@ -47,6 +47,7 @@ export class AirWingLifecycleSystem {
   private _lastEngagedTarget: Map<string, string> = new Map();
   private _pendingRedeployTarget: Map<string, string> = new Map();
   private _pendingMissionAfterRedeploy: Map<string, { mission: string; target_id: string }> = new Map();
+  private _pendingTransitAfterRedeploy: Map<string, { lng: number; lat: number }> = new Map();
 
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
@@ -59,12 +60,9 @@ export class AirWingLifecycleSystem {
                       && wing.lifecycle_state !== WING_LIFECYCLE.REFUEL;
       const isRelocating = wing.lifecycle_state === WING_LIFECYCLE.RELOCATE;
       if (isAirborne) {
-        // Fuel decay skipped during RELOCATE (ferry flight, optimised for range)
-        if (!isRelocating) {
-          const prevFuel = wing.fuel;
-          wing.fuel = Math.max(FUEL_FLOOR, wing.fuel - FUEL_DECAY_PER_TICK);
-          if (wing.fuel !== prevFuel) didChange = true;
-        }
+        const prevFuel = wing.fuel;
+        wing.fuel = Math.max(FUEL_FLOOR, wing.fuel - FUEL_DECAY_PER_TICK);
+        if (wing.fuel !== prevFuel) didChange = true;
         const prevR = wing.combat_readiness;
         wing.combat_readiness = Math.max(READINESS_FLOOR,
           wing.combat_readiness - READINESS_DECAY_PER_TICK);
@@ -232,6 +230,7 @@ export class AirWingLifecycleSystem {
     this._lastEngagedTarget.delete(wingId);
     this._pendingRedeployTarget.delete(wingId);
     this._pendingMissionAfterRedeploy.delete(wingId);
+    this._pendingTransitAfterRedeploy.delete(wingId);
 
     broadcast("WING_DESTROYED", {
       wing_id: wingId,
@@ -314,5 +313,15 @@ export class AirWingLifecycleSystem {
 
   isPendingRedeploy(wingId: string): boolean {
     return this._pendingRedeployTarget.has(wingId);
+  }
+
+  queueTransitAfterRedeploy(wingId: string, lng: number, lat: number): void {
+    this._pendingTransitAfterRedeploy.set(wingId, { lng, lat });
+  }
+
+  consumePendingTransitAfterRedeploy(wingId: string): { lng: number; lat: number } | undefined {
+    const v = this._pendingTransitAfterRedeploy.get(wingId);
+    if (v) this._pendingTransitAfterRedeploy.delete(wingId);
+    return v;
   }
 }

@@ -133,5 +133,11 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"AIR_WING_PATH":
 			EventBus.air_wing_path.emit(data)
 
+		"AIR_WING_STAGING":
+			EventBus.notification_requested.emit(
+				"Wing out of range — auto-staging to closer airbase before executing order.",
+				"info"
+			)
+
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)

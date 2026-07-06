@@ -11,7 +11,7 @@ import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
-import { AirWingLifecycleSystem } from "../systems/air_wing_lifecycle_system.js";
+import { AirWingLifecycleSystem, FUEL_DECAY_PER_TICK, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { DubinsPathfinder } from "../systems/air_dubins_pathfinder.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
@@ -263,6 +263,30 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (!nation) return;
       const wing = this.state.air_wings.get(msg.wing_id);
       if (!wing || wing.nation_id !== nation.nation_id) return;
+
+      // Auto-staging: if target is beyond max range from home airbase, find a closer
+      // friendly staging base near the target and RELOCATE there first.
+      const homePos = this._provinceCityPositionLookup.get(wing.home_airbase_province_id);
+      if (homePos) {
+        const MAX_RANGE_DEG = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_PER_TICK * 0.0002 * 1000;
+        const dlng = msg.target_lng - homePos.lng;
+        const dlat = msg.target_lat - homePos.lat;
+        if (Math.sqrt(dlng * dlng + dlat * dlat) > MAX_RANGE_DEG) {
+          const stagingId = this._findNearestFriendlyAirbaseToPoint(
+            wing, msg.target_lng, msg.target_lat,
+          );
+          if (stagingId) {
+            this.airWingLifecycleSystem.startRedeploy(wing.wing_id, stagingId, this.state);
+            this.airWingLifecycleSystem.queueTransitAfterRedeploy(
+              wing.wing_id, msg.target_lng, msg.target_lat,
+            );
+            this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+            this.broadcast("AIR_WING_STAGING", { wing_id: wing.wing_id, staging_province_id: stagingId });
+            return;
+          }
+          // No staging base near target — fall through to normal transit
+        }
+      }
 
       const startPos = { lng: wing.position_lng, lat: wing.position_lat };
       const endPos   = { lng: msg.target_lng,    lat: msg.target_lat    };
@@ -1111,6 +1135,29 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       }
 
+      // Pending-transit loop: fire transit orders queued by auto-staging once the
+      // wing lands at its staging base and finishes refuelling (IDLE state).
+      for (const wing of this.state.air_wings.values()) {
+        if (wing.lifecycle_state !== WING_LIFECYCLE.IDLE) continue;
+        const pendingTransit = this.airWingLifecycleSystem
+          .consumePendingTransitAfterRedeploy(wing.wing_id);
+        if (!pendingTransit) continue;
+
+        const startPos = { lng: wing.position_lng, lat: wing.position_lat };
+        const endPos   = { lng: pendingTransit.lng, lat: pendingTransit.lat };
+        const startHeading = (Math.atan2(
+          endPos.lng - startPos.lng,
+          endPos.lat - startPos.lat,
+        ) * 180 / Math.PI + 360) % 360;
+        const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos);
+        this.airDubinsPathfinder.storePath(wing.wing_id, path);
+        wing.path_gen_id = path.path_gen_id;
+        wing.path_elapsed_ms = 0;
+        wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+        this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
+        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+      }
+
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
       const updates = [];
       for (const id of toUpdate) {
@@ -1731,6 +1778,34 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           (type, payload) => this.broadcast(type, payload));
       }
     }
+  }
+
+  private _findNearestFriendlyAirbaseToPoint(
+    wing: AirWingState,
+    targetLng: number,
+    targetLat: number,
+  ): string | null {
+    const maxRange = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_PER_TICK * 0.0002 * 1000;
+    let bestId: string | null = null;
+    let bestDist = Infinity;
+    for (const [pid, province] of this.state.provinces) {
+      if (!province.owner_id) continue;
+      const isOwn = province.owner_id === wing.nation_id;
+      const isAllied = !isOwn &&
+        this.getRelationStance(wing.nation_id, province.owner_id) === "alliance";
+      if (!isOwn && !isAllied) continue;
+      const pos = this._provinceCityPositionLookup.get(pid);
+      if (!pos) continue;
+      const dlng = targetLng - pos.lng;
+      const dlat = targetLat - pos.lat;
+      const distToTarget = Math.sqrt(dlng * dlng + dlat * dlat);
+      if (distToTarget > maxRange) continue;
+      if (distToTarget < bestDist) {
+        bestDist = distToTarget;
+        bestId = pid;
+      }
+    }
+    return bestId;
   }
 
   private _findNearestFriendlyAirbase(wing: AirWingState, excludeProvinceId: string): string | null {
