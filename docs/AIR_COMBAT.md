@@ -39,16 +39,30 @@ squadrons flew one type.
 
 ## The Air Wing
 
-**State:** aircraft type, count (doubles as HP pool), combat readiness, position, heading,
-current mission, current target (if any), home airbase, weapon/ordnance-ready state.
+**State:** aircraft type, count (doubles as HP pool), fuel, combat readiness, position,
+heading, current mission, current target (if any), home airbase, weapon/ordnance-ready state.
 
-**Combat readiness** decays continuously while airborne and recovers on the ground at the
-home base. Readiness scales outgoing damage — a freshly launched wing hits hard; a wing
-that's been loitering or flying long-range hits progressively less hard. This single
-mechanic does three jobs at once: it's the reason distant missions are naturally weaker than
-close ones (no separate distance-penalty formula needed — it falls out of longer transit
-time), it's the reason loitering wings are worse than fresh ones, and it's a legible
-research-perk axis (lower decay rate is a real, readable upgrade).
+**Fuel** decays fast while airborne (faster than readiness) and is the primary range limiter.
+When fuel drops to a threshold, the wing is forced to RTB regardless of its current mission.
+Fuel refills quickly at base (~5 ticks to full). Ferry flights (RELOCATE state) do not consume
+fuel — modelling real-world extended-range ferry operations. Fuel is the mechanic that makes
+distant missions more costly than close ones; a wing sent far from base may not have enough
+fuel for the return leg, and the dynamic range ellipse (see Pathfinding) makes this visible
+to the player in real time.
+
+**Combat readiness** decays slowly while airborne — much slower than fuel — and represents
+crew fatigue, ordnance depletion, and airframe wear. It does not force RTB; a wing can
+operate at low readiness, but it scales outgoing damage, making exhausted wings markedly
+less effective. Readiness refills slowly at base, representing maintenance and rest. This
+creates a meaningful choice between flying a partially-recovered wing sooner versus waiting
+for full readiness. Research perks that lower the decay rate are a legible, readable upgrade
+on either axis.
+
+The two-axis model separates concerns cleanly: **fuel governs where a wing can go**
+(range, forced RTB), **readiness governs how hard it hits when it gets there** (damage
+scaling). A wing on a short-range mission can sortie again quickly after a fast refuel;
+the same wing flying repeated long sorties accumulates readiness degradation that no quick
+refuel can fix — it needs ground time.
 
 **Wings are raised and templated like land/naval units** — nation presets, custom saved
 templates, mid-game creation when not engaged. A template is just aircraft type + count,
@@ -60,15 +74,16 @@ since composition depth now lives in mission choice and positioning rather than 
 
 ```
 Idle (at base) → Transit (to target) → Engaged (mission/combat)
-                                            │
-                        ┌───────────────────┴───────────────────┐
-                  multi-sortie perk                        base case
-                        │                                       │
-                  Loiter (orbit target, cooldown)          RTB (curved return)
-                        │                                       │
-                        └──────► back to Transit             Refuel/rearm at base
-                                 (next target)                      │
-                                                                     └──► Idle
+     │                                          │
+     │ (redeploy order)           ┌─────────────┴─────────────┐
+     │                      multi-sortie perk            base case
+     ▼                            │                           │
+Relocate (ferry to new base) Loiter (orbit target,      RTB (curved return)
+     │                        cooldown)                       │
+     ▼                            │                     Refuel/rearm at base
+Refuel at new base                └──► back to Transit        │
+     │                                 (next target)          └──► Idle
+     └──► Idle (or queued mission)
 ```
 
 Single-sortie wings (the default) fly one engagement, then must RTB and refuel before
@@ -77,6 +92,14 @@ cooldown (10–20s, exact value playtesting-bound) instead of immediately return
 enough that a target isn't struck twice almost instantly, short enough to matter tactically.
 This is the same orbit-path logic used for Interception's default wait-for-a-target state
 below — one piece of pathfinding, two uses.
+
+**RELOCATE** is a distinct airborne state for ferry flights between airbases. It can be
+ordered from any state — from ground states (IDLE, REFUEL) it starts immediately; from any
+airborne state the wing RTBs first, then begins the ferry. During RELOCATE: fuel does not
+decay (ferry range benefit), enemy contact does not trigger engagement (wing is in transit
+posture, not combat posture), and the player cannot redirect the wing (committed flight). A
+mission assigned before the relocation completes is queued and auto-starts after landing and
+refuelling at the new base.
 
 Only wings not in `Idle` need a rendered icon/path at all — a base-camped reserve fleet never
 touches the map, which is most of the answer to the UI-clutter risk of individually-tracked
@@ -104,6 +127,15 @@ behaviour needs no player input; reading and exploiting it is the skill ceiling.
 **Chasing a moving target:** once a target is spotted, an interceptor generates a pursuit
 path (lead pursuit, a standard missile-guidance technique) toward the target's current or
 predicted position, recomputed periodically — not continuously — to keep this server-cheap.
+
+**Dynamic range ellipse.** When a wing is selected, a live ellipse overlay shows the set of
+all reachable strike positions given current fuel and distance from home base. The ellipse
+has two foci — the wing's current position and its airbase — and its size is determined by
+remaining fuel expressed as distance. As the wing flies further from base, the forward bulge
+of the ellipse shrinks (more fuel committed to the return leg). At the point of no return
+(fuel remaining equals the direct distance back to base) the ellipse collapses to a warning
+ring. The overlay updates every frame via client-side fuel interpolation, giving smooth
+continuous feedback rather than tick-rate steps.
 
 **Server-authoritative movement.** Land pathfinding is client-computed and server-validated
 after the fact; air needs to be **server-authoritative from the start**, because combat
@@ -410,8 +442,10 @@ the build:
 
 ## Open Questions (To Be Resolved in Playtesting)
 
-- Combat readiness decay rate while airborne, and its floor (never zero)
-- Combat readiness recovery rate at home base, proportional to supply
+- Fuel decay rate while airborne and its RTB threshold (current: 0.065/tick, threshold 0.10)
+- Fuel recovery rate at base (current: 0.20/tick, ~5 ticks to full)
+- Combat readiness decay rate while airborne (current: 0.015/tick, much slower than fuel)
+- Combat readiness floor (never zero; current: 0.15) and recovery rate (current: 0.04/tick)
 - Multi-sortie loiter/cooldown duration (target: 10–20s)
 - Redeployment/template-change stand-down time (previously 1 minute, flat, same as land —
   confirm this still holds under real-time resolution)
