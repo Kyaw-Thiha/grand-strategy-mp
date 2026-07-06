@@ -33,6 +33,7 @@ func _ready() -> void:
 	_weapon_label      = get_node_or_null("Margin/HBox/StatusBlock/WeaponLabel")
 	_target_label      = get_node_or_null("Margin/HBox/TargetBlock/TargetLabel")
 	_airbase_label     = get_node_or_null("Margin/HBox/TargetBlock/AirbaseLabel")
+	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 
 
 func populate(wing_id: String, data: Dictionary) -> void:

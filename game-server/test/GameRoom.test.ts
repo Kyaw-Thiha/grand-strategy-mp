@@ -191,6 +191,9 @@ describe("GameRoom", () => {
       const targetPrompt = new Promise<any>(resolve =>
         clients["user-b"].onMessage("DIPLOMACY_INTERACTIVE_NOTIFICATION", resolve)
       );
+      const relationsUpdated = new Promise<any>(resolve =>
+        clients["user-a"].onMessage("RELATIONS_UPDATED", resolve)
+      );
       clients["user-a"].send("DIPLOMACY_ACTION", {
         action: "invite",
         target_nation_id: "france",
@@ -201,6 +204,7 @@ describe("GameRoom", () => {
         vote_id: prompt.vote_id,
         accept: true,
       });
+      await relationsUpdated;
       await room.waitForNextPatch();
 
       assert.strictEqual(stance(room, "germany", "france"), "alliance");
@@ -227,16 +231,19 @@ describe("GameRoom", () => {
       assert.strictEqual(stance(room, "germany", "italy"), "war");
       assert.strictEqual(stance(room, "france", "italy"), "war");
 
-      const targetPeaceVote = new Promise<any>(resolve =>
-        clients["user-b"].onMessage("DIPLOMACY_INTERACTIVE_NOTIFICATION", resolve)
-      );
+      const peacePrompts: any[] = [];
+      clients["user-b"].onMessage("DIPLOMACY_INTERACTIVE_NOTIFICATION", (msg: any) => {
+        peacePrompts.push(msg);
+      });
       clients["user-a"].send("DIPLOMACY_ACTION", {
         action: "make_peace",
         target_nation_id: "spain",
       });
-      const peacePrompt = await targetPeaceVote;
+      while (peacePrompts.length < 1) {
+        await wait(25);
+      }
       clients["user-b"].send("DIPLOMACY_VOTE_RESPONSE", {
-        vote_id: peacePrompt.vote_id,
+        vote_id: peacePrompts[0].vote_id,
         accept: true,
       });
       await room.waitForNextPatch();
@@ -346,6 +353,9 @@ describe("GameRoom", () => {
       const targetPeaceVote = new Promise<any>(resolve =>
         clients["user-b"].onMessage("DIPLOMACY_INTERACTIVE_NOTIFICATION", resolve)
       );
+      const combatEnded = new Promise<any>(resolve =>
+        clients["user-a"].onMessage("COMBAT_ENDED", resolve)
+      );
       clients["user-a"].send("DIPLOMACY_ACTION", {
         action: "make_peace",
         target_nation_id: "france",
@@ -355,6 +365,7 @@ describe("GameRoom", () => {
         vote_id: peacePrompt.vote_id,
         accept: true,
       });
+      await combatEnded;
       await room.waitForNextPatch();
 
       assert.strictEqual(room.state.divisions.get("ally_a")!.combat_state, "idle");

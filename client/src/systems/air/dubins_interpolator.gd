@@ -5,6 +5,14 @@ static func evaluate_position(path_data: Dictionary, elapsed_ms: int) -> Vector2
 	if path_data.is_empty():
 		return Vector2.INF
 
+	# LOITER paths are infinite loops — wrap elapsed so the wing keeps circling
+	if path_data.get("path_type", "") == "LOITER":
+		var speed: float = float(path_data.get("speed_deg_per_ms", 0.0))
+		var total_length: float = float(path_data.get("total_length_deg", 0.0))
+		if speed > 0.0 and total_length > 0.0:
+			var period_ms: float = total_length / speed
+			elapsed_ms = int(fmod(float(elapsed_ms), period_ms))
+
 	var segments: Array = path_data.get("segments", [])
 	var start_point: Vector2 = _get_path_start_point(path_data)
 	var end_point: Vector2 = _get_path_end_point(path_data)

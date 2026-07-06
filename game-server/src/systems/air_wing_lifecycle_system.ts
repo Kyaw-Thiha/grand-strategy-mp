@@ -31,10 +31,10 @@ type BroadcastFn = (type: string, msg: unknown) => void;
 export class AirWingLifecycleSystem {
   private _engagementTicks:  Map<string, number> = new Map();
   private _loiterTicks:      Map<string, number> = new Map();
-  private _rtbTicks:         Map<string, number> = new Map();
   private _refuelTicks:      Map<string, number> = new Map();
   private _weaponCooldown:   Map<string, number> = new Map();
   private _lastEngagedTarget: Map<string, string> = new Map();
+  private _pendingRedeployTarget: Map<string, string> = new Map();
 
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
@@ -72,7 +72,6 @@ export class AirWingLifecycleSystem {
       if (isAirborne && wing.combat_readiness <= READINESS_RTB_THRESHOLD
           && wing.lifecycle_state !== WING_LIFECYCLE.RTB) {
         wing.lifecycle_state = WING_LIFECYCLE.RTB;
-        this._rtbTicks.set(wingId, 0);
         this._engagementTicks.delete(wingId);
         this._loiterTicks.delete(wingId);
         broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "low_readiness" });
@@ -108,21 +107,13 @@ export class AirWingLifecycleSystem {
           if (ticks >= MAX_LOITER_TICKS) {
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
-            this._rtbTicks.set(wingId, 0);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
             didChange = true;
           }
           break;
         }
         case WING_LIFECYCLE.RTB: {
-          const ticks = (this._rtbTicks.get(wingId) ?? 0) + 1;
-          this._rtbTicks.set(wingId, ticks);
-          if (ticks >= RTB_DURATION_TICKS) {
-            wing.lifecycle_state = WING_LIFECYCLE.REFUEL;
-            this._rtbTicks.delete(wingId);
-            this._refuelTicks.set(wingId, 0);
-            didChange = true;
-          }
+          // Path completion drives REFUEL transition via air_dubins_pathfinder.tick()
           break;
         }
         case WING_LIFECYCLE.REFUEL: {
@@ -130,6 +121,7 @@ export class AirWingLifecycleSystem {
           this._refuelTicks.set(wingId, ticks);
           if (ticks >= REFUEL_DURATION_TICKS) {
             wing.lifecycle_state = WING_LIFECYCLE.IDLE;
+            wing.path_gen_id = "";
             this._refuelTicks.delete(wingId);
             didChange = true;
           }
@@ -177,7 +169,6 @@ export class AirWingLifecycleSystem {
 
     if (!wing.perk_multi_sortie) {
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
-      this._rtbTicks.set(wingId, 0);
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
       return;
     }
@@ -203,10 +194,10 @@ export class AirWingLifecycleSystem {
 
     this._engagementTicks.delete(wingId);
     this._loiterTicks.delete(wingId);
-    this._rtbTicks.delete(wingId);
     this._refuelTicks.delete(wingId);
     this._weaponCooldown.delete(wingId);
     this._lastEngagedTarget.delete(wingId);
+    this._pendingRedeployTarget.delete(wingId);
 
     broadcast("WING_DESTROYED", {
       wing_id: wingId,
@@ -225,5 +216,48 @@ export class AirWingLifecycleSystem {
       case "precision_bombing": wing.perk_precision_bombing = value; return true;
       default: return false;
     }
+  }
+
+  retreatWing(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+    if (wing.lifecycle_state !== WING_LIFECYCLE.TRANSIT
+      && wing.lifecycle_state !== WING_LIFECYCLE.ENGAGED
+      && wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
+      return;
+    }
+
+    this._engagementTicks.delete(wingId);
+    this._loiterTicks.delete(wingId);
+    this._pendingRedeployTarget.delete(wingId);
+    wing.lifecycle_state = WING_LIFECYCLE.RTB;
+    broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "player_retreat" });
+  }
+
+  startRedeploy(wingId: string, newProvinceId: string, state: GameRoomState): boolean {
+    const wing = state.air_wings.get(wingId);
+    if (!wing || wing.lifecycle_state !== WING_LIFECYCLE.IDLE) return false;
+
+    this._pendingRedeployTarget.set(wingId, newProvinceId);
+    wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+    wing.path_elapsed_ms = 0;
+    return true;
+  }
+
+  completeRedeploy(wingId: string, state: GameRoomState): void {
+    const newProvinceId = this._pendingRedeployTarget.get(wingId);
+    if (!newProvinceId) return;
+
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+
+    wing.home_airbase_province_id = newProvinceId;
+    this._pendingRedeployTarget.delete(wingId);
+    this._refuelTicks.set(wingId, 0);
+    wing.lifecycle_state = WING_LIFECYCLE.REFUEL;
+  }
+
+  isPendingRedeploy(wingId: string): boolean {
+    return this._pendingRedeployTarget.has(wingId);
   }
 }

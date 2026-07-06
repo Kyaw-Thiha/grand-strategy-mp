@@ -44,8 +44,11 @@ func _ready() -> void:
 
 	var path_a: Dictionary = _make_straight_path("test-wing-1", "path-1", Vector2(0.0, 0.0), Vector2(10.0, 0.0))
 	EventBus.air_wing_path.emit(path_a)
-	_assert_vec2_eq(_get_icon(air_system).position, Vector2(2.5, 0.0), "path elapsed time must interpolate along path A")
+	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.25, 0.0), "path elapsed time must interpolate along path A")
+	air_system._process(0.5)
+	_assert_vec2_eq(_get_icon(air_system).position, Vector2(5.25, 0.0), "local process loop must advance the icon between server updates")
 
+	GameState.air_wings["test-wing-1"]["path_gen_id"] = "path-1"
 	GameState._apply_air_wing_updates({
 		"wings": [{
 			"wing_id": "test-wing-1",
@@ -68,11 +71,11 @@ func _ready() -> void:
 
 	var path_b: Dictionary = _make_straight_path("test-wing-1", "path-2", Vector2(0.0, 0.0), Vector2(0.0, 10.0))
 	EventBus.air_wing_path.emit(path_b)
-	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 2.5), "newer path generation must replace the visible position")
+	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 0.25), "newer path generation must replace the visible position even before GameState catches up")
 	_assert_eq(air_system.call("_get_selected_wing_path_points"), [Vector2(0.0, 0.0), Vector2(0.0, 10.0)], "newer path generation must replace the visible preview route")
 
 	EventBus.air_wing_path.emit(path_a)
-	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 2.5), "stale path_gen_id must not overwrite the newer path")
+	_assert_vec2_eq(_get_icon(air_system).position, Vector2(0.0, 0.25), "stale path_gen_id must not overwrite the newer path")
 	_assert_eq(air_system.call("_get_selected_wing_path_points"), [Vector2(0.0, 0.0), Vector2(0.0, 10.0)], "stale path_gen_id must not overwrite the visible preview route")
 
 	if _failed:
@@ -116,7 +119,7 @@ func _make_straight_path(wing_id: String, path_gen_id: String, start: Vector2, e
 		"end_lat": end.y,
 		"end_heading_compass_deg": 90.0,
 		"turn_radius_deg": 0.5,
-		"speed_deg_per_ms": 0.1,
+		"speed_deg_per_ms": 0.01,
 	}
 
 

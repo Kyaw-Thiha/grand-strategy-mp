@@ -26,6 +26,8 @@ var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
 var _wing_path_by_id: Dictionary = {}
 var _wing_path_generations_by_id: Dictionary = {}
+var _wing_total_elapsed_ms: Dictionary = {}
+var _last_synced_gen_id: Dictionary = {}
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -47,6 +49,13 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 
 func _exit_tree() -> void:
 	cleanup()
+
+
+func _process(delta: float) -> void:
+	for wing_id_variant: Variant in _wing_path_generations_by_id.keys():
+		var wing_id: String = str(wing_id_variant)
+		_wing_total_elapsed_ms[wing_id] = float(_wing_total_elapsed_ms.get(wing_id, 0.0)) + delta * 1000.0
+		_refresh_wing_icon_position(wing_id)
 
 
 func _on_air_wing_added(wing_id: String) -> void:
@@ -74,7 +83,30 @@ func _on_air_wing_updated(wing_id: String) -> void:
 	if data.is_empty():
 		return
 	icon.update_data(data)
+
+	var ls: String = data.get("lifecycle_state", "")
+	if ls == "idle" or ls == "refuel":
+		_wing_path_by_id.erase(wing_id)
+		_wing_path_generations_by_id.erase(wing_id)
+		_wing_total_elapsed_ms.erase(wing_id)
+		_last_synced_gen_id.erase(wing_id)
+		_refresh_wing_icon_position(wing_id)
+		if wing_id == _selected_wing_id:
+			_update_ghost()
+		return
+
+	var current_gen_id: String = data.get("path_gen_id", "")
+	var last_synced: String = str(_last_synced_gen_id.get(wing_id, ""))
+	var server_elapsed: float = float(data.get("path_elapsed_ms", 0))
+	if current_gen_id != last_synced:
+		_last_synced_gen_id[wing_id] = current_gen_id
+		_wing_total_elapsed_ms[wing_id] = server_elapsed
+	else:
+		var current: float = float(_wing_total_elapsed_ms.get(wing_id, 0.0))
+		_wing_total_elapsed_ms[wing_id] = max(current, server_elapsed)
 	_refresh_wing_icon_position(wing_id)
+	if wing_id == _selected_wing_id:
+		_update_ghost()
 
 
 func _on_air_wing_removed(wing_id: String) -> void:
@@ -85,13 +117,15 @@ func _on_air_wing_removed(wing_id: String) -> void:
 	_target_positions.erase(wing_id)
 	_wing_path_by_id.erase(wing_id)
 	_wing_path_generations_by_id.erase(wing_id)
+	_wing_total_elapsed_ms.erase(wing_id)
+	_last_synced_gen_id.erase(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
 		_update_ghost()
 
 
-func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
+func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_id: String = "") -> bool:
 	if not event is InputEventMouseButton:
 		return false
 	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
@@ -104,7 +138,14 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 			_append_pending_milestone(_encode_pending_point(world_pos))
 			return true
 		if _pending_milestones.is_empty():
-			return false
+			if not hovered_province_id.is_empty():
+				if _is_friendly_province(hovered_province_id):
+					_submit_redeploy_order(hovered_province_id)
+				else:
+					_submit_transit_order(world_pos)
+				return true
+			_submit_transit_order(world_pos)
+			return true
 		var last_point: Vector2 = _get_last_pending_point()
 		if last_point != Vector2.INF and world_pos.distance_to(last_point) <= HIT_THRESHOLD_PX * 2.0:
 			_remove_last_pending_milestone()
@@ -164,16 +205,15 @@ func _on_air_wing_path(path_data: Dictionary) -> void:
 	var path_gen_id: String = path_data.get("path_gen_id", "")
 	if wing_id.is_empty():
 		return
-	var current_path_gen_id: String = str(GameState.get_air_wing(wing_id).get("path_gen_id", ""))
-	if not current_path_gen_id.is_empty() and not path_gen_id.is_empty() and path_gen_id != current_path_gen_id:
-		return
 	_wing_path_by_id[wing_id] = path_data.duplicate()
 	if not path_gen_id.is_empty():
 		if not _wing_path_generations_by_id.has(wing_id):
 			_wing_path_generations_by_id[wing_id] = {}
-		var generations: Dictionary = _wing_path_generations_by_id[wing_id]
-		generations[path_gen_id] = path_data.duplicate()
-	_refresh_wing_icon_position(wing_id)
+		_wing_path_generations_by_id[wing_id][path_gen_id] = path_data.duplicate()
+		var last_synced: String = str(_last_synced_gen_id.get(wing_id, ""))
+		if path_gen_id != last_synced:
+			_last_synced_gen_id[wing_id] = path_gen_id
+			_wing_total_elapsed_ms[wing_id] = 0.0
 	if wing_id == _selected_wing_id:
 		_update_ghost()
 
@@ -211,6 +251,57 @@ func _clear_pending() -> void:
 	_update_ghost()
 
 
+## Sends an air command through the shared command queue.
+## Parameters:
+## - type: Colyseus command name.
+## - payload: command payload dictionary.
+## Returns: nothing.
+func _submit_air_command(type: String, payload: Dictionary) -> void:
+	CommandQueue.submit(type, payload)
+
+
+## Sends a transit order to the server using the clicked map position.
+## Parameters:
+## - world_pos: clicked world-space position.
+## Returns: nothing.
+func _submit_transit_order(world_pos: Vector2) -> void:
+	if _map_loader == null:
+		return
+	var lng_lat: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+	_submit_air_command("SUBMIT_AIR_WING_MOVE", {
+		"wing_id": _selected_wing_id,
+		"target_lng": lng_lat.x,
+		"target_lat": lng_lat.y,
+	})
+
+
+## Sends a redeploy order to the server for a friendly province.
+## Parameters:
+## - province_id: selected friendly province id.
+## Returns: nothing.
+func _submit_redeploy_order(province_id: String) -> void:
+	_submit_air_command("REDEPLOY_WING", {
+		"wing_id": _selected_wing_id,
+		"new_province_id": province_id,
+	})
+
+
+## Returns true when the province belongs to the current player nation.
+## Parameters:
+## - province_id: province to inspect.
+## Returns: true if the province is owned by the current nation.
+func _is_friendly_province(province_id: String) -> bool:
+	if province_id.is_empty():
+		return false
+	var province: Dictionary = GameState.get_province(province_id)
+	if province.is_empty():
+		return false
+	var my_nation_id: String = GameState.get_my_nation_id()
+	if my_nation_id.is_empty():
+		return false
+	return province.get("owner_id", "") == my_nation_id
+
+
 func cleanup() -> void:
 	if EventBus.air_wing_added.is_connected(_on_air_wing_added):
 		EventBus.air_wing_added.disconnect(_on_air_wing_added)
@@ -224,6 +315,7 @@ func cleanup() -> void:
 		_pending_route_overlay.free()
 		_pending_route_overlay = null
 	_wing_path_generations_by_id.clear()
+	_wing_total_elapsed_ms.clear()
 
 
 func _update_ghost() -> void:
@@ -249,7 +341,7 @@ func _refresh_wing_icon_position(wing_id: String) -> void:
 	if data.is_empty():
 		return
 
-	var projected_position: Vector2 = _get_interpolated_wing_position(wing_id, data)
+	var projected_position: Vector2 = _get_interpolated_wing_position(wing_id)
 	if projected_position != Vector2.INF:
 		icon.position = _map_loader.project_lng_lat(projected_position.x, projected_position.y)
 		_target_positions[wing_id] = icon.position
@@ -263,15 +355,12 @@ func _refresh_wing_icon_position(wing_id: String) -> void:
 	_target_positions[wing_id] = fallback_position
 
 
-func _get_interpolated_wing_position(wing_id: String, data: Dictionary) -> Vector2:
-	var path_gen_id: String = data.get("path_gen_id", "")
-	if path_gen_id.is_empty():
-		return Vector2.INF
-	var generations: Dictionary = _wing_path_generations_by_id.get(wing_id, {})
-	var path_data: Dictionary = generations.get(path_gen_id, {})
+func _get_interpolated_wing_position(wing_id: String) -> Vector2:
+	var path_data: Dictionary = _wing_path_by_id.get(wing_id, {})
 	if path_data.is_empty():
 		return Vector2.INF
-	return DubinsInterpolator.evaluate_position(path_data, int(data.get("path_elapsed_ms", 0)))
+	var total_ms: int = int(_wing_total_elapsed_ms.get(wing_id, 0.0))
+	return DubinsInterpolator.evaluate_position(path_data, total_ms)
 
 
 func _get_selected_wing_color() -> Color:

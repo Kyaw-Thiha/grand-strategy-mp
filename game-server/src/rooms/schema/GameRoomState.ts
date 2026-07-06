@@ -1,5 +1,5 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
-import { AirWingState } from "./AirWingState";
+import { AirWingState } from "./AirWingState.js";
 
 export class GridCellState extends Schema {
   @type("string")  unit_type: string      = "";

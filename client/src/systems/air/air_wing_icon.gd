@@ -41,7 +41,7 @@ func update_data(data: Dictionary) -> void:
 
 
 func _update_visibility() -> void:
-	visible = lifecycle_state != "idle"
+	visible = not lifecycle_state.is_empty()
 
 
 func _readiness_color() -> Color:
