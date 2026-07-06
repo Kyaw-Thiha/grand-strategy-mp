@@ -123,6 +123,14 @@ func _apply_frontline_updated(data: Dictionary) -> void:
 	EventBus.frontline_updated.emit(province_id, shares)
 
 
+## Called by SessionManager when server sends PROVINCE_INIT (once at game start).
+func _apply_province_init(data: Dictionary) -> void:
+	for pid: String in data.get("provinces", {}):
+		if not provinces.has(pid):
+			provinces[pid] = {}
+		provinces[pid]["owner_id"] = data["provinces"][pid]
+
+
 ## Called by SessionManager when server sends PROVINCE_CAPTURED.
 func _apply_province_captured(data: Dictionary) -> void:
 	var province_id: String = data.get("province_id", "")

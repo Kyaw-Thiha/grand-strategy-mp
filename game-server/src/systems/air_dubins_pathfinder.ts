@@ -435,8 +435,10 @@ export class DubinsPathfinder {
       const pathDurationMs = path.total_length_deg / Math.max(path.speed_deg_per_ms, 0.000001);
       if (wing.path_elapsed_ms < pathDurationMs) continue;
 
-      if (lifecycleSystem.isPendingRedeploy(wing.wing_id)) {
+      if (wing.lifecycle_state === WING_LIFECYCLE.RELOCATE) {
         lifecycleSystem.completeRedeploy(wing.wing_id, state);
+        this.clearPath(wing.wing_id);
+        broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
         continue;
       }
 

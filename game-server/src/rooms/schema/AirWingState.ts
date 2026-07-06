@@ -35,12 +35,13 @@ export type MissionType = typeof MISSION_TYPES[keyof typeof MISSION_TYPES];
 // ── Wing lifecycle states ─────────────────────────────────────────────────────
 
 export enum WING_LIFECYCLE {
-  IDLE    = "idle",
-  TRANSIT = "transit",
-  ENGAGED = "engaged",
-  LOITER  = "loiter",
-  RTB     = "rtb",
-  REFUEL  = "refuel",
+  IDLE     = "idle",
+  TRANSIT  = "transit",
+  ENGAGED  = "engaged",
+  LOITER   = "loiter",
+  RTB      = "rtb",
+  REFUEL   = "refuel",
+  RELOCATE = "relocate",
 }
 
 // ── Wing template (aircraft_type + count; no internal grid) ──────────────────
@@ -60,7 +61,10 @@ export class AirWingState extends Schema {
   // HP pool — count of operational aircraft in the wing
   @type("number") count: number = 10;
 
-  // 0.0–1.0; decays airborne, recovers at home base
+  // 0.0–1.0; decays fast while airborne (defines range), refills quickly at base
+  @type("number") fuel: number = 1.0;
+
+  // 0.0–1.0; decays slowly while airborne (scales combat damage), refills slowly at base
   @type("number") combat_readiness: number = 1.0;
 
   // Real-time geographic position (lng/lat in decimal degrees)
@@ -145,6 +149,7 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     nation_id:                wing.nation_id,
     aircraft_type:            wing.aircraft_type,
     count:                    wing.count,
+    fuel:                     wing.fuel,
     combat_readiness:         wing.combat_readiness,
     position_lng:             wing.position_lng,
     position_lat:             wing.position_lat,

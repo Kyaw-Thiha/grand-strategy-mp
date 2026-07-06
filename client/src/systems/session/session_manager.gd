@@ -79,6 +79,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"UNIT_DESTROYED":
 			GameState._apply_unit_destroyed(data)
 
+		"PROVINCE_INIT":
+			GameState._apply_province_init(data)
+
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
 

@@ -215,7 +215,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const wing = this.state.air_wings.get(msg.wing_id);
       if (!wing || wing.nation_id !== nation.nation_id) return;
       const province = this.state.provinces.get(msg.new_province_id);
-      if (!province || province.owner_id !== nation.nation_id) return;
+      if (!province) return;
+      const redeployStance = this.getRelationStance(nation.nation_id, province.owner_id);
+      if (province.owner_id !== nation.nation_id && redeployStance !== "alliance") return;
 
       const didStart = this.airWingLifecycleSystem.startRedeploy(msg.wing_id, msg.new_province_id, this.state);
       if (!didStart) return;
@@ -225,19 +227,28 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
 
-      const targetPos = this._resolveTargetPosition(msg.new_province_id);
-      if (!targetPos) return;
-
-      const path = this.airDubinsPathfinder.computeTransitPath(
-        { lng: updated.position_lng, lat: updated.position_lat },
-        updated.heading_deg,
-        targetPos,
-      );
-      this.airDubinsPathfinder.clearPath(updated.wing_id);
-      this.airDubinsPathfinder.storePath(updated.wing_id, path);
-      updated.path_gen_id = path.path_gen_id;
-      updated.path_elapsed_ms = 0;
-      this.broadcast("AIR_WING_PATH", { wing_id: updated.wing_id, ...path });
+      // Only compute path immediately if wing is now RELOCATE (was IDLE).
+      // Airborne wings have been forced to RTB; their RELOCATE path is computed
+      // by the gameTick RELOCATE loop after they land.
+      if (updated.lifecycle_state === WING_LIFECYCLE.RELOCATE) {
+        const targetPos = this._resolveTargetPosition(msg.new_province_id);
+        if (targetPos) {
+          const startHeading = (Math.atan2(
+            targetPos.lng - updated.position_lng,
+            targetPos.lat - updated.position_lat,
+          ) * 180 / Math.PI + 360) % 360;
+          const path = this.airDubinsPathfinder.computeTransitPath(
+            { lng: updated.position_lng, lat: updated.position_lat },
+            startHeading,
+            targetPos,
+          );
+          this.airDubinsPathfinder.clearPath(updated.wing_id);
+          this.airDubinsPathfinder.storePath(updated.wing_id, path);
+          updated.path_gen_id = path.path_gen_id;
+          updated.path_elapsed_ms = 0;
+          this.broadcast("AIR_WING_PATH", { wing_id: updated.wing_id, ...path });
+        }
+      }
     });
 
     this.onMessage("SUBMIT_AIR_WING_MOVE", (client, msg: {
@@ -433,6 +444,15 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         const wing = this.state.air_wings.get(msg.wing_id);
         if (!wing) return;
         wing.combat_readiness = Math.max(0, Math.min(1, msg.combat_readiness));
+      });
+
+      this.onMessage("SET_WING_FUEL", (_client, msg: {
+        wing_id: string;
+        fuel: number;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.fuel = Math.max(0, Math.min(1, msg.fuel));
       });
 
       this.onMessage("SET_WING_TARGET", (_client, msg: {
@@ -917,6 +937,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       game_speed: this.state.game_speed,
     });
 
+    // Send initial province ownership so clients can validate RELOCATE targets immediately
+    const provinceOwners: Record<string, string> = {};
+    for (const [pid, province] of this.state.provinces) {
+      if (province.owner_id) provinceOwners[pid] = province.owner_id;
+    }
+    this.broadcast("PROVINCE_INIT", { provinces: provinceOwners });
+
     // Send full initial division state — profile sent once at top level (shared by all divisions)
     const sharedProfileJson = this.state.divisions.values().next().value?.movement_profile_json ?? "";
     this.broadcast("DIVISIONS_SPAWNED", {
@@ -1008,7 +1035,12 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     try {
       this.movementSystem.tick(this.state);
-      const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => {
+        this.broadcast(type, msg);
+        if (type === "PROVINCE_CAPTURED") {
+          this._handleAirbaseCapture(msg as { province_id: string; new_owner_id: string });
+        }
+      });
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       this.airWingLifecycleSystem.tick(this.state, this.tickCount,
@@ -1052,12 +1084,31 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.airDubinsPathfinder.tick(this.state, TICK_MS, this.airSpatialBucket, this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg));
 
+      // RELOCATE path loop: compute Dubins path for wings that just entered RELOCATE
+      // (after landing from an airborne state) but don't yet have a path.
       for (const wing of this.state.air_wings.values()) {
-        if (wing.lifecycle_state !== WING_LIFECYCLE.TRANSIT) continue;
-        if (!this.airWingLifecycleSystem.isPendingRedeploy(wing.wing_id)) continue;
-        if (wing.path_gen_id !== "") continue;
-        if (wing.path_elapsed_ms <= 0) continue;
-        this.airWingLifecycleSystem.completeRedeploy(wing.wing_id, this.state);
+        if (wing.lifecycle_state !== WING_LIFECYCLE.RELOCATE) continue;
+        if (this.airDubinsPathfinder.getPath(wing.wing_id)) continue;
+
+        const newProvinceId = this.airWingLifecycleSystem.getPendingRedeployTarget(wing.wing_id);
+        if (!newProvinceId) continue;
+        const targetPos = this._resolveTargetPosition(newProvinceId);
+        if (!targetPos) continue;
+
+        const startHeading = (Math.atan2(
+          targetPos.lng - wing.position_lng,
+          targetPos.lat - wing.position_lat,
+        ) * 180 / Math.PI + 360) % 360;
+        const path = this.airDubinsPathfinder.computeTransitPath(
+          { lng: wing.position_lng, lat: wing.position_lat },
+          startHeading,
+          targetPos,
+        );
+        this.airDubinsPathfinder.storePath(wing.wing_id, path);
+        wing.path_gen_id = path.path_gen_id;
+        wing.path_elapsed_ms = 0;
+        this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
+        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       }
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
@@ -1663,6 +1714,45 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       return { lng: targetWing.position_lng, lat: targetWing.position_lat };
     }
     return this._provinceCityPositionLookup.get(targetId) ?? null;
+  }
+
+  private _handleAirbaseCapture(msg: { province_id: string; new_owner_id: string }): void {
+    for (const wing of this.state.air_wings.values()) {
+      if (wing.home_airbase_province_id !== msg.province_id) continue;
+      const stance = this.getRelationStance(wing.nation_id, msg.new_owner_id);
+      const isFriendly = wing.nation_id === msg.new_owner_id || stance === "alliance";
+      if (isFriendly) continue;
+      const nearestId = this._findNearestFriendlyAirbase(wing, msg.province_id);
+      if (nearestId) {
+        this.airWingLifecycleSystem.startRedeploy(wing.wing_id, nearestId, this.state);
+        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+      } else {
+        this.airWingLifecycleSystem.disbandWing(wing.wing_id, this.state,
+          (type, payload) => this.broadcast(type, payload));
+      }
+    }
+  }
+
+  private _findNearestFriendlyAirbase(wing: AirWingState, excludeProvinceId: string): string | null {
+    let bestId: string | null = null;
+    let bestDist = Infinity;
+    for (const [pid, province] of this.state.provinces) {
+      if (pid === excludeProvinceId) continue;
+      if (!province.owner_id) continue;
+      const isOwn = province.owner_id === wing.nation_id;
+      const isAllied = !isOwn && this.getRelationStance(wing.nation_id, province.owner_id) === "alliance";
+      if (!isOwn && !isAllied) continue;
+      const pos = this._provinceCityPositionLookup.get(pid);
+      if (!pos) continue;
+      const dlng = pos.lng - wing.position_lng;
+      const dlat = pos.lat - wing.position_lat;
+      const dist = dlng * dlng + dlat * dlat;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestId = pid;
+      }
+    }
+    return bestId;
   }
 
   /** Populate state.relations: all playable nations start neutral with each other. */

@@ -3,6 +3,7 @@ extends Node
 const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tscn")
 const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
+const AirRangeOverlay := preload("res://src/systems/air/air_range_overlay.gd")
 
 const NATION_COLORS: Dictionary = {
 	"germany":        Color(0.29, 0.29, 0.29),
@@ -24,6 +25,8 @@ var _pending_milestones: Array[String] = []
 var _pending_chain: Array[String] = []
 var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
+var _range_overlay: Node2D = null
+var _wing_fuel: Dictionary = {}  # wing_id → float
 var _wing_path_by_id: Dictionary = {}
 var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
@@ -41,6 +44,10 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	if _pending_route_overlay == null:
 		_pending_route_overlay = MoveOrderOverlay.new()
 		_icon_layer.add_child(_pending_route_overlay)
+	if _range_overlay == null:
+		_range_overlay = AirRangeOverlay.new()
+		_range_overlay.setup(_map_loader)
+		_icon_layer.add_child(_range_overlay)
 	# Hydrate any wings already in GameState (late join / scene reload)
 	for wing_id in GameState.air_wings:
 		_on_air_wing_added(wing_id)
@@ -56,6 +63,9 @@ func _process(delta: float) -> void:
 		var wing_id: String = str(wing_id_variant)
 		_wing_total_elapsed_ms[wing_id] = float(_wing_total_elapsed_ms.get(wing_id, 0.0)) + delta * 1000.0
 		_refresh_wing_icon_position(wing_id)
+	if _range_overlay != null:
+		_range_overlay.tick_interpolate(delta)
+	_update_range_overlay()
 
 
 func _on_air_wing_added(wing_id: String) -> void:
@@ -83,6 +93,9 @@ func _on_air_wing_updated(wing_id: String) -> void:
 	if data.is_empty():
 		return
 	icon.update_data(data)
+
+	if data.has("fuel"):
+		_wing_fuel[wing_id] = float(data.get("fuel", 1.0))
 
 	var ls: String = data.get("lifecycle_state", "")
 	if ls == "idle" or ls == "refuel":
@@ -119,6 +132,7 @@ func _on_air_wing_removed(wing_id: String) -> void:
 	_wing_path_generations_by_id.erase(wing_id)
 	_wing_total_elapsed_ms.erase(wing_id)
 	_last_synced_gen_id.erase(wing_id)
+	_wing_fuel.erase(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
@@ -138,9 +152,13 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 			_append_pending_milestone(_encode_pending_point(world_pos))
 			return true
 		if _pending_milestones.is_empty():
-			if not hovered_province_id.is_empty():
-				if _is_friendly_province(hovered_province_id):
-					_submit_redeploy_order(hovered_province_id)
+			# Only a click on a city dot → RELOCATE; province area clicks → TRANSIT
+			var city_province_id: String = ""
+			if _map_loader != null:
+				city_province_id = _resolve_province_at_screen_pos(world_pos)
+			if not city_province_id.is_empty():
+				if _is_friendly_province(city_province_id):
+					_submit_redeploy_order(city_province_id)
 				else:
 					_submit_transit_order(world_pos)
 				return true
@@ -198,6 +216,27 @@ func _deselect() -> void:
 	_selected_wing_id = ""
 	EventBus.air_wing_deselected.emit()
 	_update_ghost()
+	if _range_overlay != null:
+		_range_overlay.hide_overlay()
+
+
+func _update_range_overlay() -> void:
+	if _range_overlay == null or _selected_wing_id.is_empty():
+		return
+	var data: Dictionary = GameState.get_air_wing(_selected_wing_id)
+	if data.is_empty():
+		_range_overlay.hide_overlay()
+		return
+	var ls: String = data.get("lifecycle_state", "")
+	if ls == "idle" or ls == "refuel":
+		_range_overlay.hide_overlay()
+		return
+	var wing_pos: Vector2 = _get_interpolated_wing_position(_selected_wing_id)
+	if wing_pos == Vector2.INF:
+		wing_pos = Vector2(float(data.get("position_lng", 0.0)), float(data.get("position_lat", 0.0)))
+	var fuel: float = float(_wing_fuel.get(_selected_wing_id, float(data.get("fuel", 1.0))))
+	var nation_color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
+	_range_overlay.show_for_wing(wing_pos.x, wing_pos.y, fuel, nation_color)
 
 
 func _on_air_wing_path(path_data: Dictionary) -> void:
@@ -286,10 +325,10 @@ func _submit_redeploy_order(province_id: String) -> void:
 	})
 
 
-## Returns true when the province belongs to the current player nation.
+## Returns true when the province belongs to the current player nation or an ally.
 ## Parameters:
 ## - province_id: province to inspect.
-## Returns: true if the province is owned by the current nation.
+## Returns: true if the province is owned by own nation or an allied nation.
 func _is_friendly_province(province_id: String) -> bool:
 	if province_id.is_empty():
 		return false
@@ -299,7 +338,29 @@ func _is_friendly_province(province_id: String) -> bool:
 	var my_nation_id: String = GameState.get_my_nation_id()
 	if my_nation_id.is_empty():
 		return false
-	return province.get("owner_id", "") == my_nation_id
+	var owner_id: String = province.get("owner_id", "")
+	if owner_id == my_nation_id:
+		return true
+	var stance_ab: String = GameState.get_relation(my_nation_id, owner_id).get("stance", "")
+	var stance_ba: String = GameState.get_relation(owner_id, my_nation_id).get("stance", "")
+	return stance_ab == "alliance" or stance_ba == "alliance"
+
+
+## Returns the province id nearest to a screen-space position, or empty string.
+## Parameters:
+## - screen_pos: screen-space click position.
+## Returns: province_id if within 30px of a city marker, else empty string.
+func _resolve_province_at_screen_pos(screen_pos: Vector2) -> String:
+	const PROXIMITY_PX := 15.0  # city dot radius is 8px
+	var best_id: String = ""
+	var best_dist: float = PROXIMITY_PX
+	for pid: String in _map_loader.get_all_province_ids():
+		var city_pos: Vector2 = _map_loader.get_province_focus_position(pid)
+		var dist: float = screen_pos.distance_to(city_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_id = pid
+	return best_id
 
 
 func cleanup() -> void:

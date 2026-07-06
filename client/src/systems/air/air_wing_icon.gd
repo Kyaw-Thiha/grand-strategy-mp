@@ -5,13 +5,15 @@ var nation_id: String = ""
 var nation_color: Color = Color(0.5, 0.5, 0.5)
 var aircraft_type: String = "fighter"
 var wing_count: int = 10
+var fuel: float = 1.0
 var combat_readiness: float = 1.0
 var lifecycle_state: String = "idle"
 var is_selected: bool = false
 
 const DIAMOND_HALF    := 11.0
-const READINESS_BAR_H := 3.0
-const READINESS_BAR_Y := DIAMOND_HALF + 4.0
+const BAR_H           := 3.0
+const FUEL_BAR_Y      := DIAMOND_HALF + 4.0
+const READINESS_BAR_Y := DIAMOND_HALF + 9.0
 const BADGE_RADIUS    := 5.5
 
 
@@ -25,6 +27,7 @@ func setup(data: Dictionary, color: Color) -> void:
 	nation_color     = color
 	aircraft_type    = data.get("aircraft_type", "fighter")
 	wing_count       = data.get("count", 10)
+	fuel             = float(data.get("fuel", 1.0))
 	combat_readiness = float(data.get("combat_readiness", 1.0))
 	lifecycle_state  = data.get("lifecycle_state", "idle")
 	_update_visibility()
@@ -33,6 +36,7 @@ func setup(data: Dictionary, color: Color) -> void:
 
 func update_data(data: Dictionary) -> void:
 	wing_count       = data.get("count", wing_count)
+	fuel             = float(data.get("fuel", fuel))
 	combat_readiness = float(data.get("combat_readiness", combat_readiness))
 	lifecycle_state  = data.get("lifecycle_state", lifecycle_state)
 	aircraft_type    = data.get("aircraft_type", aircraft_type)
@@ -64,7 +68,17 @@ func _lifecycle_color() -> Color:
 		"loiter":   return Color(1.0, 0.533, 0.0)
 		"rtb":      return Color(0.667, 0.267, 1.0)
 		"refuel":   return Color(0.0, 0.8, 0.8)
+		"relocate": return Color(0.0, 0.75, 0.85)
 		_:          return Color(0.5, 0.5, 0.5)
+
+
+func _fuel_color() -> Color:
+	if fuel >= 0.5:
+		return Color(0.2, 0.55, 1.0)
+	elif fuel >= 0.25:
+		return Color(0.9, 0.7, 0.1)
+	else:
+		return Color(0.9, 0.2, 0.1)
 
 
 func set_selected(selected: bool) -> void:
@@ -94,10 +108,10 @@ func _draw() -> void:
 
 	var bar_w := DIAMOND_HALF * 2.0
 	var bar_x := -DIAMOND_HALF
-	draw_rect(Rect2(bar_x, READINESS_BAR_Y, bar_w, READINESS_BAR_H),
-			Color(0.2, 0.2, 0.2, 0.8))
-	draw_rect(Rect2(bar_x, READINESS_BAR_Y, bar_w * combat_readiness, READINESS_BAR_H),
-			_readiness_color())
+	draw_rect(Rect2(bar_x, FUEL_BAR_Y, bar_w, BAR_H), Color(0.2, 0.2, 0.2, 0.8))
+	draw_rect(Rect2(bar_x, FUEL_BAR_Y, bar_w * fuel, BAR_H), _fuel_color())
+	draw_rect(Rect2(bar_x, READINESS_BAR_Y, bar_w, BAR_H), Color(0.2, 0.2, 0.2, 0.8))
+	draw_rect(Rect2(bar_x, READINESS_BAR_Y, bar_w * combat_readiness, BAR_H), _readiness_color())
 
 	if _should_show_count_badge():
 		var badge_pos := Vector2(DIAMOND_HALF - 2.0, -DIAMOND_HALF + 2.0)

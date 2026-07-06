@@ -50,6 +50,7 @@ describe("12a — Air Wing Schema", function () {
     assert.strictEqual(wing.nation_id,                 "");
     assert.strictEqual(wing.aircraft_type,             AIR_UNIT_TYPES.FIGHTER);
     assert.strictEqual(wing.count,                     10);
+    assert.strictEqual(wing.fuel,                       1.0);
     assert.strictEqual(wing.combat_readiness,          1.0);
     assert.strictEqual(wing.position_lng,              0);
     assert.strictEqual(wing.position_lat,              0);
@@ -98,8 +99,8 @@ describe("12a — Air Wing Schema", function () {
     }
   });
 
-  it("WING_LIFECYCLE enum contains all six states", () => {
-    const expected = ["idle", "transit", "engaged", "loiter", "rtb", "refuel"];
+  it("WING_LIFECYCLE enum contains all seven states", () => {
+    const expected = ["idle", "transit", "engaged", "loiter", "rtb", "refuel", "relocate"];
     const actual = Object.values(WING_LIFECYCLE);
     assert.strictEqual(actual.length, expected.length);
     for (const v of expected) {
