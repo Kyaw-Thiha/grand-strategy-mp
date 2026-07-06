@@ -13,6 +13,9 @@ import {
   setRefuelDurationTicksForTesting,
   setReadinessDecayForTesting,
   setReadinessRecoveryForTesting,
+  setFuelDecayForTesting,
+  setFuelRecoveryForTesting,
+  setFuelRtbThresholdForTesting,
 } from "../src/systems/air_wing_lifecycle_system.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
@@ -38,6 +41,9 @@ describe("12b — Air Wing Lifecycle", function () {
     setRefuelDurationTicksForTesting(1);
     setReadinessDecayForTesting(0.1);
     setReadinessRecoveryForTesting(0.5);
+    setFuelDecayForTesting(0.1);
+    setFuelRecoveryForTesting(0.5);
+    setFuelRtbThresholdForTesting(0.25);
     colyseus = await boot(appConfig);
   });
 
@@ -47,8 +53,11 @@ describe("12b — Air Wing Lifecycle", function () {
     setMaxLoiterTicksForTesting(15);
     setRtbDurationTicksForTesting(5);
     setRefuelDurationTicksForTesting(5);
-    setReadinessDecayForTesting(0.04);
-    setReadinessRecoveryForTesting(0.06);
+    setReadinessDecayForTesting(0.015);
+    setReadinessRecoveryForTesting(0.04);
+    setFuelDecayForTesting(0.065);
+    setFuelRecoveryForTesting(0.20);
+    setFuelRtbThresholdForTesting(0.10);
     await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
@@ -345,10 +354,10 @@ describe("12b — Air Wing Lifecycle", function () {
     assert.ok(after > before, "readiness must recover during REFUEL too");
   });
 
-  it("force RTB from LOITER when readiness hits RTB threshold (0.25)", async () => {
+  it("force RTB from LOITER when fuel hits RTB threshold", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
-    client.send("SET_WING_READINESS", { wing_id: "wing-1", combat_readiness: 0.30 });
+    client.send("SET_WING_FUEL", { wing_id: "wing-1", fuel: 0.30 });
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.LOITER });
     await room.waitForNextPatch();
     await room.waitForNextPatch();

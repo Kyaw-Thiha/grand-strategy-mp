@@ -1367,21 +1367,21 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
 - [x] Readiness decay while airborne (with floor, never zero) and recovery at home base,
       proportional to supply — same mechanic drives distance-penalty, loiter-penalty, and a
       legible research-perk axis; no separate distance-penalty formula needed
-- [ ] Wing template schema — aircraft type + count only (no internal grid); nation presets,
+- [x] Wing template schema — aircraft type + count only (no internal grid); nation presets,
       custom saved templates, mid-game creation when not engaged
 
 ### Colyseus — pathfinding (new subsystem, distinct from land/naval A*)
-- [ ] Dubins-path generator — straight legs + minimum-turn-radius arcs; used for Transit, RTB
+- [x] Dubins-path generator — straight legs + minimum-turn-radius arcs; used for Transit, RTB
       (respects current heading, no instant flip), and Loiter/orbit
-- [ ] Pursuit-path generator (lead pursuit) for Interception/Air Superiority once a target is
+- [x] Pursuit-path generator (lead pursuit) for Interception/Air Superiority once a target is
       detected — recomputed periodically, not per-frame
 - [ ] Default Interception/Air Superiority behaviour with no visible target: generate an
       orbit path over a patrol area (reuses the Loiter orbit code) and hold until a target
       enters detection
-- [ ] Server-authoritative position simulation — server owns the tick, client interpolates;
+- [x] Server-authoritative position simulation — server owns the tick, client interpolates;
       broadcast path-generation id + elapsed time, not raw positions (mirrors land's
       dead-reckoning bandwidth trick)
-- [ ] Swept collision/contact check per existing 500ms room tick — analytic "did these paths
+- [x] Swept collision/contact check per existing 500ms room tick — analytic "did these paths
       cross within engagement range during this window" check, scoped via spatial bucketing;
       no separate faster tick
 
@@ -1454,9 +1454,9 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       in at realistic player counts
 
 ### Godot
-- [ ] `AirSystem` — individual wing icons (not province-level badges), real-time movement
+- [x] `AirSystem` — individual wing icons (not province-level badges), real-time movement
       rendering, selection, manual retask/override UI
-- [ ] Flight path visualisation — hidden by default, shown on wing select or in a dedicated
+- [x] Flight path visualisation — hidden by default, shown on wing select or in a dedicated
       Air Mode map view, same clutter-avoidance pattern as land's ghost-dot waypoints
 - [ ] Wing stacking at strategic zoom — wings based at the same airfield collapse to one
       icon until selected/zoomed, mirroring land's road-column stacking

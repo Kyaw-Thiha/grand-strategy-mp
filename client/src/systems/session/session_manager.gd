@@ -79,6 +79,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"UNIT_DESTROYED":
 			GameState._apply_unit_destroyed(data)
 
+		"PROVINCE_INIT":
+			GameState._apply_province_init(data)
+
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
 
@@ -126,6 +129,15 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"AIR_WING_UPDATES":
 			GameState._apply_air_wing_updates(data)
+
+		"AIR_WING_PATH":
+			EventBus.air_wing_path.emit(data)
+
+		"AIR_WING_STAGING":
+			EventBus.notification_requested.emit(
+				"Wing out of range — auto-staging to closer airbase before executing order.",
+				"info"
+			)
 
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)

@@ -3,9 +3,15 @@ import { WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
 
 // ── Module-level mutable constants — mutated ONLY by exported test helpers ───
 
-let READINESS_DECAY_PER_TICK  = 0.04;
-let READINESS_RECOVERY_RATE   = 0.06;
-let READINESS_RTB_THRESHOLD   = 0.25;
+// Fuel: fast decay defines range; forced RTB when empty; fast recovery at base
+let FUEL_DECAY_PER_TICK   = 0.065;  // ~14 ticks airborne before forced RTB
+let FUEL_RECOVERY_RATE    = 0.20;   // ~5 ticks to full refuel
+let FUEL_RTB_THRESHOLD    = 0.10;   // forced RTB below this level
+const FUEL_FLOOR          = 0.0;
+
+// Readiness: slow decay scales combat damage; no forced RTB; slow recovery (maintenance)
+let READINESS_DECAY_PER_TICK  = 0.015;
+let READINESS_RECOVERY_RATE   = 0.04;
 const READINESS_FLOOR         = 0.15;
 
 let WEAPON_COOLDOWN_TICKS          = 3;
@@ -21,6 +27,11 @@ export function setRtbDurationTicksForTesting(n: number): void { RTB_DURATION_TI
 export function setRefuelDurationTicksForTesting(n: number): void { REFUEL_DURATION_TICKS = n; }
 export function setReadinessDecayForTesting(rate: number): void { READINESS_DECAY_PER_TICK = rate; }
 export function setReadinessRecoveryForTesting(rate: number): void { READINESS_RECOVERY_RATE = rate; }
+export function setFuelDecayForTesting(rate: number): void { FUEL_DECAY_PER_TICK = rate; }
+export function setFuelRecoveryForTesting(rate: number): void { FUEL_RECOVERY_RATE = rate; }
+export function setFuelRtbThresholdForTesting(t: number): void { FUEL_RTB_THRESHOLD = t; }
+
+export { FUEL_DECAY_PER_TICK, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,10 +42,12 @@ type BroadcastFn = (type: string, msg: unknown) => void;
 export class AirWingLifecycleSystem {
   private _engagementTicks:  Map<string, number> = new Map();
   private _loiterTicks:      Map<string, number> = new Map();
-  private _rtbTicks:         Map<string, number> = new Map();
   private _refuelTicks:      Map<string, number> = new Map();
   private _weaponCooldown:   Map<string, number> = new Map();
   private _lastEngagedTarget: Map<string, string> = new Map();
+  private _pendingRedeployTarget: Map<string, string> = new Map();
+  private _pendingMissionAfterRedeploy: Map<string, { mission: string; target_id: string }> = new Map();
+  private _pendingTransitAfterRedeploy: Map<string, { lng: number; lat: number }> = new Map();
 
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
@@ -42,19 +55,26 @@ export class AirWingLifecycleSystem {
     for (const [wingId, wing] of state.air_wings.entries()) {
       let didChange = false;
 
-      // 1. Readiness: decay while airborne, recover while IDLE/REFUEL
+      // 1. Fuel + Readiness: decay while airborne, recover while IDLE/REFUEL
       const isAirborne = wing.lifecycle_state !== WING_LIFECYCLE.IDLE
                       && wing.lifecycle_state !== WING_LIFECYCLE.REFUEL;
+      const isRelocating = wing.lifecycle_state === WING_LIFECYCLE.RELOCATE;
       if (isAirborne) {
-        const prev = wing.combat_readiness;
+        const prevFuel = wing.fuel;
+        wing.fuel = Math.max(FUEL_FLOOR, wing.fuel - FUEL_DECAY_PER_TICK);
+        if (wing.fuel !== prevFuel) didChange = true;
+        const prevR = wing.combat_readiness;
         wing.combat_readiness = Math.max(READINESS_FLOOR,
           wing.combat_readiness - READINESS_DECAY_PER_TICK);
-        if (wing.combat_readiness !== prev) didChange = true;
+        if (wing.combat_readiness !== prevR) didChange = true;
       } else {
-        const prev = wing.combat_readiness;
+        const prevFuel = wing.fuel;
+        wing.fuel = Math.min(1.0, wing.fuel + FUEL_RECOVERY_RATE);
+        if (wing.fuel !== prevFuel) didChange = true;
+        const prevR = wing.combat_readiness;
         wing.combat_readiness = Math.min(1.0,
           wing.combat_readiness + READINESS_RECOVERY_RATE);
-        if (wing.combat_readiness !== prev) didChange = true;
+        if (wing.combat_readiness !== prevR) didChange = true;
       }
 
       // 2. Weapon cooldown
@@ -68,11 +88,10 @@ export class AirWingLifecycleSystem {
         }
       }
 
-      // 3. Force RTB if readiness at or below threshold (overrides any airborne state)
-      if (isAirborne && wing.combat_readiness <= READINESS_RTB_THRESHOLD
+      // 3. Force RTB if fuel at or below threshold (overrides any airborne state except RELOCATE)
+      if (isAirborne && !isRelocating && wing.fuel <= FUEL_RTB_THRESHOLD
           && wing.lifecycle_state !== WING_LIFECYCLE.RTB) {
         wing.lifecycle_state = WING_LIFECYCLE.RTB;
-        this._rtbTicks.set(wingId, 0);
         this._engagementTicks.delete(wingId);
         this._loiterTicks.delete(wingId);
         broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "low_readiness" });
@@ -108,29 +127,33 @@ export class AirWingLifecycleSystem {
           if (ticks >= MAX_LOITER_TICKS) {
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
-            this._rtbTicks.set(wingId, 0);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
             didChange = true;
           }
           break;
         }
         case WING_LIFECYCLE.RTB: {
-          const ticks = (this._rtbTicks.get(wingId) ?? 0) + 1;
-          this._rtbTicks.set(wingId, ticks);
-          if (ticks >= RTB_DURATION_TICKS) {
-            wing.lifecycle_state = WING_LIFECYCLE.REFUEL;
-            this._rtbTicks.delete(wingId);
-            this._refuelTicks.set(wingId, 0);
-            didChange = true;
-          }
+          // Path completion drives REFUEL transition via air_dubins_pathfinder.tick()
           break;
         }
         case WING_LIFECYCLE.REFUEL: {
           const ticks = (this._refuelTicks.get(wingId) ?? 0) + 1;
           this._refuelTicks.set(wingId, ticks);
           if (ticks >= REFUEL_DURATION_TICKS) {
-            wing.lifecycle_state = WING_LIFECYCLE.IDLE;
             this._refuelTicks.delete(wingId);
+            if (this._pendingRedeployTarget.has(wingId)) {
+              // Queued relocation: transition to RELOCATE instead of IDLE
+              wing.lifecycle_state = WING_LIFECYCLE.RELOCATE;
+            } else {
+              wing.lifecycle_state = WING_LIFECYCLE.IDLE;
+              wing.path_gen_id = "";
+              // Auto-start queued mission if one was set before landing
+              const pending = this._pendingMissionAfterRedeploy.get(wingId);
+              if (pending) {
+                this._pendingMissionAfterRedeploy.delete(wingId);
+                this.assignMission(wingId, pending.mission, pending.target_id, state);
+              }
+            }
             didChange = true;
           }
           break;
@@ -177,7 +200,6 @@ export class AirWingLifecycleSystem {
 
     if (!wing.perk_multi_sortie) {
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
-      this._rtbTicks.set(wingId, 0);
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
       return;
     }
@@ -203,10 +225,12 @@ export class AirWingLifecycleSystem {
 
     this._engagementTicks.delete(wingId);
     this._loiterTicks.delete(wingId);
-    this._rtbTicks.delete(wingId);
     this._refuelTicks.delete(wingId);
     this._weaponCooldown.delete(wingId);
     this._lastEngagedTarget.delete(wingId);
+    this._pendingRedeployTarget.delete(wingId);
+    this._pendingMissionAfterRedeploy.delete(wingId);
+    this._pendingTransitAfterRedeploy.delete(wingId);
 
     broadcast("WING_DESTROYED", {
       wing_id: wingId,
@@ -225,5 +249,79 @@ export class AirWingLifecycleSystem {
       case "precision_bombing": wing.perk_precision_bombing = value; return true;
       default: return false;
     }
+  }
+
+  retreatWing(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+    if (wing.lifecycle_state !== WING_LIFECYCLE.TRANSIT
+      && wing.lifecycle_state !== WING_LIFECYCLE.ENGAGED
+      && wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
+      return;
+    }
+
+    this._engagementTicks.delete(wingId);
+    this._loiterTicks.delete(wingId);
+    this._pendingRedeployTarget.delete(wingId);
+    wing.lifecycle_state = WING_LIFECYCLE.RTB;
+    broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "player_retreat" });
+  }
+
+  startRedeploy(wingId: string, newProvinceId: string, state: GameRoomState): boolean {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return false;
+    if (wing.lifecycle_state === WING_LIFECYCLE.RELOCATE) return false;
+
+    this._pendingRedeployTarget.set(wingId, newProvinceId);
+
+    if (wing.lifecycle_state === WING_LIFECYCLE.IDLE) {
+      wing.lifecycle_state = WING_LIFECYCLE.RELOCATE;
+      wing.path_elapsed_ms = 0;
+    } else if (wing.lifecycle_state === WING_LIFECYCLE.REFUEL) {
+      // Will transition to RELOCATE when REFUEL completes (handled in tick)
+    } else {
+      // Airborne: force RTB; RELOCATE starts after landing
+      if (wing.lifecycle_state !== WING_LIFECYCLE.RTB) {
+        wing.lifecycle_state = WING_LIFECYCLE.RTB;
+        this._engagementTicks.delete(wingId);
+        this._loiterTicks.delete(wingId);
+      }
+    }
+    return true;
+  }
+
+  getPendingRedeployTarget(wingId: string): string | undefined {
+    return this._pendingRedeployTarget.get(wingId);
+  }
+
+  queueMissionAfterRedeploy(wingId: string, mission: string, target_id: string): void {
+    this._pendingMissionAfterRedeploy.set(wingId, { mission, target_id });
+  }
+
+  completeRedeploy(wingId: string, state: GameRoomState): void {
+    const newProvinceId = this._pendingRedeployTarget.get(wingId);
+    if (!newProvinceId) return;
+
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+
+    wing.home_airbase_province_id = newProvinceId;
+    this._pendingRedeployTarget.delete(wingId);
+    this._refuelTicks.set(wingId, 0);
+    wing.lifecycle_state = WING_LIFECYCLE.REFUEL;
+  }
+
+  isPendingRedeploy(wingId: string): boolean {
+    return this._pendingRedeployTarget.has(wingId);
+  }
+
+  queueTransitAfterRedeploy(wingId: string, lng: number, lat: number): void {
+    this._pendingTransitAfterRedeploy.set(wingId, { lng, lat });
+  }
+
+  consumePendingTransitAfterRedeploy(wingId: string): { lng: number; lat: number } | undefined {
+    const v = this._pendingTransitAfterRedeploy.get(wingId);
+    if (v) this._pendingTransitAfterRedeploy.delete(wingId);
+    return v;
   }
 }

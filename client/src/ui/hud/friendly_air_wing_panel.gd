@@ -5,6 +5,8 @@ var _wing_id_label: Label
 var _aircraft_type_label: Label
 var _lifecycle_label: Label
 var _mission_label: Label
+var _fuel_bar: ProgressBar
+var _fuel_pct: Label
 var _readiness_bar: ProgressBar
 var _readiness_pct: Label
 var _weapon_label: Label
@@ -14,12 +16,13 @@ var _airbase_label: Label
 var _current_wing_id: String = ""
 
 const LIFECYCLE_COLOR: Dictionary = {
-	"idle":    Color(0.5, 0.5, 0.5),
-	"transit": Color(0.267, 0.533, 1.0),
-	"engaged": Color(1.0, 0.267, 0.267),
-	"loiter":  Color(1.0, 0.533, 0.0),
-	"rtb":     Color(0.667, 0.267, 1.0),
-	"refuel":  Color(0.0, 0.8, 0.8),
+	"idle":     Color(0.5, 0.5, 0.5),
+	"transit":  Color(0.267, 0.533, 1.0),
+	"engaged":  Color(1.0, 0.267, 0.267),
+	"loiter":   Color(1.0, 0.533, 0.0),
+	"rtb":      Color(0.667, 0.267, 1.0),
+	"refuel":   Color(0.0, 0.8, 0.8),
+	"relocate": Color(0.0, 0.75, 0.85),
 }
 
 
@@ -33,6 +36,24 @@ func _ready() -> void:
 	_weapon_label      = get_node_or_null("Margin/HBox/StatusBlock/WeaponLabel")
 	_target_label      = get_node_or_null("Margin/HBox/TargetBlock/TargetLabel")
 	_airbase_label     = get_node_or_null("Margin/HBox/TargetBlock/AirbaseLabel")
+
+	var readiness_block: Node = get_node_or_null("Margin/HBox/ReadinessBlock")
+	if readiness_block and _readiness_bar:
+		_fuel_bar = ProgressBar.new()
+		_fuel_bar.min_value = 0.0
+		_fuel_bar.max_value = 100.0
+		_fuel_bar.value = 100.0
+		_fuel_bar.show_percentage = false
+		_fuel_bar.custom_minimum_size = _readiness_bar.custom_minimum_size
+		_fuel_pct = Label.new()
+		_fuel_pct.text = "100%"
+		_fuel_pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_fuel_pct.add_theme_font_size_override("font_size", 10)
+		_fuel_bar.add_child(_fuel_pct)
+		readiness_block.add_child(_fuel_bar)
+		readiness_block.move_child(_fuel_bar, _readiness_bar.get_index())
+
+	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 
 
 func populate(wing_id: String, data: Dictionary) -> void:
@@ -55,6 +76,19 @@ func _refresh_stats(data: Dictionary) -> void:
 		)
 	if _mission_label:
 		_mission_label.text = "Mission: " + data.get("mission", "").replace("_", " ")
+	if _fuel_bar:
+		var f: float = float(data.get("fuel", 1.0))
+		_fuel_bar.value = f * 100.0
+		var fuel_color: Color
+		if f >= 0.5:
+			fuel_color = Color(0.2, 0.55, 1.0)
+		elif f >= 0.25:
+			fuel_color = Color(0.9, 0.7, 0.1)
+		else:
+			fuel_color = Color(0.9, 0.2, 0.1)
+		_fuel_bar.modulate = fuel_color
+	if _fuel_pct:
+		_fuel_pct.text = "Fuel " + str(int(float(data.get("fuel", 1.0)) * 100.0)) + "%"
 	if _readiness_bar:
 		var r: float = float(data.get("combat_readiness", 1.0))
 		_readiness_bar.value = r * 100.0
@@ -67,7 +101,7 @@ func _refresh_stats(data: Dictionary) -> void:
 			bar_color = Color(0.9, 0.2, 0.1)
 		_readiness_bar.modulate = bar_color
 	if _readiness_pct:
-		_readiness_pct.text = str(int(float(data.get("combat_readiness", 1.0)) * 100.0)) + "%"
+		_readiness_pct.text = "Rdy " + str(int(float(data.get("combat_readiness", 1.0)) * 100.0)) + "%"
 	if _weapon_label:
 		var wr: bool = data.get("weapon_ready", true)
 		_weapon_label.text = "Weapons: " + ("READY" if wr else "RELOADING")

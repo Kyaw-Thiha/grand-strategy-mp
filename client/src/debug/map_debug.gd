@@ -70,7 +70,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			event_position = (event as InputEventMouseMotion).position
 		var world_pos: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event_position
-		if _air_wing_system.handle_mouse_input(event, world_pos):
+		var hovered_province_id: String = _map_interaction.get_hovered_province_id()
+		if _air_wing_system.handle_mouse_input(event, world_pos, hovered_province_id):
 			get_viewport().set_input_as_handled()
 			return
 		if _military_system.handle_mouse_input(event, world_pos):
@@ -103,6 +104,7 @@ func _on_map_loaded(province_count: int) -> void:
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)
 	_map_interaction.province_clicked.connect(_on_province_clicked)
+	_map_interaction.province_right_clicked.connect(_on_province_right_clicked)
 	EventBus.division_selected.connect(func(_id: String) -> void:
 		_map_interaction.deselect()
 		_map_renderer.clear_highlights()
@@ -202,6 +204,24 @@ func _on_province_clicked(province_id: String) -> void:
 		_map_renderer.clear_highlights()
 		_map_renderer.highlight_province(province_id)
 		EventBus.province_selected.emit(province_id)
+
+
+
+func _on_province_right_clicked(province_id: String) -> void:
+	if _air_wing_system == null or _map_loader == null:
+		return
+
+	var world_pos: Vector2 = _map_loader.get_province_focus_position(province_id)
+	if world_pos == Vector2.INF:
+		var province_node: Node2D = _map_loader.get_province_node(province_id)
+		if province_node == null:
+			return
+		world_pos = province_node.position
+
+	var right_click: InputEventMouseButton = InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	_air_wing_system.handle_mouse_input(right_click, world_pos, province_id)
 
 
 

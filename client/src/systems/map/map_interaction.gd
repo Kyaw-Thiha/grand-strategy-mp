@@ -40,6 +40,13 @@ func deselect() -> void:
 		selection_cleared.emit()
 
 
+## Returns the province currently under the mouse cursor, or "" when none.
+## Parameters: none.
+## Returns: hovered province id, or empty string.
+func get_hovered_province_id() -> String:
+	return _hovered_id
+
+
 # ── signal handlers ───────────────────────────────────────────────────────────
 
 func _on_area_mouse_entered(pid: String) -> void:
@@ -69,6 +76,7 @@ func _on_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int, p
 		province_clicked.emit(pid)
 	elif mb.button_index == MOUSE_BUTTON_RIGHT:
 		province_right_clicked.emit(pid)
+		get_viewport().set_input_as_handled()
 
 
 ## Enables or disables player-driven province hover and click interaction.
