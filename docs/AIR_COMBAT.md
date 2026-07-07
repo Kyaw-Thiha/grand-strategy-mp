@@ -1,7 +1,10 @@
 # Grand Strategy Multiplayer — Air Combat Design
 
 > Confirmed design decisions for the air combat layer.
-> Last updated: July 2026.
+> Last updated: July 2026 — combat resolution corrected to a per-engagement lethality/
+> surprise model (not per-tick attrition), wing sub-status system added, wing size and
+> airbase capacity mechanics added. See Combat Resolution, Wing Sub-Status System, Wing Size
+> & Formation Density, and Airbase Capacity sections for what's new in this pass.
 > **This is a full replacement of the previous province-assigned, round-resolved air combat
 > design.** Air wings are now individually selectable, real-time, pathfinding units — closer
 > to naval flotillas than to the old abstracted model. See "Relationship to Other Combat
@@ -201,17 +204,18 @@ missions, not final unit stats.
 | Recon plane | Recon |
 
 **Escort eligibility is range-gated, not type-gated.** Heavy Fighter reaches deep
-strategic-bomber missions by design (longer range, lower readiness decay); standard Fighter
-is not hard-blocked from Escort, but its shorter range and faster readiness decay make it
-naturally unsuited to deep escort and well suited to short-range tactical escort near the
-front — the readiness/range mechanic above does this gating for free, matching the real
-history of short-ranged fighters failing at deep escort (the Bf 109 over Britain, ~10 minutes
-loiter time before having to turn back) without needing a hardcoded rule. A future
-drop-tank-style research perk is one plausible way Fighter later reaches deep-escort
-viability; a Heavy-Fighter-style archetype is the other route (slower, worse in a straight
-dogfight against enemy Fighters, but long-ranged from the start, mirroring the historical
-Bf 110) — research specifics are deferred, per this document's scope (mechanics before
-perks).
+strategic-bomber missions by design (longer range, lower readiness decay, and — see
+Detection & Visibility — an observation range close to its attack range, which is the actual
+mechanism that makes it viable as an escort rather than just a stat difference). Standard
+Fighter is not hard-blocked from Escort, but its shorter range, faster readiness decay, and
+short observation range make it naturally unsuited to deep escort and well suited to
+short-range tactical escort near the front, matching the real history of short-ranged
+fighters failing at deep escort (the Bf 109 over Britain, ~10 minutes loiter time before
+having to turn back) without needing a hardcoded rule. A future drop-tank-style research perk
+is one plausible way Fighter later reaches deep-escort viability; a Heavy-Fighter-style
+archetype is the other route (slower, worse in a straight dogfight against enemy Fighters,
+but long-ranged and better-sighted from the start, mirroring the historical Bf 110) —
+research specifics are deferred, per this document's scope (mechanics before perks).
 
 ---
 
@@ -249,24 +253,71 @@ implemented, but no redesign should be needed there.
 
 ## Combat Resolution
 
+**Combat resolves per engagement, not per tick.** A wing gets one decisive exchange per
+sortie (or per engagement within a multi-sortie flight) — this is not attrition ground down
+tick-by-tick the way a land tactical round is; it's closer to "one pass, then reload/RTB
+before the next chance." Attrition happens **across separate sorties over a battle**, not
+within one continuous dogfight. This matters for calibration: the numbers below need to make
+one exchange meaningful, not survivable-by-default.
+
 **Attack vs. Defense — one rule covers bombers, fighters, and the reload-vulnerability case:**
 
 ```
-damage_dealt_this_tick = weapon_ready ? Attack_value : Defense_value
+damage_dealt = weapon_ready ? Attack_value : Defense_value
 ```
 
 Every wing has an Attack-vs-air value (its main offensive punch, gated by weapon-ready/
 reload cooldown) and a small, always-available Defense-vs-air value (passive return fire —
 tail gunner, deflection shot). A pure bomber simply has `Attack_vs_air = 0` — a data value,
-not a special-cased code path, the same pattern `TACTICAL_COMBAT.md` already uses for AA guns
-having no ground-attack role.
+not a special-cased code path, the same pattern `TACTICAL_COMBAT.md` uses for AA guns having
+no ground-attack role. Defense value target: **~10–15% of Attack** — enough that a caught-
+reloading wing is still meaningfully worse off, not enough to make catching it a free kill.
 
-- **Two fresh fighters dogfighting:** both weapons ready → both deal full Attack
-  simultaneously.
-- **Fighter caught mid-reload:** falls into the Defense branch — still dangerous to attack,
-  just far less so. Catching a reloading wing is good play, not a free kill; there's no
-  zero-counterplay outcome.
-- **Bombers:** always in the Defense branch against fighters, no special logic needed.
+**Calibrating Attack_value — the lethality ratio.** Define `L` as the fraction of an equal-
+strength opponent's HP a full-strength, full-readiness, non-surprised wing deals in one
+exchange:
+
+```
+L = (H_attacker × Attack_value_per_plane) / H_opponent
+```
+
+Target **L = 0.15–0.35** for a fair, mutually-spotted fight — high enough that one exchange
+has real stakes, low enough that two alert equal wings meeting head-on don't erase each other
+in a single pass. This replaces any per-tick attrition framing; `L` is the thing to tune, not
+a tick count.
+
+**Surprise — the mechanism that makes detection asymmetry matter.** Attack range is uniform
+across all aircraft types (see Detection & Visibility); observation range is not. A wing can
+therefore be within striking distance of a target it hasn't itself been spotted by — the
+mechanical version of a WWII "bounce," where a widely-cited estimate holds that roughly 80%
+of aerial kills were surprise attacks the victim never saw coming. On the tick an engagement
+first triggers, if the attacker had the target in detection coverage *before* this tick and
+the target did not have the attacker detected, the attacker's damage this exchange gets a
+surprise multiplier:
+
+```
+damage_dealt = weapon_ready ? Attack_value × S : Defense_value
+```
+
+Target **S = 2.0–3.0×**. At the top of that range, `L × S` can approach or exceed 1.0 —
+meaning a well-executed surprise attack against an equal-strength wing can credibly wipe it
+out in the one pass it gets. That asymmetry is intentional: a fair, mutually-spotted fight
+stays in the grinding 15–35% range; a successful bounce is close to decisive. Skill (setting
+up the detection gap) should matter more than the base matchup. If both sides detected each
+other on the same tick (a head-on meeting), neither gets `S` — fair fight.
+
+A pure bomber gains nothing from being the surprise attacker (`Attack_vs_air = 0` regardless
+of `S`) and loses nothing extra from being surprised (it was always in the Defense branch) —
+surprise only matters between Attack-capable targets, which is the historically honest
+outcome: bombers died to being outnumbered or unescorted, not to being bounced.
+
+**Why this still produces real attrition across a battle, not just coin-flips:** the multi-
+sortie loiter-cooldown (see Wing Lifecycle) is literally "how many separate chances does this
+wing get," and combat-readiness decay means a wing's later sorties in a long session hit for
+less than its first (lower readiness scales `Attack_value_per_plane` down directly). A wing
+that survives an early bounce and keeps flying doesn't face a flat risk each time out — it
+gets progressively weaker, reusing the fatigue mechanic already designed for a different
+reason.
 
 **Target deconfliction.** When multiple friendly wings could each independently pick the same
 "best" enemy target, greedy unique-target assignment prevents pile-ups: sort engaged
@@ -278,6 +329,113 @@ remaining target rather than sitting idle. Cheap (O(n log n)), no new infrastruc
 selected target): utility score = `base_priority(target_type, mission) × distance_falloff(from
 base) + noise_floor`. The noise floor matters for the same reason the old detection formula
 kept a 5% minimum — a purely greedy nearest-target algorithm is predictable and gameable.
+
+---
+
+## Wing Sub-Status System
+
+Mirrors `TACTICAL_COMBAT.md`'s Vehicle Sub-Status System directly — same four-category
+shape, same deterministic reasoning, same multiplicative stacking convention. Applied
+**wing-wide, not per-plane**: HP (plane count) is unaffected by status; status is a flag on
+the whole wing with a magnitude, multiplying the wing's derived values. This is simpler than
+per-plane bucketing and more consistent with how fuel and readiness already work — both are
+wing-level scalars, not tracked per individual aircraft, so status shouldn't be the one thing
+that isn't.
+
+### The four flags
+
+| Flag | Effect | Historical anchor |
+|---|---|---|
+| **Engine** | Reduced speed | Direct mobility-kill equivalent |
+| **Weapons** | Reduced Attack/Defense value | Direct firepower-kill equivalent |
+| **Fuel tank** | Faster fuel decay, forces earlier RTB | Self-sealing tanks existed specifically because fuel-tank hits were the line between "damaged" and "explosion" — and the tradeoff was real: self-sealing tanks cut fuel capacity 20–30% (e.g. the P-38 went from 410 to 300 gallons), a direct precedent for "surviving this costs you range" |
+| **Instruments** | −1 row/column reach in its attack pattern | Bombsight/gunsight damage — same logic as a tank's Optics flag |
+
+### Deterministic triggers
+
+Which status a wing takes is determined by **what kind of attack hit it**, not a roll —
+same principle as the tank system, applied to air-specific attack sources:
+- **Defense-value return fire** (small-arms-scale, glancing hits) → **Instruments**. Weak
+  hits tend to land on soft external components rather than critical structure.
+- **AA fire specifically** (province fixed AA or flotilla pooled AA — not air-to-air) →
+  **Fuel tank**. Flak-vs-fuel-tank is the single best-documented non-fatal aircraft damage
+  category of the war; self-sealing tanks were the direct historical response to exactly
+  this pattern.
+- **A fighter's full Attack value landing without destroying the target** → **Engine or
+  Weapons**. Concentrated cannon fire that doesn't down a plane outright typically disables
+  one or the other.
+
+Same attack type always produces the same status, exactly like the tank table it mirrors.
+
+### Applying status to combat math
+
+Individual planes don't hold fractional status — the flag and its magnitude apply once to
+the whole wing:
+
+```
+wing_effective_attack = HP_count × Attack_value_per_plane × status_modifiers
+```
+
+Where `status_modifiers` is the product of every active flag's multiplier (multiplicative
+stacking, consistent with `terrain_modifier_system.ts`'s existing convention) — e.g. a
+Weapons-flagged wing might apply ×0.6; add a second Weapons-tier hit and it becomes
+×0.6 × 0.6 = ×0.36, not ×0.2 (additive) or a flat re-roll. Same shape recommended for Engine
+(speed), Fuel tank (decay rate), and Instruments (pattern coverage) — each status modifies
+its own relevant value the same way.
+
+### Recovery
+
+All four flags clear on RTB and refuel/rest, same as fuel and readiness — no separate repair
+system. A wing that doesn't make it home with an active flag doesn't get the chance to clear
+it, the same "you only keep it if you get it back" logic `TACTICAL_COMBAT.md`'s Incapacitated
+state already uses for land units left behind in a retreat.
+
+---
+
+## Wing Size & Formation Density
+
+Bigger wings aren't strictly better, and the reason is historical rather than an arbitrary
+balance lever. The USAAF's "combat box" bomber formation is a real case of *increasing*
+returns to size, capped by a real counter-pressure rather than an artificial one: a 54-plane
+"wing box" could mass up to ~700 defensive machine guns in overlapping fields of fire — a
+genuine escalating mutual-defense benefit from flying in a bigger group. But larger
+formations were also easier for flak to hit — a large, bunched formation flying straight and
+level on a bomb run was a far better target than a small, loose one. This is the actual
+historical reason formation size oscillated across the war (54-plane boxes when fighters
+were the dominant threat, shrinking back to 36 once flak overtook fighters as the primary
+killer by mid-1944) rather than one size simply winning.
+
+**The same two-sided pressure applies to wing size here:**
+- **Bigger wings get a saturating Defense-value bonus** (mutual covering fire) —
+  increasing, but with diminishing marginal benefit past a certain size, so it plateaus
+  rather than rewarding infinite stacking.
+- **Bigger wings take more AA damage** (both province fixed AA and flotilla pooled AA scale
+  up somewhat with wing size — a denser formation is a better flak target). Roughly linear,
+  no saturation expected.
+
+Where these cross is a genuine, emergent sweet spot rather than a hard cap — the same shape
+of reasoning naval flotillas already use for their 15–20 ship cap, arrived at through a
+trade-off instead of a flat number. A reasonable real-world anchor for playtesting: the
+actual historical progression was 18/36/54 planes, settling on 36 as the wartime standard
+once both threats (fighters and flak) mattered simultaneously.
+
+---
+
+## Airbase Capacity — Soft, via Recovery Congestion
+
+Airbase capacity is **soft, not a hard wing-slot cap**: more wings stationed at one base
+means each wing's fuel and readiness recovery rate while `Idle` gets marginally slower,
+representing shared ground crew and maintenance bandwidth. This is continuous pressure, never
+a wall — it rewards building more airbases without making a single base feel like it hit a
+ceiling, and it's the same shape as manpower recruitment in `RESOURCE_ECONOMY.md`
+(**progressively more expensive, never hard-blocked**), just applied to ground-crew bandwidth
+instead of manpower.
+
+This stacks cleanly with Wing Size & Formation Density above without the two fighting each
+other: size pressure discourages one mega-wing; base-congestion pressure discourages
+spamming many small wings at the same field. Between the two, there's no hard wall anywhere —
+just gradients pushing toward a moderate number of moderately-sized wings spread across more
+than one airbase, without a single arbitrary cost multiplier.
 
 ---
 
@@ -300,6 +458,24 @@ there's no reason to duplicate naval's fog-of-war shape here. An enemy wing is v
 if it is currently inside the detection coverage of a radar building, a friendly wing, or a
 land division's observation radius — binary, continuously updated, not time-boxed.
 
+**Attack range is uniform across all aircraft types; observation range is not.** This
+deliberate gap is what makes the surprise mechanic in Combat Resolution meaningful — a wing
+can be well within striking distance of a target before that target's own (shorter)
+observation range would ever reveal the attacker back. Recon Plane carries by far the
+largest observation range of any type, matching its sole Recon mission. Every other type's
+observation range is comparatively short by default — including bombers, which is why an
+unescorted bomber wing is genuinely blind to an incoming interceptor until very late.
+
+**Heavy Fighter is the deliberate exception, and it's the actual answer to escort viability:**
+rather than fixing the escort-vulnerability problem with raw stat bumps, Heavy Fighter's
+observation range sits close to its attack range — nothing can get within striking distance
+of it, or the bomber it's protecting, without being spotted first. This matches the real
+historical job of an escort (mutual lookout to prevent bounces, not just surviving one
+better) more directly than a Defense-value buff would. A smaller Defense-value bonus on top
+is reasonable as a secondary cushion — even real escorts got bounced sometimes (Bf 110s
+needed their own escort at times despite being purpose-built for exactly this role) — but
+observation range is the primary lever, not Defense value.
+
 **Sources:**
 - **Radar building** — reveals all air units in a region; also boosts naval detection chance
   in the same area. Not tied to the city point (sited independently, like the supply hub).
@@ -315,6 +491,13 @@ land division's observation radius — binary, continuously updated, not time-bo
 This also answers how a strike wing "finds" a target it didn't spot itself: recon holds
 visibility on an area, a bombing wing already inbound (or retasked) completes the kill —
 mirroring how real strike missions were vectored onto contacts held by a separate spotter.
+
+**The exception this doesn't cover: air-to-land.** Attack-range-beyond-observation-range
+creates surprise for air-to-air combat, but a bombing run still requires being essentially on
+top of the target — there's no equivalent "attack from beyond where you'd be seen" for
+ground targets without a guided stand-off weapon, which real stand-off munitions did exist
+for (Germany's radio-guided Fritz X and Hs 293 glide bombs, released up to several miles from
+a ship target) but are explicitly deferred — see Out of Scope.
 
 ---
 
@@ -468,6 +651,10 @@ the build:
 - Multi-sortie loiter/cooldown duration (target: 10–20s)
 - Redeployment/template-change stand-down time (previously 1 minute, flat, same as land —
   confirm this still holds under real-time resolution)
+- **Lethality ratio `L` exact value** (shape confirmed: target 0.15–0.35 for a fair,
+  mutually-spotted exchange between equal-strength wings)
+- **Surprise multiplier `S` exact value** (shape confirmed: target 2.0–3.0×; note `L × S`
+  approaching or exceeding 1.0 at the top of the range is intentional, not a bug to fix)
 - Defense-value magnitude relative to Attack-value (target: small, ~10–15% of Attack — enough
   that catching a reloading wing is still clearly correct play, not enough to be a free kill)
 - Weapon-ready/reload cooldown duration per aircraft type
@@ -477,16 +664,25 @@ the build:
 - Contact-marker radius and duration per detection source quality (maritime patrol vs.
   triangulated sinking-event contact vs. own-flotilla scouting)
 - Recon plane's detection-generation rate and how quickly visibility lapses after it leaves
+- Observation range values per aircraft type (shape confirmed: Recon Plane highest, Heavy
+  Fighter close to its own attack range, all others short by default)
 - Pursuit-path recompute interval for interceptors chasing a moving target
-- Fighter vs. Heavy Fighter dogfight modifier (Heavy Fighter's proposed vulnerability in a
-  straight dogfight against standard Fighters, mirroring the historical Bf 110 pattern)
+- Fighter vs. Heavy Fighter dogfight modifier — a secondary Defense-value cushion on top of
+  Heavy Fighter's observation-range advantage, mirroring the historical Bf 110 pattern
+  (purpose-built escort, still occasionally out-turned by nimbler single-engine fighters)
+- **Wing Sub-Status magnitudes** — Engine speed penalty, Weapons damage-output penalty,
+  Fuel tank decay-rate multiplier, Instruments pattern-reach reduction (shape confirmed:
+  multiplicative stacking, deterministic trigger-to-status mapping)
+- **Wing Size & Formation Density curve constants** — the saturating Defense-value bonus
+  curve and the roughly-linear AA-vulnerability curve, and where they cross (illustrative
+  historical anchor: 18/36/54 planes, settling near 36)
+- **Airbase recovery-congestion curve** — how much each additional stationed wing slows
+  fuel/readiness recovery for all wings at that base
 - Air Fleet directive vocabulary and auto-assignment heuristic (mirrors the land Army Group
   advance-axis heuristic; exact matching logic from playtesting)
 - Wing withdrawal threshold — HP/readiness floor at which a wing auto-RTBs rather than
   fighting to zero, mirroring naval's zone-based withdrawal pattern; manual Retreat always
   available as an override
-- Airbase capacity — whether airbase level caps simultaneous stationed wings and/or governs
-  refuel/rearm speed, mirroring naval base level's role for ship repair
 
 ---
 
@@ -496,6 +692,14 @@ the build:
 fighter vs. American-drop-tank escort-range archetypes discussed during design) — deferred
 until after mechanics are implemented and playtested, per explicit direction for this
 rewrite: mechanics before perks.
+
+**Stand-off munitions** (e.g. the German Fritz X / Hs 293 guided glide bombs, historically
+used against ships) — real historical precedent exists and a future research perk extending
+Naval Bomber's effective attack range is plausible, but explicitly deferred as future work,
+not part of this rewrite. Notably, the one documented WWII attempt to use a stand-off glide
+bomb (Hs 293) against a land target (bridges, Normandy and the Oder) failed both times —
+worth keeping any future version of this perk naval-specific rather than generalising it to
+air-to-land.
 
 **Radar and anti-air network building design** (cost, levels, perk tree) — deferred to the
 "military buildings" pass flagged in `ECONOMY_BUILDINGS.md`. This document defines only their
