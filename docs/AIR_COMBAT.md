@@ -126,6 +126,18 @@ the intended lever for skilled play: a player can send an obvious threat toward 
 pull enemy interceptors there, then commit the real strike through the gap. Default
 behaviour needs no player input; reading and exploiting it is the skill ceiling.
 
+**Interception targeting priority:** an Interception wing prefers bomber-class targets
+(Strategic Bomber, Tactical Bomber, CAS Plane, Dive Bomber) — wings whose primary purpose
+is hitting the ground. If no bomber-class target is detected, it will engage whatever enemy
+is present. This lets interceptors behave sensibly in mixed engagements without needing
+manual retasking.
+
+**Air Superiority targeting priority:** an Air Superiority wing prefers fighter-class targets
+(Fighter, Heavy Fighter) — wings whose primary purpose is air-to-air combat. If no
+fighter-class target is detected, it will engage whatever enemy is present. Fighter and Heavy
+Fighter are distinct unit types with different performance envelopes and separate research
+perk trees; Air Superiority treats both as equal-priority fighter-class targets.
+
 **Chasing a moving target:** once a target is spotted, an interceptor generates a pursuit
 path (lead pursuit, a standard missile-guidance technique) toward the target's current or
 predicted position, recomputed periodically — not continuously — to keep this server-cheap.
