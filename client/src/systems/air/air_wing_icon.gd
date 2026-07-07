@@ -9,6 +9,9 @@ var fuel: float = 1.0
 var combat_readiness: float = 1.0
 var lifecycle_state: String = "idle"
 var is_selected: bool = false
+var is_own: bool = false
+var passive_radius_px: float = 0.0
+var recon_radius_px: float = 0.0
 
 const DIAMOND_HALF    := 11.0
 const BAR_H           := 3.0
@@ -21,7 +24,7 @@ func _ready() -> void:
 	set_process(false)
 
 
-func setup(data: Dictionary, color: Color) -> void:
+func setup(data: Dictionary, color: Color, passive_px: float = 0.0, recon_px: float = 0.0, own: bool = false) -> void:
 	wing_id          = data.get("wing_id", "")
 	nation_id        = data.get("nation_id", "")
 	nation_color     = color
@@ -30,6 +33,9 @@ func setup(data: Dictionary, color: Color) -> void:
 	fuel             = float(data.get("fuel", 1.0))
 	combat_readiness = float(data.get("combat_readiness", 1.0))
 	lifecycle_state  = data.get("lifecycle_state", "idle")
+	passive_radius_px = passive_px
+	recon_radius_px   = recon_px
+	is_own            = own
 	_update_visibility()
 	queue_redraw()
 
@@ -88,6 +94,11 @@ func set_selected(selected: bool) -> void:
 
 
 func _draw() -> void:
+	var airborne := lifecycle_state != "idle" and lifecycle_state != "refuel"
+	if is_own and airborne and recon_radius_px > 0.0:
+		draw_circle(Vector2.ZERO, recon_radius_px,   Color(1.0, 1.0, 1.0, 0.06))
+		draw_circle(Vector2.ZERO, passive_radius_px, Color(1.0, 1.0, 1.0, 0.18))
+
 	var points := PackedVector2Array([
 		Vector2(0,            -DIAMOND_HALF),
 		Vector2(DIAMOND_HALF,  0),

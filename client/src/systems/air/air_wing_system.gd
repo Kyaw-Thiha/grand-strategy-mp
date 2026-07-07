@@ -4,6 +4,8 @@ const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tsc
 const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 const AirRangeOverlay := preload("res://src/systems/air/air_range_overlay.gd")
+const PASSIVE_RADIUS_DEG := 0.1
+const RECON_RADIUS_DEG   := 1.0
 
 const NATION_COLORS: Dictionary = {
 	"germany":        Color(0.29, 0.29, 0.29),
@@ -26,21 +28,31 @@ var _pending_chain: Array[String] = []
 var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
 var _range_overlay: Node2D = null
+var _passive_radius_px: float = 0.0
+var _recon_radius_px: float = 0.0
 var _wing_fuel: Dictionary = {}  # wing_id → float
 var _wing_path_by_id: Dictionary = {}
 var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
 var _last_synced_gen_id: Dictionary = {}
+var _detected_wings: Dictionary = {}
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	_map_loader = map_loader
 	_icon_layer = icon_layer
+	var _center: Vector2 = _map_loader.project_lng_lat(0.0, 0.0)
+	_passive_radius_px = _center.distance_to(_map_loader.project_lng_lat(PASSIVE_RADIUS_DEG, 0.0))
+	_recon_radius_px   = _center.distance_to(_map_loader.project_lng_lat(RECON_RADIUS_DEG, 0.0))
 	EventBus.air_wing_added.connect(_on_air_wing_added)
 	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 	EventBus.air_wing_removed.connect(_on_air_wing_removed)
 	if not EventBus.air_wing_path.is_connected(_on_air_wing_path):
 		EventBus.air_wing_path.connect(_on_air_wing_path)
+	if not EventBus.air_wing_detected.is_connected(_on_air_wing_detected):
+		EventBus.air_wing_detected.connect(_on_air_wing_detected)
+	if not EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
+		EventBus.air_wing_detection_lost.connect(_on_air_wing_detection_lost)
 	if _pending_route_overlay == null:
 		_pending_route_overlay = MoveOrderOverlay.new()
 		_icon_layer.add_child(_pending_route_overlay)
@@ -79,10 +91,12 @@ func _on_air_wing_added(wing_id: String) -> void:
 		return
 	var icon: Node2D = AIR_WING_ICON_SCENE.instantiate()
 	var color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
-	icon.setup(data, color)
+	var is_own: bool = data.get("nation_id", "") == GameState.get_my_nation_id()
+	icon.setup(data, color, _passive_radius_px, _recon_radius_px, is_own)
 	_icon_layer.add_child(icon)
 	_icons[wing_id] = icon
 	_refresh_wing_icon_position(wing_id)
+	_update_icon_visibility(wing_id)
 
 
 func _on_air_wing_updated(wing_id: String) -> void:
@@ -96,9 +110,12 @@ func _on_air_wing_updated(wing_id: String) -> void:
 
 	if data.has("fuel"):
 		_wing_fuel[wing_id] = float(data.get("fuel", 1.0))
+	if data.has("is_detected"):
+		_detected_wings[wing_id] = bool(data.get("is_detected", false))
 
 	var ls: String = data.get("lifecycle_state", "")
-	if ls == "idle" or ls == "refuel":
+	var current_gen_id: String = data.get("path_gen_id", "")
+	if ls == "idle" or ls == "refuel" or current_gen_id.is_empty():
 		_wing_path_by_id.erase(wing_id)
 		_wing_path_generations_by_id.erase(wing_id)
 		_wing_total_elapsed_ms.erase(wing_id)
@@ -106,9 +123,9 @@ func _on_air_wing_updated(wing_id: String) -> void:
 		_refresh_wing_icon_position(wing_id)
 		if wing_id == _selected_wing_id:
 			_update_ghost()
+		_update_icon_visibility(wing_id)
 		return
 
-	var current_gen_id: String = data.get("path_gen_id", "")
 	var last_synced: String = str(_last_synced_gen_id.get(wing_id, ""))
 	var server_elapsed: float = float(data.get("path_elapsed_ms", 0))
 	if current_gen_id != last_synced:
@@ -118,6 +135,7 @@ func _on_air_wing_updated(wing_id: String) -> void:
 		var current: float = float(_wing_total_elapsed_ms.get(wing_id, 0.0))
 		_wing_total_elapsed_ms[wing_id] = max(current, server_elapsed)
 	_refresh_wing_icon_position(wing_id)
+	_update_icon_visibility(wing_id)
 	if wing_id == _selected_wing_id:
 		_update_ghost()
 
@@ -132,6 +150,7 @@ func _on_air_wing_removed(wing_id: String) -> void:
 	_wing_path_generations_by_id.erase(wing_id)
 	_wing_total_elapsed_ms.erase(wing_id)
 	_last_synced_gen_id.erase(wing_id)
+	_detected_wings.erase(wing_id)
 	_wing_fuel.erase(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
@@ -257,6 +276,32 @@ func _on_air_wing_path(path_data: Dictionary) -> void:
 		_update_ghost()
 
 
+func _update_icon_visibility(wing_id: String) -> void:
+	var icon = _icons.get(wing_id)
+	if not is_instance_valid(icon):
+		return
+	var data: Dictionary = GameState.get_air_wing(wing_id)
+	if data.is_empty():
+		icon.visible = false
+		return
+	var airborne: bool = data.get("lifecycle_state", "") != "idle" and data.get("lifecycle_state", "") != "refuel"
+	var is_own: bool = data.get("nation_id", "") == GameState.get_my_nation_id()
+	if is_own:
+		icon.visible = true
+	else:
+		icon.visible = airborne and bool(_detected_wings.get(wing_id, data.get("is_detected", false)))
+
+
+func _on_air_wing_detected(wing_id: String) -> void:
+	_detected_wings[wing_id] = true
+	_update_icon_visibility(wing_id)
+
+
+func _on_air_wing_detection_lost(wing_id: String) -> void:
+	_detected_wings[wing_id] = false
+	_update_icon_visibility(wing_id)
+
+
 func _append_pending_milestone(milestone_id: String) -> void:
 	if milestone_id.is_empty():
 		return
@@ -372,11 +417,16 @@ func cleanup() -> void:
 		EventBus.air_wing_removed.disconnect(_on_air_wing_removed)
 	if EventBus.air_wing_path.is_connected(_on_air_wing_path):
 		EventBus.air_wing_path.disconnect(_on_air_wing_path)
+	if EventBus.air_wing_detected.is_connected(_on_air_wing_detected):
+		EventBus.air_wing_detected.disconnect(_on_air_wing_detected)
+	if EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
+		EventBus.air_wing_detection_lost.disconnect(_on_air_wing_detection_lost)
 	if _pending_route_overlay != null:
 		_pending_route_overlay.free()
 		_pending_route_overlay = null
 	_wing_path_generations_by_id.clear()
 	_wing_total_elapsed_ms.clear()
+	_detected_wings.clear()
 
 
 func _update_ghost() -> void:

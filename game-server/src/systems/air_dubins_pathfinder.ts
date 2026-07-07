@@ -213,6 +213,8 @@ function makeArcSegment(
 export class DubinsPathfinder {
   private _activePaths: Map<string, DubinsPath> = new Map();
 
+  defaultTurnRadius(): number { return WING_TURN_RADIUS_DEG; }
+
   storePath(wingId: string, path: DubinsPath): void {
     this._activePaths.set(wingId, path);
   }
