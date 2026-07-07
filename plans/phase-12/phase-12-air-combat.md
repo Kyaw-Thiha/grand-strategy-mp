@@ -211,9 +211,12 @@ over → enemy icon appears; recon leaves → icon disappears.
 
 **Server:**
 - `AirCombatSystem` (`game-server/src/systems/air_combat_system.ts`)
-- **Interception:** auto-targets enemy bomber-class wings; pursuit path (Branch C) when
-  detected; LOITER when not
-- **Air Superiority:** auto-targets enemy fighter-class wings
+- **Interception:** primary target = bomber-class wings (Strategic Bomber, Tactical Bomber,
+  CAS Plane, Dive Bomber); falls back to any enemy if no bombers detected; pursuit path
+  (Branch C) when detected; LOITER when not
+- **Air Superiority:** primary target = fighter-class wings (Fighter, Heavy Fighter — both
+  treated as equal-priority; they are distinct unit types with separate research trees);
+  falls back to any enemy if no fighters detected
 - **Attack/Defense damage rule:** `damage = weapon_ready ? Attack_value : Defense_value`;
   pure bombers have `Attack_vs_air = 0` as a data value — not a special-cased branch
 - **Target deconfliction:** sort engaged friendlies by score; each claims highest unclaimed

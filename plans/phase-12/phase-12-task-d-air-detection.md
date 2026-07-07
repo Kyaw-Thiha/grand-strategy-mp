@@ -103,10 +103,11 @@ pattern. For tests, it is simpler to spawn wings of different nations (e.g., "ge
 |------|--------|
 | `game-server/src/rooms/schema/AirWingState.ts` | Add `is_detected` boolean field |
 | `game-server/src/systems/air_wing_lifecycle_system.ts` | Add `startInterceptionPursuit` method |
-| `game-server/src/rooms/GameRoom.ts` | Add `airDetectionSystem` field, wire into tick, add `SET_PROVINCE_RADAR` + `SET_WING_POSITION` test-only handlers |
+| `game-server/src/rooms/GameRoom.ts` | Add `airDetectionSystem` field, wire into tick, add `SET_PROVINCE_RADAR` + `SET_WING_POSITION` test-only handlers, broadcast `RADAR_UPDATED` from `SET_PROVINCE_RADAR` |
 | `game-server/package.json` | Add `12d-air-detection.test.ts` to test chain |
-| `client/src/systems/air/air_wing_system.gd` | Filter enemy icon visibility by `is_detected` |
-| `client/src/core/event_bus.gd` | Add `air_wing_detected` / `air_wing_detection_lost` signals |
+| `client/src/systems/air/air_wing_system.gd` | Filter enemy icon visibility by `is_detected`; wire detection overlay; handle `radar_updated` signal |
+| `client/src/core/event_bus.gd` | Add `air_wing_detected`, `air_wing_detection_lost`, `radar_updated` signals |
+| `client/src/systems/session/session_manager.gd` | Add `RADAR_UPDATED` handler |
 
 ---
 
@@ -224,6 +225,10 @@ describe("12d — Air Detection System", function () {
   }
 
   // Always pass position and heading explicitly so tests are deterministic.
+  // German wings default to Berlin (lng≈13.4, lat≈52.5).
+  // French enemy wings should override nation_id + use Nancy (lng≈6.18, lat≈48.69,
+  // home_airbase_province_id: "province-nancy") — close to the German border, easy
+  // to test interception without large coordinate offsets.
   async function spawnWing(
     client: any, room: any,
     overrides: Record<string, unknown> = {}
@@ -235,11 +240,28 @@ describe("12d — Air Detection System", function () {
       count:                    10,
       heading_deg:              0,
       home_airbase_province_id: "province-berlin",
-      position_lng:             10,
-      position_lat:             50,
+      position_lng:             13.4,
+      position_lat:             52.5,
     };
     client.send("SPAWN_WING", { ...defaults, ...overrides });
     await room.waitForNextPatch();
+  }
+
+  // Convenience: spawn a French wing at Nancy for detection/interception tests.
+  async function spawnFrenchWingAtNancy(
+    client: any, room: any,
+    overrides: Record<string, unknown> = {}
+  ) {
+    return spawnWing(client, room, {
+      wing_id:                  "wing-enemy",
+      nation_id:                "france",
+      aircraft_type:            AIR_UNIT_TYPES.TACTICAL_BOMBER,
+      home_airbase_province_id: "province-nancy",
+      position_lng:             6.18,
+      position_lat:             48.69,
+      lifecycle_state:          WING_LIFECYCLE.TRANSIT,
+      ...overrides,
+    });
   }
 ```
 
@@ -789,7 +811,20 @@ private airDetectionSystem = new AirDetectionSystem();
 
 Import from `"../systems/air_detection_system.js"`.
 
-### 5b. Wire into gameTick — after airDubinsPathfinder
+### 5b. Wire into gameTick — after the pending-transit loop
+
+The actual gameTick tail order is:
+```
+airWingLifecycleSystem.tick()
+→ RTB path loop
+→ airDubinsPathfinder.tick()        ← positions finalized here
+→ RELOCATE path loop                ← assigns paths, changes lifecycle to RELOCATE
+→ pending-transit loop              ← changes lifecycle IDLE→TRANSIT
+→ [INSERT AirDetectionSystem here]
+→ toUpdate / DIVISION_UPDATES
+```
+
+Detection must run **after the pending-transit loop**, not just "after pathfinder". The RELOCATE and pending-transit loops change lifecycle states that affect which wings are considered airborne; running detection before them would read stale states for wings that just launched.
 
 ```typescript
 this.airDetectionSystem.tick(
@@ -816,7 +851,13 @@ this.onMessage("SET_WING_POSITION", (_client, msg: {
   wing_id: string; position_lng: number; position_lat: number;
 }) => {
   const wing = this.state.air_wings.get(msg.wing_id);
-  if (wing) { wing.position_lng = msg.position_lng; wing.position_lat = msg.position_lat; }
+  if (!wing) return;
+  wing.position_lng = msg.position_lng;
+  wing.position_lat = msg.position_lat;
+  // Clear active path so pathfinder.tick() doesn't overwrite the teleported position
+  this.airDubinsPathfinder.clearPath(msg.wing_id);
+  wing.path_gen_id = "";
+  wing.path_elapsed_ms = 0;
 });
 ```
 
@@ -869,7 +910,7 @@ func _update_icon_visibility(wing_id: String) -> void:
     if not data: return
     # Check the actual field used by GameState/SessionManager for local player nation.
     # Do NOT hardcode "germany" — look at how MilitarySystem accesses local nation.
-    var is_own := data.nation_id == GameState.local_nation_id
+    var is_own := data.nation_id == GameState.get_my_nation_id()
     var airborne := data.lifecycle_state != "idle" and data.lifecycle_state != "refuel"
     if is_own:
         icon.visible = airborne
@@ -886,6 +927,175 @@ if show_detection_debug and _is_airborne:
              Color(0.2, 0.8, 1.0, 0.25), 1.5)
 ```
 Pattern follows `division_icon.gd`'s existing `draw_arc`/`draw_circle` in `_draw()`.
+
+---
+
+### 7e. Detection range overlay — new file `air_detection_overlay.gd`
+
+Create `client/src/systems/air/air_detection_overlay.gd`. This is a `Node2D` sibling of
+`air_range_overlay.gd` that draws **two kinds of circles**:
+
+1. **Wing passive/recon detection radius** — shown around each of the local player's
+   airborne wings (so they can see what they can detect). Passive wings get a small circle;
+   RECON-mission wings get a larger one. Uses the wing's nation color at low alpha.
+2. **Radar range** — shown for each radar owned by the local player. A static circle at
+   the radar's `position_lng/lat` with `radius_deg` converted to screen pixels. Uses the
+   nation color at low alpha. Updated via `RADAR_UPDATED` broadcast (see 7f).
+
+Follow the exact same draw pattern as `air_range_overlay.gd`: convert degree radius to
+pixels using `_map_loader.project_lng_lat(lng + radius_deg, lat)` and take the distance
+to the center point. Draw a filled polygon + border polyline using `PackedVector2Array`.
+
+```gdscript
+extends Node2D
+
+const CIRCLE_POINTS  := 48
+const FILL_ALPHA     := 0.07
+const BORDER_ALPHA   := 0.40
+const BORDER_WIDTH   := 1.2
+
+# Must match server constants in air_detection_system.ts
+const PASSIVE_RADIUS_DEG := 0.1
+const RECON_RADIUS_DEG   := 1.0
+
+var _map_loader: Node = null
+var _nation_color: Color = Color(0.4, 0.7, 1.0)
+
+# { wing_id → { lng, lat, mission, nation_color } }
+var _wing_entries: Dictionary = {}
+# { key → { lng, lat, radius_deg, nation_color } }  — key is province_id or any unique id
+var _radar_entries: Dictionary = {}
+
+
+func setup(map_loader: Node, nation_color: Color) -> void:
+    _map_loader   = map_loader
+    _nation_color = nation_color
+
+
+func set_wing_entry(wing_id: String, lng: float, lat: float, mission: String) -> void:
+    _wing_entries[wing_id] = { "lng": lng, "lat": lat, "mission": mission }
+    queue_redraw()
+
+
+func remove_wing_entry(wing_id: String) -> void:
+    _wing_entries.erase(wing_id)
+    queue_redraw()
+
+
+func set_radar_entry(key: String, lng: float, lat: float, radius_deg: float) -> void:
+    if radius_deg <= 0.0:
+        _radar_entries.erase(key)
+    else:
+        _radar_entries[key] = { "lng": lng, "lat": lat, "radius_deg": radius_deg }
+    queue_redraw()
+
+
+func _draw() -> void:
+    if _map_loader == null:
+        return
+    var fill   := Color(_nation_color.r, _nation_color.g, _nation_color.b, FILL_ALPHA)
+    var border := Color(_nation_color.r, _nation_color.g, _nation_color.b, BORDER_ALPHA)
+    for entry in _wing_entries.values():
+        var radius_deg: float = RECON_RADIUS_DEG if entry["mission"] == "recon" else PASSIVE_RADIUS_DEG
+        _draw_circle_deg(entry["lng"], entry["lat"], radius_deg, fill, border)
+    for entry in _radar_entries.values():
+        _draw_circle_deg(entry["lng"], entry["lat"], entry["radius_deg"], fill, border)
+
+
+func _draw_circle_deg(lng: float, lat: float, radius_deg: float,
+                      fill: Color, border: Color) -> void:
+    var center: Vector2 = _map_loader.project_lng_lat(lng, lat)
+    var edge: Vector2   = _map_loader.project_lng_lat(lng + radius_deg, lat)
+    var radius_px: float = center.distance_to(edge)
+    if radius_px < 1.0:
+        return
+    var pts := PackedVector2Array()
+    for i in range(CIRCLE_POINTS):
+        var angle: float = float(i) / float(CIRCLE_POINTS) * TAU
+        pts.append(center + Vector2(cos(angle), sin(angle)) * radius_px)
+    draw_colored_polygon(pts, fill)
+    var border_pts := PackedVector2Array(pts)
+    border_pts.append(pts[0])
+    draw_polyline(border_pts, border, BORDER_WIDTH)
+```
+
+**Wire into `air_wing_system.gd`:**
+- Add `var _detection_overlay: Node2D = null` field.
+- In `setup()`, instantiate the scene/node and call `_detection_overlay.setup(map_loader, nation_color)`.
+- In `_on_air_wing_added` / `_on_air_wing_updated`: if wing is own nation and airborne, call
+  `_detection_overlay.set_wing_entry(wing_id, lng, lat, mission)`. If grounded or removed,
+  call `remove_wing_entry`.
+- In `_on_air_wing_removed`: call `remove_wing_entry`.
+
+**When to show wing detection circles:** only for own-nation wings (the player already knows
+where their own wings are; the circle shows what those wings can see). Enemy wing detection
+radii are not shown — that would tell the player how big the enemy's detection radius is,
+which they shouldn't know.
+
+---
+
+### 7f. Radar range: server broadcast + client handler
+
+The server currently has no production path to push radar entries to clients. Add a minimal
+broadcast so the overlay can show radar coverage without a polling loop.
+
+**Server — `GameRoom.ts`:** When `SET_PROVINCE_RADAR` is received (currently test-only),
+send `RADAR_UPDATED` **only to clients who own `msg.nation_id`** — do NOT use
+`this.broadcast()` here, as that would leak radar coverage to enemy players.
+
+Use the same per-client loop pattern as `sendDiplomacyVoteNotification` (GameRoom.ts ~1464):
+
+```typescript
+const radarPayload = {
+    key: msg.province_id,
+    nation_id: msg.nation_id,
+    position_lng: msg.position_lng,
+    position_lat: msg.position_lat,
+    radius_deg: msg.radius_deg,
+};
+for (const c of this.clients) {
+    const p = this.state.players.get(c.sessionId);
+    if (!p) continue;
+    const n = this.getNationForPlayer(p.userId);
+    if (!n || n.nation_id !== msg.nation_id) continue;
+    c.send("RADAR_UPDATED", radarPayload);
+}
+```
+
+**Client — `session_manager.gd`:** Add handler:
+```gdscript
+"RADAR_UPDATED":
+    EventBus.radar_updated.emit(data)
+```
+
+**Client — `event_bus.gd`:** Add signal:
+```gdscript
+signal radar_updated(data: Dictionary)
+```
+
+**Client — `air_wing_system.gd`:** Connect `EventBus.radar_updated`:
+```gdscript
+func _on_radar_updated(data: Dictionary) -> void:
+    var my_nation := GameState.get_my_nation_id()
+    if data.get("nation_id", "") != my_nation:
+        return
+    _detection_overlay.set_radar_entry(
+        data.get("key", ""),
+        data.get("position_lng", 0.0),
+        data.get("position_lat", 0.0),
+        data.get("radius_deg", 0.0),
+    )
+```
+
+---
+
+## Files to Create (updated)
+
+| File | Purpose |
+|------|---------|
+| `game-server/test/12d-air-detection.test.ts` | All detection tests |
+| `game-server/src/systems/air_detection_system.ts` | AirDetectionSystem class |
+| `client/src/systems/air/air_detection_overlay.gd` | Detection range circle overlay |
 
 ---
 
@@ -906,6 +1116,10 @@ All existing tests plus `12d` must pass. Then launch the client and verify:
 6. German INTERCEPTION wing in LOITER, French wing enters passive radius → interceptor starts
    moving toward French wing (lifecycle = TRANSIT in schema inspector)
 7. Own wings always visible regardless of enemy detection state
+8. Own airborne wing shows a small passive detection circle on the map around it
+9. Own RECON-mission wing shows a larger detection circle
+10. `SET_PROVINCE_RADAR` with a radius → a radar circle appears on the map at the specified position
+11. `SET_PROVINCE_RADAR` with radius 0 → radar circle disappears
 
 ---
 
@@ -925,4 +1139,7 @@ All existing tests plus `12d` must pass. Then launch the client and verify:
 | Own-nation radar detects own wings | Detection only fires when `source.nation_id` is HOSTILE to `wing.nation_id` |
 | All LOITER wings pursue detected enemies | Only `INTERCEPTION` and `AIR_SUPERIORITY` missions; TACTICAL_BOMBING etc. stay in LOITER |
 | `SET_WING_POSITION` handler already exists | It does NOT — add it in Step 5c |
-| `GameState.local_nation_id` is the right field name | Verify the actual field/method used by MilitarySystem for local player's nation before using it |
+| `GameState.local_nation_id` is the right field name | **It does not exist** — use `GameState.get_my_nation_id()` |
+| Detection can run right after `airDubinsPathfinder.tick()` | **No** — run it after the pending-transit loop; the RELOCATE and pending-transit loops mutate lifecycle states that affect which wings are airborne |
+| `this.broadcast("RADAR_UPDATED", ...)` is correct | **No** — that leaks radar positions to enemies; use the per-client loop pattern (`for (const c of this.clients)`) filtering to `nation_id === msg.nation_id` |
+| `SET_WING_POSITION` only needs to write coordinates | **No** — also call `airDubinsPathfinder.clearPath()` + reset `path_gen_id`/`path_elapsed_ms`; otherwise the pathfinder overwrites the teleported position on the next tick |
