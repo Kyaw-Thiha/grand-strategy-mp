@@ -12,6 +12,7 @@ import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_PER_TICK, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
+import { AirDetectionSystem } from "../systems/air_detection_system.js";
 import { DubinsPathfinder } from "../systems/air_dubins_pathfinder.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
@@ -74,6 +75,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
+  private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
@@ -321,6 +323,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.airDubinsPathfinder.clearPath(msg.wing_id);
       this.airWingLifecycleSystem.disbandWing(msg.wing_id, this.state,
         (type, m) => this.broadcast(type, m));
+      this.airDetectionSystem.clearWing(msg.wing_id);
     });
 
     this.onMessage("SET_WING_PERK", (client, msg: {
@@ -378,13 +381,23 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         nation_id: string;
         position_lng: number;
         position_lat: number;
+        observation_radius?: number;
       }) => {
         const div = new DivisionState();
         div.division_id  = msg.division_id;
         div.nation_id    = msg.nation_id;
         div.position_lng = msg.position_lng;
         div.position_lat = msg.position_lat;
+        if (msg.observation_radius !== undefined) div.observation_radius = msg.observation_radius;
         this.state.divisions.set(msg.division_id, div);
+      });
+      this.onMessage("SET_RELATION", (_client, msg: {
+        nation_a: string;
+        nation_b: string;
+        stance: "war" | "neutral" | "alliance";
+      }) => {
+        this.setRelationStance(msg.nation_a, msg.nation_b, msg.stance);
+        this.broadcastRelations();
       });
       this.onMessage("SET_CELL", (_client, msg: {
         division_id: string;
@@ -492,6 +505,50 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         const wing = this.state.air_wings.get(msg.wing_id);
         if (!wing) return;
         wing.path_elapsed_ms = msg.elapsed_ms;
+      });
+
+      this.onMessage("SET_PROVINCE_RADAR", (_client, msg: {
+        province_id: string;
+        nation_id: string;
+        position_lng: number;
+        position_lat: number;
+        radius_deg: number;
+      }) => {
+        this.airDetectionSystem.setRadarEntry(msg.province_id, {
+          position_lng: msg.position_lng,
+          position_lat: msg.position_lat,
+          radius_deg: msg.radius_deg,
+          nation_id: msg.nation_id,
+        });
+
+        const payload = {
+          key: msg.province_id,
+          nation_id: msg.nation_id,
+          position_lng: msg.position_lng,
+          position_lat: msg.position_lat,
+          radius_deg: msg.radius_deg,
+        };
+        for (const client of this.clients) {
+          const player = this.state.players.get(client.sessionId);
+          if (!player) continue;
+          const nation = this.getNationForPlayer(player.userId);
+          if (!nation || nation.nation_id !== msg.nation_id) continue;
+          client.send("RADAR_UPDATED", payload);
+        }
+      });
+
+      this.onMessage("SET_WING_POSITION", (_client, msg: {
+        wing_id: string;
+        position_lng: number;
+        position_lat: number;
+      }) => {
+        const wing = this.state.air_wings.get(msg.wing_id);
+        if (!wing) return;
+        wing.position_lng = msg.position_lng;
+        wing.position_lat = msg.position_lat;
+        this.airDubinsPathfinder.clearPath(msg.wing_id);
+        wing.path_gen_id = "";
+        wing.path_elapsed_ms = 0;
       });
 
       this.onMessage("SIMULATE_ENGAGEMENT_START", (_client, msg: {
@@ -979,6 +1036,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wings: [...this.state.air_wings.values()].map(w => serializeWing(w)),
     });
 
+    // Send initial loiter paths so clients can animate pre-spawned loitering wings
+    for (const wing of this.state.air_wings.values()) {
+      if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) continue;
+      const path = this.airDubinsPathfinder.getPath(wing.wing_id);
+      if (path) this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
+    }
+
     // Start game loop
     this.clock.setInterval(() => this.gameTick(), TICK_MS);
 
@@ -1039,12 +1103,25 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wing.position_lng             = spawn.lng;
       wing.position_lat             = spawn.lat;
       wing.heading_deg              = 0;
-      wing.lifecycle_state          = WING_LIFECYCLE.IDLE;
-      wing.mission                  = "interception";
+      wing.lifecycle_state          = (spawn.lifecycle_state as WING_LIFECYCLE) ?? WING_LIFECYCLE.IDLE;
+      wing.mission                  = spawn.mission ?? "interception";
       wing.target_id                = "";
       wing.home_airbase_province_id = spawn.home_airbase_province_id;
       wing.weapon_ready             = true;
       this.state.air_wings.set(spawn.wing_id, wing);
+
+      // Wings spawned directly as LOITER need a real loiter arc so the pathfinder
+      // has a valid position/heading when RTB is eventually triggered. Without a path,
+      // the RTB produces a degenerate zero-distance path that causes erratic behaviour.
+      if (wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
+        const loiterPath = this.airDubinsPathfinder.computeLoiterArc(
+          { lng: spawn.lng, lat: spawn.lat },
+          0,
+          this.airDubinsPathfinder.defaultTurnRadius(),
+        );
+        this.airDubinsPathfinder.storePath(wing.wing_id, loiterPath);
+        wing.path_gen_id = loiterPath.path_gen_id;
+      }
     }
   }
 
@@ -1157,6 +1234,21 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
         this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       }
+
+      this.airDetectionSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => {
+          for (const c of this.clients) {
+            const p = this.state.players.get(c.sessionId);
+            if (!p) continue;
+            const n = this.getNationForPlayer(p.userId);
+            if (!n || n.nation_id !== nationId) continue;
+            c.send(type, msg);
+          }
+        },
+      );
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
       const updates = [];

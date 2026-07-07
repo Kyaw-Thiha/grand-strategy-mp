@@ -1,5 +1,5 @@
 import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
-import { WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
 
 // ── Module-level mutable constants — mutated ONLY by exported test helpers ───
 
@@ -190,6 +190,17 @@ export class AirWingLifecycleSystem {
     if (!wing || wing.lifecycle_state !== WING_LIFECYCLE.TRANSIT) return;
     this._lastEngagedTarget.set(wingId, targetWingId);
     wing.lifecycle_state = WING_LIFECYCLE.ENGAGED;
+  }
+
+  startInterceptionPursuit(wingId: string, targetWingId: string, state: GameRoomState): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+    if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) return;
+    if (wing.mission !== MISSION_TYPES.INTERCEPTION && wing.mission !== MISSION_TYPES.AIR_SUPERIORITY) return;
+
+    this._loiterTicks.delete(wingId);
+    wing.target_id = targetWingId;
+    wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
   }
 
   resolveEngagement(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void {

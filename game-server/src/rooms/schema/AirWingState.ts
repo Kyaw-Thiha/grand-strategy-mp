@@ -91,6 +91,8 @@ export class AirWingState extends Schema {
   // Weapon reload state
   @type("boolean") weapon_ready: boolean = true;
 
+  @type("boolean") is_detected: boolean = false;
+
   // Research perk flags (set via SET_WING_PERK; no research tree yet — Phase 11)
   @type("boolean") perk_multi_sortie: boolean = false;
   @type("boolean") perk_strafing: boolean = false;
@@ -161,6 +163,7 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     path_gen_id:              wing.path_gen_id,
     path_elapsed_ms:          wing.path_elapsed_ms,
     weapon_ready:             wing.weapon_ready,
+    is_detected:              wing.is_detected,
     perk_multi_sortie:        wing.perk_multi_sortie,
     perk_strafing:            wing.perk_strafing,
     perk_extended_range:      wing.perk_extended_range,

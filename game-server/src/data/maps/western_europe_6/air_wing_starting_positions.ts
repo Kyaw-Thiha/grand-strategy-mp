@@ -8,11 +8,15 @@ export interface AirWingSpawnConfig {
   lat: number;
   aircraft_type: string;
   home_airbase_province_id: string;
+  lifecycle_state?: string;
+  mission?: string;
 }
 
 export const AIR_WING_STARTING_POSITIONS: AirWingSpawnConfig[] = [
   { wing_id: "germany_wing_01",        nation_id: "germany",        lng: 13.385771, lat: 52.483566, aircraft_type: "fighter", home_airbase_province_id: "we6_germany_06" },
+  { wing_id: "germany_wing_02",        nation_id: "germany",        lng:  8.684450, lat: 50.063147, aircraft_type: "fighter", home_airbase_province_id: "we6_germany_01" },
   { wing_id: "france_wing_01",         nation_id: "france",         lng:  2.335453, lat: 48.896725, aircraft_type: "fighter", home_airbase_province_id: "we6_france_03" },
+  { wing_id: "france_wing_02",         nation_id: "france",         lng:  6.184000, lat: 48.692000, aircraft_type: "fighter", home_airbase_province_id: "we6_france_05", lifecycle_state: "loiter", mission: "interception" },
   { wing_id: "united_kingdom_wing_01", nation_id: "united_kingdom", lng: -0.209940, lat: 51.538663, aircraft_type: "fighter", home_airbase_province_id: "we6_united_kingdom_08" },
   { wing_id: "spain_wing_01",          nation_id: "spain",          lng: -3.675196, lat: 40.373968, aircraft_type: "fighter", home_airbase_province_id: "we6_spain_06" },
   { wing_id: "algeria_wing_01",        nation_id: "algeria",        lng:  3.080039, lat: 36.747008, aircraft_type: "fighter", home_airbase_province_id: "we6_algeria_05" },

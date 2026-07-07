@@ -133,6 +133,21 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"AIR_WING_PATH":
 			EventBus.air_wing_path.emit(data)
 
+		"WING_DETECTED":
+			EventBus.air_wing_detected.emit(data.get("wing_id", ""))
+
+		"WING_LOST_DETECTION":
+			EventBus.air_wing_detection_lost.emit(data.get("wing_id", ""))
+
+		"RADAR_UPDATED":
+			EventBus.radar_updated.emit(data)
+
+		"DIVISION_REVEALED":
+			EventBus.division_revealed.emit(data.get("division_id", ""))
+
+		"DIVISION_HIDDEN":
+			EventBus.division_hidden.emit(data.get("division_id", ""))
+
 		"AIR_WING_STAGING":
 			EventBus.notification_requested.emit(
 				"Wing out of range — auto-staging to closer airbase before executing order.",

@@ -49,6 +49,7 @@ var _banners: Dictionary = {}  # engagement_key → EngagementBanner node
 var _target_positions: Dictionary = {}
 var _visible_provinces: Dictionary = {}
 var _vision_filter_enabled: bool = false
+var _air_revealed_divisions: Dictionary = {}
 
 var _selected_division_id: String = ""
 var _selected_division_ids: Array[String] = []
@@ -137,6 +138,8 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.stack_rotated.connect(_on_stack_rotated)
 	EventBus.stack_dissolved.connect(_on_stack_dissolved)
 	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
+	EventBus.division_revealed.connect(_on_division_revealed)
+	EventBus.division_hidden.connect(_on_division_hidden)
 	EventBus.reposition_mode_requested.connect(_enter_reposition_mode)
 	EventBus.combat_started.connect(_on_combat_started_banner)
 	EventBus.combat_resolved.connect(_on_combat_resolved_banner)
@@ -1447,6 +1450,16 @@ func _on_vision_visibility_changed(visible_provinces: Dictionary) -> void:
 		_update_division_visibility(division_id)
 
 
+func _on_division_revealed(division_id: String) -> void:
+	_air_revealed_divisions[division_id] = true
+	_update_division_visibility(division_id)
+
+
+func _on_division_hidden(division_id: String) -> void:
+	_air_revealed_divisions.erase(division_id)
+	_update_division_visibility(division_id)
+
+
 func _update_division_visibility(division_id: String) -> void:
 	var icon: Node2D = _icons.get(division_id) as Node2D
 	if icon == null:
@@ -1473,8 +1486,10 @@ func _update_division_visibility(division_id: String) -> void:
 func _is_division_visible_to_player(division_id: String) -> bool:
 	if _is_own_unit(division_id):
 		return true
-	if not _vision_filter_enabled:
+	if _air_revealed_divisions.has(division_id):
 		return true
+	if not _vision_filter_enabled:
+		return false
 
 	var icon: Node2D = _icons.get(division_id) as Node2D
 	if icon == null:
