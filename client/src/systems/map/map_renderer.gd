@@ -4,7 +4,7 @@ extends Node
 ## Takes a data_source with get_province(id) -> Dict so it works in both
 ## debug mode (MapLoader) and game mode (GameState) without any special cases.
 
-enum OverlayMode { POLITICAL, ELEVATION, COVER }
+enum OverlayMode { POLITICAL, COVER }
 
 const NATION_PALETTE := {
 	# Major powers
@@ -50,12 +50,6 @@ const NATION_PALETTE := {
 	"default":         Color(0.55, 0.55, 0.55),
 }
 
-const ELEVATION_COLORS := {
-	"flat":      Color(0.70, 0.85, 0.60),
-	"hills":     Color(0.55, 0.70, 0.35),
-	"mountains": Color(0.60, 0.50, 0.40),
-}
-
 const COVER_COLORS := {
 	"farmland":            Color(0.76, 0.70, 0.50),
 	"hot_desert":          Color(0.95, 0.85, 0.60),
@@ -81,6 +75,8 @@ const NATION_DISPLAY_NAMES := {
 	"united_kingdom":  "UK",
 	"spanish_morocco": "SP. MOROCCO",
 }
+
+const POLITICAL_ELEVATION_LAYER_ALPHA := 0.36
 
 var _map_loader: Node = null
 var _data_source: Object = null
@@ -114,8 +110,8 @@ func on_map_loaded(_province_count: int) -> void:
 func set_overlay_mode(mode: String) -> void:
 	match mode:
 		"political":  _overlay_mode = OverlayMode.POLITICAL
-		"elevation":  _overlay_mode = OverlayMode.ELEVATION
 		"cover":      _overlay_mode = OverlayMode.COVER
+		"elevation":  _overlay_mode = OverlayMode.POLITICAL
 	_highlighted.clear()
 	_refresh_all()
 	_set_overlay_layer_visibility()
@@ -413,11 +409,16 @@ func _set_overlay_layer_visibility() -> void:
 
 	match _overlay_mode:
 		OverlayMode.POLITICAL:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = false
-		OverlayMode.ELEVATION:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = true
+			if cover_layer:
+				cover_layer.visible = false
+				cover_layer.modulate = Color.WHITE
+			if elev_layer:
+				elev_layer.visible = true
+				elev_layer.modulate = Color(1.0, 1.0, 1.0, POLITICAL_ELEVATION_LAYER_ALPHA)
 		OverlayMode.COVER:
-			if cover_layer:  cover_layer.visible = true
-			if elev_layer:   elev_layer.visible = false
+			if cover_layer:
+				cover_layer.visible = true
+				cover_layer.modulate = Color.WHITE
+			if elev_layer:
+				elev_layer.visible = false
+				elev_layer.modulate = Color.WHITE

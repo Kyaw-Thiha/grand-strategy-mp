@@ -426,7 +426,7 @@ layout_mode = 2
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 58)
 layout_mode = 2
-tooltip_text = "Political map mode"
+tooltip_text = "Political map mode with elevation detail"
 
 [node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical" unique_id=759560892]
 layout_mode = 1
@@ -488,40 +488,6 @@ stretch_mode = 5
 layout_mode = 2
 size_flags_horizontal = 4
 text = "COVER"
-horizontal_alignment = 1
-
-[node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=2046348814]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(132, 58)
-layout_mode = 2
-tooltip_text = "Elevation map mode"
-
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation" unique_id=982271855]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=1185570590]
-modulate = Color(0.91, 0.87, 0.78, 1)
-material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(22, 22)
-layout_mode = 2
-size_flags_horizontal = 4
-mouse_filter = 2
-texture = ExtResource("26_mountain")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=133091782]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "ELEVATION"
 horizontal_alignment = 1
 
 [node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot" unique_id=573809543]
@@ -620,7 +586,7 @@ offset_top = -160.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="FriendlyAirWingPanel" parent="." instance=ExtResource("36")]
+[node name="FriendlyAirWingPanel" parent="." unique_id=1025496055 instance=ExtResource("36")]
 visible = false
 anchors_preset = 2
 anchor_top = 1.0

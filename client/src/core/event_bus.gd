@@ -62,7 +62,7 @@ signal reposition_mode_requested(div_id: String)
 signal notification_requested(message: String, type: String)
 signal interactive_notification_requested(notification: Dictionary)
 signal interactive_notification_updated(notification: Dictionary)
-signal map_mode_changed(mode: String)   # "political" | "cover" | "elevation"
+signal map_mode_changed(mode: String)   # "political" | "cover"
 signal settings_requested()
 signal pause_menu_blocking_changed(blocking: bool)
 signal ui_pointer_blocking_changed(blocking: bool)
