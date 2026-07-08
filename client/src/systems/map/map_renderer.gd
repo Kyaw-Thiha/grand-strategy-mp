@@ -4,7 +4,7 @@ extends Node
 ## Takes a data_source with get_province(id) -> Dict so it works in both
 ## debug mode (MapLoader) and game mode (GameState) without any special cases.
 
-enum OverlayMode { POLITICAL, COVER }
+enum OverlayMode { POLITICAL, ELEVATION, COVER }
 
 const NATION_PALETTE := {
 	# Major powers
@@ -110,8 +110,8 @@ func on_map_loaded(_province_count: int) -> void:
 func set_overlay_mode(mode: String) -> void:
 	match mode:
 		"political":  _overlay_mode = OverlayMode.POLITICAL
+		"elevation":  _overlay_mode = OverlayMode.ELEVATION
 		"cover":      _overlay_mode = OverlayMode.COVER
-		"elevation":  _overlay_mode = OverlayMode.POLITICAL
 	_highlighted.clear()
 	_refresh_all()
 	_set_overlay_layer_visibility()
@@ -415,6 +415,13 @@ func _set_overlay_layer_visibility() -> void:
 			if elev_layer:
 				elev_layer.visible = true
 				elev_layer.modulate = Color(1.0, 1.0, 1.0, POLITICAL_ELEVATION_LAYER_ALPHA)
+		OverlayMode.ELEVATION:
+			if cover_layer:
+				cover_layer.visible = false
+				cover_layer.modulate = Color.WHITE
+			if elev_layer:
+				elev_layer.visible = true
+				elev_layer.modulate = Color.WHITE
 		OverlayMode.COVER:
 			if cover_layer:
 				cover_layer.visible = true

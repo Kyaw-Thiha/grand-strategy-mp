@@ -32,7 +32,7 @@ func _ready() -> void:
 	var elevation_button: Button = hud.get_node_or_null("%BtnMapElevation") as Button
 	_check(political_button != null, "Map mode bar includes Political button")
 	_check(cover_button != null, "Map mode bar includes Cover button")
-	_check(elevation_button == null, "Map mode bar no longer includes Elevation button")
+	_check(elevation_button != null, "Map mode bar keeps Elevation debug button")
 	var map_mode_log: Array[String] = []
 	EventBus.map_mode_changed.connect(func(mode: String) -> void:
 		map_mode_log.append(mode)
@@ -41,7 +41,9 @@ func _ready() -> void:
 		political_button.pressed.emit()
 	if cover_button != null:
 		cover_button.pressed.emit()
-	_check(map_mode_log == ["political", "cover"], "Map mode buttons emit Political and Cover only")
+	if elevation_button != null:
+		elevation_button.pressed.emit()
+	_check(map_mode_log == ["political", "cover", "elevation"], "Map mode buttons emit Political, Cover, and Elevation")
 	var diplomacy_panel: Control = hud.find_child("DiplomacyPanel", true, false) as Control
 	_check(_has_label_text(diplomacy_panel, "ALLIANCE 2 / 5"), "Diplomacy Nations page shows alliance section")
 	_check(_has_label_text(diplomacy_panel, "ENEMY"), "Diplomacy Nations page shows enemy section")

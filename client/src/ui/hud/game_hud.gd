@@ -22,6 +22,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _btn_settings: Button = %SettingsButton
 @onready var _btn_map_pol:  Button = %BtnMapPolitical
 @onready var _btn_map_cov:  Button = %BtnMapCover
+@onready var _btn_map_ele:  Button = %BtnMapElevation
 
 @onready var _dock_btn_q: Button = $HUDRoot/LeftDockRail/VBox/DockButton_Q
 @onready var _dock_btn_e: Button = $HUDRoot/LeftDockRail/VBox/DockButton_E
@@ -83,6 +84,7 @@ func _ready() -> void:
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
 	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
 	_btn_map_cov.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("cover"))
+	_btn_map_ele.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("elevation"))
 
 	# Click outside center panel = close
 	overlay_dim.gui_input.connect(_on_overlay_clicked)
