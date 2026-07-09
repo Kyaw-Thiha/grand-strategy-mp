@@ -96,8 +96,14 @@ async function waitForWingState(room: any, wingId: string, expectedState: string
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.TRANSIT });
     await room.waitForNextPatch();
 
+    const wingRtbPromise = new Promise<any>(resolve =>
+      client.onMessage("WING_RTB", (msg: any) => {
+        if (msg.wing_id === "wing-1") resolve(msg);
+      })
+    );
     client.send("RETREAT_WING", { wing_id: "wing-1" });
-    await waitForWingState(room, "wing-1", WING_LIFECYCLE.RTB);
+    const rtbMsg = await wingRtbPromise;
+    assert.strictEqual(rtbMsg.reason, "player_retreat");
   });
 
   it("RETREAT_WING from ENGAGED forces RTB", async () => {
@@ -120,27 +126,30 @@ async function waitForWingState(room: any, wingId: string, expectedState: string
     assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.IDLE);
   });
 
-  it("REDEPLOY_WING from IDLE transitions to TRANSIT", async () => {
+  it("REDEPLOY_WING from IDLE transitions to RELOCATE", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
 
     client.send("REDEPLOY_WING", { wing_id: "wing-1", new_province_id: "we6_germany_01" });
     await room.waitForNextPatch();
 
-    assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.RELOCATE);
   });
 
-  it("REDEPLOY_WING from non-IDLE is rejected", async () => {
+  it("REDEPLOY_WING from airborne forces RTB before relocating", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.TRANSIT });
     await room.waitForNextPatch();
 
     client.send("REDEPLOY_WING", { wing_id: "wing-1", new_province_id: "we6_germany_01" });
-    await new Promise(r => setTimeout(r, 200));
+    await room.waitForNextPatch();
 
-    assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.TRANSIT);
-    assert.strictEqual(room.state.air_wings.get("wing-1").home_airbase_province_id, "we6_germany_06");
+    const state = room.state.air_wings.get("wing-1").lifecycle_state;
+    assert.ok(
+      state === WING_LIFECYCLE.RTB || state === WING_LIFECYCLE.REFUEL || state === WING_LIFECYCLE.RELOCATE,
+      `expected RTB/REFUEL/RELOCATE after airborne redeploy, got ${state}`
+    );
   });
 
   it("REDEPLOY_WING arrival updates home base and leaves airborne state", async () => {

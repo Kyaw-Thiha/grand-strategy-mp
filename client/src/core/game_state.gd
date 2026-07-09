@@ -32,6 +32,9 @@ var stacks: Dictionary = {}
 #   position_lng, position_lat, heading_deg, lifecycle_state, mission,
 #   target_id, home_airbase_province_id, weapon_ready} }
 var air_wings: Dictionary = {}
+# air_wing_paths: { wing_id → AIR_WING_PATH payload } — cached so the hydration loop
+# can replay paths that arrived before air_wing_system was set up (GAME_STARTED race).
+var air_wing_paths: Dictionary = {}
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -291,6 +294,12 @@ func _apply_air_wing_updates(data: Dictionary) -> void:
 			EventBus.air_wing_added.emit(id)
 		else:
 			EventBus.air_wing_updated.emit(id)
+
+func _apply_air_wing_path(data: Dictionary) -> void:
+	var id: String = data.get("wing_id", "")
+	if id.is_empty():
+		return
+	air_wing_paths[id] = data
 
 func _apply_air_wing_destroyed(data: Dictionary) -> void:
 	var id: String = data.get("wing_id", "")

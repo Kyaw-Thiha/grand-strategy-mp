@@ -235,6 +235,14 @@ describe("GameRoom", () => {
       clients["user-b"].onMessage("DIPLOMACY_INTERACTIVE_NOTIFICATION", (msg: any) => {
         peacePrompts.push(msg);
       });
+      // Filter to the peace RELATIONS_UPDATED only — the declare_war broadcast can
+      // arrive late (after this listener is registered) and resolve prematurely.
+      const relationsUpdated = new Promise<any>(resolve =>
+        clients["user-a"].onMessage("RELATIONS_UPDATED", (msg: any) => {
+          const r = msg.relations as Record<string, string>;
+          if (r["germany:spain"] === "neutral" || r["spain:germany"] === "neutral") resolve(msg);
+        })
+      );
       clients["user-a"].send("DIPLOMACY_ACTION", {
         action: "make_peace",
         target_nation_id: "spain",
@@ -246,6 +254,7 @@ describe("GameRoom", () => {
         vote_id: peacePrompts[0].vote_id,
         accept: true,
       });
+      await relationsUpdated;
       await room.waitForNextPatch();
 
       assert.strictEqual(stance(room, "germany", "spain"), "neutral");

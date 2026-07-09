@@ -4,8 +4,16 @@ const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tsc
 const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 const AirRangeOverlay := preload("res://src/systems/air/air_range_overlay.gd")
-const PASSIVE_RADIUS_DEG := 0.1
 const RECON_RADIUS_DEG   := 1.0
+const COMBAT_RADIUS_DEG  := 0.3
+
+const OBSERVATION_DEG_BY_TYPE := {
+	"fighter": 0.25, "heavy_fighter": 0.35,
+	"cas_plane": 0.05, "dive_bomber": 0.05,
+	"tactical_bomber": 0.05, "strategic_bomber": 0.05,
+	"naval_bomber": 0.05, "recon_plane": 1.0,
+}
+const DEFAULT_OBSERVATION_DEG := 0.05
 
 const NATION_COLORS: Dictionary = {
 	"germany":        Color(0.29, 0.29, 0.29),
@@ -20,6 +28,7 @@ const HIT_THRESHOLD_PX := 20.0
 
 var _map_loader: Node     = null
 var _icon_layer: Node2D   = null
+var _center: Vector2      = Vector2.ZERO
 var _icons: Dictionary    = {}             # wing_id → AirWingIcon node
 var _target_positions: Dictionary = {}    # wing_id → Vector2 screen-space
 var _selected_wing_id: String = ""
@@ -28,10 +37,12 @@ var _pending_chain: Array[String] = []
 var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
 var _range_overlay: Node2D = null
-var _passive_radius_px: float = 0.0
 var _recon_radius_px: float = 0.0
+var _combat_radius_px: float = 0.0
 var _wing_fuel: Dictionary = {}  # wing_id → float
 var _wing_path_by_id: Dictionary = {}
+var _engaged_pairs: Dictionary = {}   # wing_id → opponent wing_id
+var _engagement_lines: Dictionary = {} # pair_key → Line2D
 var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
 var _last_synced_gen_id: Dictionary = {}
@@ -41,9 +52,9 @@ var _detected_wings: Dictionary = {}
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
 	_map_loader = map_loader
 	_icon_layer = icon_layer
-	var _center: Vector2 = _map_loader.project_lng_lat(0.0, 0.0)
-	_passive_radius_px = _center.distance_to(_map_loader.project_lng_lat(PASSIVE_RADIUS_DEG, 0.0))
+	_center = _map_loader.project_lng_lat(0.0, 0.0)
 	_recon_radius_px   = _center.distance_to(_map_loader.project_lng_lat(RECON_RADIUS_DEG, 0.0))
+	_combat_radius_px  = _center.distance_to(_map_loader.project_lng_lat(COMBAT_RADIUS_DEG, 0.0))
 	EventBus.air_wing_added.connect(_on_air_wing_added)
 	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 	EventBus.air_wing_removed.connect(_on_air_wing_removed)
@@ -53,6 +64,8 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 		EventBus.air_wing_detected.connect(_on_air_wing_detected)
 	if not EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
 		EventBus.air_wing_detection_lost.connect(_on_air_wing_detection_lost)
+	EventBus.air_combat_started.connect(_on_air_combat_started)
+	EventBus.air_combat_ended.connect(_on_air_combat_ended)
 	if _pending_route_overlay == null:
 		_pending_route_overlay = MoveOrderOverlay.new()
 		_icon_layer.add_child(_pending_route_overlay)
@@ -60,9 +73,15 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 		_range_overlay = AirRangeOverlay.new()
 		_range_overlay.setup(_map_loader)
 		_icon_layer.add_child(_range_overlay)
-	# Hydrate any wings already in GameState (late join / scene reload)
+	# Hydrate any wings already in GameState (late join / scene reload).
+	# Also replay cached AIR_WING_PATH payloads: the initial loiter paths arrive from the server
+	# before the game scene finishes loading, so the signal connection isn't up yet and they're
+	# lost. GameState caches each payload so we can reapply it here.
 	for wing_id in GameState.air_wings:
 		_on_air_wing_added(wing_id)
+		var cached_path: Dictionary = GameState.air_wing_paths.get(wing_id, {})
+		if not cached_path.is_empty():
+			_on_air_wing_path(cached_path)
 	_update_ghost()
 
 
@@ -75,9 +94,20 @@ func _process(delta: float) -> void:
 		var wing_id: String = str(wing_id_variant)
 		_wing_total_elapsed_ms[wing_id] = float(_wing_total_elapsed_ms.get(wing_id, 0.0)) + delta * 1000.0
 		_refresh_wing_icon_position(wing_id)
+		_sync_detection_overlay(wing_id)
 	if _range_overlay != null:
 		_range_overlay.tick_interpolate(delta)
 	_update_range_overlay()
+	for pair_key: String in _engagement_lines:
+		var line: Line2D = _engagement_lines[pair_key]
+		var ids := pair_key.split(",")
+		if ids.size() != 2:
+			continue
+		var icon_a = _icons.get(ids[0])
+		var icon_b = _icons.get(ids[1])
+		if is_instance_valid(icon_a) and is_instance_valid(icon_b):
+			line.set_point_position(0, icon_a.position)
+			line.set_point_position(1, icon_b.position)
 
 
 func _on_air_wing_added(wing_id: String) -> void:
@@ -92,7 +122,10 @@ func _on_air_wing_added(wing_id: String) -> void:
 	var icon: Node2D = AIR_WING_ICON_SCENE.instantiate()
 	var color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 	var is_own: bool = data.get("nation_id", "") == GameState.get_my_nation_id()
-	icon.setup(data, color, _passive_radius_px, _recon_radius_px, is_own)
+	var aircraft_type: String = data.get("aircraft_type", "fighter")
+	var passive_deg: float = OBSERVATION_DEG_BY_TYPE.get(aircraft_type, DEFAULT_OBSERVATION_DEG)
+	var passive_px: float = _center.distance_to(_map_loader.project_lng_lat(passive_deg, 0.0))
+	icon.setup(data, color, passive_px, _recon_radius_px, _combat_radius_px, is_own)
 	_icon_layer.add_child(icon)
 	_icons[wing_id] = icon
 	_refresh_wing_icon_position(wing_id)
@@ -255,6 +288,8 @@ func _update_range_overlay() -> void:
 		wing_pos = Vector2(float(data.get("position_lng", 0.0)), float(data.get("position_lat", 0.0)))
 	var fuel: float = float(_wing_fuel.get(_selected_wing_id, float(data.get("fuel", 1.0))))
 	var nation_color: Color = NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
+	var decay_rate: float = float(data.get("fuel_decay_rate", 0.02))
+	_range_overlay.set_fuel_decay_rate(decay_rate)
 	_range_overlay.show_for_wing(wing_pos.x, wing_pos.y, fuel, nation_color)
 
 
@@ -300,6 +335,43 @@ func _on_air_wing_detected(wing_id: String) -> void:
 func _on_air_wing_detection_lost(wing_id: String) -> void:
 	_detected_wings[wing_id] = false
 	_update_icon_visibility(wing_id)
+
+
+func _on_air_combat_started(data: Dictionary) -> void:
+	var a: String = data.get("wing_a_id", "")
+	var b: String = data.get("wing_b_id", "")
+	if a.is_empty() or b.is_empty():
+		return
+	_engaged_pairs[a] = b
+	_engaged_pairs[b] = a
+	var parts := PackedStringArray([a, b])
+	parts.sort()
+	var key := ",".join(parts)
+	if not _engagement_lines.has(key) and _icon_layer != null:
+		var line := Line2D.new()
+		line.default_color = Color(1.0, 0.2, 0.2, 0.7)
+		line.width = 1.5
+		line.add_point(Vector2.ZERO)
+		line.add_point(Vector2.ZERO)
+		_icon_layer.add_child(line)
+		_engagement_lines[key] = line
+
+
+func _on_air_combat_ended(data: Dictionary) -> void:
+	var a: String = data.get("wing_a_id", "")
+	var b: String = data.get("wing_b_id", "")
+	_engaged_pairs.erase(a)
+	_engaged_pairs.erase(b)
+	var parts := PackedStringArray([a, b])
+	parts.sort()
+	var key := ",".join(parts)
+	if _engagement_lines.has(key):
+		(_engagement_lines[key] as Line2D).queue_free()
+		_engagement_lines.erase(key)
+
+
+func _sync_detection_overlay(wing_id: String) -> void:
+	pass  # Deferred: detection overlay follows icon during TRANSIT
 
 
 func _append_pending_milestone(milestone_id: String) -> void:
@@ -427,6 +499,11 @@ func cleanup() -> void:
 	_wing_path_generations_by_id.clear()
 	_wing_total_elapsed_ms.clear()
 	_detected_wings.clear()
+	_engaged_pairs.clear()
+	for line: Variant in _engagement_lines.values():
+		if is_instance_valid(line):
+			(line as Line2D).queue_free()
+	_engagement_lines.clear()
 
 
 func _update_ghost() -> void:

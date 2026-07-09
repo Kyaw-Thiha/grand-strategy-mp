@@ -1,6 +1,7 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
-import { MISSION_TYPES, WING_LIFECYCLE } from "../rooms/schema/AirWingState.js";
+import { MISSION_TYPES, WING_LIFECYCLE, AirWingState } from "../rooms/schema/AirWingState.js";
 import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
+import { getObservationDeg, setPassiveObservationOverrideForTesting } from "../data/air_unit_stats.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
 type BroadcastToNationFn = (type: string, msg: unknown, nationId: string) => void;
@@ -11,6 +12,7 @@ let KM_PER_DEG = 111.32;
 
 export function setPassiveWingRadiusForTesting(v: number): void {
   PASSIVE_WING_RADIUS_DEG = v;
+  setPassiveObservationOverrideForTesting(v);
 }
 
 export function setReconWingRadiusForTesting(v: number): void {
@@ -36,6 +38,7 @@ type AirborneWingSnapshot = {
   wing_id: string;
   nation_id: string;
   mission: string;
+  aircraft_type: string;
   position_lng: number;
   position_lat: number;
 };
@@ -90,6 +93,7 @@ export class AirDetectionSystem {
     }
 
     // ── Interception pursuit trigger ────────────────────────────────────────
+    const INTERCEPTION_PURSUIT_RANGE_DEG = 2.0;
     for (const wing of airborneWings) {
       if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) continue;
       if (wing.mission !== MISSION_TYPES.INTERCEPTION && wing.mission !== MISSION_TYPES.AIR_SUPERIORITY) continue;
@@ -100,7 +104,7 @@ export class AirDetectionSystem {
         if (!this._areNationsHostile(wing.nation_id, enemy.nation_id, state)) continue;
         if (!enemy.is_detected) continue;
         const dist = euclidDeg(wing.position_lng, wing.position_lat, enemy.position_lng, enemy.position_lat);
-        if (dist < bestDist) {
+        if (dist < bestDist && dist <= INTERCEPTION_PURSUIT_RANGE_DEG) {
           bestDist = dist;
           bestTarget = enemy.wing_id;
         }
@@ -136,11 +140,6 @@ export class AirDetectionSystem {
     broadcastToNation: BroadcastToNationFn,
   ): void {
     const newVisible = this._computeDivisionVisibility(state, airborneWings);
-    if (newVisible.size > 0) {
-      for (const [nation, divs] of newVisible) {
-        console.log(`[AirDetection] nation=${nation} can see divisions: ${[...divs].join(", ")}`);
-      }
-    }
     const allNations = new Set([...this._prevVisibleDivisions.keys(), ...newVisible.keys()]);
 
     for (const nationId of allNations) {
@@ -175,16 +174,13 @@ export class AirDetectionSystem {
     for (const wing of airborneWings) {
       const radius = wing.mission === MISSION_TYPES.RECON
         ? RECON_WING_RADIUS_DEG * 2.0
-        : RECON_WING_RADIUS_DEG;
-
-      console.log(`[AirDetection] checking wing=${wing.wing_id} nation=${wing.nation_id} pos=(${wing.position_lng.toFixed(3)},${wing.position_lat.toFixed(3)}) radius=${radius}`);
+        : getObservationDeg(wing.aircraft_type);
 
       for (const [divId, div] of state.divisions.entries()) {
         if (div.nation_id === wing.nation_id) continue;
         const dist = euclidDeg(wing.position_lng, wing.position_lat, div.position_lng, div.position_lat);
         if (dist > radius) continue;
 
-        console.log(`[AirDetection] wing=${wing.wing_id} REVEALS div=${divId} nation=${div.nation_id} dist=${dist.toFixed(3)}`);
         if (!result.has(wing.nation_id)) result.set(wing.nation_id, new Set());
         result.get(wing.nation_id)!.add(divId);
       }
@@ -199,7 +195,7 @@ export class AirDetectionSystem {
     wingLng: number,
     wingLat: number,
     state: GameRoomState,
-    airborneWings: AirborneWingSnapshot[],
+    airborneWingsList: AirborneWingSnapshot[],
   ): boolean {
     for (const radar of this._radars.values()) {
       if (!this._areNationsHostile(radar.nation_id, wingNationId, state)) continue;
@@ -208,10 +204,12 @@ export class AirDetectionSystem {
       }
     }
 
-    for (const source of airborneWings) {
+    for (const source of airborneWingsList) {
       if (source.wing_id === wingId) continue;
       if (!this._areNationsHostile(source.nation_id, wingNationId, state)) continue;
-      const radius = source.mission === MISSION_TYPES.RECON ? RECON_WING_RADIUS_DEG : PASSIVE_WING_RADIUS_DEG;
+      const radius = source.mission === MISSION_TYPES.RECON
+        ? RECON_WING_RADIUS_DEG
+        : getObservationDeg(source.aircraft_type);
       if (euclidDeg(wingLng, wingLat, source.position_lng, source.position_lat) <= radius) {
         return true;
       }

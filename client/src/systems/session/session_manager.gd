@@ -131,6 +131,7 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 			GameState._apply_air_wing_updates(data)
 
 		"AIR_WING_PATH":
+			GameState._apply_air_wing_path(data)
 			EventBus.air_wing_path.emit(data)
 
 		"WING_DETECTED":
@@ -156,3 +157,14 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)
+
+		"AIR_COMBAT_STARTED":
+			EventBus.air_combat_started.emit(data)
+		"AIR_COMBAT_ENDED":
+			EventBus.air_combat_ended.emit(data)
+		"AIR_WING_RTB_QUEUED":
+			EventBus.notification_requested.emit(
+				"Wing returning to base — will proceed to target after refuelling.", "info")
+		"AIR_WING_MOVE_REJECTED":
+			EventBus.notification_requested.emit(
+				"Target out of range — no staging airbase available.", "warning")

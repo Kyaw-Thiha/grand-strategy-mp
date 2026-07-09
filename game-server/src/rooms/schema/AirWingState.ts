@@ -93,6 +93,16 @@ export class AirWingState extends Schema {
 
   @type("boolean") is_detected: boolean = false;
 
+  // Fuel decay rate multiplier; >1.0 means fuel tank damage (burns fuel faster)
+  @type("number") status_fuel: number = 1.0;
+
+  // Current fuel decay rate (fuel/tick) — sent to client for range-ring display
+  @type("number") fuel_decay_rate: number = 0.02;
+
+  // Pending transit target — set by GameRoom when queuing a move for a wing mid-sortie
+  @type("number") pending_transit_lng: number = 0;
+  @type("number") pending_transit_lat: number = 0;
+
   // Research perk flags (set via SET_WING_PERK; no research tree yet — Phase 11)
   @type("boolean") perk_multi_sortie: boolean = false;
   @type("boolean") perk_strafing: boolean = false;
@@ -164,6 +174,10 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     path_elapsed_ms:          wing.path_elapsed_ms,
     weapon_ready:             wing.weapon_ready,
     is_detected:              wing.is_detected,
+    status_fuel:              wing.status_fuel,
+    fuel_decay_rate:          wing.fuel_decay_rate,
+    pending_transit_lng:      wing.pending_transit_lng,
+    pending_transit_lat:      wing.pending_transit_lat,
     perk_multi_sortie:        wing.perk_multi_sortie,
     perk_strafing:            wing.perk_strafing,
     perk_extended_range:      wing.perk_extended_range,
