@@ -227,14 +227,14 @@ export interface AirUnitStats {
 }
 
 const STAT_TABLE: Record<string, AirUnitStats> = {
-  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.05 },
-  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.25 },
-  cas_plane:        { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05 },
-  dive_bomber:      { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05 },
-  tactical_bomber:  { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05 },
-  strategic_bomber: { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05 },
-  naval_bomber:     { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05 },
-  recon_plane:      { attack_vs_air: 0.0,  defense_vs_air: 0.01, observation_deg: 1.0  },
+  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.25 },
+  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.35 },
+  cas_plane:        { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.25 },
+  dive_bomber:      { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.25 },
+  tactical_bomber:  { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.25 },
+  strategic_bomber: { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.25 },
+  naval_bomber:     { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.25 },
+  recon_plane:      { attack_vs_air: 0.0,  defense_vs_air: 0.01, observation_deg: 0.5  },
 };
 
 const DEFAULT_STATS: AirUnitStats = { attack_vs_air: 0.0, defense_vs_air: 0.0, observation_deg: 0.05 };
@@ -300,9 +300,9 @@ In `after()`, restore all defaults.
 - `status_fuel` defaults to 1.0 on new AirWingState
 - `getAirUnitStats("fighter").attack_vs_air > 0`
 - `getAirUnitStats("strategic_bomber").attack_vs_air === 0`
-- `getObservationDeg("heavy_fighter") === 0.25`
-- `getObservationDeg("fighter") === 0.05`
-- `getObservationDeg("recon_plane") === 1.0`
+- `getObservationDeg("heavy_fighter") === 0.35`
+- `getObservationDeg("fighter") === 0.25`
+- `getObservationDeg("recon_plane") === 0.5`
 
 **Attack vs Defense branch:**
 - `weapon_ready = true` uses `attack_vs_air` — reduces enemy count by ~2–3
@@ -334,7 +334,7 @@ In `after()`, restore all defaults.
 - Wing with `status_fuel=1.5` loses more fuel per tick than base rate
 
 **Per-type observation_deg in detection:**
-- `heavy_fighter` (0.25°) detects enemy 0.2° away; `fighter` (0.05°) does not
+- `heavy_fighter` (0.35°) detects enemy 0.2° away; `fighter` (0.25°) does not
 
 **Run all tests after Step 3 — ALL must fail (implementation not written yet):**
 ```bash
@@ -981,67 +981,43 @@ exported: `export { FUEL_DECAY_PER_TICK, FUEL_RTB_THRESHOLD }`).
 
 ---
 
-### Additional features deferred from original scope
+### Additional features — implemented in this branch
 
-These were discussed and agreed during review but not yet implemented:
+These were discussed and agreed during review and implemented as part of this branch:
 
 **Transit vs loiter fuel decay split** (lifecycle system):
 ```typescript
-// Replace single constant:
-let FUEL_DECAY_PER_TICK = 0.01;
-// With:
 let FUEL_DECAY_TRANSIT = 0.02;   // higher: engines at cruise power
 let FUEL_DECAY_LOITER  = 0.008;  // lower: throttled back in orbit
 
-// In tick() decay block, use lifecycle_state to pick the rate:
 const fuelRate = wing.lifecycle_state === WING_LIFECYCLE.LOITER
   ? FUEL_DECAY_LOITER
   : FUEL_DECAY_TRANSIT;
 wing.fuel = Math.max(FUEL_FLOOR, wing.fuel - fuelRate * wing.status_fuel);
 ```
-Add test helpers `setFuelDecayTransitForTesting` and `setFuelDecayLoiterForTesting`.
-Update test 7 to set and assert against `FUEL_DECAY_TRANSIT` (the TRANSIT rate).
+Test helpers `setFuelDecayTransitForTesting` and `setFuelDecayLoiterForTesting` are exported.
 
 **Air-to-air readiness spike** (in `_resolveOneSide`):
-After computing damage and before `startWeaponCooldown`, apply a sudden readiness hit to BOTH
-wings (attacker was involved in a dogfight, target was hit):
 ```typescript
 const READINESS_COMBAT_SPIKE_AIR = 0.12;
 if (stats.attack_vs_air > 0) {
-  attacker.combat_readiness = Math.max(READINESS_FLOOR, attacker.combat_readiness - READINESS_COMBAT_SPIKE_AIR);
-  target.combat_readiness   = Math.max(READINESS_FLOOR, target.combat_readiness   - READINESS_COMBAT_SPIKE_AIR);
+  attacker.combat_readiness = Math.max(0, attacker.combat_readiness - READINESS_COMBAT_SPIKE_AIR);
+  target.combat_readiness   = Math.max(0, target.combat_readiness   - READINESS_COMBAT_SPIKE_AIR);
 }
 ```
-This is separate from the per-tick readiness decay in lifecycle.
+Both wings lose readiness when involved in air combat.
 
 **Detection overlay follow fix** (`client/src/systems/air/air_wing_system.gd`):
-In `_process()`, inside the per-wing Dubins path loop, add `_sync_detection_overlay(wing_id)` so
-the detection circle follows the icon during TRANSIT:
-```gdscript
-func _process(delta: float) -> void:
-    for wing_id_variant: Variant in _wing_path_generations_by_id.keys():
-        var wing_id: String = str(wing_id_variant)
-        _wing_total_elapsed_ms[wing_id] = float(_wing_total_elapsed_ms.get(wing_id, 0.0)) + delta * 1000.0
-        _refresh_wing_icon_position(wing_id)
-        _sync_detection_overlay(wing_id)   # ← ADD THIS LINE
-    ...
-```
+In `_process()`, `_sync_detection_overlay(wing_id)` is called so the detection circle
+follows the icon during TRANSIT.
 
-**Attack range ring UI** (`client/src/systems/air/air_range_overlay.gd` or `air_wing_icon.gd`):
-When a wing is selected, draw a dashed circle at `ATTACK_RANGE_DEG = 0.3°` radius (converted to
-pixels via map scale). Distinct from the detection radius circle (which shows observation_deg).
-The outer ground-detection circle (`RECON_WING_RADIUS_DEG = 1.0°`) should only display
-prominently for `recon_plane` aircraft type; for all other types it should be suppressed or
-drawn at very low opacity.
+**Attack range ring UI** (`air_wing_icon.gd`):
+When selected, a red arc is drawn at `combat_radius_px` (0.3° attack range converted to pixels).
+The outer ground-detection circle (`RECON_WING_RADIUS_DEG = 1.0°`) is suppressed for non-recon
+aircraft types.
 
 ---
 
 ### Debug console.log removal
 
-Two debug logs were left in `game-server/src/systems/air_combat_system.ts`:
-
-- **Line 47** (in `tick()`): `console.log('[ACS tick] candidates=[...] pairs=...')`
-- **Line 67** (in `tick()` inner loop): `console.log('[COMBAT] ...')`
-
-Remove both. They flood the test output (every tick of every test prints `[ACS tick]`) and will
-clutter production logs.
+Debug logs in `air_combat_system.ts` were removed. No debug console.log statements remain.
