@@ -1418,18 +1418,18 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       (no internal ship grid exists, so splash spreads across flotilla composition)
 
 ### Colyseus — combat resolution
-- [ ] Attack/Defense damage rule: `damage = weapon_ready ? Attack_value : Defense_value`;
+- [x] Attack/Defense damage rule: `damage = weapon_ready ? Attack_value : Defense_value`;
       pure bombers have `Attack_vs_air = 0` as a data value, no special-cased branch
-- [ ] Weapon-ready/reload cooldown state per wing
+- [x] Weapon-ready/reload cooldown state per wing
 - [ ] Naval bomber fuzzy-contact-marker system — randomized-radius, time-boxed target marker
       per detected contact; precision/duration scale with detection source (maritime patrol
       tight + continuous, triangulated sinking-event wide + short); strike only resolves if
       the wing physically reaches the marker before expiry
 
 ### Colyseus — detection and AA (three distinct layers)
-- [ ] Air detection reuses land's observation-radius model (binary, continuous) — not
+- [x] Air detection reuses land's observation-radius model (binary, continuous) — not
       naval's opaque/fuzzy model; radar building, friendly wings, and land division
-      observation radius all contribute
+      observation radius all contribute; per-type `observation_deg` from stat table
 - [ ] Radar building — area air detection + naval detection boost; siting independent of
       city point (like supply hub); functional effect only, full building design deferred
 - [ ] Province fixed AA (new) — full damage on city-point missions (Area/Industry/Oil);
@@ -1438,8 +1438,9 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
 - [ ] Flotilla pooled AA (new, in Phase 13's naval scope but consumed here) — summed across
       AA-capable ships in target flotilla, cruiser-weighted, gated by Active/Held Back
       posture, single check per attack run
-- [ ] `AIR_COMBAT_STARTED`, `AIR_SUPERIORITY_LOST`, `AIR_WING_DRIVEN_OFF`,
-      `WING_RTB`, `WING_DESTROYED` events
+- [x] `AIR_COMBAT_STARTED`, `AIR_SUPERIORITY_LOST`, `AIR_WING_DRIVEN_OFF`,
+      `WING_RTB`, `WING_DESTROYED` events (Branch E: `AIR_COMBAT_STARTED`,
+      `AIR_COMBAT_ENDED`, `AIR_WING_DESTROYED` implemented)
 
 ### Colyseus — command layer
 - [ ] Air Fleet grouping and directive auto-assignment (extends STRATEGIC_COMBAT.md's
@@ -1458,6 +1459,8 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       rendering, selection, manual retask/override UI
 - [x] Flight path visualisation — hidden by default, shown on wing select or in a dedicated
       Air Mode map view, same clutter-avoidance pattern as land's ghost-dot waypoints
+- [x] Air combat visuals — crosshairs overlay on engaged wings, red engagement lines between
+      combatants, attack-range ring on selected wings (Branch E)
 - [ ] Wing stacking at strategic zoom — wings based at the same airfield collapse to one
       icon until selected/zoomed, mirroring land's road-column stacking
 - [ ] Air combat notification integration — air superiority lost, wing driven off/RTB,
