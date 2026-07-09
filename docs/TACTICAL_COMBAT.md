@@ -1,7 +1,10 @@
 # Grand Strategy Multiplayer — Tactical Combat Design
 
 > Confirmed design decisions for the division-level tactical combat layer.
-> Last updated: June 2026.
+> Last updated: July 2026 — added the Vehicle Sub-Status System (Mobility/Firepower/Armour/
+> Optics), extending Armour Penetration and the existing Incapacitated state with deterministic,
+> weapon-type-triggered degradation states; mirrored in AIR_COMBAT.md's Wing Sub-Status System
+> for the equivalent air-side mechanic.
 > This document covers the 5×5 grid system, unit archetypes, combat resolution, terrain
 > integration, positional mechanics, unit experience, formation bonuses, attacker/defender
 > determination, and the interface between tactical outcomes and the strategic layer defined
@@ -687,6 +690,11 @@ When a unit's HP drops below a threshold, it enters **Incapacitated** state rath
 being destroyed. This models the historical reality that most front-line units go to ground
 and stop contributing long before they are completely eliminated.
 
+> See also **Vehicle Sub-Status System** below (after Armour Penetration System) for the
+> finer-grained Mobility/Firepower/Armour/Optics degradation states a unit can carry *above*
+> this HP floor — Incapacitation is the terminal state; the sub-status system describes how
+> a still-fighting unit is impaired on the way there.
+
 ### HP floor thresholds
 
 | Unit category | Incapacitation threshold | Rationale |
@@ -744,17 +752,106 @@ Armoured units have two armour values:
 AT units and other anti-armour weapons have an **armour penetration value**. Damage dealt
 is determined by the ratio of pen to armour:
 
-| Pen / Armour ratio | Damage dealt |
-|---|---|
-| < 60% | 0% (no effect) |
-| 60–69% | 20% |
-| 70–79% | 30% |
-| 80–89% | 40% |
-| 90–99% | 70% |
-| ≥ 100% | 100% |
+| Pen / Armour ratio | Damage dealt | Status applied (see Vehicle Sub-Status System below) |
+|---|---|---|
+| < 60% | 0% (no effect) | none |
+| 60–69% | 20% | Mobility |
+| 70–79% | 30% | Mobility |
+| 80–89% | 40% | Firepower |
+| 90–99% | 70% | Firepower |
+| ≥ 100% | 100% | none (clean penetration — HP damage applies normally) |
 
 The hard floor at 60% means under-gunned AT is not just weak — it is completely useless.
 This prevents stacking under-spec AT for marginal effect (the HoI4 failure mode).
+
+**Same ratio always produces the same status — this is the deterministic trigger for the
+Mobility and Firepower flags below, not a separate random roll.** A marginal partial
+penetration (60–79%) represents a hit that grazes running gear without reaching the crew
+compartment; a stronger partial penetration (80–99%) represents a hit that reaches internal
+components (turret ring, gun mount, breech) without full penetration. A clean penetration
+(≥100%) is a normal kill-or-cripple HP hit and does not additionally apply a status — it
+doesn't need to, the HP damage already speaks for itself.
+
+---
+
+## Vehicle Sub-Status System
+
+Real armoured-warfare damage assessment has long used a three-way split for exactly this
+situation — **M-kill** (mobility kill: tracks/engine/running gear disabled, vehicle may
+retain full use of its weapons), **F-kill** (firepower kill: gun/turret disabled, vehicle
+may still move), and **K-kill** (catastrophic: destroyed beyond repair). It's a real and
+common outcome, not an edge case: it's claimed the Wehrmacht lost more Panther tanks to
+mobility kills than to catastrophic kills across the entire war. This section extends the
+existing Incapacitated state (above) with four independent, deterministic status flags that
+give that distinction concrete mechanical teeth.
+
+**Scope note on granularity:** these flags apply to the **whole unit cell** (e.g. the
+"medium tank" cell, representing its full vehicle count), not to individual vehicles within
+it. Tracking which specific vehicle in a 12-tank cell has which status would add bookkeeping
+complexity for no real player-facing benefit at this scale — the cell either has a status or
+it doesn't, exactly like fuel and combat readiness are wing-level rather than per-plane
+values in `AIR_COMBAT.md`'s equivalent system.
+
+### The four flags
+
+A cell can carry any combination of these simultaneously — they are independent, not
+mutually exclusive:
+
+| Flag | Effect | Applies to |
+|---|---|---|
+| **Mobility** | Cannot move (or moves at drastically reduced speed); still fights from current position | Armoured/vehicle units only |
+| **Firepower** | Reduced damage output | Any weapon-system unit (vehicles and crew-served weapons alike) |
+| **Armour** | Reduced effective armour value — easier to penetrate on subsequent hits | Armoured/vehicle units only |
+| **Optics** | −1 row/column reach in its attack pattern | Any unit with a targeted (non-AOE) attack pattern |
+
+### Deterministic triggers
+
+**Mobility and Firepower** come directly from the armour-pen-ratio table above — same ratio,
+same status, every time. **Armour and Optics** are triggered by weapon *category* rather than
+penetration ratio: HE/fragmentation-type attacks (artillery, bombs) that don't achieve
+penetration can still crack vision blocks and periscopes without needing to penetrate armour
+at all, so they're the deterministic Optics trigger; repeated hits to a cell already carrying
+damage (any hit after the first non-destroying hit) deterministically add the Armour flag,
+representing cumulative structural weakening at the same impact area — armour doesn't
+degrade gracefully, but it does degrade with repetition.
+
+No random rolls anywhere in this system — which attack type hit a cell always produces the
+same status, exactly like the pen-ratio table it extends.
+
+### Relationship to Incapacitation
+
+These four flags are **intermediate** degradation states a cell passes through above the
+Incapacitation HP floor — they describe *how* a still-fighting unit is impaired, not whether
+it's still in the fight at all. Incapacitation (this document, above) remains the terminal
+state once HP crosses the existing floor (20% infantry-type, 30% armoured), unchanged by this
+system. A tank cell can be both Mobility- and Firepower-flagged while still well above its
+30% Incapacitation floor — badly hurt, not out of the fight.
+
+### Recovery
+
+All four flags clear via the same supply-based recovery the Incapacitated state already
+uses — no separate repair mechanic. A Mobility-flagged tank that holds its position and
+receives supply recovers to full mobility; one whose division is destroyed while flagged is
+lost with it, the same "you kept it only if you kept the ground" rule Incapacitation already
+enforces.
+
+### Stacking
+
+Multiple simultaneous effects on the same flag type (e.g. two separate attackers both
+landing Firepower-tier hits on the same cell) stack **multiplicatively**, consistent with
+`terrain_modifier_system.ts`'s existing convention for percentage-style combat modifiers
+(`hp_dealt_mult`, `supp_dealt_mult`, etc. are all documented as multiplicative there). This
+gives a natural diminishing-returns shape without needing a separate curve or a floor clamp —
+`0.8 × 0.8 = 0.64`, asymptotically approaching zero, never crossing it.
+
+### Research perks
+
+A perk can shift a unit's damage output toward deliberately causing a specific status rather
+than raw HP damage — e.g. an anti-tank doctrine specialising in opportunistic mobility shots
+against otherwise-impenetrable heavy armour (the historical role of under-gunned AT like the
+Soviet PTRD-41 against late-war German tanks: unable to penetrate, but still capable of
+disabling tracks or optics with an aimed shot). Exact perks are deferred per this document's
+existing research scope.
 
 ---
 

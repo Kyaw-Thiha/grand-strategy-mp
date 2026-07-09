@@ -28,8 +28,7 @@ Dubins-pathfinding units (see `docs/AIR_COMBAT.md`). The phase-6 tactical combat
 
 ---
 
-## Branch A — `feat/air-wing-schema`
-**Must merge first. All other branches depend on this.**
+## ✅ Branch A — `feat/air-wing-schema` — COMPLETE
 
 - `AirWingState` Colyseus schema class added to `GameRoomState` (aircraft_type, count as HP
   pool, combat_readiness, position_lng/lat, heading_deg, lifecycle_state, mission, target_id,
@@ -45,203 +44,247 @@ Dubins-pathfinding units (see `docs/AIR_COMBAT.md`). The phase-6 tactical combat
 - Airbase linkage: `home_airbase_province_id` on wing points to existing `ProvinceState`
 - `air_wings` MapSchema on `GameRoomState`
 
-**Tests:** create a wing schema instance, verify all fields serialise/deserialise through
-Colyseus. All AIR_UNIT_TYPE and MISSION_TYPE values round-trip. Wing added to GameRoomState
-`air_wings` map.
-
 ---
 
-## Branch K-stubs — `feat/air-client-stubs`
-**Starts after A merges. Unblocks visual verification for all subsequent branches.**
+## ✅ Branch K-stubs — `feat/air-client-stubs` — COMPLETE
 
 Minimal GDScript client that makes every server branch visually verifiable as it lands.
 No panels, no mission UI — just map presence and state feedback.
 
-- `AirSystem` autoload (`client/src/systems/air/air_system.gd`): subscribes to
-  `air_wings` MapSchema; spawns/removes `AirWingIcon` nodes on schema add/remove
-- `AirWingIcon` scene: placeholder icon (aircraft silhouette sprite) positioned at
-  `position_lng/lat`; hidden when `lifecycle_state == IDLE` at home base; visible for
-  TRANSIT / ENGAGED / LOITER / RTB states
-- Readiness color tint: green (≥ 0.7) → yellow (0.4–0.7) → red (< 0.4), driven directly
-  from `combat_readiness` schema field — no dependency on Branch B logic
-- Wing stacking at strategic zoom: wings at same home airbase collapse to one icon
-  (count label) until zoomed in or selected; mirrors land road-column stacking
-- No movement interpolation yet (icons snap to schema position each tick — smooth movement
-  comes in Branch C)
-
-**Visual check:** spawn two wings via `SPAWN_WING` test message; verify icons appear on
-map, disappear when lifecycle set to IDLE, tint correctly as readiness changes.
+- `AirWingSystem` autoload (`client/src/systems/air/air_wing_system.gd`): subscribes to
+  `AIR_WING_UPDATES`; spawns/removes `AirWingIcon` nodes per wing
+- `AirWingIcon` scene: diamond icon with readiness color tint; hidden for enemy wings unless
+  detected; own wings always visible
+- Readiness color tint: green (≥ 0.7) → yellow (0.4–0.7) → red (< 0.4)
+- Detection circles drawn per icon as two filled discs (inner = passive radius, outer = recon
+  radius) matching land unit observation/scouting ring pattern; own airborne wings only
+- Smooth icon movement via `DubinsInterpolator` each `_process` frame
 
 ---
 
-## Branch B — `feat/air-wing-lifecycle`
-**Starts after A merges. Can run parallel with K-stubs, C, D.**
+## ✅ Branch B — `feat/air-wing-lifecycle` — COMPLETE
 
-- `AirWingLifecycleSystem` (new file: `game-server/src/systems/air_wing_lifecycle_system.ts`)
-- **State machine transitions:** Idle → Transit → Engaged → (target scan) → Refuel → Idle
-- **Multi-sortie post-engagement target scan** (replaces mandatory Loiter cooldown):
-  after engagement resolves, immediately re-score available targets:
-  - New target found → TRANSIT directly (skip LOITER entirely)
-  - Same target only → re-engage allowed, but with a recency penalty multiplier (× 0.4 on
-    priority score); if readiness is below threshold, prefer LOITER first to recover slightly
-  - No targets found → LOITER (orbit patrol area, same arc path as Branch C); exits when
-    detection event fires a new contact or readiness floor forces RTB
-  - LOITER's purpose is "orbiting while searching", not an arbitrary cooldown
-- **Single-sortie default** (`perk_multi_sortie = false`): Engaged → RTB directly; no
-  target scan, no LOITER
-- **Readiness decay** per tick while airborne (floor: never reaches 0); recovery per tick
-  while IDLE/REFUEL at home base — simplified rate constant, supply-graph wire-up deferred
-- **Weapon-ready/reload cooldown** — toggles `weapon_ready` field on each tick
-- **Wing handlers:** `CREATE_WING` spawns from template, `DISBAND_WING` removes
-- **K-stubs visual verification:** lifecycle transitions visible via icon show/hide
-  (IDLE hides, TRANSIT/ENGAGED/LOITER/RTB shows) and readiness tint — no additional client
-  code needed in this branch
-
-**Tests:** state machine advances through every transition; multi-sortie post-engagement scan
-goes to TRANSIT when new target found, LOITER when none, re-engages same target with penalty;
-single-sortie goes straight to RTB; recency penalty reduces priority score by × 0.4; readiness
-decays airborne, recovers at base; weapon_ready toggles on cooldown schedule.
+- `AirWingLifecycleSystem` (`game-server/src/systems/air_wing_lifecycle_system.ts`)
+- State machine: IDLE → TRANSIT → ENGAGED → LOITER/RTB → REFUEL → IDLE
+- Readiness decay airborne, recovery at base; weapon_ready/reload cooldown
+- Fuel decay, forced RTB at threshold, recovery at base
+- Auto-staging: out-of-range transit orders relocate wing to a closer airbase first
+- `CREATE_WING`, `DISBAND_WING` handlers; LOITER orbit arc via Dubins
 
 ---
 
-## Branch B-patch — `feat/air-wing-lifecycle-patch`
-**Applies after Branch B merges. Adds two missing handlers to the existing `AirWingLifecycleSystem`.**
+## ✅ Branch B-patch — `feat/air-wing-lifecycle-patch` — COMPLETE
 
-Branch B is complete but two handlers from `AIR_COMBAT.md` were not included:
-
-- **`REDEPLOY_WING` handler:** transfers a wing's home base to a different friendly airbase
-  province. Wing must be IDLE (not airborne). On receipt: set lifecycle → TRANSIT, generate a
-  Dubins path (Branch C) to the new province's airbase position. On arrival: update
-  `home_airbase_province_id` to the new province, transition → REFUEL → IDLE at the new base.
-  The wing does NOT RTB to its old base — the new base is now home.
-- **`RETREAT_WING` handler:** manual early-RTB override. From any airborne lifecycle state
-  (TRANSIT, ENGAGED, LOITER), immediately forces lifecycle → RTB. This is the "pull a wing
-  home early" control `AIR_COMBAT.md` says is always available as a manual override alongside
-  the auto-RTB readiness-floor. Wings already in RTB or REFUEL/IDLE: silently no-op.
-
-**Tests:** REDEPLOY_WING updates `home_airbase_province_id` on arrival and transitions to
-REFUEL/IDLE at the new province (not the old one); RETREAT_WING from TRANSIT → RTB; from
-ENGAGED → RTB; from LOITER → RTB; from IDLE → no-op; from RTB → no-op.
+- `REDEPLOY_WING` handler: ferry wing to a new home airbase; updates `home_airbase_province_id`
+  on arrival; REFUEL → IDLE at new base
+- `RETREAT_WING` handler: manual early-RTB from any airborne state; no-op from ground states
 
 ---
 
-## Branch C — `feat/air-dubins-pathfinding`
-**Starts after A merges. Can run parallel with K-stubs, B, D.**
+## ✅ Branch C — `feat/air-dubins-pathfinding` — COMPLETE
 
 **Server:**
-- `DubinsPathfinder` class (`game-server/src/systems/air_dubins_pathfinder.ts`) — entirely
-  distinct from land A*; no shared code
-- Straight-leg + minimum-turn-radius arc path generator; input: position, heading, target
-  position/heading, turn radius → outputs compact path descriptor (path type + arc/straight
-  segment parameters)
-- RTB path: Dubins from current position/heading to home airbase entry heading — never
-  instant-flip
-- Loiter/orbit path: arc-only Dubins special case — used for Interception wait state AND
-  multi-sortie no-target pause (one piece of code, two uses)
-- Pursuit path (lead pursuit): given target position + velocity vector, compute intercept
-  point; recomputed every N ticks (not every tick — server-cheap)
-- Server broadcasts `AIR_WING_PATH` room message on every new path (path_gen_id, path_type,
-  start_pos, start_heading_rad, end_pos, end_heading_rad, turn_radius_deg, speed_deg_per_ms);
-  schema `path_elapsed_ms` updated each tick as a lightweight correction signal
-- Swept contact check per existing 500ms room tick: analytic "did these two Dubins curves
-  come within engagement range during this window?" — not position-sample; scoped by spatial
-  bucketing (lat/lng grid partition)
+- `DubinsPathfinder` class (`game-server/src/systems/air_dubins_pathfinder.ts`)
+- Straight-leg + minimum-turn-radius arc path generator
+- RTB path respects current heading; loiter arc-only special case; pursuit path (lead pursuit)
+- `AIR_WING_PATH` broadcast on every new path; `path_elapsed_ms` updated each tick
+- Spatial bucketing for proximity checks
 
-**Client (same branch — needed to visually verify path math):**
-- `DubinsInterpolator` (`client/src/systems/air/dubins_interpolator.gd`): stores received
-  `AIR_WING_PATH` params; reconstructs wing position at 60fps from local elapsed time —
-  mirrors land dead-reckoning exactly (server corrects via `path_elapsed_ms`, client animates
-  between corrections)
-- `AirSystem` consumes `AIR_WING_PATH` messages, calls `DubinsInterpolator` each `_process`
-  frame; icons now move smoothly instead of snapping to schema position
-- Dashed arc overlay on wing selection: visualises the current Dubins curve shape; hidden by
-  default; consistent with land ghost-dot waypoint pattern
-- **Right-click-to-move (same pattern as land combat):** select a wing icon, then:
-  - Right-click on empty map position → sends `ASSIGN_WING_MISSION` with the clicked lat/lng
-    as target; server generates a Dubins transit path to that point
-  - Right-click on a friendly province → sends `REDEPLOY_WING` with that province_id (from
-    Branch B-patch); server generates a Dubins transit path and updates home base on arrival
-  - This is the primary interactive way to trigger paths during Branch C's visual verification
-    pass; without it there is no way to test path generation interactively
-
-**Tests (server):** Dubins path connects start to goal with correct heading at both ends; RTB
-respects current heading (no instant flip); Loiter generates a closed arc; pursuit path
-converges on a moving target over successive recomputes; swept contact detects two paths
-crossing within range, misses paths passing outside range; spatial bucketing prunes distant
-wings correctly.
-**Visual check:** select a wing, right-click a map position — confirm icon begins smooth
-movement along the dashed arc overlay toward the target; select a different wing, right-click
-a friendly province — confirm wing transits and icon moves to new airbase.
+**Client:**
+- `DubinsInterpolator` reconstructs wing position at 60fps
+- Dashed arc overlay on wing selection
+- Right-click-to-move: empty map → `ASSIGN_WING_MISSION`; friendly province → `REDEPLOY_WING`
 
 ---
 
-## Branch D — `feat/air-detection`
-**Starts after A merges. Can run parallel with K-stubs, B, C.**
+## ✅ Branch D — `feat/air-detection` — COMPLETE
 
-**Server:**
-- `AirDetectionSystem` (`game-server/src/systems/air_detection_system.ts`)
-- Detection model: binary, continuously updated — enemy wing visible iff inside any
-  detection source's coverage radius; reuses land division observation-radius pattern
-- Detection sources:
-  - **Radar building:** province coverage radius; also boosts naval detection in same area
-    (naval field stubbed until Phase 13); functional effect only — full building design
-    deferred per `AIR_COMBAT.md` Out of Scope
-  - **Recon wing on RECON mission:** extends coverage in area currently overflown;
-    non-persistent — lapses when wing leaves area; no cached state
-  - **Land division observation radius:** taps existing `observation_radius` on DivisionState
-  - **Other friendly wings:** small passive detection radius
-- Detection gates path generation: no detected target → wing LOITER instead of pursuing
-- Broadcasts `WING_DETECTED` / `WING_LOST_DETECTION` events
+**Server (`game-server/src/systems/air_detection_system.ts`):**
+- Binary detection: wing visible iff inside radar, friendly wing, or land division
+  observation radius
+- Radar entries (`setRadarEntry`) with province-scoped coverage
+- Recon wings use `RECON_WING_RADIUS_DEG` (1.0°); passive wings use `PASSIVE_WING_RADIUS_DEG` (0.1°)
+- Interception/Air Superiority wings in LOITER pursue nearest detected enemy
+- `WING_DETECTED` / `WING_LOST_DETECTION` broadcast to all clients
+- **Beyond original spec — Air-to-ground visibility:** `_tickDivisionVisibility` tracks which
+  divisions each nation can see from airborne wings. RECON_WING_RADIUS_DEG (1.0°, ×2 for RECON
+  mission) used for ground detection. `DIVISION_REVEALED` / `DIVISION_HIDDEN` broadcast per-nation
+  via `broadcastToNation` lambda. Divisions hidden from enemy clients by default; `military_system.gd`
+  shows them only when `_air_revealed_divisions` contains them.
 
-**Client (same branch — detection is invisible without it):**
-- `AirSystem` listens for `WING_DETECTED` and `WING_LOST_DETECTION` events
-- Enemy wing icons hidden by default; shown only while detected; own wings always visible
-- Detection radius debug overlay (dev-mode toggle): circle showing each source's coverage
-
-**Tests (server):** wing inside radar radius → detected; outside → not detected; recon wing
-overflying → detected, leaves → lapses next tick; land division observation radius reveals
-nearby wing; detection gates Interception Loiter→pursuit transition.
-**Visual check:** enemy wing outside detection range → no icon; friendly recon wing flies
-over → enemy icon appears; recon leaves → icon disappears.
+**Client:**
+- Enemy wing icons hidden unless `is_detected`; own wings always visible
+- Detection disc overlay drawn in `AirWingIcon._draw()` — two filled circles, very low alpha
+- `DIVISION_REVEALED` / `DIVISION_HIDDEN` → `EventBus.division_revealed/hidden` →
+  `military_system._air_revealed_divisions` dict → `_update_division_visibility()`
+- `_vision_filter_enabled = false` (no province vision data yet) means enemy divisions default
+  to hidden unless air-revealed
 
 ---
 
 ## Branch E — `feat/air-to-air-combat`
-**Starts after B + C + D all merge.**
+**Starts after B + C + D all merge. ✅ All prerequisites met.**
 
-**Server:**
-- `AirCombatSystem` (`game-server/src/systems/air_combat_system.ts`)
-- **Interception:** primary target = bomber-class wings (Strategic Bomber, Tactical Bomber,
-  CAS Plane, Dive Bomber); falls back to any enemy if no bombers detected; pursuit path
-  (Branch C) when detected; LOITER when not
-- **Air Superiority:** primary target = fighter-class wings (Fighter, Heavy Fighter — both
-  treated as equal-priority; they are distinct unit types with separate research trees);
-  falls back to any enemy if no fighters detected
-- **Attack/Defense damage rule:** `damage = weapon_ready ? Attack_value : Defense_value`;
-  pure bombers have `Attack_vs_air = 0` as a data value — not a special-cased branch
-- **Target deconfliction:** sort engaged friendlies by score; each claims highest unclaimed
-  enemy; overflow doubles on highest-value remaining — O(n log n)
-- **Escort:** wing bound to a specific friendly bomber wing ID; follows bomber's Dubins path;
-  engages only when "enemy is currently attacking my assigned bomber"; follows bomber home on
-  RTB or destruction
-- Fighter vs Heavy Fighter modifier: data field, not hard-coded branch
-- Events: `AIR_COMBAT_STARTED`, `AIR_SUPERIORITY_LOST`, `AIR_WING_DRIVEN_OFF`, `WING_RTB`,
-  `WING_DESTROYED`
+### Server — `game-server/src/systems/air_combat_system.ts`
 
-**Client (same branch — combat is invisible without it):**
-- On `AIR_COMBAT_STARTED`: switch both wing icons to engaged visual state (red tint +
-  crosshairs overlay); draw a thin line between the two wings while engaged
-- On `WING_DESTROYED`: play destruction animation (icon flashes → fades out → removed)
-- On `AIR_WING_DRIVEN_OFF` / `WING_RTB`: clear engaged visual state, icon returns to normal
-  tint and begins RTB path
-- On `AIR_SUPERIORITY_LOST`: brief screen-edge flash on the affected player's client
+**Range constants** (defined in `air_combat_system.ts`, not globals):
+- `ATTACK_RANGE_DEG = 0.3` — uniform across all aircraft types (≈33km, matches land engagement scale)
+- Passive detection radius is **per-type in the stat table** (no longer a single global constant),
+  defaulting to 0.05° for most types; HEAVY_FIGHTER carries ~0.25° to match its near-attack-range
+  observation design. This replaces `PASSIVE_WING_RADIUS_DEG` in `air_detection_system.ts`.
 
-**Tests (pure functions where possible):** Attack/Defense rule correct for weapon_ready
-true/false; Attack_vs_air=0 keeps pure bombers in Defense branch; deconfliction assigns
-unique targets, overflow doubles correctly; Escort triggers only on "attacker of assigned
-bomber" not nearest enemy; Interception transitions from LOITER to pursuit on detection.
-**Visual check:** two opposing fighter wings — confirm crosshairs appear on both during
-engagement, destruction animation plays on the losing wing.
+**Aircraft stat table** (`game-server/src/data/air_unit_stats.ts`):
+
+| Type | `attack_vs_air` | `defense_vs_air` | `observation_deg` |
+|---|---|---|---|
+| FIGHTER | 0.25 | 0.03 | 0.05 |
+| HEAVY_FIGHTER | 0.22 | 0.05 | 0.25 |
+| CAS_PLANE | 0.0 | 0.03 | 0.05 |
+| DIVE_BOMBER | 0.0 | 0.03 | 0.05 |
+| TACTICAL_BOMBER | 0.0 | 0.02 | 0.05 |
+| STRATEGIC_BOMBER | 0.0 | 0.02 | 0.05 |
+| NAVAL_BOMBER | 0.0 | 0.02 | 0.05 |
+| RECON_PLANE | 0.0 | 0.01 | 1.0 |
+
+- Pure bombers have `attack_vs_air = 0` — data value, not a code branch
+- All values are playtesting-tunable starting points; L ≈ 0.25 for a fair fighter-vs-fighter fight
+- `observation_deg` replaces the old `PASSIVE_WING_RADIUS_DEG` global; `AirDetectionSystem` reads
+  this per-wing instead of a constant. RECON_PLANE's value here doubles when on RECON mission
+  (existing ×2 behaviour preserved)
+
+**Engagement detection:**
+- Each tick: find all pairs of opposing airborne wings within `ATTACK_RANGE_DEG`
+- Wings already in ENGAGED skip re-engagement check; wings in LOITER/TRANSIT are candidates
+- Spatial bucketing reused from `AirDubinsPathfinder` to prune distant pairs cheaply
+
+**Combat resolution per engagement (one exchange per sortie):**
+```
+damage_dealt = weapon_ready ? attack_vs_air : defense_vs_air
+effective_damage = damage_dealt × count × combat_readiness × status_fuel
+```
+- `status_fuel` is the only active status modifier in Branch E (see Wing Sub-Status below)
+- Apply `effective_damage` to opponent `count` (HP pool); clamp at 0
+- On first engagement tick: check surprise condition (see below)
+
+**Surprise mechanic:**
+- Attacker had target in detection coverage *before this tick* (`target.is_detected === true`
+  coming into the tick) AND target did NOT have attacker detected → apply multiplier S = 2.5×
+  to attacker's `attack_vs_air` damage
+- If both detected each other on the same tick → fair fight, no S
+- Pure bombers (`attack_vs_air = 0`) are unaffected by S in the Attack branch; they were
+  always in the Defense branch anyway
+
+**Targeting — Interception mission:**
+- Primary target: bomber-class (STRATEGIC_BOMBER, TACTICAL_BOMBER, CAS_PLANE, DIVE_BOMBER)
+- Falls back to any hostile if no bomber-class detected
+
+**Targeting — Air Superiority mission:**
+- Primary target: fighter-class (FIGHTER, HEAVY_FIGHTER — equal priority)
+- Falls back to any hostile if no fighter-class detected
+
+**Target deconfliction (applies to all missions):**
+- Sort engaging friendlies by score descending
+- Each claims its highest-scoring still-unclaimed hostile; remove from pool
+- Overflow: doubly assign to the highest-value remaining target rather than sitting idle
+- O(n log n)
+
+**Escort mission (separate code path — server only in Branch E):**
+- Wing bound to a specific `target_id` friendly bomber wing
+- Follows bomber's Dubins path (mirrors `path_gen_id` and elapsed time)
+- Engagement trigger: an enemy wing is currently ENGAGED with the assigned bomber
+  (not nearest-enemy logic — explicitly different)
+- On assigned bomber RTB or destruction: escort follows home automatically
+- Assignment UI (player picks which bomber to escort) is deferred to Branch K-ui;
+  server logic is fully testable via test harness with manually set `target_id`
+
+**Post-engagement lifecycle handoff:**
+- Wing transitions to LOITER or RTB per existing `AirWingLifecycleSystem` logic (Branch B)
+- `AirCombatSystem` calls `lifecycleSystem.onEngagementComplete(wingId, outcome)`
+- On WING_DESTROYED: call `lifecycleSystem.destroyWing(wingId)` → removes from state,
+  broadcasts `AIR_WING_DESTROYED`
+
+**Wing Sub-Status — Fuel tank only (Branch E scope):**
+
+Schema addition to `AirWingState`:
+- `status_fuel: number = 1.0` — fuel decay rate multiplier; default 1.0, damaged > 1.0
+
+Trigger rule:
+- **Fighter full Attack_value landing, target survives** → `status_fuel` ×1.5
+  (tank hit: wing survives but burns fuel faster, implicitly shortening its remaining range)
+
+Clears to 1.0 on RTB+refuel. No other status flags in Branch E — Engine, Weapons, and
+Instruments are deferred to Branch E-patch (see below).
+
+**Events broadcast:**
+- `AIR_COMBAT_STARTED` — `{ engagement_id, wing_a_id, wing_b_id, is_surprise: bool }`
+- `AIR_COMBAT_ENDED` — `{ engagement_id, winner_id, loser_id, loser_destroyed: bool }`
+- `AIR_WING_DESTROYED` — `{ wing_id, nation_id }`
+- `AIR_SUPERIORITY_LOST` — `{ nation_id, province_id }` (broadcast when a nation loses all
+  air coverage over a province due to wing destruction or driven off)
+- `AIR_WING_DRIVEN_OFF` — `{ wing_id }` (wing survives but retreats — RTB forced)
+
+### Client
+
+- `AirWingIcon`: on `AIR_COMBAT_STARTED` involving own or detected wing → red tint override +
+  crosshairs sprite overlay; clear on `AIR_COMBAT_ENDED`
+- Thin line drawn between engaged wing icons while engagement active; cleared on end
+- `AIR_WING_DESTROYED` → destruction animation (icon flashes 3× → fades → removed); also
+  triggers `GameState._apply_air_wing_destroyed(data)` to remove from local state
+- `AIR_SUPERIORITY_LOST` → brief screen-edge red flash on the affected player's client
+- `AIR_WING_DRIVEN_OFF` → icon clears engaged state, begins RTB arc animation
+
+### Tests (`game-server/test/12e-air-combat.test.ts`)
+
+- Attack/Defense rule: `weapon_ready = true` uses `attack_vs_air`; `false` uses `defense_vs_air`
+- Pure bomber (`attack_vs_air = 0`): always in Defense branch regardless of `weapon_ready`
+- Surprise multiplier: attacker detected target before tick + target missed attacker → S applied
+- Fair fight: both detected same tick → no S
+- Deconfliction: 3 friendlies vs 2 enemies → unique assignment + overflow doubles
+- Escort: only engages enemy attacking its assigned bomber, not nearest enemy
+- Interception: picks bomber-class over fighter-class target when both present
+- Air Superiority: picks fighter-class over bomber-class
+- Fuel tank status: fighter attack landing on surviving target → `status_fuel` ×1.5;
+  clears on RTB+refuel
+- WING_DESTROYED emitted when count reaches 0
+- Per-type `observation_deg` read correctly from stat table (HEAVY_FIGHTER ≠ FIGHTER)
+
+---
+
+## Branch E-patch — `feat/air-formation-density`
+**After E merges. Adds remaining Wing Sub-Status flags, Wing Size & Airbase Capacity.**
+
+**Remaining Wing Sub-Status flags** (deferred from E):
+
+Schema additions to `AirWingState`:
+- `status_engine: number = 1.0` — speed multiplier (< 1.0 = Engine damage)
+- `status_weapons: number = 1.0` — attack/defense multiplier (< 1.0 = Weapons damage)
+- `status_instruments: number = 0` — pattern reach reduction count (integer; used in Branch F)
+
+Deterministic trigger rules:
+- **Defense-value return fire** (counter-fire from a surviving target) → `status_instruments` +1
+- **AA fire** (province fixed AA or flotilla pooled AA, from Branch G) → `status_fuel` ×1.5
+  (AA trigger joins the existing Fuel tank trigger from Branch E)
+- **Fighter full Attack_value landing, target survives** → alternates between
+  `status_engine` ×0.7 and `status_weapons` ×0.6 per engagement
+
+Multipliers stack multiplicatively (two Weapons hits = 0.6 × 0.6 = 0.36). All four flags
+clear on RTB+refuel. `status_instruments` feeds into Branch F's attack pattern registry.
+
+**Wing Size & Formation Density:**
+- Bigger wings (higher `count`) get a saturating Defense-value bonus from mutual covering fire
+  — increasing returns up to ~36 planes, then plateaus
+- Bigger wings take proportionally more AA damage — roughly linear, no saturation
+- Formula constants tuned during playtesting; historical anchor: 18/36/54 planes
+- Wing size *adjustment UI* (+10/−10 controls) is Branch K-ui
+
+**Airbase Capacity — soft cap via recovery congestion:**
+- More wings stationed at one base → each wing's fuel and readiness recovery rate while IDLE
+  gets marginally slower (shared ground crew bandwidth)
+- Continuous pressure, never a hard wall; same shape as manpower recruitment cost curve
+
+**Tests:** Engine/Weapons/Instruments triggers fire correctly; stacking is multiplicative;
+all flags clear on RTB; Defense bonus increases with count up to plateau then flat; AA damage
+scales linearly; base congestion reduces recovery rate proportionally to wing count at base.
 
 ---
 
@@ -264,8 +307,6 @@ All damage patterns are pure functions — write test fixtures first (grid state
 - Carrier CAS interface stub (Phase 13 wires flotilla position)
 
 **Client: none needed — verify via existing TacticalCombatPanel from Phase 6.**
-Open TacticalCombatPanel during a bot bombing run; the existing Phase 6 HP bars and cell
-state already display the grid damage caused by bombing patterns. No new GDScript required.
 
 **Tests:** each pattern as pure function; Dive single-cell shifts toward high-value targets
 as recon increases; Tactical row partial→full with perk; CAS column same; Fighter strafing
@@ -294,14 +335,9 @@ damage per pattern.
 
 **Client (same branch — AA and province damage are invisible without it):**
 - **AA flak visual:** on `PROVINCE_AA_FIRED` event (new, broadcast when AA engages a
-  bomber), render a brief flak burst particle at the province location; essential to see
-  whether AA is actually triggering
+  bomber), render a brief flak burst particle at the province location
 - **Province damage overlay:** on province click, info panel shows live industry/logistics/
-  oil scalars so you can confirm bombing is reducing the correct fields; driven from
-  existing province schema fields (no new schema fields needed if the scalars are already
-  on ProvinceState — add them if not)
-- **Wing count reduction from AA hit:** already visible via K-stubs icon tint (readiness)
-  and E's destruction animation — no additional client
+  oil scalars
 
 **Tests:** Logistics stub no-ops before Phase 7; Area/Industry/Oil reduce correct scalars;
 province AA applies full damage for city missions, distance-decayed for logistics/tactical;
@@ -320,37 +356,21 @@ appears; open province info panel — confirm industry scalar is reduced.
 - **Anti-ship:** auto-targets highest-value detected ship contact; stubs to mock data
   (Phase 13 wires real flotilla composition)
 - **Port strike:** targets ships anchored in a friendly or contested port province; no
-  zone-based or pooled-AA defence (anchored ships are fully exposed); naval base level on
-  the target province reduces damage to docked ships (existing field — reuse it, don't add
-  a new one); resolved the same way as Anti-ship but triggered on a port province target
-  rather than a fuzzy contact marker
+  zone-based or pooled-AA defence; naval base level on target province reduces damage
 - **Fuzzy contact marker system:** `NavalContactMarker` — position marker with randomized
-  radius + expiry window; precision/duration scale by detection source quality; naval bomber
-  generates Dubins transit path to marker centre; strike resolves if wing reaches marker
-  before expiry; whiffs if expired; marker cleared on expiry
-- **Splash damage perk** (`perk_splash = true`): primary target takes full damage; a
-  percentage splashes to other ships in the same flotilla (flotilla membership is the only
-  spatial container for naval units — no internal grid); splash percentage is a tunable
-  constant, exact value from playtesting. Stub the constant at a reasonable default (15%).
-  Creates a genuine tension with the AA-pooling mechanic from Branch G: tight formation
-  maximises mutual AA but also maximises splash exposure — tradeoff falls out of the two
-  systems, no extra mechanic needed.
-- New schema: `NavalContactMarkerState` added to `GameRoomState` (position, radius_deg,
-  expires_at_ms, nation_id) — needed so client can render it
+  radius + expiry window; precision/duration scale by detection source quality
+- **Splash damage perk** (`perk_splash = true`): primary target full damage, percentage
+  splashes to other ships in same flotilla; default 15%
+- New schema: `NavalContactMarkerState` (position, radius_deg, expires_at_ms, nation_id)
 - Events: `NAVAL_BOMBER_STRIKE_HIT`, `NAVAL_BOMBER_STRIKE_MISSED`, `CONTACT_MARKER_EXPIRED`
 
-**Client (same branch — fuzzy markers are the core mechanic and must be visible):**
-- On `NavalContactMarkerState` schema add: draw a translucent circle on the sea at marker
-  position with radius matching `radius_deg`; circle fades in opacity as expiry approaches
-  (visual countdown)
-- On `CONTACT_MARKER_EXPIRED` / marker removed from schema: circle fades out and disappears
-- Own-nation markers always shown; enemy markers not shown (fog of war)
+**Client:**
+- On `NavalContactMarkerState` schema add: translucent circle; fades as expiry approaches
+- Own-nation markers shown; enemy markers hidden
 
-**Tests:** marker radius within spec per detection source tier; bomber arrives before expiry
-→ strike resolves (mock flotilla); arrives after expiry → sortie whiffs; trade interdiction
-reaches existing cargo-sinking pipeline; anti-ship targets highest-value first; port strike
-resolves with no AA and applies naval base level damage reduction; splash perk distributes
-damage across flotilla members, non-perk wing deals no splash.
+**Tests:** marker radius within spec per tier; strike resolves on arrival before expiry;
+whiffs after expiry; trade interdiction reaches pipeline; anti-ship targets highest-value;
+port strike resolves with no AA; splash perk distributes damage across flotilla.
 
 ---
 
@@ -361,14 +381,8 @@ damage across flotilla members, non-perk wing deals no splash.
 - `AirFleetState` schema (fleet_id, nation_id, wing_ids[], directive)
 - Handlers: `CREATE_AIR_FLEET`, `DISBAND_AIR_FLEET`, `ASSIGN_WINGS_TO_FLEET`,
   `SET_FLEET_DIRECTIVE`
-- Directives: `HOLD_AIR_SUPERIORITY` (Interception/Air Superiority over a front area),
-  `INTERDICT_SUPPLY` (Logistics bombing), `ESCORT_BOMBERS` (fighters escort fleet's bombers)
-- Auto-assignment: score unassigned wings by suitability (aircraft type × mission
-  eligibility); greedy assignment; per-wing override always available
-- Extends STRATEGIC_COMBAT.md's Macro/Micro command layer to air
-
-**Client: none in this branch** — fleet panel and directive selector are K-ui territory.
-Server correctness is verifiable via test messages and Colyseus state inspection.
+- Directives: `HOLD_AIR_SUPERIORITY`, `INTERDICT_SUPPLY`, `ESCORT_BOMBERS`
+- Auto-assignment: score unassigned wings by suitability (aircraft type × mission eligibility)
 
 **Tests:** directive assigns correct mission type to eligible wings; ineligible types skipped;
 per-wing override survives fleet re-evaluation; fleet dissolve clears all wing assignments.
@@ -377,42 +391,22 @@ per-wing override survives fleet re-evaluation; fleet dissolve clears all wing a
 
 ## Branch J — `feat/air-networking-aoi`
 **Starts after A merges. Can run parallel with all other branches.**
-**Requires K-stubs running to visually verify viewport gating.**
 
 **Server:**
-- Switch air wing interest management from `@filter()` to `StateView`/`@view()` — Colyseus
-  docs flag `@filter()` as unsuitable for fast-paced real-time layers
+- Switch air wing interest management from `@filter()` to `StateView`/`@view()`
 - AOI: client receives only wings within strategic viewport + all own wings regardless
 - IDLE wings at home base emit zero position updates
-
-**Client: none** — K-stubs already renders wings; AOI verification is observing which
-wings appear/disappear as the viewport moves.
-
-**Tests:** viewport-limited client receives updates only for wings inside viewport; own wings
-always received; IDLE wings at base emit no continuous updates; entering viewport triggers
-initial state sync.
-**Visual check:** zoom/pan map — confirm enemy wings outside viewport vanish from map and
-reappear when viewport covers them; own wings always visible.
 
 ---
 
 ## Branch K-ui — `feat/air-client-ui`
 **Starts after I merges. Pure UI panels — no map rendering logic.**
 
-- Military panel → Air sub-tab: wing list per airbase, mission assignment dropdown, target
-  province/wing override
-- Air Fleet panel: fleet list, directive selector, wing assignment drag-and-drop view
-- Nation preset air wing templates in lobby/game-start (type + count; historically flavoured)
-- Air combat notification toasts: air superiority lost, wing driven off/RTB, strike resolved;
-  feeds existing `NotificationSystem`
-- Manual wing retask: click wing icon → bottom panel shows current mission + override controls
-- **Move button on bottom panel:** explicit "Move" button in the wing selection bottom panel;
-  enters target-pick mode; player clicks a map position or province to confirm; sends
-  `ASSIGN_WING_MISSION` (empty position) or `REDEPLOY_WING` (friendly province) — same
-  commands as right-click-to-move from Branch C, just a button-driven alternative for
-  players who prefer it over right-click
-- **Retreat button on bottom panel:** sends `RETREAT_WING` (Branch B-patch) to immediately
-  force the selected wing to RTB; shown only when wing is airborne (TRANSIT/ENGAGED/LOITER)
+- Military panel → Air sub-tab: wing list per airbase, mission assignment dropdown
+- Air Fleet panel: fleet list, directive selector
+- Nation preset air wing templates
+- Air combat notification toasts
+- Move button + Retreat button on wing selection bottom panel
 
 ---
 
@@ -423,35 +417,31 @@ reappear when viewport covers them; own wings always visible.
 - Bot clients launching wings on every mission type against bot land divisions and bot
   flotilla stubs
 - Verify full gate from `DEV_PHASES.md §12`:
-  - Tactical-bombing wing → land combat → grid takes damage in correct pattern (visible in
-    TacticalCombatPanel)
-  - Enemy Interception wing → LOITER (no detection) → recon wing reveals bomber →
-    interceptor pursues → Attack/Defense rule resolves
-  - Naval bomber → maritime-patrol contact → reaches marker in time → strike resolves with
-    pooled AA stub; marker expiry causes whiff
-  - Strategic bomber hits city → full province fixed-AA (flak burst visible) → industry
-    scalar reduced (visible in province panel)
-  - Escort wing follows bomber path; engages only bombers attacking its assigned target
-- **Load test:** wing counts at AIR_COMBAT.md "Server Architecture & Scaling" scale —
-  confirm bandwidth and tick-budget headroom (mandatory perf pass per DEV_PHASES.md)
+  - Tactical-bombing wing → land combat → grid takes damage in correct pattern
+  - Enemy Interception wing → LOITER → recon reveals bomber → interceptor pursues →
+    Attack/Defense rule resolves; surprise multiplier fires if detection gap exists
+  - Naval bomber → maritime-patrol contact → reaches marker → strike resolves with pooled AA stub
+  - Strategic bomber hits city → full province fixed-AA → industry scalar reduced
+  - Escort wing follows bomber; engages only attackers of its assigned bomber
+- **Load test:** wing counts at `AIR_COMBAT.md` "Server Architecture & Scaling" scale
 
 ---
 
 ## Merge Order
 
 ```
-A
-├── K-stubs (after A — unblocks visual verification for all branches below)
-├── B ── B-patch (REDEPLOY_WING + RETREAT_WING handlers) ──────────────────┐
-├── C (+ DubinsInterpolator + right-click-to-move client) ──────────────────┤
-└── D (+ detection visibility client) ──────────────────────────────────────┴── E (+ combat indicator client) ──┐
-                                                                                ├──── F (verify via Phase 6 panel)┤
-                                                                                ├──── G (+ AA flak + province UI) ┤
-                                                                                └──── H (+ contact marker client) ─┴── I ──┐
-                                                                                                                            │
-J (after A, parallel; needs K-stubs running for viewport AOI check)                                                        │
-K-ui (after I — move + retreat buttons, full panels)                                                                        │
-                                                                                M ◄──────────────────────────────────────── ┘
+A (✅)
+├── K-stubs (✅)
+├── B (✅) ── B-patch (✅) ──────────────────────────────────────────────────────┐
+├── C (✅) ──────────────────────────────────────────────────────────────────────┤
+└── D (✅) ──────────────────────────────────────────────────────────────────────┴── E ── E-patch ──┐
+                                                                                    ├──── F ──────────┤
+                                                                                    ├──── G ──────────┤
+                                                                                    └──── H ──────────┴── I ──┐
+                                                                                                              │
+J (after A, parallel)                                                                                         │
+K-ui (after I)                                                                                                │
+                                                                                    M ◄──────────────────────┘
 ```
 
 ---

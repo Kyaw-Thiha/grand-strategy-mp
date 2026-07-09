@@ -1,7 +1,5 @@
 extends Node2D
 
-# Must be kept in sync with server constants in air_wing_lifecycle_system.ts
-const FUEL_DECAY_PER_TICK  := 0.065
 const FUEL_RTB_THRESHOLD   := 0.10
 const WING_SPEED_DEG_PER_MS := 0.0002
 const TICK_MS              := 1000.0
@@ -20,6 +18,7 @@ var _fuel: float = 1.0
 var _display_fuel: float = 1.0  # client-interpolated between server ticks
 var _nation_color: Color = Color(0.5, 0.5, 0.5)
 var _active: bool = false
+var _fuel_decay_rate: float = 0.02
 
 
 func setup(map_loader: Node) -> void:
@@ -37,6 +36,10 @@ func show_for_wing(wing_lng: float, wing_lat: float, fuel: float, nation_color: 
 	queue_redraw()
 
 
+func set_fuel_decay_rate(rate: float) -> void:
+	_fuel_decay_rate = rate
+
+
 func hide_overlay() -> void:
 	if _active:
 		_active = false
@@ -46,7 +49,7 @@ func hide_overlay() -> void:
 func tick_interpolate(delta: float) -> void:
 	if not _active:
 		return
-	_display_fuel -= (FUEL_DECAY_PER_TICK / TICK_MS) * delta * 1000.0
+	_display_fuel -= (_fuel_decay_rate / TICK_MS) * delta * 1000.0
 	_display_fuel = maxf(_display_fuel, 0.0)
 	queue_redraw()
 
@@ -62,7 +65,7 @@ func _draw() -> void:
 		draw_arc(center, 20.0, 0.0, TAU, 32, Color(0.9, 0.2, 0.1, WARNING_ALPHA), BORDER_WIDTH)
 		return
 
-	var ticks_remaining: float = (_display_fuel - FUEL_RTB_THRESHOLD) / FUEL_DECAY_PER_TICK
+	var ticks_remaining: float = (_display_fuel - FUEL_RTB_THRESHOLD) / _fuel_decay_rate
 	var radius_deg: float = ticks_remaining * WING_SPEED_DEG_PER_MS * TICK_MS
 
 	# Convert radius from degrees to screen pixels using a longitude offset at the wing's latitude

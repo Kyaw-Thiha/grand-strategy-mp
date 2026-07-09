@@ -12,6 +12,7 @@ var is_selected: bool = false
 var is_own: bool = false
 var passive_radius_px: float = 0.0
 var recon_radius_px: float = 0.0
+var combat_radius_px: float = 0.0
 
 const DIAMOND_HALF    := 11.0
 const BAR_H           := 3.0
@@ -24,7 +25,7 @@ func _ready() -> void:
 	set_process(false)
 
 
-func setup(data: Dictionary, color: Color, passive_px: float = 0.0, recon_px: float = 0.0, own: bool = false) -> void:
+func setup(data: Dictionary, color: Color, passive_px: float = 0.0, recon_px: float = 0.0, combat_px: float = 0.0, own: bool = false) -> void:
 	wing_id          = data.get("wing_id", "")
 	nation_id        = data.get("nation_id", "")
 	nation_color     = color
@@ -35,6 +36,7 @@ func setup(data: Dictionary, color: Color, passive_px: float = 0.0, recon_px: fl
 	lifecycle_state  = data.get("lifecycle_state", "idle")
 	passive_radius_px = passive_px
 	recon_radius_px   = recon_px
+	combat_radius_px  = combat_px
 	is_own            = own
 	_update_visibility()
 	queue_redraw()
@@ -95,9 +97,13 @@ func set_selected(selected: bool) -> void:
 
 func _draw() -> void:
 	var airborne := lifecycle_state != "idle" and lifecycle_state != "refuel"
-	if is_own and airborne and recon_radius_px > 0.0:
-		draw_circle(Vector2.ZERO, recon_radius_px,   Color(1.0, 1.0, 1.0, 0.06))
-		draw_circle(Vector2.ZERO, passive_radius_px, Color(1.0, 1.0, 1.0, 0.18))
+	if is_own and airborne:
+		if aircraft_type == "recon_plane" and recon_radius_px > 0.0:
+			draw_circle(Vector2.ZERO, recon_radius_px, Color(1.0, 1.0, 1.0, 0.06))
+		if passive_radius_px > DIAMOND_HALF + 2.0:
+			draw_circle(Vector2.ZERO, passive_radius_px, Color(1.0, 1.0, 1.0, 0.18))
+	if is_own and airborne and combat_radius_px > 0.0 and aircraft_type in ["fighter", "heavy_fighter"]:
+		draw_arc(Vector2.ZERO, combat_radius_px, 0, TAU, 64, Color(1.0, 0.3, 0.3, 0.25), 1.0)
 
 	var points := PackedVector2Array([
 		Vector2(0,            -DIAMOND_HALF),
@@ -111,6 +117,12 @@ func _draw() -> void:
 		PackedVector2Array([points[0], points[1], points[2], points[3], points[0]]),
 		border_color, 2.5
 	)
+
+	if lifecycle_state == "engaged":
+		var c := Color(1.0, 1.0, 1.0, 0.85)
+		draw_line(Vector2(-DIAMOND_HALF, 0), Vector2(DIAMOND_HALF, 0), c, 1.5)
+		draw_line(Vector2(0, -DIAMOND_HALF), Vector2(0, DIAMOND_HALF), c, 1.5)
+
 	_draw_aircraft_symbol()
 
 	if is_selected:

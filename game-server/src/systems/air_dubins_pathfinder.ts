@@ -48,7 +48,7 @@ export interface AirWingPathMessage extends DubinsPath {
 
 let WING_SPEED_DEG_PER_MS = 0.0002;
 let WING_TURN_RADIUS_DEG = 0.3;
-let ENGAGEMENT_RANGE_DEG = 0.15;
+let ENGAGEMENT_RANGE_DEG = 0.3;
 
 export function setWingSpeedForTesting(v: number): void { WING_SPEED_DEG_PER_MS = v; }
 export function setTurnRadiusForTesting(v: number): void { WING_TURN_RADIUS_DEG = v; }
@@ -391,6 +391,15 @@ export class DubinsPathfinder {
       const path = this._activePaths.get(wing.wing_id);
       if (!path) continue;
 
+      // Stale loiter path: wing left LOITER state via direct mutation without going through lifecycle.
+      // Clear rather than silently moving the wing along the wrong arc.
+      if (path.path_type === "LOITER" && wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
+        this.clearPath(wing.wing_id);
+        wing.path_gen_id = "";
+        wing.path_elapsed_ms = 0;
+        continue;
+      }
+
       wing.path_elapsed_ms += tickMs;
 
       if (path.path_type === "LOITER") {
@@ -412,18 +421,43 @@ export class DubinsPathfinder {
       spatialBucket.add(wing.wing_id, wing.position_lng, wing.position_lat);
     }
 
+    const processedContactPairs = new Set<string>();
     for (const [wingIdA, wingIdB] of spatialBucket.getLocalPairs()) {
       const wingA = state.air_wings.get(wingIdA);
       const wingB = state.air_wings.get(wingIdB);
       if (!wingA || !wingB) continue;
       if (wingA.nation_id === wingB.nation_id) continue;
       if (wingA.lifecycle_state !== WING_LIFECYCLE.TRANSIT || wingB.lifecycle_state !== WING_LIFECYCLE.TRANSIT) continue;
+      const pairKey = wingIdA < wingIdB ? `${wingIdA}|${wingIdB}` : `${wingIdB}|${wingIdA}`;
+      if (processedContactPairs.has(pairKey)) continue;
+      processedContactPairs.add(pairKey);
 
       const pathA = this._activePaths.get(wingIdA);
       const pathB = this._activePaths.get(wingIdB);
-      if (!pathA || !pathB) continue;
 
-      if (this.sweepCheck(pathA, wingA.path_elapsed_ms - tickMs, pathB, wingB.path_elapsed_ms - tickMs, ENGAGEMENT_RANGE_DEG, tickMs)) {
+      const fakePathForWing = (wing: any): DubinsPath => ({
+        path_gen_id: wing.wing_id,
+        path_type: "TRANSIT",
+        segments: [],
+        total_length_deg: 0,
+        start_lng: wing.position_lng,
+        start_lat: wing.position_lat,
+        start_heading_compass_deg: wing.heading_deg,
+        end_lng: wing.position_lng,
+        end_lat: wing.position_lat,
+        end_heading_compass_deg: wing.heading_deg,
+        turn_radius_deg: 0.05,
+        speed_deg_per_ms: 0.0001,
+      });
+
+      if (this.sweepCheck(
+        pathA ?? fakePathForWing(wingA),
+        pathA ? wingA.path_elapsed_ms - tickMs : 0,
+        pathB ?? fakePathForWing(wingB),
+        pathB ? wingB.path_elapsed_ms - tickMs : 0,
+        ENGAGEMENT_RANGE_DEG,
+        tickMs,
+      )) {
         lifecycleSystem.triggerContact(wingIdA, wingIdB, state);
         lifecycleSystem.triggerContact(wingIdB, wingIdA, state);
       }
