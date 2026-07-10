@@ -50,8 +50,9 @@ describe("12c — Dubins pathfinding", () => {
   });
 
   it("computeLoiterArc: is a closed circle (start and end positions match)", () => {
-    const center = { lng: 10, lat: 50 };
-    const loiter = pf.computeLoiterArc(center, RADIUS);
+    // entryPos is one radius east of center with heading=0 (north), so actualCenter=(10,50)
+    const entry = { lng: 10 + RADIUS, lat: 50 };
+    const loiter = pf.computeLoiterArc(entry, 0, RADIUS);
     assert.strictEqual(loiter.path_type, "LOITER");
     assert.strictEqual(loiter.segments.length, 1, "loiter must be one arc segment");
     const totalMs = loiter.total_length_deg / SPEED;
@@ -62,8 +63,10 @@ describe("12c — Dubins pathfinding", () => {
   });
 
   it("computeLoiterArc: all sampled points are at constant radius from center", () => {
+    // entryPos is one radius east of center with heading=0 (north), so actualCenter=(10,50)
     const center = { lng: 10, lat: 50 };
-    const loiter = pf.computeLoiterArc(center, RADIUS);
+    const entry  = { lng: 10 + RADIUS, lat: 50 };
+    const loiter = pf.computeLoiterArc(entry, 0, RADIUS);
     const totalMs = loiter.total_length_deg / SPEED;
     for (let i = 0; i <= 8; i++) {
       const p = pf.evaluatePosition(loiter, (i / 8) * totalMs);
@@ -329,7 +332,7 @@ describe("12c — Air wing path integration", function () {
     await spawnWing(client, room);
 
     client.send("REDEPLOY_WING", { wing_id: "wing-1", new_province_id: "we6_germany_01" });
-    await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
+    await waitForWingState(room, "wing-1", WING_LIFECYCLE.RELOCATE);
 
     client.send("SET_PATH_ELAPSED", { wing_id: "wing-1", elapsed_ms: 999_999 });
     (room as any).gameTick();
@@ -341,11 +344,12 @@ describe("12c — Air wing path integration", function () {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
 
-    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 20, target_lat: 50 });
+    // Use targets within max range (~2.8 deg from we6_germany_06 home at 13.39,52.48)
+    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 14, target_lat: 52.5 });
     await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
     const firstId = room.state.air_wings.get("wing-1").path_gen_id;
 
-    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 5, target_lat: 45 });
+    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 13.5, target_lat: 52.0 });
     await waitForWingPredicate(room, "wing-1", (wing) => wing?.path_gen_id !== firstId && wing.path_elapsed_ms === 0);
   });
 

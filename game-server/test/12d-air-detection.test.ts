@@ -11,6 +11,7 @@ import {
   setReconWingRadiusForTesting,
   setKmPerDegForTesting,
 } from "../src/systems/air_detection_system.js";
+import { setEngagementRangeForTesting } from "../src/systems/air_dubins_pathfinder.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 const jwtSecret = new TextEncoder().encode(JWT_SECRET);
@@ -35,6 +36,7 @@ describe("12d — Air Detection System", function () {
     setPassiveWingRadiusForTesting(0.5);
     setReconWingRadiusForTesting(2.0);
     setKmPerDegForTesting(100.0);
+    setEngagementRangeForTesting(0); // detection tests must not trigger combat
     colyseus = await boot(appConfig);
   });
 
@@ -44,6 +46,7 @@ describe("12d — Air Detection System", function () {
     setPassiveWingRadiusForTesting(0.1);
     setReconWingRadiusForTesting(1.0);
     setKmPerDegForTesting(111.32);
+    setEngagementRangeForTesting(0.3);
     await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
@@ -206,7 +209,9 @@ describe("12d — Air Detection System", function () {
       enemyWing.position_lat = 50;
       reconWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
       reconWing.mission = MISSION_TYPES.RECON;
-      reconWing.position_lng = 10.1;
+      // Place recon 0.4 deg away: within recon radius (2.0) but outside attack range (0.3)
+      // so combat doesn't fire before detection runs.
+      reconWing.position_lng = 10.4;
       reconWing.position_lat = 50;
       await tickRoom(room);
       assert.strictEqual(getWing(room, "france_wing_01").is_detected, true);
@@ -295,7 +300,9 @@ describe("12d — Air Detection System", function () {
       interceptor.position_lng = 10;
       interceptor.position_lat = 50;
       enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      enemyWing.position_lng = 10.2;
+      // 0.4 deg: outside attack range (0.3) so combat doesn't fire before detection,
+      // but inside passive detection radius (0.5) so the enemy is detected.
+      enemyWing.position_lng = 10.4;
       enemyWing.position_lat = 50;
       await tickRoom(room);
       assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.TRANSIT);
@@ -321,7 +328,8 @@ describe("12d — Air Detection System", function () {
       superiority.position_lng = 10;
       superiority.position_lat = 50;
       enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      enemyWing.position_lng = 10.2;
+      // 0.4 deg: outside attack range (0.3), inside passive radius (0.5)
+      enemyWing.position_lng = 10.4;
       enemyWing.position_lat = 50;
       await tickRoom(room);
       assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.TRANSIT);
@@ -337,7 +345,9 @@ describe("12d — Air Detection System", function () {
       bomber.position_lng = 10;
       bomber.position_lat = 50;
       enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      enemyWing.position_lng = 10.2;
+      // 0.4 deg: outside attack range (0.3) so no combat fires; inside passive radius (0.5)
+      // so the detection system sees the enemy but the bomber should NOT pursue.
+      enemyWing.position_lng = 10.4;
       enemyWing.position_lat = 50;
       await tickRoom(room);
       assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.LOITER);

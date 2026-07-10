@@ -158,6 +158,7 @@ export class AirWingLifecycleSystem {
           const ticks = (this._loiterTicks.get(wingId) ?? 0) + 1;
           this._loiterTicks.set(wingId, ticks);
           if (!isPatrolMission && ticks >= MAX_LOITER_TICKS) {
+            this.applyLandingDecay(wingId, state);
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });

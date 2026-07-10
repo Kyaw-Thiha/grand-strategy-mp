@@ -86,7 +86,7 @@ describe("12b — Air Wing Lifecycle", function () {
       count:                    10,
       lifecycle_state:          WING_LIFECYCLE.IDLE,
       mission:                  MISSION_TYPES.INTERCEPTION,
-      home_airbase_province_id: "berlin",
+      home_airbase_province_id: "we6_germany_06",
     };
     client.send("SPAWN_WING", { ...defaults, ...overrides });
     await room.waitForNextPatch();
@@ -216,7 +216,8 @@ describe("12b — Air Wing Lifecycle", function () {
 
   it("single-sortie wing progresses RTB → REFUEL → IDLE", async () => {
     const { client, room } = await joinRoom();
-    await spawnWing(client, room);
+    // Place wing at its home airbase so the RTB Dubins path is near-zero length and completes in one tick.
+    await spawnWing(client, room, { position_lng: 13.385771, position_lat: 52.483566 });
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.RTB });
     await room.waitForNextPatch();
 
@@ -324,12 +325,11 @@ describe("12b — Air Wing Lifecycle", function () {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
     client.send("SET_WING_READINESS", { wing_id: "wing-1", combat_readiness: 0.5 });
-    await room.waitForNextPatch();
-
-    const before = room.state.air_wings.get("wing-1").combat_readiness;
-    await waitForWingPredicate(room, "wing-1", (wing) => !!wing && wing.combat_readiness > before);
-    const after = room.state.air_wings.get("wing-1").combat_readiness;
-    assert.ok(after > before, "readiness must recover while IDLE");
+    // Use a fixed threshold: recovery must push readiness above the set value.
+    // Avoid reading "before" from state after waitForNextPatch — the tick may have
+    // already run and recovered readiness to 1.0 before we capture it.
+    await waitForWingPredicate(room, "wing-1", (wing) => !!wing && wing.combat_readiness > 0.5);
+    assert.ok(room.state.air_wings.get("wing-1").combat_readiness > 0.5, "readiness must recover while IDLE");
   });
 
   it("combat_readiness does not exceed 1.0 while recovering", async () => {
@@ -472,5 +472,55 @@ describe("12b — Air Wing Lifecycle", function () {
     assert.strictEqual(w.perk_strafing, false);
     assert.strictEqual(w.perk_extended_range, false);
     assert.strictEqual(w.perk_precision_bombing, false);
+  });
+
+  // ── Test Group 9: TRANSIT pursuit re-pathing ─────────────────────────────
+
+  it("INTERCEPTION wing in TRANSIT with no path re-paths toward target after one tick", async () => {
+    const { client, room } = await joinRoom();
+
+    // Spawn interceptor: TRANSIT with INTERCEPTION mission but NO stored path
+    client.send("SPAWN_WING", {
+      wing_id:                  "wing-1",
+      nation_id:                "germany",
+      aircraft_type:            AIR_UNIT_TYPES.FIGHTER,
+      count:                    10,
+      lifecycle_state:          WING_LIFECYCLE.TRANSIT,
+      mission:                  MISSION_TYPES.INTERCEPTION,
+      home_airbase_province_id: "we6_germany_06",
+      position_lng:             10.0,
+      position_lat:             50.0,
+      heading_deg:              90,
+    });
+    await room.waitForNextPatch();
+
+    // Spawn target wing in TRANSIT at a reachable position
+    client.send("SPAWN_WING", {
+      wing_id:                  "wing-2",
+      nation_id:                "france",
+      aircraft_type:            AIR_UNIT_TYPES.FIGHTER,
+      count:                    10,
+      lifecycle_state:          WING_LIFECYCLE.TRANSIT,
+      mission:                  MISSION_TYPES.INTERCEPTION,
+      home_airbase_province_id: "we6_germany_06",
+      position_lng:             10.5,
+      position_lat:             50.0,
+    });
+    await room.waitForNextPatch();
+
+    // Link interceptor to target (no path yet — this is the freeze scenario)
+    client.send("SET_WING_TARGET", { wing_id: "wing-1", target_id: "wing-2" });
+    await room.waitForNextPatch();
+
+    // Wait until the interceptor starts moving (path assigned + first advance)
+    await waitForWingPredicate(
+      room, "wing-1",
+      (wing) => wing !== undefined && wing.position_lng !== 10.0,
+      5_000,
+    );
+
+    const wing = room.state.air_wings.get("wing-1")!;
+    assert.ok(wing.position_lng !== 10.0,
+      `interceptor should have moved from start toward target; got lng=${wing.position_lng}`);
   });
 });

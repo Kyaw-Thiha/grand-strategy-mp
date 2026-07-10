@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import type { AirWingState } from "../rooms/schema/AirWingState.js";
 import { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import { AirSpatialBucket } from "./air_spatial_bucket.js";
 
@@ -380,6 +381,20 @@ export class DubinsPathfinder {
     return false;
   }
 
+  advanceWingOnePath(wing: AirWingState, tickMs: number): void {
+    const path = this._activePaths.get(wing.wing_id);
+    if (!path) return;
+    wing.path_elapsed_ms += tickMs * Math.max(0.01, wing.status_engine);
+    if (path.path_type === "LOITER") {
+      const period = path.speed_deg_per_ms > 0 ? path.total_length_deg / path.speed_deg_per_ms : 0;
+      if (period > 0) wing.path_elapsed_ms = wing.path_elapsed_ms % period;
+    }
+    const pos = this.evaluatePosition(path, wing.path_elapsed_ms);
+    wing.position_lng  = pos.lng;
+    wing.position_lat  = pos.lat;
+    wing.heading_deg   = pos.heading_compass_deg;
+  }
+
   tick(
     state: GameRoomState,
     tickMs: number,
@@ -508,6 +523,54 @@ export class DubinsPathfinder {
       wing.path_gen_id = loiterPath.path_gen_id;
       wing.path_elapsed_ms = 0;
       broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...loiterPath } satisfies AirWingPathMessage);
+    }
+
+    // Re-path TRANSIT wings that have no stored path (or an expired path) toward their target.
+    // Root cause: lifecycle.tick() transitions LOITER patrol wings back to TRANSIT (when
+    // target_id is set) without assigning a path. The advancement and expiry loops above
+    // both skip wings with no path, so the wing freezes in TRANSIT indefinitely.
+    for (const wing of state.air_wings.values()) {
+      if (wing.lifecycle_state !== WING_LIFECYCLE.TRANSIT) continue;
+      if (wing.mission === MISSION_TYPES.ESCORT) continue; // escort sync handled above
+      const existingPath = this._activePaths.get(wing.wing_id);
+
+      const pathExpired = !existingPath
+        || (existingPath.speed_deg_per_ms > 0
+            && wing.path_elapsed_ms >= existingPath.total_length_deg / existingPath.speed_deg_per_ms);
+
+      if (!pathExpired) continue;
+
+      if (wing.target_id) {
+        const target = state.air_wings.get(wing.target_id);
+        if (target
+            && target.lifecycle_state !== WING_LIFECYCLE.IDLE
+            && target.lifecycle_state !== WING_LIFECYCLE.REFUEL) {
+          const newPath = this.computeTransitPath(
+            { lng: wing.position_lng, lat: wing.position_lat },
+            wing.heading_deg,
+            { lng: target.position_lng, lat: target.position_lat },
+          );
+          this.storePath(wing.wing_id, newPath);
+          wing.path_gen_id     = newPath.path_gen_id;
+          wing.path_elapsed_ms = 0;
+          broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...newPath } satisfies AirWingPathMessage);
+        }
+        // target_id set but target unavailable — leave wing in TRANSIT; lifecycle system
+        // will clear target_id when engagement resolves or target is destroyed
+        continue;
+      }
+
+      // No target at all — loiter at current position
+      const fallbackLoiter = this.computeLoiterArc(
+        { lng: wing.position_lng, lat: wing.position_lat },
+        wing.heading_deg,
+        WING_TURN_RADIUS_DEG,
+      );
+      this.storePath(wing.wing_id, fallbackLoiter);
+      wing.path_gen_id     = fallbackLoiter.path_gen_id;
+      wing.path_elapsed_ms = 0;
+      wing.lifecycle_state = WING_LIFECYCLE.LOITER as any;
+      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...fallbackLoiter } satisfies AirWingPathMessage);
     }
   }
 }

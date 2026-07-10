@@ -668,8 +668,9 @@ describe("12e-patch — Formation Density & Escort Path", function () {
         getWing(room, `extra_${i}`).lifecycle_state = WING_LIFECYCLE.IDLE;
       }
 
-      // Record fuel BEFORE the tick (auto-tick may have already fired during setup,
-      // but both wings were set up identically, so any prior recovery is equalized)
+      // Reset fuel to a known low value so neither wing hits the cap on the next tick.
+      soloWing.fuel = 0.5;
+      crowdedWing.fuel = 0.5;
       const soloBefore = soloWing.fuel;
       const crowdBefore = crowdedWing.fuel;
 

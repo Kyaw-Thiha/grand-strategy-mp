@@ -5,8 +5,8 @@ export interface AirUnitStats {
 }
 
 const STAT_TABLE: Record<string, AirUnitStats> = {
-  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.25 },
-  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.35 },
+  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.05 },
+  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.25 },
   cas_plane:        { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05 },
   dive_bomber:      { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05 },
   tactical_bomber:  { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05 },
