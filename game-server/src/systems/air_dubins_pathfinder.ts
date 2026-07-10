@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
-import { WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
 import { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import { AirSpatialBucket } from "./air_spatial_bucket.js";
 
@@ -411,6 +411,17 @@ export class DubinsPathfinder {
       wing.position_lng = position.lng;
       wing.position_lat = position.lat;
       wing.heading_deg = position.heading_compass_deg;
+    }
+
+    // Sync escort wings to their bomber's path so the client renders them co-located
+    for (const escort of state.air_wings.values()) {
+      if (escort.mission !== MISSION_TYPES.ESCORT) continue;
+      if (escort.lifecycle_state !== WING_LIFECYCLE.TRANSIT &&
+          escort.lifecycle_state !== WING_LIFECYCLE.LOITER) continue;
+      const bomber = state.air_wings.get(escort.target_id);
+      if (!bomber || !bomber.path_gen_id) continue;
+      escort.path_gen_id     = bomber.path_gen_id;
+      escort.path_elapsed_ms = bomber.path_elapsed_ms;
     }
 
     spatialBucket.clear();
