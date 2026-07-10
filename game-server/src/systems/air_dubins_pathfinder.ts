@@ -400,7 +400,7 @@ export class DubinsPathfinder {
         continue;
       }
 
-      wing.path_elapsed_ms += tickMs;
+      wing.path_elapsed_ms += tickMs * Math.max(0.01, wing.status_engine);
 
       if (path.path_type === "LOITER") {
         const loiterPeriodMs = path.total_length_deg / Math.max(path.speed_deg_per_ms, 0.000001);

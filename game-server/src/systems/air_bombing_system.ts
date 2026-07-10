@@ -46,8 +46,9 @@ export class AirBombingSystem {
     }>();
 
     for (const wing of bombers) {
+      const range = BOMBING_RANGE_DEG * Math.max(0.01, wing.status_instruments);
       const engagement = combatSystem.getEngagementAtPosition(
-        wing.position_lng, wing.position_lat, BOMBING_RANGE_DEG,
+        wing.position_lng, wing.position_lat, range,
         wing.nation_id,
         state,
       );

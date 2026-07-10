@@ -8,6 +8,7 @@ type BroadcastFn = (type: string, msg: unknown) => void;
 let ATTACK_RANGE_DEG    = 0.3;
 let SURPRISE_MULTIPLIER = 2.5;
 const READINESS_COMBAT_SPIKE_AIR = 0.12;
+const INSTRUMENTS_DECAY_PER_HIT = 0.05;
 
 export function setAttackRangeForTesting(v: number): void      { ATTACK_RANGE_DEG = v; }
 export function setSurpriseMultiplierForTesting(v: number): void { SURPRISE_MULTIPLIER = v; }
@@ -109,8 +110,9 @@ export class AirCombatSystem {
     if (isSurprise && attacker.weapon_ready && stats.attack_vs_air > 0) {
       baseValue = stats.attack_vs_air * SURPRISE_MULTIPLIER;
     }
-    const damage = Math.floor(baseValue * attackerCountSnapshot * attackerReadinessSnapshot);
+    const damage = Math.floor(baseValue * attackerCountSnapshot * attackerReadinessSnapshot * attacker.status_weapons);
     target.count = Math.max(0, target.count - damage);
+    target.status_instruments = Math.max(0, target.status_instruments - INSTRUMENTS_DECAY_PER_HIT);
 
     if (attacker.weapon_ready && stats.attack_vs_air > 0 && target.count > 0) {
       target.status_fuel = +(target.status_fuel * 1.5).toFixed(4);

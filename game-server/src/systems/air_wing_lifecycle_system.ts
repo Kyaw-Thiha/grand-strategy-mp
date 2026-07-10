@@ -34,6 +34,10 @@ export function setFuelDecayLoiterForTesting(rate: number): void { FUEL_DECAY_LO
 export function setFuelRecoveryForTesting(rate: number): void { FUEL_RECOVERY_RATE = rate; }
 export function setFuelRtbThresholdForTesting(t: number): void { FUEL_RTB_THRESHOLD = t; }
 
+const ENGINE_DECAY_PER_LANDING  = 0.04;
+const WEAPONS_DECAY_PER_LANDING = 0.04;
+let _landingToggle = false;
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -126,6 +130,12 @@ export class AirWingLifecycleSystem {
         }
         case WING_LIFECYCLE.LOITER: {
           if (wing.target_id !== "") {
+            if (_landingToggle) {
+              wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
+            } else {
+              wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
+            }
+            _landingToggle = !_landingToggle;
             wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
             this._loiterTicks.delete(wingId);
             didChange = true;
@@ -136,6 +146,12 @@ export class AirWingLifecycleSystem {
           const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
                                 || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
           if (!isPatrolMission && ticks >= MAX_LOITER_TICKS) {
+            if (_landingToggle) {
+              wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
+            } else {
+              wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
+            }
+            _landingToggle = !_landingToggle;
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
