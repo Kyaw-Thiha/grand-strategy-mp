@@ -1388,12 +1388,13 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
 ### Colyseus — mission handlers, one per aircraft type
 - [ ] Tactical bombing — CAS plane / Dive bomber / Tactical bomber / CAS bomber / Fighter
       (research perk); auto-target weighting = `base_priority × distance_falloff + noise_floor`
-- [ ] Interception — prioritises enemy bombers; Air Superiority — prioritises enemy fighters;
+- [x] Interception — prioritises enemy bombers; Air Superiority — prioritises enemy fighters;
       target deconfliction via greedy unique-assignment across all engaged friendlies in a
       cluster, overflow doubles on highest-value remaining target
-- [ ] Escort — binds a wing to a specific friendly bomber wing; path follows the bomber;
-      engagement trigger is "enemy currently attacking my assigned bomber," not
-      nearest-enemy; auto-follows bomber home on RTB/destruction
+- [x] Escort — binds a wing to a specific friendly bomber wing; path follows the bomber
+      (Branch E: combat targeting via `_findEscortTargets`; E-patch: Dubins path mirroring
+      in `airDubinsPathfinder.tick()`); engagement trigger is "enemy currently attacking my
+      assigned bomber," not nearest-enemy; auto-follows bomber home on RTB/destruction
 - [ ] Strategic bombing sub-missions — Logistics (road/supply-hub throughput, N ticks),
       Area (population/infrastructure), Industry (`industry` scalar — already flagged
       "Affected by bombing" in MAP_DATA_CONTRACT.md), Oil (extraction output, N ticks);
@@ -1421,6 +1422,16 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
 - [x] Attack/Defense damage rule: `damage = weapon_ready ? Attack_value : Defense_value`;
       pure bombers have `Attack_vs_air = 0` as a data value, no special-cased branch
 - [x] Weapon-ready/reload cooldown state per wing
+- [x] Wing Sub-Status System — `status_engine` (speed multiplier), `status_weapons`
+      (attack/defense multiplier), `status_instruments` (bombing reach multiplier);
+      deterministic triggers: defence return fire → instruments, fighter landing →
+      alternating engine/weapons; all four flags (incl. existing `status_fuel`) clear
+      on RTB+refuel; multiplicative stacking
+- [x] Formation density defence bonus — saturating mitigation `1/(1 + densityBonus)` where
+      `densityBonus = min(count/36, 1.0) × 0.4`; larger wings take less air-to-air damage
+- [x] Airbase congestion — soft recovery penalty for IDLE wings at the same airbase:
+      `congestionFactor = 1/(1 + excess×0.15)` where `excess = max(0, wingsAtBase - 3)`;
+      applied to fuel and readiness recovery rates; never fully stops recovery
 - [ ] Naval bomber fuzzy-contact-marker system — randomized-radius, time-boxed target marker
       per detected contact; precision/duration scale with detection source (maritime patrol
       tight + continuous, triangulated sinking-event wide + short); strike only resolves if

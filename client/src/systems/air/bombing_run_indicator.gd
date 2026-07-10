@@ -52,11 +52,11 @@ func _draw() -> void:
 		         -PI * 0.5 + TAU * progress, 32, Color(1, 1, 1, 0.6 * progress), 2.0)
 
 
-func _input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			var local := to_local(event.global_position)
 			if local.length() <= CIRCLE_RADIUS + 6.0:
 				EventBus.bombing_detail_open_requested.emit({ "runs": _runs, "province_id": _province_id })
 				queue_free()
-				accept_event()
+				get_viewport().set_input_as_handled()

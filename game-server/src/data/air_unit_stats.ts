@@ -29,6 +29,9 @@ export function getAirUnitStats(aircraftType: string): AirUnitStats {
   return STAT_TABLE[aircraftType] ?? DEFAULT_STATS;
 }
 
+export const MAX_FORMATION_BONUS   = 0.4;
+export const FORMATION_DENSITY_CAP = 36;
+
 export function getObservationDeg(aircraftType: string): number {
   if (_passiveOverride !== null && aircraftType !== "recon_plane") return _passiveOverride;
   return (STAT_TABLE[aircraftType] ?? DEFAULT_STATS).observation_deg;

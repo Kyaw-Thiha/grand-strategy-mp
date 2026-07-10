@@ -41,7 +41,6 @@ func _setup_ui() -> void:
 	_progress_bar = TextureProgressBar.new()
 	_progress_bar.max_value = 1.0
 	_progress_bar.value = 1.0
-	_progress_bar.show_percentage = false
 	_progress_bar.custom_minimum_size = Vector2(0, 6)
 	vbox.add_child(_progress_bar)
 
@@ -130,8 +129,10 @@ func _process(delta: float) -> void:
 
 func _close() -> void:
 	EventBus.bombing_detail_closed.emit()
-	if Engine.get_main_loop() != null:
-		var hud := Engine.get_main_loop().root.find_child("GameHUD", true, false)
+	var ml: MainLoop = Engine.get_main_loop()
+	if ml != null:
+		var root_node: Window = ml.root
+		var hud: Node = root_node.find_child("GameHUD", true, false)
 		if hud != null and hud.has_method("_hide_bombing_detail"):
 			hud._hide_bombing_detail()
 
@@ -146,8 +147,11 @@ func _find_vbox() -> VBoxContainer:
 
 
 func _get_map_loader() -> Node:
-	var root := Engine.get_main_loop().root
-	var ml := root.find_child("MapLoader", true, false)
+	var ml2: MainLoop = Engine.get_main_loop()
+	if ml2 == null:
+		return null
+	var root_node: Window = ml2.root
+	var ml: Node = root_node.find_child("MapLoader", true, false)
 	if ml == null:
 		ml = preload("res://src/systems/map/map_loader.gd").new()
 	return ml

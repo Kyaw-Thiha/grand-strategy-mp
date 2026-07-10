@@ -96,6 +96,13 @@ export class AirWingState extends Schema {
   // Fuel decay rate multiplier; >1.0 means fuel tank damage (burns fuel faster)
   @type("number") status_fuel: number = 1.0;
 
+  // Sub-status: speed multiplier (<1.0 = engine damage)
+  @type("number") status_engine: number = 1.0;
+  // Sub-status: attack/defense multiplier (<1.0 = weapons damage)
+  @type("number") status_weapons: number = 1.0;
+  // Sub-status: bombing reach multiplier (<1.0 = instruments damage)
+  @type("number") status_instruments: number = 1.0;
+
   // Current fuel decay rate (fuel/tick) — sent to client for range-ring display
   @type("number") fuel_decay_rate: number = 0.02;
 
@@ -175,6 +182,9 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     weapon_ready:             wing.weapon_ready,
     is_detected:              wing.is_detected,
     status_fuel:              wing.status_fuel,
+    status_engine:            wing.status_engine,
+    status_weapons:           wing.status_weapons,
+    status_instruments:       wing.status_instruments,
     fuel_decay_rate:          wing.fuel_decay_rate,
     pending_transit_lng:      wing.pending_transit_lng,
     pending_transit_lat:      wing.pending_transit_lat,

@@ -127,6 +127,7 @@ that lost-contact only applies to manual intercept wings, not all INTERCEPTION w
 | File | Purpose |
 |---|---|
 | `game-server/test/12h-manual-targeting.test.ts` | All Branch H server tests |
+| `client/src/systems/air/air_combat_banner.gd` | Timed map indicator for resolved air fights |
 
 ## Files to Modify
 
@@ -138,7 +139,127 @@ that lost-contact only applies to manual intercept wings, not all INTERCEPTION w
 | `game-server/src/systems/air_strategic_bombing_system.ts` | RTB when target province captured by friendly (amend to Branch G) |
 | `game-server/src/systems/air_wing_lifecycle_system.ts` | Ground attack loiter timeout |
 | `game-server/package.json` | Append 12h to test chain |
-| `client/src/systems/air/air_wing_system.gd` | Right-click disambiguation logic |
+| `client/src/systems/air/air_wing_system.gd` | Air combat banner wiring + right-click disambiguation logic |
+
+---
+
+## Step 0: Air Combat Banner (Client-Only)
+
+Air combat resolves in a single server tick — there is no "started" event, only
+`AIR_COMBAT_ENDED`. The banner is a **timed flash** that appears at the midpoint of the
+two wing icons and auto-dismisses after a few seconds.
+
+### Design
+
+Mirror `engagement_banner.gd` (colored circle, dark border) but:
+- Use the jet fighter icon from `res://assets/icons/jet-fighter-up-solid-full.svg`
+  instead of drawn swords
+- Color encodes result:
+  - **C_GREEN** — attacker won (target destroyed, attacker survived)
+  - **C_RED** — attacker lost (attacker destroyed, target survived)
+  - **C_NEUTRAL** (gray) — both survived (glancing exchange) or both destroyed
+- Auto-dismisses via a `Timer` node after `DISPLAY_DURATION = 4.0` seconds
+- No click-to-open action (no air combat detail panel exists yet)
+
+Reuse the same color constants from `engagement_banner.gd`:
+```
+C_GREEN  = Color(0.20, 0.75, 0.35, 1.0)
+C_RED    = Color(0.75, 0.20, 0.20, 1.0)
+C_NEUTRAL= Color(0.70, 0.70, 0.70, 1.0)
+C_BORDER = Color(0.08, 0.05, 0.02, 0.8)
+```
+
+### 0a. Create `client/src/systems/air/air_combat_banner.gd`
+
+```gdscript
+extends Node2D
+## Timed map indicator for a resolved air-to-air engagement.
+
+const CIRCLE_R:        float = 14.0
+const DISPLAY_DURATION:float = 4.0
+const ICON_SIZE:       Vector2 = Vector2(14, 14)
+
+const C_GREEN:   Color = Color(0.20, 0.75, 0.35, 1.0)
+const C_RED:     Color = Color(0.75, 0.20, 0.20, 1.0)
+const C_NEUTRAL: Color = Color(0.70, 0.70, 0.70, 1.0)
+const C_BORDER:  Color = Color(0.08, 0.05, 0.02, 0.8)
+
+var _color:   Color = C_NEUTRAL
+var _icon_tex: Texture2D
+
+func setup(wing_a_pos: Vector2, wing_b_pos: Vector2,
+           attacker_destroyed: bool, target_destroyed: bool) -> void:
+    position = (wing_a_pos + wing_b_pos) * 0.5 + Vector2(0, -24)
+
+    if attacker_destroyed and not target_destroyed:
+        _color = C_RED
+    elif target_destroyed and not attacker_destroyed:
+        _color = C_GREEN
+    else:
+        _color = C_NEUTRAL
+
+    _icon_tex = load("res://assets/icons/jet-fighter-up-solid-full.svg")
+
+    var timer := Timer.new()
+    timer.wait_time = DISPLAY_DURATION
+    timer.one_shot  = true
+    timer.timeout.connect(queue_free)
+    add_child(timer)
+    timer.start()
+    queue_redraw()
+
+func _draw() -> void:
+    draw_circle(Vector2.ZERO, CIRCLE_R, _color)
+    draw_arc(Vector2.ZERO, CIRCLE_R, 0.0, TAU, 24, C_BORDER, 1.5)
+    if _icon_tex:
+        var rect := Rect2(-ICON_SIZE * 0.5, ICON_SIZE)
+        draw_texture_rect(_icon_tex, rect, false, Color(0.08, 0.05, 0.02, 0.9))
+```
+
+### 0b. Wire into `air_wing_system.gd`
+
+In `_ready()`, connect the EventBus signal (already emitted by `session_manager.gd`):
+```gdscript
+EventBus.air_combat_ended.connect(_on_air_combat_ended)
+```
+
+Add the handler — resolve wing icon screen positions from the active icon nodes:
+```gdscript
+func _on_air_combat_ended(data: Dictionary) -> void:
+    var id_a: String = data.get("wing_a_id", "")
+    var id_b: String = data.get("wing_b_id", "")
+
+    # Get screen positions from existing wing icon nodes
+    # (use the same dictionary/node lookup already used for crosshairs)
+    var pos_a: Vector2 = _get_wing_screen_pos(id_a)
+    var pos_b: Vector2 = _get_wing_screen_pos(id_b)
+
+    var banner := preload("res://client/src/systems/air/air_combat_banner.gd").new()
+    add_child(banner)
+    banner.setup(
+        pos_a, pos_b,
+        data.get("attacker_destroyed", false),
+        data.get("target_destroyed",   false),
+    )
+```
+
+`_get_wing_screen_pos(wing_id)` — check if this already exists in `air_wing_system.gd`
+(used by the crosshairs/engagement-line drawing code). If so, reuse it directly. If it
+doesn't exist as a named helper yet, extract it from the drawing code.
+
+### Notes for execution agent
+
+- `EventBus.air_combat_ended` already has a signal defined (check `event_bus.gd` before
+  adding a duplicate). `session_manager.gd` already emits it.
+- The banner is added as a child of `air_wing_system` (a `Node2D` on the map canvas
+  layer), so its `position` is in map canvas space — the same space as wing icon
+  positions. No coordinate conversion needed beyond what `_get_wing_screen_pos` already
+  does.
+- Do not create a `.tscn` scene file for the banner — instantiate it directly from the
+  script (`preload(...).new()`) as the engagement banner does not use a packed scene
+  either.
+- The SVG loads as a Texture2D at runtime; no `.import` override needed beyond what
+  Godot's default SVG importer produces.
 
 ---
 

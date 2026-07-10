@@ -264,8 +264,8 @@ describe("12e — Air Combat System", function () {
       frWing.is_detected = true; // SURPRISE: target detected
 
       await tickRoom(room);
-      // Surprise damage: 0.25 * 2.5 * 10 * 1.0 = 6.25 → floor = 6
-      assert.ok(frWing.count <= 4, `Expected count <= 4 (surprise 6 dmg), got ${frWing.count}`);
+      // Surprise damage: 0.25 * 2.5 * 10 * 1.0 = 6.25 → floor = 5 with density mitigation
+      assert.ok(frWing.count <= 5, `Expected count <= 5 (surprise with density), got ${frWing.count}`);
     });
 
     it("no surprise bonus when both detect each other same tick", async () => {

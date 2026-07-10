@@ -34,6 +34,13 @@ export function setFuelDecayLoiterForTesting(rate: number): void { FUEL_DECAY_LO
 export function setFuelRecoveryForTesting(rate: number): void { FUEL_RECOVERY_RATE = rate; }
 export function setFuelRtbThresholdForTesting(t: number): void { FUEL_RTB_THRESHOLD = t; }
 
+const ENGINE_DECAY_PER_LANDING  = 0.04;
+const WEAPONS_DECAY_PER_LANDING = 0.04;
+let _landingToggle = false;
+
+const CONGESTION_FREE_WINGS = 3;
+const CONGESTION_FACTOR     = 0.15;
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -56,6 +63,14 @@ export class AirWingLifecycleSystem {
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
 
+    // Build per-base IDLE wing count for airbase congestion
+    const wingsPerBase = new Map<string, number>();
+    for (const w of state.air_wings.values()) {
+      if (w.lifecycle_state === WING_LIFECYCLE.IDLE && w.home_airbase_province_id) {
+        wingsPerBase.set(w.home_airbase_province_id, (wingsPerBase.get(w.home_airbase_province_id) ?? 0) + 1);
+      }
+    }
+
     for (const [wingId, wing] of state.air_wings.entries()) {
       let didChange = false;
 
@@ -77,12 +92,18 @@ export class AirWingLifecycleSystem {
         if (wing.combat_readiness !== prevR) didChange = true;
       } else {
         wing.fuel_decay_rate = FUEL_DECAY_TRANSIT;
+
+        // Airbase congestion: more IDLE wings at same base → slower recovery
+        const wingsAtBase      = wingsPerBase.get(wing.home_airbase_province_id) ?? 1;
+        const excess           = Math.max(0, wingsAtBase - CONGESTION_FREE_WINGS);
+        const congestionFactor = 1 / (1 + excess * CONGESTION_FACTOR);
+
         const prevFuel = wing.fuel;
-        wing.fuel = Math.min(1.0, wing.fuel + FUEL_RECOVERY_RATE);
+        wing.fuel = Math.min(1.0, wing.fuel + FUEL_RECOVERY_RATE * congestionFactor);
         if (wing.fuel !== prevFuel) didChange = true;
         const prevR = wing.combat_readiness;
         wing.combat_readiness = Math.min(1.0,
-          wing.combat_readiness + READINESS_RECOVERY_RATE);
+          wing.combat_readiness + READINESS_RECOVERY_RATE * congestionFactor);
         if (wing.combat_readiness !== prevR) didChange = true;
       }
 
@@ -125,7 +146,10 @@ export class AirWingLifecycleSystem {
           break;
         }
         case WING_LIFECYCLE.LOITER: {
-          if (wing.target_id !== "") {
+          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
+                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
+          // Patrol wings re-sortie when a new interception target is assigned
+          if (isPatrolMission && wing.target_id !== "") {
             wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
             this._loiterTicks.delete(wingId);
             didChange = true;
@@ -133,8 +157,6 @@ export class AirWingLifecycleSystem {
           }
           const ticks = (this._loiterTicks.get(wingId) ?? 0) + 1;
           this._loiterTicks.set(wingId, ticks);
-          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
-                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
           if (!isPatrolMission && ticks >= MAX_LOITER_TICKS) {
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
@@ -222,6 +244,7 @@ export class AirWingLifecycleSystem {
     this._engagementTicks.delete(wingId);
 
     if (!wing.perk_multi_sortie) {
+      wing.target_id = "";
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
       return;
@@ -326,6 +349,17 @@ export class AirWingLifecycleSystem {
     if (!wing) return;
     wing.weapon_ready = false;
     this._weaponCooldown.set(wingId, WEAPON_COOLDOWN_TICKS);
+  }
+
+  applyLandingDecay(wingId: string, state: GameRoomState): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+    if (_landingToggle) {
+      wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
+    } else {
+      wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
+    }
+    _landingToggle = !_landingToggle;
   }
 
   getStatusFuel(wingId: string): number {
