@@ -1,6 +1,7 @@
 extends Node
 
 const AIR_WING_ICON_SCENE := preload("res://scenes/systems/air/air_wing_icon.tscn")
+const BombingRunIndicatorScene := preload("res://scenes/systems/air/bombing_run_indicator.tscn")
 const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 const AirRangeOverlay := preload("res://src/systems/air/air_range_overlay.gd")
@@ -47,6 +48,7 @@ var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
 var _last_synced_gen_id: Dictionary = {}
 var _detected_wings: Dictionary = {}
+var _bombing_indicators: Dictionary = {}  # province_id → BombingRunIndicator
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -66,6 +68,8 @@ func setup(map_loader: Node, icon_layer: Node2D) -> void:
 		EventBus.air_wing_detection_lost.connect(_on_air_wing_detection_lost)
 	EventBus.air_combat_started.connect(_on_air_combat_started)
 	EventBus.air_combat_ended.connect(_on_air_combat_ended)
+	if not EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
+		EventBus.air_bombing_result.connect(_on_air_bombing_result)
 	if _pending_route_overlay == null:
 		_pending_route_overlay = MoveOrderOverlay.new()
 		_icon_layer.add_child(_pending_route_overlay)
@@ -370,6 +374,28 @@ func _on_air_combat_ended(data: Dictionary) -> void:
 		_engagement_lines.erase(key)
 
 
+func _on_air_bombing_result(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	if province_id.is_empty():
+		return
+	if not _bombing_indicators.has(province_id) or \
+	   not is_instance_valid(_bombing_indicators[province_id]):
+		var indicator = BombingRunIndicatorScene.instantiate()
+		_icon_layer.add_child(indicator)
+		var province_data: Dictionary = _map_loader.get_province_data(province_id)
+		if province_data.is_empty():
+			indicator.queue_free()
+			return
+		var city_pos: Array = province_data.get("city_position", [])
+		if city_pos.size() < 2:
+			indicator.queue_free()
+			return
+		indicator.setup(_map_loader, province_id, float(city_pos[0]), float(city_pos[1]))
+		_bombing_indicators[province_id] = indicator
+	for run in data.get("runs", []):
+		_bombing_indicators[province_id].add_run(run)
+
+
 func _sync_detection_overlay(wing_id: String) -> void:
 	pass  # Deferred: detection overlay follows icon during TRANSIT
 
@@ -493,6 +519,8 @@ func cleanup() -> void:
 		EventBus.air_wing_detected.disconnect(_on_air_wing_detected)
 	if EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
 		EventBus.air_wing_detection_lost.disconnect(_on_air_wing_detection_lost)
+	if EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
+		EventBus.air_bombing_result.disconnect(_on_air_bombing_result)
 	if _pending_route_overlay != null:
 		_pending_route_overlay.free()
 		_pending_route_overlay = null
@@ -504,6 +532,10 @@ func cleanup() -> void:
 		if is_instance_valid(line):
 			(line as Line2D).queue_free()
 	_engagement_lines.clear()
+	for indicator in _bombing_indicators.values():
+		if is_instance_valid(indicator):
+			indicator.queue_free()
+	_bombing_indicators.clear()
 
 
 func _update_ghost() -> void:

@@ -228,6 +228,14 @@ interface ActivePair {
   _lastDeltaDefender: GridCellDelta[];       // last round's defender grid deltas (populated in _applyDamage)
 }
 
+export interface EngagementRef {
+  engagement_id: string;
+  attacker_nation_id: string;
+  defender_nation_id: string;
+  defender_cells: Array<{ unit_type: string; hp: number; suppression: number; incapacitated: boolean }>;
+  applyAirStrikeDelta(deltas: Array<{ cell_index: number; hp_damage: number; supp_damage: number }>): void;
+}
+
 // ─── CombatSystem ────────────────────────────────────────────────────────────
 
 export class CombatSystem {
@@ -235,6 +243,16 @@ export class CombatSystem {
   private activePairs = new Map<string, ActivePair>(); // sorted "idA|idB" → data
   private movementSystem: MovementSystem;
   private _resolveCombatTickCount = 0;
+
+  // Test-only: lightweight synthetic engagements (bypass activePairs entirely)
+  private _syntheticEngagements = new Map<string, {
+    engagement_id: string;
+    attacker_nation_id: string;
+    defender_nation_id: string;
+    position_lng: number;
+    position_lat: number;
+    cells: Array<{ unit_type: string; hp: number; suppression: number; incapacitated: boolean }>;
+  }>();
 
   constructor(movementSystem: MovementSystem) {
     this.movementSystem = movementSystem;
@@ -1643,6 +1661,107 @@ export class CombatSystem {
       return this._distKm(lng, lat, prov.city_lng, prov.city_lat) <= CAPTURE_RADIUS_KM;
     }
     return prov.polygons.some(ring => this._pointInRing(lng, lat, ring));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Synthetic engagement — lightweight test-only engagement injection
+  // ---------------------------------------------------------------------------
+
+  /** Inject a synthetic engagement used by AirBombingSystem tests. */
+  injectTestEngagement(params: {
+    province_id: string;
+    attacker_nation_id: string;
+    defender_nation_id: string;
+    position_lng: number;
+    position_lat: number;
+    defender_grid: Array<{ cell_index: number; unit_type: string; hp: number }>;
+  }): void {
+    const cells = Array.from({ length: 25 }, () => ({
+      unit_type: "", hp: 0, suppression: 0, incapacitated: false,
+    }));
+    for (const entry of params.defender_grid) {
+      cells[entry.cell_index] = {
+        unit_type: entry.unit_type, hp: entry.hp, suppression: 0, incapacitated: false,
+      };
+    }
+    this._syntheticEngagements.set(params.province_id, {
+      engagement_id:      params.province_id,
+      attacker_nation_id: params.attacker_nation_id,
+      defender_nation_id: params.defender_nation_id,
+      position_lng:       params.position_lng,
+      position_lat:       params.position_lat,
+      cells,
+    });
+  }
+
+  /** Look up a land engagement near the given position for a bombing run. */
+  getEngagementAtPosition(
+    lng: number,
+    lat: number,
+    radiusDeg: number,
+    attackerNationId: string,
+    state: GameRoomState,
+  ): EngagementRef | undefined {
+    // 1. Synthetic (test) engagements — position stored directly, no state lookup needed
+    for (const syn of this._syntheticEngagements.values()) {
+      if (syn.attacker_nation_id !== attackerNationId) continue;
+      const dist = Math.sqrt((syn.position_lng - lng) ** 2 + (syn.position_lat - lat) ** 2);
+      if (dist > radiusDeg) continue;
+      const cells = syn.cells;
+      return {
+        engagement_id:      syn.engagement_id,
+        attacker_nation_id: syn.attacker_nation_id,
+        defender_nation_id: syn.defender_nation_id,
+        defender_cells: cells,
+        applyAirStrikeDelta(deltas) {
+          for (const hit of deltas) {
+            const c = cells[hit.cell_index];
+            if (c) {
+              c.hp = Math.max(0, c.hp - hit.hp_damage);
+              c.suppression = Math.min(100, c.suppression + hit.supp_damage);
+            }
+          }
+        },
+      };
+    }
+
+    // 2. Real engagements — positions resolved from division objects via state
+    for (const [key, pair] of this.activePairs) {
+      let atkId = pair.attacker_id;
+      let defId = pair.defender_id;
+      if (pair.is_meeting) {
+        const parts = key.split("|");
+        atkId = parts[0];
+        defId = parts[1];
+      }
+      const atkDiv = state.divisions.get(atkId);
+      const defDiv = state.divisions.get(defId);
+      if (!atkDiv || !defDiv) continue;
+      if (atkDiv.nation_id !== attackerNationId) continue;
+
+      const midLng = (atkDiv.position_lng + defDiv.position_lng) / 2;
+      const midLat = (atkDiv.position_lat + defDiv.position_lat) / 2;
+      if (Math.sqrt((midLng - lng) ** 2 + (midLat - lat) ** 2) > radiusDeg) continue;
+
+      const liveCells = [...defDiv.grid.cells];
+      return {
+        engagement_id:      pair.engagement_id,
+        attacker_nation_id: atkDiv.nation_id,
+        defender_nation_id: defDiv.nation_id,
+        defender_cells: liveCells,
+        applyAirStrikeDelta(deltas) {
+          for (const hit of deltas) {
+            const c = defDiv.grid.cells[hit.cell_index];
+            if (c) {
+              c.hp = Math.max(0, c.hp - hit.hp_damage);
+              c.suppression = Math.min(100, c.suppression + hit.supp_damage);
+            }
+          }
+        },
+      };
+    }
+
+    return undefined;
   }
 
   // ---------------------------------------------------------------------------
