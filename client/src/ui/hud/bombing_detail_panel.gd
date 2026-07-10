@@ -41,7 +41,6 @@ func _setup_ui() -> void:
 	_progress_bar = TextureProgressBar.new()
 	_progress_bar.max_value = 1.0
 	_progress_bar.value = 1.0
-	_progress_bar.show_percentage = false
 	_progress_bar.custom_minimum_size = Vector2(0, 6)
 	vbox.add_child(_progress_bar)
 

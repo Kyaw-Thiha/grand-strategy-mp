@@ -118,6 +118,7 @@ export class AirCombatSystem {
 
     if (attacker.weapon_ready && stats.attack_vs_air > 0 && target.count > 0) {
       target.status_fuel = +(target.status_fuel * 1.5).toFixed(4);
+      lifecycleSystem.applyLandingDecay(attacker.wing_id, state);
     }
 
     if (stats.attack_vs_air > 0) {

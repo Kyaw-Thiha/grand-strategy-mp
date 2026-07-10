@@ -146,13 +146,10 @@ export class AirWingLifecycleSystem {
           break;
         }
         case WING_LIFECYCLE.LOITER: {
-          if (wing.target_id !== "") {
-            if (_landingToggle) {
-              wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
-            } else {
-              wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
-            }
-            _landingToggle = !_landingToggle;
+          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
+                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
+          // Patrol wings re-sortie when a new interception target is assigned
+          if (isPatrolMission && wing.target_id !== "") {
             wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
             this._loiterTicks.delete(wingId);
             didChange = true;
@@ -160,15 +157,7 @@ export class AirWingLifecycleSystem {
           }
           const ticks = (this._loiterTicks.get(wingId) ?? 0) + 1;
           this._loiterTicks.set(wingId, ticks);
-          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
-                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
           if (!isPatrolMission && ticks >= MAX_LOITER_TICKS) {
-            if (_landingToggle) {
-              wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
-            } else {
-              wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
-            }
-            _landingToggle = !_landingToggle;
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
@@ -255,6 +244,7 @@ export class AirWingLifecycleSystem {
     this._engagementTicks.delete(wingId);
 
     if (!wing.perk_multi_sortie) {
+      wing.target_id = "";
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
       return;
@@ -359,6 +349,17 @@ export class AirWingLifecycleSystem {
     if (!wing) return;
     wing.weapon_ready = false;
     this._weaponCooldown.set(wingId, WEAPON_COOLDOWN_TICKS);
+  }
+
+  applyLandingDecay(wingId: string, state: GameRoomState): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+    if (_landingToggle) {
+      wing.status_engine  = Math.max(0, wing.status_engine  - ENGINE_DECAY_PER_LANDING);
+    } else {
+      wing.status_weapons = Math.max(0, wing.status_weapons - WEAPONS_DECAY_PER_LANDING);
+    }
+    _landingToggle = !_landingToggle;
   }
 
   getStatusFuel(wingId: string): number {
