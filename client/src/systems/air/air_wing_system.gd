@@ -373,6 +373,21 @@ func _on_air_combat_ended(data: Dictionary) -> void:
 		(_engagement_lines[key] as Line2D).queue_free()
 		_engagement_lines.erase(key)
 
+	var icon_a = _icons.get(a)
+	var icon_b = _icons.get(b)
+	if icon_a != null and icon_b != null and _icon_layer != null:
+		var nation_a: String = GameState.get_air_wing(a).get("nation_id", "")
+		var nation_b: String = GameState.get_air_wing(b).get("nation_id", "")
+		var banner: Node2D = preload("res://client/src/systems/air/air_combat_banner.gd").new()
+		_icon_layer.add_child(banner)
+		banner.setup(
+			icon_a.position, icon_b.position,
+			"air",
+			GameState.get_my_nation_id(),
+			nation_a,
+			nation_b,
+		)
+
 
 func _on_air_bombing_result(data: Dictionary) -> void:
 	var province_id: String = data.get("province_id", "")
