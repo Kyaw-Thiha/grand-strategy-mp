@@ -1,6 +1,6 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { AirWingState, MISSION_TYPES, WING_LIFECYCLE } from "../rooms/schema/AirWingState.js";
-import { getAirUnitStats } from "../data/air_unit_stats.js";
+import { getAirUnitStats, MAX_FORMATION_BONUS, FORMATION_DENSITY_CAP } from "../data/air_unit_stats.js";
 import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
@@ -110,7 +110,9 @@ export class AirCombatSystem {
     if (isSurprise && attacker.weapon_ready && stats.attack_vs_air > 0) {
       baseValue = stats.attack_vs_air * SURPRISE_MULTIPLIER;
     }
-    const damage = Math.floor(baseValue * attackerCountSnapshot * attackerReadinessSnapshot * attacker.status_weapons);
+    const densityBonus = Math.min(target.count / FORMATION_DENSITY_CAP, 1.0) * MAX_FORMATION_BONUS;
+    const raw = baseValue * attackerCountSnapshot * attackerReadinessSnapshot * attacker.status_weapons;
+    const damage = Math.floor(raw / (1 + densityBonus));
     target.count = Math.max(0, target.count - damage);
     target.status_instruments = Math.max(0, target.status_instruments - INSTRUMENTS_DECAY_PER_HIT);
 

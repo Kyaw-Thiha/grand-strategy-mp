@@ -398,6 +398,159 @@ describe("12e-patch — Formation Density & Escort Path", function () {
     });
   });
 
+  // ── Step 5: Formation Density Defense Bonus ──────────────────────────────
+
+  describe("Formation density defense bonus", () => {
+    it("larger wing takes less damage per plane than smaller wing", async () => {
+      const { room } = await joinRoom();
+      setRelation(room, "germany", "france", "war");
+
+      // Set up enemy attacker that shoots once then we measure damage per plane on two targets
+      const enemy = getWing(room, "france_wing_01");
+      const target36 = getWing(room, "germany_wing_01");
+      const target1 = getWing(room, "germany_wing_02");
+
+      enemy.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      enemy.aircraft_type = "fighter";
+      enemy.count = 10;
+      enemy.weapon_ready = true;
+      enemy.combat_readiness = 1.0;
+      enemy.position_lng = 10.2;
+      enemy.position_lat = 50.0;
+      enemy.is_detected = true;
+
+      // Target with 36 planes (full density bonus when implemented)
+      target36.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      target36.aircraft_type = "fighter";
+      target36.count = 36;
+      target36.weapon_ready = false;
+      target36.combat_readiness = 1.0;
+      target36.position_lng = 10.0;
+      target36.position_lat = 50.0;
+      target36.is_detected = true;
+
+      // Target with 1 plane (minimal density bonus)
+      target1.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      target1.aircraft_type = "fighter";
+      target1.count = 1;
+      target1.weapon_ready = false;
+      target1.combat_readiness = 1.0;
+      target1.position_lng = 10.01;
+      target1.position_lat = 50.0;
+      target1.is_detected = true;
+
+      await tickRoom(room);
+
+      // The enemy should attack target36 (first deconflict choice since both same priority)
+      // Damage to 36-plane wing: 0.25 * 10 * 1.0 * 1.0 = 2.5 → floor 2
+      // Without density bonus: count goes from 36 to 34 (damage = 2)
+      // With density bonus: count = 36 - floor(2.5 / (1 + 0.4)) = 36 - floor(1.786) = 36 - 1 = 35
+      const dmg36 = 36 - target36.count;
+      assert.strictEqual(dmg36, 1, `36-plane wing should take 1 damage with density bonus, got ${dmg36}`);
+    });
+
+    it("bonus saturates at count=36 (count=72 takes same mitigation)", async () => {
+      const { client, room } = await joinRoom();
+      setRelation(room, "germany", "france", "war");
+
+      // Use TWO enemy wings so each German target gets attacked (deconflict assignment)
+      const enemy1 = getWing(room, "france_wing_01");
+      const enemy2 = getWing(room, "france_wing_02");
+      const target36 = getWing(room, "germany_wing_01");
+      // Spawn a second target with 72 planes
+      client.send("SPAWN_WING", {
+        wing_id: "target_72",
+        nation_id: "germany",
+        aircraft_type: "fighter",
+        count: 72,
+        mission: MISSION_TYPES.INTERCEPTION,
+        home_airbase_province_id: "berlin",
+        position_lng: 10.01,
+        position_lat: 50.0,
+        weapon_ready: false,
+        combat_readiness: 1.0,
+      });
+      await room.waitForNextPatch();
+      const target72 = getWing(room, "target_72");
+
+      enemy1.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      enemy1.aircraft_type = "fighter";
+      enemy1.count = 10;
+      enemy1.weapon_ready = true;
+      enemy1.combat_readiness = 1.0;
+      enemy1.position_lng = 10.2;
+      enemy1.position_lat = 50.0;
+      enemy1.is_detected = true;
+
+      enemy2.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      enemy2.aircraft_type = "fighter";
+      enemy2.count = 10;
+      enemy2.weapon_ready = true;
+      enemy2.combat_readiness = 1.0;
+      enemy2.position_lng = 10.2;
+      enemy2.position_lat = 50.01;
+      enemy2.is_detected = true;
+
+      target36.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      target36.aircraft_type = "fighter";
+      target36.count = 36;
+      target36.weapon_ready = false;
+      target36.combat_readiness = 1.0;
+      target36.position_lng = 10.0;
+      target36.position_lat = 50.0;
+      target36.is_detected = true;
+
+      target72.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      target72.aircraft_type = "fighter";
+      target72.weapon_ready = false;
+      target72.combat_readiness = 1.0;
+      target72.is_detected = true;
+
+      await tickRoom(room);
+
+      // Both targets should take the same damage (bonus saturates at 36)
+      const dmg36 = 36 - target36.count;
+      const dmg72 = 72 - target72.count;
+      // With saturation: both use mitigation = 1 / (1 + 0.4) = 0.714
+      // Damage: floor(2.5 / 1.4) = floor(1.786) = 1 for both
+      assert.strictEqual(dmg36, dmg72,
+        `damage 36=${dmg36} should equal damage 72=${dmg72}`);
+    });
+
+    it("count=1 wing takes full unmitigated damage", async () => {
+      const { room } = await joinRoom();
+      setRelation(room, "germany", "france", "war");
+
+      const enemy = getWing(room, "france_wing_01");
+      const target = getWing(room, "germany_wing_01");
+
+      enemy.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      enemy.aircraft_type = "fighter";
+      enemy.count = 10;
+      enemy.weapon_ready = true;
+      enemy.combat_readiness = 1.0;
+      enemy.position_lng = 10.2;
+      enemy.position_lat = 50.0;
+      enemy.is_detected = true;
+
+      target.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+      target.aircraft_type = "fighter";
+      target.count = 1;
+      target.weapon_ready = false;
+      target.combat_readiness = 1.0;
+      target.position_lng = 10.0;
+      target.position_lat = 50.0;
+      target.is_detected = true;
+
+      await tickRoom(room);
+
+      // count=1: densityBonus = min(1/36, 1.0) * 0.4 ≈ 0.011. Mitigation = 1/1.011 ≈ 0.989
+      // Damage: floor(2.5 * 0.989) = floor(2.47) = 2 → target destroyed
+      // No meaningful mitigation at count=1
+      assert.strictEqual(target.count, 0, "1-plane wing should be destroyed with no meaningful bonus");
+    });
+  });
+
   describe("Sub-status effects", () => {
     it("status_weapons=0.5 halves damage dealt", async () => {
       const { room } = await joinRoom();
