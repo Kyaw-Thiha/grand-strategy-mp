@@ -10,7 +10,6 @@ type BroadcastToNationFn = (type: string, msg: unknown, nationId: string) => voi
 
 const BOMBING_MISSIONS = new Set([
   MISSION_TYPES.TACTICAL_BOMBING,
-  MISSION_TYPES.AREA,
 ]);
 
 export const READINESS_BOMBING_SPIKE = 0.05;
