@@ -621,4 +621,99 @@ describe("12e-patch — Formation Density & Escort Path", function () {
       assert.ok(distMoved > 0, "wing with half engine should still move");
     });
   });
+
+  // ── Step 6: Airbase Congestion ──────────────────────────────────────────
+
+  describe("Airbase congestion", () => {
+    it("uncongested wing recovers fuel faster than congested wing in same tick", async () => {
+      const { client, room } = await joinRoom();
+
+      // Two wings at different bases, both IDLE with low fuel
+      const soloWing = getWing(room, "germany_wing_01");
+      soloWing.lifecycle_state = WING_LIFECYCLE.IDLE;
+      soloWing.home_airbase_province_id = "hamburg";
+      soloWing.fuel = 0.5;
+
+      client.send("SPAWN_WING", {
+        wing_id: "crowded_wing",
+        nation_id: "germany",
+        aircraft_type: "fighter",
+        count: 10,
+        home_airbase_province_id: "berlin",
+        position_lng: 13.0,
+        position_lat: 52.0,
+        weapon_ready: true,
+        combat_readiness: 1.0,
+      });
+      await room.waitForNextPatch();
+      const crowdedWing = getWing(room, "crowded_wing");
+      crowdedWing.lifecycle_state = WING_LIFECYCLE.IDLE;
+      crowdedWing.home_airbase_province_id = "berlin";
+      crowdedWing.fuel = 0.5;
+
+      // Crowd berlin with 5 extra wings (total 6 at berlin, 3 excess)
+      for (let i = 0; i < 5; i++) {
+        client.send("SPAWN_WING", {
+          wing_id: `extra_${i}`,
+          nation_id: "germany",
+          aircraft_type: "fighter",
+          count: 10,
+          home_airbase_province_id: "berlin",
+          position_lng: 13.0,
+          position_lat: 52.0,
+          weapon_ready: true,
+          combat_readiness: 1.0,
+        });
+        await room.waitForNextPatch();
+        getWing(room, `extra_${i}`).lifecycle_state = WING_LIFECYCLE.IDLE;
+      }
+
+      // Record fuel BEFORE the tick (auto-tick may have already fired during setup,
+      // but both wings were set up identically, so any prior recovery is equalized)
+      const soloBefore = soloWing.fuel;
+      const crowdBefore = crowdedWing.fuel;
+
+      (room as any).gameTick();
+      await new Promise(r => setTimeout(r, 50));
+
+      // Hamburg: 1 wing → full rate (factor=1.0). Berlin: 6 wings → factor=1/(1+3*0.15)=0.69
+      const soloDelta = soloWing.fuel - soloBefore;
+      const crowdDelta = crowdedWing.fuel - crowdBefore;
+      assert.ok(soloDelta > crowdDelta,
+        `solo gain (${soloDelta.toFixed(4)}) should exceed congested gain (${crowdDelta.toFixed(4)})`);
+    });
+
+    it("extreme congestion still allows some fuel recovery", async () => {
+      const { client, room } = await joinRoom();
+
+      const baseWing = getWing(room, "germany_wing_01");
+      baseWing.lifecycle_state = WING_LIFECYCLE.IDLE;
+      baseWing.home_airbase_province_id = "berlin";
+      baseWing.fuel = 0.5;
+
+      for (let i = 0; i < 25; i++) {
+        client.send("SPAWN_WING", {
+          wing_id: `many_${i}`,
+          nation_id: "germany",
+          aircraft_type: "fighter",
+          count: 10,
+          home_airbase_province_id: "berlin",
+          position_lng: 13.0,
+          position_lat: 52.0,
+          weapon_ready: true,
+          combat_readiness: 1.0,
+        });
+        await room.waitForNextPatch();
+        getWing(room, `many_${i}`).lifecycle_state = WING_LIFECYCLE.IDLE;
+      }
+
+      const fuelBefore = baseWing.fuel;
+      (room as any).gameTick();
+      await new Promise(r => setTimeout(r, 50));
+
+      // Even with 26 wings at berlin, recovery should be positive (> fuelBefore)
+      assert.ok(baseWing.fuel > fuelBefore,
+        `even extreme congestion should allow some recovery: ${fuelBefore} → ${baseWing.fuel}`);
+    });
+  });
 });

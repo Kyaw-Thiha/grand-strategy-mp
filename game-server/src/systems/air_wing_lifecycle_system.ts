@@ -38,6 +38,9 @@ const ENGINE_DECAY_PER_LANDING  = 0.04;
 const WEAPONS_DECAY_PER_LANDING = 0.04;
 let _landingToggle = false;
 
+const CONGESTION_FREE_WINGS = 3;
+const CONGESTION_FACTOR     = 0.15;
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -60,6 +63,14 @@ export class AirWingLifecycleSystem {
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
 
+    // Build per-base IDLE wing count for airbase congestion
+    const wingsPerBase = new Map<string, number>();
+    for (const w of state.air_wings.values()) {
+      if (w.lifecycle_state === WING_LIFECYCLE.IDLE && w.home_airbase_province_id) {
+        wingsPerBase.set(w.home_airbase_province_id, (wingsPerBase.get(w.home_airbase_province_id) ?? 0) + 1);
+      }
+    }
+
     for (const [wingId, wing] of state.air_wings.entries()) {
       let didChange = false;
 
@@ -81,12 +92,18 @@ export class AirWingLifecycleSystem {
         if (wing.combat_readiness !== prevR) didChange = true;
       } else {
         wing.fuel_decay_rate = FUEL_DECAY_TRANSIT;
+
+        // Airbase congestion: more IDLE wings at same base → slower recovery
+        const wingsAtBase      = wingsPerBase.get(wing.home_airbase_province_id) ?? 1;
+        const excess           = Math.max(0, wingsAtBase - CONGESTION_FREE_WINGS);
+        const congestionFactor = 1 / (1 + excess * CONGESTION_FACTOR);
+
         const prevFuel = wing.fuel;
-        wing.fuel = Math.min(1.0, wing.fuel + FUEL_RECOVERY_RATE);
+        wing.fuel = Math.min(1.0, wing.fuel + FUEL_RECOVERY_RATE * congestionFactor);
         if (wing.fuel !== prevFuel) didChange = true;
         const prevR = wing.combat_readiness;
         wing.combat_readiness = Math.min(1.0,
-          wing.combat_readiness + READINESS_RECOVERY_RATE);
+          wing.combat_readiness + READINESS_RECOVERY_RATE * congestionFactor);
         if (wing.combat_readiness !== prevR) didChange = true;
       }
 
