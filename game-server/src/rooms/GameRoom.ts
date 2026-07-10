@@ -15,6 +15,7 @@ import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
 import { DubinsPathfinder } from "../systems/air_dubins_pathfinder.js";
 import { AirCombatSystem } from "../systems/air_combat_system.js";
+import { AirBombingSystem } from "../systems/air_bombing_system.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
@@ -79,6 +80,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
   private airCombatSystem = new AirCombatSystem();
+  private airBombingSystem = new AirBombingSystem();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -629,6 +631,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (!wing) return;
         wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
         this.airWingLifecycleSystem.triggerContact(msg.wing_id, msg.target_wing_id, this.state);
+      });
+
+      this.onMessage("SPAWN_LAND_ENGAGEMENT", (_client, msg: {
+        province_id: string;
+        attacker_nation_id: string;
+        defender_nation_id: string;
+        position_lng: number;
+        position_lat: number;
+        defender_grid: Array<{ cell_index: number; unit_type: string; hp: number }>;
+      }) => {
+        this.combatSystem.injectTestEngagement({
+          province_id:        msg.province_id,
+          attacker_nation_id: msg.attacker_nation_id,
+          defender_nation_id: msg.defender_nation_id,
+          position_lng:       msg.position_lng,
+          position_lat:       msg.position_lat,
+          defender_grid:      msg.defender_grid,
+        });
       });
     }
 
@@ -1353,6 +1373,22 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
         this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       }
+
+      this.airBombingSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
+        this.combatSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => {
+          for (const c of this.clients) {
+            const p = this.state.players.get(c.sessionId);
+            if (!p) continue;
+            const n = this.getNationForPlayer(p.userId);
+            if (!n || n.nation_id !== nationId) continue;
+            c.send(type, msg);
+          }
+        },
+      );
 
       this.airDetectionSystem.tick(
         this.state,

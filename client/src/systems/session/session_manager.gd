@@ -168,3 +168,5 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"AIR_WING_MOVE_REJECTED":
 			EventBus.notification_requested.emit(
 				"Target out of range — no staging airbase available.", "warning")
+		"AIR_BOMBING_RESULT":
+			EventBus.air_bombing_result.emit(data)

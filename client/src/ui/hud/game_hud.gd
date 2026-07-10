@@ -203,6 +203,22 @@ func _ready() -> void:
 			_map_interaction.set_player_input_enabled(true)
 	)
 
+	# BombingDetailPanel — full-center overlay for bombing run results
+	const BombingDetailPanelScene := preload("res://src/ui/hud/bombing_detail_panel.tscn")
+	var _bombing_detail_panel: Control = BombingDetailPanelScene.instantiate()
+	add_child(_bombing_detail_panel)
+	_register_ui_input_ownership_root(_bombing_detail_panel)
+	hud_manager.register_panel("bombing_detail", _bombing_detail_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
+	EventBus.bombing_detail_open_requested.connect(func(data: Dictionary) -> void:
+		_bombing_detail_panel.populate(data)
+		hud_manager.show_panel("bombing_detail")
+	)
+	EventBus.bombing_detail_closed.connect(func() -> void:
+		hud_manager.hide_panel("bombing_detail")
+	)
+
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
 	hud_manager.set_panel_shortcut("military",  KEY_R)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)

@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://bombing_detail_panel"]
+
+[ext_resource type="Script" path="res://src/ui/hud/bombing_detail_panel.gd" id="1_bdp"]
+
+[node name="BombingDetailPanel" type="PanelContainer"]
+script = ExtResource("1_bdp")
