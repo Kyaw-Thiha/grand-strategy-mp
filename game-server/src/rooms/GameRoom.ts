@@ -376,7 +376,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this.airDubinsPathfinder.clearPath(msg.wing_id);
       this.airWingLifecycleSystem.disbandWing(msg.wing_id, this.state,
-        (type, m) => this.broadcast(type, m));
+        (type, m) => this.broadcast(type, m), "WING_DESTROYED");
       this.airDetectionSystem.clearWing(msg.wing_id);
     });
 
@@ -1252,6 +1252,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.airDubinsPathfinder.storePath(wing.wing_id, rtbPath);
       wing.path_gen_id = rtbPath.path_gen_id;
       wing.path_elapsed_ms = 0;
+      this.airDubinsPathfinder.advanceWingOnePath(wing, TICK_MS);
       this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...rtbPath });
       this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
     }
