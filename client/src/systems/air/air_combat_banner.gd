@@ -72,7 +72,7 @@ func _draw() -> void:
 		var rect := Rect2(-ICON_SIZE * 0.5, ICON_SIZE)
 		draw_texture_rect(_icon_tex, rect, false, Color(0.08, 0.05, 0.02, 0.9))
 	if _show_ring:
-		var progress := clamp(1.0 - _elapsed / DISPLAY_DURATION, 0.0, 1.0)
+		var progress: float = clamp(1.0 - _elapsed / DISPLAY_DURATION, 0.0, 1.0)
 		if progress > 0.0:
 			draw_arc(Vector2.ZERO, CIRCLE_R + 3.0,
 				-PI * 0.5, -PI * 0.5 + TAU * progress,

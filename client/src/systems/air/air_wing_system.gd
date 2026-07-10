@@ -378,7 +378,7 @@ func _on_air_combat_ended(data: Dictionary) -> void:
 	if icon_a != null and icon_b != null and _icon_layer != null:
 		var nation_a: String = GameState.get_air_wing(a).get("nation_id", "")
 		var nation_b: String = GameState.get_air_wing(b).get("nation_id", "")
-		var banner: Node2D = preload("res://client/src/systems/air/air_combat_banner.gd").new()
+		var banner: Node2D = preload("res://src/systems/air/air_combat_banner.gd").new()
 		_icon_layer.add_child(banner)
 		banner.setup(
 			icon_a.position, icon_b.position,
