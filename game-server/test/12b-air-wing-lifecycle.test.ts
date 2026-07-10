@@ -287,7 +287,9 @@ describe("12b — Air Wing Lifecycle", function () {
 
   it("multi-sortie wing in LOITER: MAX_LOITER_TICKS elapsed with no target → RTB", async () => {
     const { client, room } = await joinRoom();
-    await spawnWing(client, room);
+    // Use a non-patrol mission so the MAX_LOITER_TICKS check applies
+    // (INTERCEPTION/AIR_SUPERIORITY wings are exempt — they loiter until fuel forces RTB)
+    await spawnWing(client, room, { mission: MISSION_TYPES.TACTICAL_BOMBING });
     client.send("SET_WING_PERK", { wing_id: "wing-1", perk: "multi_sortie", value: true });
     await room.waitForNextPatch();
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.LOITER });
