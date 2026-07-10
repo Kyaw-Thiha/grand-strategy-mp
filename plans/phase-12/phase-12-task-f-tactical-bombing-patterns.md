@@ -59,7 +59,7 @@ All other unit types are soft targets.
 File: `game-server/src/systems/combat_system.ts`
 
 The execution agent MUST read `combat_system.ts` to find:
-1. The name of the private engagements map (likely `_engagements` or `_pairs`)
+1. The name of the private engagements map — **VERIFIED: it is `activePairs`** (not `_engagements` or `_pairs`)
 2. Each engagement's structure — specifically: `province_id` or the position fields of the
    two divisions involved
 3. The method (or lack thereof) to look up an engagement by province position
@@ -80,9 +80,9 @@ The BombingDetailPanel must copy these functions **verbatim** and adapt:
 
 Copy `GLYPH_SCENE` preload path exactly:
 ```gdscript
-const GLYPH_SCENE = preload("res://src/ui/components/unit_glyph_cell/unit_glyph_cell.tscn")
+const GLYPH_SCENE = preload("res://scenes/game/panels/unit_glyph_cell.tscn")
 ```
-Verify this path exists before using it.
+**VERIFIED path** — confirmed from `tactical_combat_panel.gd`. Do NOT use `res://src/ui/components/...`.
 
 ### EngagementBanner — map marker code to copy
 
@@ -103,9 +103,10 @@ Copy the `_input(event)` click handler verbatim and adapt the callback to open
 File: `client/src/ui/hud/game_hud.gd`
 
 ```gdscript
-# HOW TO REGISTER A NEW PANEL (copy this pattern):
+# HOW TO REGISTER A NEW PANEL (copy this pattern — _register_ui_input_ownership_root BEFORE register_panel):
 _bombing_detail_panel = BombingDetailPanelScene.instantiate()
 add_child(_bombing_detail_panel)
+_register_ui_input_ownership_root(_bombing_detail_panel)
 hud_manager.register_panel("bombing_detail", _bombing_detail_panel, HUDManager.PlacementMode.FULL_CENTER)
 
 # HOW TO SHOW/HIDE:
@@ -147,11 +148,11 @@ draw_texture_rect(FIRE_ICON, Rect2(Vector2(-12, -12), Vector2(24, 24)), false)
 File: `game-server/src/rooms/schema/AirWingState.ts`
 
 The execution agent MUST read this file and find the exact names of perk boolean fields.
-Expected names (verify — do NOT assume):
+**VERIFIED names** (confirmed by inspection — use these exactly):
 - `perk_strafing: boolean` — enables fighter strafing column (CAS-style column for fighters)
-- `perk_precision: boolean` — dive bomber hits 2 cells instead of 1
+- `perk_precision_bombing: boolean` — dive bomber hits 2 cells instead of 1
 
-If the field names differ from above, use the actual names throughout.
+The plan previously said `perk_precision` — that is WRONG. The actual field is `perk_precision_bombing`.
 
 ### gameTick order (post-Branch E)
 
@@ -192,7 +193,7 @@ and after the pending-transit loop. Do NOT create a compile dependency on AirCom
 | `game-server/src/systems/air_attack_pattern_registry.ts` | Pure pattern functions |
 | `game-server/src/systems/air_bombing_system.ts` | Orchestration system |
 | `game-server/test/12f-air-bombing-patterns.test.ts` | All bombing tests |
-| `client/src/systems/air/bombing_run_indicator.gd` | Timed map marker (based on engagement_banner.gd) |
+| `client/src/systems/air/bombing_run_indicator.gd` + `client/scenes/systems/air/bombing_run_indicator.tscn` | Timed map marker (based on engagement_banner.gd) |
 | `client/src/ui/hud/bombing_detail_panel.gd` | Click-to-open detail popup (based on tactical_combat_panel.gd) |
 | `client/src/ui/hud/bombing_detail_panel.tscn` | Scene for the detail panel |
 
@@ -387,7 +388,7 @@ export interface BombingContext {
   count: number;
   combat_readiness: number;
   perk_strafing: boolean;
-  perk_precision: boolean;
+  perk_precision_bombing: boolean;
   recon_quality: number;      // 0.0 (pure random) – 1.0 (fully prioritised)
 }
 
@@ -449,7 +450,7 @@ export function resolveDivePattern(cells: CellSnapshot[], ctx: BombingContext): 
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const num_targets = ctx.perk_precision ? 2 : 1;
+  const num_targets = ctx.perk_precision_bombing ? 2 : 1;
   const targets = scored.slice(0, num_targets);
 
   const hit_cells: CellHit[] = targets.map(t => ({
@@ -607,12 +608,12 @@ function makeGrid(occupied: Array<{ index: number; unit_type?: string; hp?: numb
 }
 
 const DEFAULT_CTX: BombingContext = {
-  aircraft_type:    "dive_bomber",
-  count:            10,
-  combat_readiness: 1.0,
-  perk_strafing:    false,
-  perk_precision:   false,
-  recon_quality:    0.0,
+  aircraft_type:           "dive_bomber",
+  count:                   10,
+  combat_readiness:        1.0,
+  perk_strafing:           false,
+  perk_precision_bombing:  false,
+  recon_quality:           0.0,
 };
 ```
 
@@ -628,9 +629,9 @@ describe("AirAttackPatternRegistry — pure unit tests", () => {
       assert.strictEqual(result.hit_cells.length, 1);
     });
 
-    it("hits 2 cells with perk_precision", () => {
+    it("hits 2 cells with perk_precision_bombing", () => {
       const cells = makeGrid([{ index: 5 }, { index: 10 }, { index: 20 }]);
-      const result = resolveDivePattern(cells, { ...DEFAULT_CTX, perk_precision: true });
+      const result = resolveDivePattern(cells, { ...DEFAULT_CTX, perk_precision_bombing: true });
       assert.strictEqual(result.hit_cells.length, 2);
     });
 
@@ -1016,40 +1017,143 @@ cd game-server && NODE_ENV=test mocha -r tsx test/12f-air-bombing-patterns.test.
 
 ---
 
-## Step 4: Add `getEngagementAtPosition` to CombatSystem
+## Step 4: Add `getEngagementAtPosition` + `injectTestEngagement` to CombatSystem
 
-Open `game-server/src/systems/combat_system.ts`. Read the file and:
+### Verified facts about `combat_system.ts`
 
-1. Find the private field that stores active engagements (likely `_engagements` or `_pairs`).
-   Find what information each engagement has about province position (province_id + province position,
-   or division positions).
+- Private field: **`activePairs: Map<string, ActivePair>`** — key is `"idA|idB"`, sorted.
+- `ActivePair` stores **no position data** — only `attacker_id`, `defender_id`, `engagement_id`, and combat state fields.
+- Positions must be resolved at runtime via `state.divisions.get(id)?.position_lng/lat`.
+- Nation IDs: also NOT in `ActivePair` — resolve via `state.divisions.get(id)?.nation_id`.
+- For meeting battles (`pair.is_meeting === true`), both IDs come from splitting the map key: `const [idA, idB] = key.split("|")`.
+- `DivisionState.grid.cells` is a Colyseus `ArraySchema<GridCellState>` with 25 elements. Iterate with `Array.from()` or spread `[...]`.
+- `GridCellState` fields: `unit_type`, `hp` (0–100), `suppression` (0–100), `incapacitated`, `xp_tier`, `xp_points`, `xp_pending`, `stealthed`. Structural superset of `CellSnapshot`.
 
-2. Add a public method:
+### Step 4a — Add `_syntheticEngagements` map and `injectTestEngagement`
+
+`ActivePair` requires real `DivisionState` objects with full Colyseus schema — fabricating them for tests is too fragile. Instead, `CombatSystem` maintains a **separate lightweight map** for test-injected engagements that `getEngagementAtPosition` checks first:
 
 ```typescript
-getEngagementAtPosition(
-  lng: number, lat: number, radiusDeg: number,
-  attackerNationId: string, defenderNationId: string,
-): EngagementRef | undefined {
-  // Implementation depends on how engagements are stored.
-  // Return the engagement where:
-  //   - the battle is near (lng, lat) within radiusDeg
-  //   - one side is attackerNationId, other is defenderNationId
-  // Return undefined if no match.
-}
-
-export interface EngagementRef {
+// Test-only: lightweight synthetic engagements (bypass activePairs entirely)
+private _syntheticEngagements = new Map<string, {
   engagement_id: string;
-  defender_cells: CellSnapshot[];  // live cell array (not a snapshot)
-  applyAirStrikeDelta(deltas: CellHit[]): void;  // applies damage in-place
+  attacker_nation_id: string;
+  defender_nation_id: string;
+  position_lng: number;
+  position_lat: number;
+  cells: Array<{ unit_type: string; hp: number; suppression: number; incapacitated: boolean }>;
+}>();
+
+injectTestEngagement(params: {
+  province_id: string;
+  attacker_nation_id: string;
+  defender_nation_id: string;
+  position_lng: number;
+  position_lat: number;
+  defender_grid: Array<{ cell_index: number; unit_type: string; hp: number }>;
+}): void {
+  const cells = Array.from({ length: 25 }, () => ({
+    unit_type: "", hp: 0, suppression: 0, incapacitated: false,
+  }));
+  for (const entry of params.defender_grid) {
+    cells[entry.cell_index] = {
+      unit_type: entry.unit_type, hp: entry.hp, suppression: 0, incapacitated: false,
+    };
+  }
+  this._syntheticEngagements.set(params.province_id, {
+    engagement_id:      params.province_id,
+    attacker_nation_id: params.attacker_nation_id,
+    defender_nation_id: params.defender_nation_id,
+    position_lng:       params.position_lng,
+    position_lat:       params.position_lat,
+    cells,
+  });
 }
 ```
 
-The `applyAirStrikeDelta` method applies `hit.hp_damage` to `cell.hp` (clamped to 0) and
-`hit.supp_damage` to `cell.suppression` (clamped to 100) for each hit in the array.
+### Step 4b — Add `EngagementRef` interface and `getEngagementAtPosition`
 
-**CRITICAL:** The execution agent must read `combat_system.ts` to find actual field names.
-Do NOT invent field names that may not exist.
+```typescript
+export interface EngagementRef {
+  engagement_id: string;
+  attacker_nation_id: string;
+  defender_nation_id: string;
+  defender_cells: Array<{ unit_type: string; hp: number; suppression: number; incapacitated: boolean }>;
+  applyAirStrikeDelta(deltas: Array<{ cell_index: number; hp_damage: number; supp_damage: number }>): void;
+}
+
+getEngagementAtPosition(
+  lng: number,
+  lat: number,
+  radiusDeg: number,
+  attackerNationId: string,
+  state: GameRoomState,
+): EngagementRef | undefined {
+  // 1. Synthetic (test) engagements — position stored directly, no state lookup needed
+  for (const syn of this._syntheticEngagements.values()) {
+    if (syn.attacker_nation_id !== attackerNationId) continue;
+    const dist = Math.sqrt((syn.position_lng - lng) ** 2 + (syn.position_lat - lat) ** 2);
+    if (dist > radiusDeg) continue;
+    const cells = syn.cells;
+    return {
+      engagement_id:      syn.engagement_id,
+      attacker_nation_id: syn.attacker_nation_id,
+      defender_nation_id: syn.defender_nation_id,
+      defender_cells: cells,
+      applyAirStrikeDelta(deltas) {
+        for (const hit of deltas) {
+          const c = cells[hit.cell_index];
+          if (c) {
+            c.hp = Math.max(0, c.hp - hit.hp_damage);
+            c.suppression = Math.min(100, c.suppression + hit.supp_damage);
+          }
+        }
+      },
+    };
+  }
+
+  // 2. Real engagements — positions resolved from division objects via state
+  for (const [key, pair] of this.activePairs) {
+    let atkId = pair.attacker_id;
+    let defId = pair.defender_id;
+    if (pair.is_meeting) {
+      const parts = key.split("|");
+      atkId = parts[0];
+      defId = parts[1];
+    }
+    const atkDiv = state.divisions.get(atkId);
+    const defDiv = state.divisions.get(defId);
+    if (!atkDiv || !defDiv) continue;
+    if (atkDiv.nation_id !== attackerNationId) continue;
+
+    const midLng = (atkDiv.position_lng + defDiv.position_lng) / 2;
+    const midLat = (atkDiv.position_lat + defDiv.position_lat) / 2;
+    if (Math.sqrt((midLng - lng) ** 2 + (midLat - lat) ** 2) > radiusDeg) continue;
+
+    // Pass snapshot to pattern registry (read-only), but applyAirStrikeDelta writes to live schema
+    const liveCells = [...defDiv.grid.cells];
+    return {
+      engagement_id:      pair.engagement_id,
+      attacker_nation_id: atkDiv.nation_id,
+      defender_nation_id: defDiv.nation_id,
+      defender_cells: liveCells,
+      applyAirStrikeDelta(deltas) {
+        for (const hit of deltas) {
+          const c = defDiv.grid.cells[hit.cell_index];
+          if (c) {
+            c.hp = Math.max(0, c.hp - hit.hp_damage);
+            c.suppression = Math.min(100, c.suppression + hit.supp_damage);
+          }
+        }
+      },
+    };
+  }
+
+  return undefined;
+}
+```
+
+**`applyAirStrikeDelta` note:** For real engagements it writes to `defDiv.grid.cells[i]` (live Colyseus schema), not to the `liveCells` snapshot. The snapshot is passed to the pattern registry for reading only.
 
 ---
 
@@ -1066,10 +1170,12 @@ import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import type { CombatSystem } from "./combat_system.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
+type BroadcastToNationFn = (type: string, msg: unknown, nationId: string) => void;
 
+// MISSION_TYPES.CAS does NOT exist — CAS planes use TACTICAL_BOMBING mission.
+// Differentiation between tactical bomber vs CAS plane happens via aircraft_type in the pattern registry.
 const BOMBING_MISSIONS = new Set([
   MISSION_TYPES.TACTICAL_BOMBING,
-  MISSION_TYPES.CAS,
   MISSION_TYPES.AREA,       // handled here only for range check — damage is Branch G's job
 ]);
 
@@ -1083,6 +1189,7 @@ export class AirBombingSystem {
     lifecycleSystem: AirWingLifecycleSystem,
     combatSystem: CombatSystem,
     broadcast: BroadcastFn,
+    broadcastToNation: BroadcastToNationFn,
   ): void {
     // Only process LOITER bomber wings
     const bombers = [...state.air_wings.values()].filter(w =>
@@ -1091,14 +1198,19 @@ export class AirBombingSystem {
     );
 
     // Batch results by province so multiple wings on same province are grouped
-    const batchByProvince = new Map<string, { province_id: string; runs: unknown[] }>();
+    const batchByProvince = new Map<string, {
+      province_id: string;
+      attacker_nation_id: string;
+      defender_nation_id: string;
+      runs: unknown[];
+    }>();
 
     for (const wing of bombers) {
       // Find an active land engagement near this wing
       const engagement = combatSystem.getEngagementAtPosition(
         wing.position_lng, wing.position_lat, BOMBING_RANGE_DEG,
         wing.nation_id,   // attacker side
-        undefined,        // any defender that is hostile
+        state,            // needed to resolve division positions from activePairs
       );
 
       if (!engagement) continue;  // no active engagement in range
@@ -1111,8 +1223,8 @@ export class AirBombingSystem {
         aircraft_type:    wing.aircraft_type,
         count:            wing.count,
         combat_readiness: wing.combat_readiness,
-        perk_strafing:    (wing as any).perk_strafing ?? false,
-        perk_precision:   (wing as any).perk_precision ?? false,
+        perk_strafing:          (wing as any).perk_strafing ?? false,
+        perk_precision_bombing: (wing as any).perk_precision_bombing ?? false,
         recon_quality,
       };
 
@@ -1125,15 +1237,20 @@ export class AirBombingSystem {
       // Accumulate for broadcast
       const key = engagement.engagement_id;
       if (!batchByProvince.has(key)) {
-        batchByProvince.set(key, { province_id: engagement.engagement_id, runs: [] });
+        batchByProvince.set(key, {
+          province_id:        engagement.engagement_id,
+          attacker_nation_id: engagement.attacker_nation_id,
+          defender_nation_id: engagement.defender_nation_id,
+          runs: [],
+        });
       }
       batchByProvince.get(key)!.runs.push({
-        wing_id:       wing.wing_id,
-        nation_id:     wing.nation_id,
-        aircraft_type: wing.aircraft_type,
-        count:         wing.count,
-        hit_cells:     result.hit_cells,
-        pattern_type:  result.pattern_type,
+        wing_id:         wing.wing_id,
+        nation_id:       wing.nation_id,
+        aircraft_type:   wing.aircraft_type,
+        count:           wing.count,
+        hit_cells:       result.hit_cells,
+        pattern_type:    result.pattern_type,
         total_hp_damage: result.total_hp_damage,
       });
 
@@ -1141,9 +1258,11 @@ export class AirBombingSystem {
       lifecycleSystem.resolveEngagement(wing.wing_id, state, broadcast);
     }
 
-    // Broadcast one AIR_BOMBING_RESULT per engagement (batched)
+    // Broadcast to attacker and defender nations only (NOT all clients)
+    // Pattern: same as RADAR_UPDATED in GameRoom.ts — use broadcastToNation per nation
     for (const batch of batchByProvince.values()) {
-      broadcast("AIR_BOMBING_RESULT", batch);
+      broadcastToNation("AIR_BOMBING_RESULT", batch, batch.attacker_nation_id);
+      broadcastToNation("AIR_BOMBING_RESULT", batch, batch.defender_nation_id);
     }
   }
 
@@ -1189,6 +1308,16 @@ this.airBombingSystem.tick(
   this.airWingLifecycleSystem,
   this.combatSystem,
   (type, msg) => this.broadcast(type, msg),
+  // broadcastToNation: same pattern as AirDetectionSystem — filter per client by nation
+  (type, msg, nationId) => {
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation || nation.nation_id !== nationId) continue;
+      client.send(type, msg);
+    }
+  },
 );
 ```
 
@@ -1339,7 +1468,7 @@ BombingDetailPanel (PanelContainer)
 
 ```gdscript
 # COPY THIS BLOCK FROM tactical_combat_panel.gd's _build_grid():
-const GLYPH_SCENE = preload("res://src/ui/components/unit_glyph_cell/unit_glyph_cell.tscn")
+const GLYPH_SCENE = preload("res://scenes/game/panels/unit_glyph_cell.tscn")
 
 func _build_run_grid(container: GridContainer) -> Array:
     var cells := []
@@ -1442,19 +1571,25 @@ func _on_air_bombing_result(data: Dictionary) -> void:
     if not _bombing_indicators.has(province_id) or \
        not is_instance_valid(_bombing_indicators[province_id]):
         var indicator = BombingRunIndicatorScene.instantiate()
-        _air_wing_layer.add_child(indicator)
-        # Find province position from GameState
-        var province = GameState.get_province(province_id)
-        if province == null:
+        _icon_layer.add_child(indicator)
+        # Position from MapLoader (GameState.get_province has no position data — only owner_id/nation_id)
+        var province_data: Dictionary = _map_loader.get_province_data(province_id)
+        if province_data.is_empty():
             indicator.queue_free()
             return
-        indicator.setup(_map_loader, province_id, province.position_lng, province.position_lat)
+        var city_pos: Array = province_data.get("city_position", [])
+        if city_pos.size() < 2:
+            indicator.queue_free()
+            return
+        indicator.setup(_map_loader, province_id, float(city_pos[0]), float(city_pos[1]))
         _bombing_indicators[province_id] = indicator
     # Add all runs to the indicator
     for run in data.get("runs", []):
         _bombing_indicators[province_id].add_run(run)
 
-# In cleanup():
+# In cleanup() — disconnect new signals before freeing nodes:
+if EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
+    EventBus.air_bombing_result.disconnect(_on_air_bombing_result)
 for indicator in _bombing_indicators.values():
     if is_instance_valid(indicator):
         indicator.queue_free()
@@ -1463,7 +1598,7 @@ _bombing_indicators.clear()
 
 Preload the indicator scene:
 ```gdscript
-const BombingRunIndicatorScene = preload("res://src/systems/air/bombing_run_indicator.tscn")
+const BombingRunIndicatorScene = preload("res://scenes/systems/air/bombing_run_indicator.tscn")
 ```
 
 **You must also create `bombing_run_indicator.tscn`** — a minimal scene with just the Node2D
@@ -1513,8 +1648,9 @@ All suites 12a–12f must pass.
 | Fighter with strafing perk hits a ROW | **Fighter strafing is a COLUMN** — deliberately different from tactical bomber's row |
 | Strategic bomber (AREA/INDUSTRY/OIL missions) is handled in Branch F | **Those missions are Branch G's responsibility** — Branch F only handles TACTICAL_BOMBING and CAS_PLANE missions hitting the tactical grid |
 | Bombing applies every tick while wing is in LOITER | **One bomb per sortie** — after bombing, AirBombingSystem immediately calls `lifecycleSystem.resolveEngagement()` to RTB the wing |
-| `perk_strafing` and `perk_precision` field names are guaranteed | **Verify the actual field names in `AirWingState.ts`** before using them |
-| `GameState.get_province(province_id)` exists and has position fields | **Verify this method exists** in the client's `game_state.gd` before calling it; if it doesn't, find the correct GameState API for province positions |
+| `perk_precision` is the correct field name | **WRONG — it is `perk_precision_bombing`**. Confirmed by inspection. |
+| `MISSION_TYPES.CAS` exists in the enum | **WRONG — it does not exist.** CAS planes use `MISSION_TYPES.TACTICAL_BOMBING`. The pattern registry already dispatches by `aircraft_type`, so no separate mission type is needed. `BOMBING_MISSIONS` only contains `TACTICAL_BOMBING` and `AREA`. |
+| `GameState.get_province()` returns position data | **WRONG** — it returns only `{ owner_id, nation_id }`. Province positions come from `_map_loader.get_province_data(province_id)` which returns the full map JSON including `city_position: [lng, lat]`. Also: `get_province()` returns `{}` on miss, never `null`, so `== null` guards don't work — use `.is_empty()`. |
 
 ---
 
@@ -1538,9 +1674,9 @@ The client already has wing positions in `GameState.air_wings`.
 ```gdscript
 extends Node2D
 ## Timed map marker that appears at the midpoint of an air-to-air engagement.
+## NOTE: crosshairs-solid.svg does NOT exist in assets — draw crosshairs procedurally.
 
 const AUTO_DISMISS_SEC := 5.0
-const CROSSHAIRS_ICON: Texture2D = preload("res://assets/icons/crosshairs-solid.svg")
 
 var _runs: Array[Dictionary] = []   # each { wing_a_id, wing_b_id, is_surprise }
 var _timer := AUTO_DISMISS_SEC
@@ -1559,7 +1695,11 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
     draw_circle(Vector2.ZERO, 16.0, Color(1.0, 0.4, 0.0, 0.75))
-    draw_texture_rect(CROSSHAIRS_ICON, Rect2(Vector2(-10, -10), Vector2(20, 20)), false)
+    # Procedural crosshairs (crosshairs-solid.svg is missing from assets)
+    var c := Color(1.0, 1.0, 1.0, 0.9)
+    draw_line(Vector2(-9, 0), Vector2(9, 0), c, 2.0)
+    draw_line(Vector2(0, -9), Vector2(0, 9), c, 2.0)
+    draw_arc(Vector2.ZERO, 5.0, 0.0, TAU, 32, c, 1.5)
     var progress := maxf(0.0, _timer / AUTO_DISMISS_SEC)
     draw_arc(Vector2.ZERO, 20.0, -PI * 0.5, -PI * 0.5 + TAU * progress,
              32, Color(1, 1, 1, 0.6 * progress), 2.0)
@@ -1588,7 +1728,7 @@ func _on_air_combat_started(data: Dictionary) -> void:
     var key := _bucket_key(mid_lng, mid_lat)
     if not _dogfight_indicators.has(key) or not is_instance_valid(_dogfight_indicators[key]):
         var indicator = DogfightIndicatorScene.instantiate()
-        add_child(indicator)
+        _icon_layer.add_child(indicator)
         indicator.position = _map_loader.project_lng_lat(mid_lng, mid_lat)
         indicator.tree_exited.connect(func(): _dogfight_indicators.erase(key))
         _dogfight_indicators[key] = indicator
