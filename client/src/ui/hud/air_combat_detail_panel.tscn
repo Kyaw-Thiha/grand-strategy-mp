@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://air_combat_detail_panel"]
+
+[ext_resource type="Script" path="res://src/ui/hud/air_combat_detail_panel.gd" id="1_acdp"]
+
+[node name="AirCombatDetailPanel" type="PanelContainer"]
+script = ExtResource("1_acdp")

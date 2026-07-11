@@ -48,7 +48,9 @@ var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
 var _last_synced_gen_id: Dictionary = {}
 var _detected_wings: Dictionary = {}
-var _bombing_indicators: Dictionary = {}  # province_id → BombingRunIndicator
+var _bombing_indicators: Dictionary = {}    # province_id → BombingRunIndicator
+var _air_combat_indicators: Dictionary = {} # bucket_key → AirCombatBanner node
+var _bucket_slot_counts: Dictionary    = {} # bucket_key → int (all indicator types)
 
 
 func setup(map_loader: Node, icon_layer: Node2D) -> void:
@@ -240,13 +242,32 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 			best_dist = dist
 			best_id   = wing_id
 
-	if best_id.is_empty():
-		if not _selected_wing_id.is_empty():
-			_deselect()
-		return false
+	if not best_id.is_empty():
+		_select(best_id)
+		return true
 
-	_select(best_id)
-	return true
+	# Check air combat banners
+	const BANNER_HIT_R: float = 20.0
+	for banner_key in _air_combat_indicators:
+		var banner = _air_combat_indicators[banner_key]
+		if not is_instance_valid(banner):
+			continue
+		if world_pos.distance_to(banner.position) <= BANNER_HIT_R:
+			banner.on_clicked()
+			return true
+
+	# Check bombing run indicators
+	for province_id in _bombing_indicators:
+		var indicator = _bombing_indicators[province_id]
+		if not is_instance_valid(indicator):
+			continue
+		if world_pos.distance_to(indicator.position) <= BANNER_HIT_R:
+			indicator.on_clicked()
+			return true
+
+	if not _selected_wing_id.is_empty():
+		_deselect()
+	return false
 
 
 func _select(wing_id: String) -> void:
@@ -274,6 +295,10 @@ func _deselect() -> void:
 	_update_ghost()
 	if _range_overlay != null:
 		_range_overlay.hide_overlay()
+
+
+func deselect() -> void:
+	_deselect()
 
 
 func _update_range_overlay() -> void:
@@ -376,17 +401,41 @@ func _on_air_combat_ended(data: Dictionary) -> void:
 	var icon_a = _icons.get(a)
 	var icon_b = _icons.get(b)
 	if icon_a != null and icon_b != null and _icon_layer != null:
-		var nation_a: String = GameState.get_air_wing(a).get("nation_id", "")
-		var nation_b: String = GameState.get_air_wing(b).get("nation_id", "")
-		var banner: Node2D = preload("res://src/systems/air/air_combat_banner.gd").new()
-		_icon_layer.add_child(banner)
-		banner.setup(
-			icon_a.position, icon_b.position,
-			"air",
-			GameState.get_my_nation_id(),
-			nation_a,
-			nation_b,
-		)
+		var wing_a_data: Dictionary = GameState.get_air_wing(a)
+		var wing_b_data: Dictionary = GameState.get_air_wing(b)
+		var nation_a: String = data.get("wing_a_nation_id", wing_a_data.get("nation_id", ""))
+		var nation_b: String = data.get("wing_b_nation_id", wing_b_data.get("nation_id", ""))
+		var mid_lng: float = (float(wing_a_data.get("position_lng", 0.0))
+				+ float(wing_b_data.get("position_lng", 0.0))) / 2.0
+		var mid_lat: float = (float(wing_a_data.get("position_lat", 0.0))
+				+ float(wing_b_data.get("position_lat", 0.0))) / 2.0
+		var bucket: String = _bucket_key(mid_lng, mid_lat)
+		var _pk := PackedStringArray([a, b])
+		_pk.sort()
+		var _pair_key := ",".join(_pk)
+		if _air_combat_indicators.has(bucket) and is_instance_valid(_air_combat_indicators[bucket]):
+			if _air_combat_indicators[bucket].has_pair_entry(_pair_key):
+				return
+			_air_combat_indicators[bucket].add_combat(data)
+		else:
+			var slot: int = _bucket_slot_counts.get(bucket, 0)
+			var banner: Node2D = preload("res://src/systems/air/air_combat_banner.gd").new()
+			_icon_layer.add_child(banner)
+			banner.setup_with_data(
+				icon_a.position, icon_b.position,
+				"air",
+				GameState.get_my_nation_id(),
+				nation_a,
+				nation_b,
+				data,
+			)
+			banner.position += Vector2(32.0 * slot, 0.0)
+			_air_combat_indicators[bucket] = banner
+			_bucket_slot_counts[bucket] = slot + 1
+			banner.tree_exited.connect(func() -> void:
+				_air_combat_indicators.erase(bucket)
+				_bucket_slot_counts[bucket] = max(0, _bucket_slot_counts.get(bucket, 1) - 1)
+			)
 
 
 func _on_air_bombing_result(data: Dictionary) -> void:
@@ -395,18 +444,26 @@ func _on_air_bombing_result(data: Dictionary) -> void:
 		return
 	if not _bombing_indicators.has(province_id) or \
 	   not is_instance_valid(_bombing_indicators[province_id]):
-		var indicator = BombingRunIndicatorScene.instantiate()
-		_icon_layer.add_child(indicator)
 		var province_data: Dictionary = _map_loader.get_province_data(province_id)
 		if province_data.is_empty():
-			indicator.queue_free()
 			return
 		var city_pos: Array = province_data.get("city_position", [])
 		if city_pos.size() < 2:
-			indicator.queue_free()
 			return
-		indicator.setup(_map_loader, province_id, float(city_pos[0]), float(city_pos[1]))
+		var b_lng: float = float(city_pos[0])
+		var b_lat: float = float(city_pos[1])
+		var key: String = _bucket_key(b_lng, b_lat)
+		var slot: int = _bucket_slot_counts.get(key, 0)
+		var indicator = BombingRunIndicatorScene.instantiate()
+		_icon_layer.add_child(indicator)
+		indicator.setup(_map_loader, province_id, b_lng, b_lat)
+		indicator.position += Vector2(32.0 * slot, 0.0)
 		_bombing_indicators[province_id] = indicator
+		_bucket_slot_counts[key] = slot + 1
+		indicator.tree_exited.connect(func() -> void:
+			_bombing_indicators.erase(province_id)
+			_bucket_slot_counts[key] = max(0, _bucket_slot_counts.get(key, 1) - 1)
+		)
 	for run in data.get("runs", []):
 		_bombing_indicators[province_id].add_run(run)
 
@@ -551,6 +608,15 @@ func cleanup() -> void:
 		if is_instance_valid(indicator):
 			indicator.queue_free()
 	_bombing_indicators.clear()
+	for banner in _air_combat_indicators.values():
+		if is_instance_valid(banner):
+			banner.queue_free()
+	_air_combat_indicators.clear()
+	_bucket_slot_counts.clear()
+
+
+func _bucket_key(lng: float, lat: float) -> String:
+	return "%d_%d" % [int(lng / 0.5), int(lat / 0.5)]
 
 
 func _update_ghost() -> void:

@@ -47,11 +47,16 @@ export class AirCombatSystem {
 
     const countSnapshots = new Map<string, number>();
     const readinessSnapshots = new Map<string, number>();
+    const nationIdSnapshots = new Map<string, string>();
+    const aircraftTypeSnapshots = new Map<string, string>();
     for (const wing of state.air_wings.values()) {
       countSnapshots.set(wing.wing_id, wing.count);
       readinessSnapshots.set(wing.wing_id, wing.combat_readiness);
+      nationIdSnapshots.set(wing.wing_id, wing.nation_id);
+      aircraftTypeSnapshots.set(wing.wing_id, wing.aircraft_type);
     }
 
+    const surpriseMap = new Map<string, boolean>();
     const engagedPairs: Array<[string, string]> = [];
 
     for (const [attackerWingId, targetWingId] of assignments) {
@@ -61,6 +66,7 @@ export class AirCombatSystem {
 
       const isSurprise = target.is_detected === true && attacker.is_detected === false;
       broadcast("AIR_COMBAT_STARTED", { wing_a_id: attackerWingId, wing_b_id: targetWingId, is_surprise: isSurprise });
+      surpriseMap.set(attackerWingId, isSurprise);
 
       this._resolveOneSide(attacker, target, isSurprise,
         countSnapshots.get(attackerWingId) ?? attacker.count,
@@ -71,6 +77,7 @@ export class AirCombatSystem {
     }
 
     const lifecycleProcessed = new Set<string>();
+    const broadcastedPairs = new Set<string>();
     for (const [attackerWingId, targetWingId] of engagedPairs) {
       for (const [wingId, otherId] of [[attackerWingId, targetWingId], [targetWingId, attackerWingId]] as [string, string][]) {
         if (lifecycleProcessed.has(wingId)) continue;
@@ -88,12 +95,26 @@ export class AirCombatSystem {
         }
       }
 
+      const pairKey = [attackerWingId, targetWingId].sort().join("|");
+      if (broadcastedPairs.has(pairKey)) continue;
+      broadcastedPairs.add(pairKey);
+
       const aWing = state.air_wings.get(attackerWingId);
       const tWing = state.air_wings.get(targetWingId);
+      const aCountBefore = countSnapshots.get(attackerWingId) ?? 0;
+      const tCountBefore = countSnapshots.get(targetWingId)   ?? 0;
       broadcast("AIR_COMBAT_ENDED", {
-        wing_a_id: attackerWingId, wing_b_id: targetWingId,
-        attacker_destroyed: !aWing || aWing.count <= 0,
-        target_destroyed:   !tWing || tWing.count <= 0,
+        wing_a_id:            attackerWingId,
+        wing_b_id:            targetWingId,
+        attacker_destroyed:   !aWing || aWing.count <= 0,
+        target_destroyed:     !tWing || tWing.count <= 0,
+        wing_a_nation_id:     nationIdSnapshots.get(attackerWingId) ?? "",
+        wing_b_nation_id:     nationIdSnapshots.get(targetWingId)   ?? "",
+        wing_a_aircraft_type: aircraftTypeSnapshots.get(attackerWingId) ?? "",
+        wing_b_aircraft_type: aircraftTypeSnapshots.get(targetWingId)   ?? "",
+        wing_a_planes_lost:   Math.max(0, aCountBefore - (aWing?.count ?? 0)),
+        wing_b_planes_lost:   Math.max(0, tCountBefore - (tWing?.count ?? 0)),
+        is_surprise:          surpriseMap.get(attackerWingId) ?? false,
       });
     }
   }
@@ -126,7 +147,9 @@ export class AirCombatSystem {
       target.combat_readiness   = Math.max(0, target.combat_readiness   - READINESS_COMBAT_SPIKE_AIR);
     }
 
-    lifecycleSystem.startWeaponCooldown(attacker.wing_id, state);
+    if (attacker.weapon_ready) {
+      lifecycleSystem.startWeaponCooldown(attacker.wing_id, state);
+    }
   }
 
   private _findPairs(

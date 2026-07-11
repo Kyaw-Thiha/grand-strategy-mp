@@ -6,9 +6,10 @@ const DISPLAY_DURATION: float   = 4.0
 const ICON_SIZE:        Vector2 = Vector2(14, 14)
 
 ## Fill colors — combat type
-const C_AIR:   Color = Color(0.25, 0.55, 0.85, 1.0)  # sky blue — air-to-air
-const C_LAND:  Color = Color(0.85, 0.50, 0.10, 1.0)  # amber    — air-to-land
-const C_NAVAL: Color = Color(0.10, 0.62, 0.62, 1.0)  # sea teal — air-to-naval
+const C_AIR:      Color = Color(0.25, 0.55, 0.85, 1.0)  # sky blue    — air-to-air
+const C_LAND:     Color = Color(0.85, 0.50, 0.10, 1.0)  # amber       — air-to-land
+const C_NAVAL:    Color = Color(0.10, 0.62, 0.62, 1.0)  # sea teal    — air-to-naval
+const C_STRATEGIC: Color = Color(0.55, 0.20, 0.75, 1.0) # purple      — strategic bombing
 
 ## Outcome ring colors — player-relative role (air-to-air only)
 const C_ATTACKER: Color = Color(0.20, 0.75, 0.35, 1.0)  # green — we attacked
@@ -21,24 +22,48 @@ var _fill_color: Color = C_AIR
 var _ring_color: Color = C_OBSERVER
 var _show_ring:  bool  = false
 var _elapsed:    float = 0.0
+var _dismissing: bool  = false
 var _icon_tex:   Texture2D
+var _combats: Array[Dictionary] = []
+var _pair_keys: Array[String] = []
+var _badge_label: Label
 
 
-## combat_type: "air", "land", or "naval"
+func _ready() -> void:
+	var lbl := Label.new()
+	lbl.name = "BadgeLabel"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.position = Vector2(6.0, -18.0)
+	lbl.size = Vector2(12, 12)
+	lbl.visible = false
+	add_child(lbl)
+	_badge_label = lbl
+
+
+## combat_type: "air", "land", "naval", or "strategic"
 ## local_nation_id: the player's own nation string
 ## wing_a_nation_id: attacker's nation
 ## wing_b_nation_id: defender's nation
-func setup(wing_a_pos: Vector2, wing_b_pos: Vector2,
+## first_combat_data: full AIR_COMBAT_ENDED payload dict
+func setup_with_data(wing_a_pos: Vector2, wing_b_pos: Vector2,
 		combat_type: String,
 		local_nation_id: String,
 		wing_a_nation_id: String,
-		wing_b_nation_id: String) -> void:
+		wing_b_nation_id: String,
+		first_combat_data: Dictionary) -> void:
 	position = (wing_a_pos + wing_b_pos) * 0.5 + Vector2(0, -24)
+	_combats.append(first_combat_data)
+	var _p := PackedStringArray([first_combat_data.get("wing_a_id", ""), first_combat_data.get("wing_b_id", "")])
+	_p.sort()
+	_pair_keys.append(",".join(_p))
 
 	match combat_type:
-		"land":  _fill_color = C_LAND
-		"naval": _fill_color = C_NAVAL
-		_:       _fill_color = C_AIR
+		"land":      _fill_color = C_LAND
+		"naval":     _fill_color = C_NAVAL
+		"strategic": _fill_color = C_STRATEGIC
+		_:           _fill_color = C_AIR
 
 	if combat_type == "air":
 		_show_ring = true
@@ -60,7 +85,24 @@ func setup(wing_a_pos: Vector2, wing_b_pos: Vector2,
 	queue_redraw()
 
 
+func has_pair_entry(pair_key: String) -> bool:
+	return _pair_keys.has(pair_key)
+
+
+## Stack an additional combat into this indicator (same 0.5° bucket, same type).
+func add_combat(data: Dictionary) -> void:
+	_combats.append(data)
+	var _p := PackedStringArray([data.get("wing_a_id", ""), data.get("wing_b_id", "")])
+	_p.sort()
+	_pair_keys.append(",".join(_p))
+	_badge_label.text = "×%d" % _combats.size()
+	_badge_label.visible = true
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
+	if _dismissing:
+		return
 	_elapsed += delta
 	queue_redraw()
 
@@ -79,7 +121,17 @@ func _draw() -> void:
 				32, _ring_color, 2.5)
 
 
+func on_clicked() -> void:
+	if _dismissing:
+		return
+	_begin_dismiss()
+	EventBus.air_combat_detail_open_requested.emit({ "combats": _combats })
+
+
 func _begin_dismiss() -> void:
+	if _dismissing:
+		return
+	_dismissing = true
 	set_process(false)
 	var tween := create_tween()
 	tween.set_parallel(true)
