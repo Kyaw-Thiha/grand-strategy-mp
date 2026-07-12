@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -32,7 +33,7 @@ describe("lane:air-combat | 12b-patch — Air wing lifecycle handlers", function
     setRefuelDurationTicksForTesting(1);
     setReadinessDecayForTesting(0.01);
     setReadinessRecoveryForTesting(0.5);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
@@ -40,7 +41,6 @@ describe("lane:air-combat | 12b-patch — Air wing lifecycle handlers", function
     setRefuelDurationTicksForTesting(5);
     setReadinessDecayForTesting(0.003);
     setReadinessRecoveryForTesting(0.04);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 

@@ -63,11 +63,14 @@ Server tests in `game-server/test/` are organized into four lanes defined in `ga
 
 `npm test` auto-detects which lanes are affected by your changes (via `git diff`) and runs only those. Shared files (`src/rooms/schema/GameRoomState.ts`, `src/data/map_loader.ts`) trigger the full suite.
 
+`npm run test:full` uses mocha parallel mode (`jobs`: 8) to run test files across multiple workers. Each worker gets a unique port via `process.env.MOCHA_WORKER_ID` offset from 2568 (`test/helpers.ts` exports `getTestPort()`).
+
 Use `npm run test:<lane>` to explicitly run a lane. Use `npm run test:full` for comprehensive coverage.
 
 New test files must:
-1. Be listed in their lane's `tests` array in `test-lanes.json`
-2. Prefix their top-level `describe()` with `lane:<name> | ` (e.g. `describe("lane:air-combat | 12z — New feature", ...)`)
+1. Import `getTestPort` from `./helpers.js` and pass it to `boot(appConfig, getTestPort())`
+2. Be listed in their lane's `tests` array in `test-lanes.json`
+3. Prefix their top-level `describe()` with `lane:<name> | ` (e.g. `describe("lane:air-combat | 12z — New feature", ...)`)
 
 ---
 

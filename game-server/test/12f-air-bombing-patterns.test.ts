@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -225,14 +226,13 @@ describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
     process.env.DEV_MODE = "true";
     setRtbDurationTicksForTesting(2);
     setRefuelDurationTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
     if (previousDevMode === undefined) delete process.env.DEV_MODE;
     else process.env.DEV_MODE = previousDevMode;
     resetRng();
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 

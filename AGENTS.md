@@ -55,7 +55,7 @@ There is currently no root workspace `package.json` and no `packages/shared-type
 ### Tests and Checks
 
 - `cd game-server && npm test` — auto-detects affected lanes from git diff
-- `cd game-server && npm run test:full` — all test files (takes ~9 min)
+- `cd game-server && npm run test:full` — all test files in parallel (takes ~4 min)
 - `cd game-server && npm run test:air` — air combat tests only
 - `cd game-server && npm run test:tactical` — tactical combat tests only
 - `cd game-server && npm run test:movement` — movement tests only
@@ -152,7 +152,7 @@ Before marking a task complete:
 
 - Run the smallest relevant automated checks for the files changed.
 - For server simulation changes, run `cd game-server && npm test` (auto-detects which lane to run based on your diff). Run `cd game-server && npm run test:full` before merging to main.
-- Adding a new server test file? Add it to the relevant lane in `game-server/test-lanes.json` and prefix its top-level `describe()` with `lane:<name> | `.
+- Adding a new server test file? Import `getTestPort` from `./helpers.js`, pass it to `boot(appConfig, getTestPort())`, add it to the relevant lane in `game-server/test-lanes.json`, and prefix its top-level `describe()` with `lane:<name> | `.
 - For API changes, run `cd api-server && bun test <relevant test file>` and consider adding a package script if the test surface grows.
 - For full flow changes, run the relevant `scripts/e2e-*.sh` script.
 - For Godot UI/client changes, run targeted headless scene tests when available and describe manual checks for visual/interaction behavior.

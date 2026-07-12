@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import { GameRoomState, DivisionState } from "../src/rooms/schema/GameRoomState.js";
 import { UnitType, XpTier } from "../src/types/tactical_types.js";
 
@@ -21,11 +22,10 @@ describe("lane:tactical | 6a — Tactical Grid Schema", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
-  before(async () => { colyseus = await boot(appConfig); });
+  before(async () => { colyseus = await boot(appConfig, getTestPort()); });
   // Small drain delay lets in-flight HTTP requests complete before shutdown
   // to avoid ERR_HTTP_HEADERS_SENT contaminating subsequent test suites.
   after(async () => {
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
   beforeEach(async () => { await colyseus.cleanup(); });

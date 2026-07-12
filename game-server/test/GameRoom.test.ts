@@ -2,6 +2,7 @@ import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { setCombatGraceTicksForTesting } from "../src/systems/combat_system.js";
 
@@ -20,7 +21,7 @@ describe("lane:core | GameRoom", () => {
 
   before(async () => {
     setCombatGraceTicksForTesting(0);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
   after(async () => {
     setCombatGraceTicksForTesting(10);

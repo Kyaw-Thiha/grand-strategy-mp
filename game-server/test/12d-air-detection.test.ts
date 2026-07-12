@@ -4,6 +4,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { Encoder } from "@colyseus/schema";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -37,7 +38,7 @@ describe("lane:air-combat | 12d — Air Detection System", function () {
     setReconWingRadiusForTesting(2.0);
     setKmPerDegForTesting(100.0);
     setEngagementRangeForTesting(0); // detection tests must not trigger combat
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
@@ -47,7 +48,6 @@ describe("lane:air-combat | 12d — Air Detection System", function () {
     setReconWingRadiusForTesting(1.0);
     setKmPerDegForTesting(111.32);
     setEngagementRangeForTesting(0.3);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 

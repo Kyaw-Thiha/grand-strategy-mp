@@ -9,6 +9,7 @@ import type { TerrainModifierRule, TerrainCellInput } from "../src/systems/terra
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { setRoundTicksForTesting, setCombatGraceTicksForTesting } from "../src/systems/combat_system.js";
 
@@ -210,12 +211,11 @@ describe("lane:tactical | terrain-modifier-system — integration (no active rul
   before(async () => {
     setRoundTicksForTesting(3);
     setCombatGraceTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
   after(async () => {
     setRoundTicksForTesting(20);
     setCombatGraceTicksForTesting(10);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
   beforeEach(async () => { await colyseus.cleanup(); });

@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import { DubinsPathfinder, setWingSpeedForTesting, setTurnRadiusForTesting } from "../src/systems/air_dubins_pathfinder.js";
@@ -171,13 +172,12 @@ describe("lane:air-combat | 12c — Air wing path integration", function () {
   before(async () => {
     setWingSpeedForTesting(0.0005);
     setTurnRadiusForTesting(0.1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
     setWingSpeedForTesting(SPEED);
     setTurnRadiusForTesting(RADIUS);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
