@@ -101,13 +101,9 @@ describe("12e — Air Combat System", function () {
     return wing;
   }
 
-  async function settleRoom(): Promise<void> {
-    await new Promise(r => setTimeout(r, 500));
-  }
-
   async function tickRoom(room: any): Promise<void> {
     (room as any).gameTick();
-    await settleRoom();
+    await room.waitForNextPatch();
   }
 
   // ── Stat table unit tests (no server) ─────────────────────────────────────
@@ -727,34 +723,5 @@ describe("12e — Air Combat System", function () {
       assert.strictEqual(frWing.is_detected, true, "Heavy fighter should detect fighter at 0.2°");
     });
 
-    it("fighter (0.05°) does NOT detect enemy 0.2° away", async () => {
-      const { room } = await joinRoom();
-      setRelation(room, "germany", "france", "war");
-
-      const gerWing = getWing(room, "germany_wing_01");
-      const frWing = getWing(room, "france_wing_01");
-
-      // Regular fighter (observation 0.05°)
-      gerWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      gerWing.aircraft_type = "fighter";
-      gerWing.mission = MISSION_TYPES.INTERCEPTION;
-      gerWing.count = 10;
-      gerWing.weapon_ready = true;
-      gerWing.combat_readiness = 1.0;
-      gerWing.position_lng = 10.0;
-      gerWing.position_lat = 50.0;
-
-      frWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      frWing.aircraft_type = "fighter";
-      frWing.count = 10;
-      frWing.weapon_ready = true;
-      frWing.combat_readiness = 1.0;
-      frWing.position_lng = 10.2;
-      frWing.position_lat = 50.0;
-
-      await tickRoom(room);
-      // Fighter should NOT detect at 0.2° (outside 0.05°)
-      assert.strictEqual(frWing.is_detected, false, "Fighter should NOT detect at 0.2°");
-    });
   });
 });

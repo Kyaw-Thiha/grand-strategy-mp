@@ -143,6 +143,9 @@ describe("row-perk-system — integration", function () {
     await room.waitForNextPatch();
 
     await (room as any).startGame();
+    // startGame() resets all relations to neutral via _initRelations().
+    // Declare war so _detectEngagements() can trigger COMBAT_STARTED.
+    client.send("SET_RELATION", { nation_a: "germany", nation_b: "france", stance: "war" });
     await room.waitForNextPatch();
     await client.waitForMessage("COMBAT_STARTED", 60_000);
 

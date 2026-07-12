@@ -24,7 +24,7 @@ describe("GameRoom", () => {
   });
   after(async () => {
     setCombatGraceTicksForTesting(10);
-    colyseus.shutdown();
+    await colyseus.shutdown();
   });
   beforeEach(async () => await colyseus.cleanup());
 

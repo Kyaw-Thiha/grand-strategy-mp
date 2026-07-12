@@ -97,13 +97,9 @@ describe("12d — Air Detection System", function () {
     });
   }
 
-  async function settleRoom(): Promise<void> {
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
   async function tickRoom(room: any): Promise<void> {
     (room as any).gameTick();
-    await settleRoom();
+    await room.waitForNextPatch();
   }
 
   it("defaults is_detected to false", () => {
@@ -216,8 +212,11 @@ describe("12d — Air Detection System", function () {
       await tickRoom(room);
       assert.strictEqual(getWing(room, "france_wing_01").is_detected, true);
 
-      reconWing.position_lng = 30;
-      reconWing.position_lat = 50;
+      // The first tick transitions reconWing from TRANSIT→LOITER (no path/target fallback).
+      // Setting lifecycle to IDLE removes it from the airborne set entirely, which is the
+      // correct way to simulate "wing left the area" — direct position assignment is
+      // overwritten by the pathfinder evaluating the loiter arc on the next tick.
+      reconWing.lifecycle_state = WING_LIFECYCLE.IDLE;
       await tickRoom(room);
       assert.strictEqual(getWing(room, "france_wing_01").is_detected, false);
     });

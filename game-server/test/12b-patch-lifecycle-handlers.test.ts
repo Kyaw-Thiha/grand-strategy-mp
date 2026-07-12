@@ -38,8 +38,8 @@ describe("12b-patch — Air wing lifecycle handlers", function () {
   after(async () => {
     setRtbDurationTicksForTesting(5);
     setRefuelDurationTicksForTesting(5);
-    setReadinessDecayForTesting(0.04);
-    setReadinessRecoveryForTesting(0.06);
+    setReadinessDecayForTesting(0.003);
+    setReadinessRecoveryForTesting(0.04);
     await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });

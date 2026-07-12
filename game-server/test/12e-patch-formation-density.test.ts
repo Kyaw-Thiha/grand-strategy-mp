@@ -108,7 +108,7 @@ describe("12e-patch — Formation Density & Escort Path", function () {
 
   async function tickRoom(room: any): Promise<void> {
     (room as any).gameTick();
-    await new Promise(r => setTimeout(r, 500));
+    await room.waitForNextPatch();
   }
 
   // ── Step 1: Escort Path Mirroring ─────────────────────────────────────────
