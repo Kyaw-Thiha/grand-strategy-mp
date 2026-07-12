@@ -238,24 +238,34 @@ The overlay's `start_node.position` is already prepended as point[0]; the chain 
 contain only the remaining segment END points — which `get_remaining_endpoints` provides.
 Do NOT include the path's original `start_lng/lat` in the returned array.
 
-### 0a-3. Pursuit color in the overlay call site
+### 0a-3. Pursuit color — modify `_get_selected_wing_color()`
 
-In the function that calls `_pending_route_overlay.set_path(chain, milestones, color)`
-(inside `_update_ghost()` or wherever the color is passed), add a conditional:
+`_update_ghost()` (line 634) already calls `_get_selected_wing_color()` and passes the
+result to `set_path()` as the third positional arg. Do NOT add a separate color block in
+`_update_ghost()`. Instead, modify `_get_selected_wing_color()` at line 667 to check
+`target_id`:
 
 ```gdscript
-var wing_state = _get_wing_data(_selected_wing_id)   # or however state is accessed
-var path_color: Color
-if wing_state and wing_state.get("target_id", "") != "":
-    path_color = Color(1.0, 0.55, 0.1, 0.7)           # Amber — pursuit / following target
-else:
-    var nid: String = wing_state.get("nation_id", "") if wing_state else ""
-    var nc: Color   = _nation_colors.get(nid, NEUTRAL_COLOR)
-    path_color      = Color(nc.r, nc.g, nc.b, 0.55)   # Nation color — normal movement
+# BEFORE (lines 667–671):
+func _get_selected_wing_color() -> Color:
+    if _selected_wing_id.is_empty():
+        return NEUTRAL_COLOR
+    var data: Dictionary = GameState.get_air_wing(_selected_wing_id)
+    return NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
+
+# AFTER:
+func _get_selected_wing_color() -> Color:
+    if _selected_wing_id.is_empty():
+        return NEUTRAL_COLOR
+    var data: Dictionary = GameState.get_air_wing(_selected_wing_id)
+    if data.get("target_id", "") != "":
+        return Color(1.0, 0.55, 0.1, 0.7)  # Amber — pursuit / following target
+    return NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 ```
 
-Check whether `set_path()` takes `color` as a parameter or reads it from a property on
-the overlay, and follow the existing call convention.
+`GameState.get_air_wing()` is the correct accessor (used at lines 125, 145, 307, 641,
+670). `NATION_COLORS` is a module-level const at line 19 (NOT `_nation_colors`).
+`NEUTRAL_COLOR` is defined at line 27.
 
 ### Notes for execution agent (Step 0a)
 
@@ -486,6 +496,11 @@ _dr_icon_reconcile_t.erase(div_id)
 
 ## Step 0: Air Combat Banner (Client-Only)
 
+> **ALREADY IMPLEMENTED — SKIP THIS STEP.** `air_combat_banner.gd` already exists with
+> `setup_with_data(wing_a_pos, wing_b_pos, combat_type, local_nation_id, wing_a_nation_id,
+> wing_b_nation_id, first_combat_data)`. `air_wing_system.gd` already has
+> `_on_air_combat_ended` wired to it at lines 418–431. Nothing to do here.
+
 Air combat resolves in a single server tick — there is no "started" event, only
 `AIR_COMBAT_ENDED`. The banner is a **timed flash** that appears at the midpoint of the
 two wing icons and auto-dismisses after a few seconds.
@@ -647,8 +662,8 @@ export interface AirUnitStats {
 }
 
 const STAT_TABLE: Record<string, AirUnitStats> = {
-  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.25, min_turn_radius_deg: 0.30 },
-  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.35, min_turn_radius_deg: 0.50 },
+  fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.30 },
+  heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.25, min_turn_radius_deg: 0.50 },
   cas_plane:        { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.30 },
   dive_bomber:      { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.40 },
   tactical_bomber:  { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05, min_turn_radius_deg: 0.50 },
@@ -769,12 +784,12 @@ if (Math.abs(delta) < STRAIGHT_THRESHOLD_DEG) {
 
   // Build segments using existing helpers
   // Read makeArcSegment() signature at lines 197–212 and adapt accordingly
-  const arcSeg = makeArcSegment({
-    center_lng: centerLng, center_lat: centerLat,
-    radius_deg: turnRadiusDeg,
-    start_angle_rad: startAngleRad,
-    sweep_rad: sweepRad,
-  });
+  const arcSeg = makeArcSegment(
+    { lng: centerLng, lat: centerLat },
+    turnRadiusDeg,
+    startAngleRad,
+    sweepRad,
+  );
   const exitBearing = bearingCompassDeg({ lng: arcExitLng, lat: arcExitLat }, endPos);
   const straightSeg = makeStraightSegment(
     { lng: arcExitLng, lat: arcExitLat }, endPos, exitBearing
@@ -913,22 +928,46 @@ this.onMessage("ASSIGN_WING_MISSION", (client, msg: {
 });
 ```
 
-### 2d. Strategic bomber — friendly capture → RTB
+### 2d. Add `resolveWingBombed` to `air_wing_lifecycle_system.ts`
 
-In `air_strategic_bombing_system.ts` (Branch G amendment), the existing guard:
+`resolveWingBombed` does **NOT** exist yet — create it before Steps 2d and 3 can use it.
+It should RTB the wing (bombing run complete or target gone), similar to how
+`resolveEngagement` finalises an air-to-air fight. Add as a public method:
 
 ```typescript
-// Before (skips silently):
-if (province.owner_id === wing.nation_id) continue;
+resolveWingBombed(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void {
+  this.retreatWing(wingId, state, broadcast);
+}
+```
 
-// After (RTB on friendly capture):
-if (province.owner_id === wing.nation_id) {
-  lifecycleSystem.resolveWingBombed(wing.wing_id, state);
+`retreatWing` takes 3 params: `(wingId, state: GameRoomState, broadcast: BroadcastFn)`.
+`BroadcastFn` is defined at line 48 of the lifecycle system as
+`type BroadcastFn = (type: string, msg: unknown) => void`. Add `resolveWingBombed` as
+a public method alongside `retreatWing`.
+
+### 2e. Strategic bomber — friendly capture → RTB
+
+In `air_bombing_system.ts`, there is **no existing province-owner guard** — the system
+identifies bombing targets via engagement objects returned by
+`combatSystem.getEngagementAtPosition()`, NOT by direct province ownership checks.
+The engagement contains `defender_nation_id`.
+
+After the engagement null-check at line ~56 (`if (!engagement) continue;`), insert:
+
+```typescript
+// RTB if the target province is now owned by a friendly nation
+if (engagement.defender_nation_id === wing.nation_id) {
+  lifecycleSystem.resolveEngagement(wing.wing_id, state, broadcast);
   continue;
 }
 ```
 
-### 2e. Tests
+Use `lifecycleSystem.resolveEngagement()` — it already exists in this file (line 95)
+and is the correct hook for post-bombing state transitions. Do NOT use
+`resolveWingBombed` here; that method is for the lifecycle system's internal loiter
+timeout (Step 3).
+
+### 2f. Tests
 
 ```typescript
 describe("Lost contact handling", () => {
@@ -960,6 +999,8 @@ describe("Lost contact handling", () => {
 When a ground-attack wing (CAS/dive/tactical bomber on AREA or TACTICAL_BOMBING
 mission) loiters with no engagement, RTB after N ticks.
 
+`resolveWingBombed` is added in Step 2d — execute Step 2d before Step 3.
+
 ### 3a. Constants and tracking in `air_wing_lifecycle_system.ts`
 
 ```typescript
@@ -980,7 +1021,7 @@ if (GROUND_ATTACK_MISSIONS.has(wing.mission) &&
   _groundAttackLoiterCount.set(wing.wing_id, count);
   if (count >= GROUND_ATTACK_LOITER_MAX_TICKS) {
     _groundAttackLoiterCount.delete(wing.wing_id);
-    this.resolveWingBombed(wing.wing_id, state);
+    this.resolveWingBombed(wing.wing_id, state, broadcast);
   }
 }
 ```
@@ -1031,7 +1072,7 @@ Replace the existing right-click body (lines 288–341) with:
 
 ```gdscript
 if event.button_index == MOUSE_BUTTON_RIGHT and _selected_wing_id != "":
-    var selected_wing = _get_wing_data(_selected_wing_id)
+    var selected_wing: Dictionary = GameState.get_air_wing(_selected_wing_id)
     if not selected_wing:
         return
 
