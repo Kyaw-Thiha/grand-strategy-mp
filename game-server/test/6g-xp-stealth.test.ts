@@ -27,7 +27,7 @@ function makeCell(overrides: Partial<{
 
 // ── getXpTier ─────────────────────────────────────────────────────────────
 
-describe("6g — XP tier", function () {
+describe("lane:tactical | 6g — XP tier", function () {
   it("0 pts → green",    () => assert.strictEqual(getXpTier(0),    "green"));
   it("99 pts → green",   () => assert.strictEqual(getXpTier(99),   "green"));
   it("100 pts → seasoned",() => assert.strictEqual(getXpTier(100), "seasoned"));
@@ -40,7 +40,7 @@ describe("6g — XP tier", function () {
 
 // ── XP stat multipliers ───────────────────────────────────────────────────
 
-describe("6g — XP stat multipliers", function () {
+describe("lane:tactical | 6g — XP stat multipliers", function () {
   it("getXpHpMult: green → 1.0",    () => assert.strictEqual(getXpHpMult(0),    1.0));
   it("getXpHpMult: seasoned → 1.10",() => assert.strictEqual(getXpHpMult(100),  1.10));
   it("getXpHpMult: veteran → 1.20", () => assert.strictEqual(getXpHpMult(400),  1.20));
@@ -64,7 +64,7 @@ describe("6g — XP stat multipliers", function () {
 // ── _computeXpRetention ───────────────────────────────────────────────────
 // _computeXpRetention(hp_ratio, is_incap, div_won, incap_ret, damaged_ret) → mult
 
-describe("6g — XP retention", function () {
+describe("lane:tactical | 6g — XP retention", function () {
   it("HP > 0.5, healthy → 1.0",
     () => assert.strictEqual(_computeXpRetention(0.8,  false, true,  0.4, 0.6), 1.0));
   it("HP = 0.51 → 1.0",
@@ -86,7 +86,7 @@ describe("6g — XP retention", function () {
 // ── _resolveStealthForRound ───────────────────────────────────────────────
 // _resolveStealthForRound(cells, max_enemy_anti, effective_stealths) — mutates stealthed
 
-describe("6g — stealth resolution", function () {
+describe("lane:tactical | 6g — stealth resolution", function () {
   it("stealth=0 → not stealthed (even with max_enemy_anti=0)", () => {
     const cells = [makeCell({ unit_type: "infantry" })];
     _resolveStealthForRound(cells, 0, [0]);

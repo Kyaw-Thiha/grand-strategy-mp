@@ -22,7 +22,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12a — Air Wing Schema", function () {
+describe("lane:air-combat | 12a — Air Wing Schema", function () {
   this.timeout(15_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

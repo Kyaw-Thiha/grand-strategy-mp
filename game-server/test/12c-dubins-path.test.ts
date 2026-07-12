@@ -26,7 +26,7 @@ function dist(a: { lng: number; lat: number }, b: { lng: number; lat: number }):
   return Math.sqrt((a.lng - b.lng) ** 2 + (a.lat - b.lat) ** 2);
 }
 
-describe("12c — Dubins pathfinding", () => {
+describe("lane:air-combat | 12c — Dubins pathfinding", () => {
   it("computeTransitPath: evaluatePosition at t=0 returns start heading", () => {
     const path = pf.computeTransitPath({ lng: 10, lat: 50 }, 0, { lng: 11, lat: 50 });
     const start = pf.evaluatePosition(path, 0);
@@ -163,7 +163,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12c — Air wing path integration", function () {
+describe("lane:air-combat | 12c — Air wing path integration", function () {
   this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

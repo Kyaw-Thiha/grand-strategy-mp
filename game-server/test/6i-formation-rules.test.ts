@@ -34,7 +34,7 @@ function makeRule(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("formation-rule-system — unit tests", () => {
+describe("lane:tactical | formation-rule-system — unit tests", () => {
 
   // ── getActiveFormationRules ────────────────────────────────────────────────
 
@@ -210,7 +210,7 @@ describe("formation-rule-system — unit tests", () => {
 // break existing combat behaviour. Since getActiveFormationRules() returns [],
 // formation bonuses are identity (1.0) and all damage/suppression is unchanged.
 
-describe("formation-rule-system — integration (no active rules = no change)", function () {
+describe("lane:tactical | formation-rule-system — integration (no active rules = no change)", function () {
   this.timeout(180_000);
 
   const JWT_SECRET = process.env.JWT_SECRET || "test-secret";

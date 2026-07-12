@@ -13,7 +13,12 @@
     "loadtest": "tsx loadtest/example.ts --room my_room --numClients 2",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "clean": "rimraf build",
-    "test": "NODE_ENV=test mocha 'test/GameRoom.test.ts' 'test/movement-jerk.test.ts' 'test/6a-grid-schema.test.ts' 'test/6b-perk-extensibility.test.ts' 'test/6b-round-system.test.ts' 'test/6-phase-gate.test.ts' 'test/6c-combat-stats.test.ts' 'test/6d-infantry-patterns.test.ts' 'test/6f-special-patterns.test.ts' 'test/6g-xp-stealth.test.ts' 'test/6h-row-perks.test.ts' 'test/6j-terrain-modifiers.test.ts' 'test/12a-air-wing-schema.test.ts' 'test/12b-air-wing-lifecycle.test.ts' 'test/12b-patch-lifecycle-handlers.test.ts' 'test/12c-dubins-path.test.ts' 'test/12d-air-detection.test.ts' 'test/12e-air-combat.test.ts' 'test/12f-air-bombing-patterns.test.ts' 'test/12e-patch-formation-density.test.ts'",
+    "test": "NODE_ENV=test tsx scripts/test-changed.ts",
+    "test:full": "NODE_ENV=test mocha 'test/*.test.ts'",
+    "test:air": "NODE_ENV=test mocha --grep 'lane:air-combat' 'test/12*.test.ts'",
+    "test:tactical": "NODE_ENV=test mocha --grep 'lane:tactical' 'test/6*.test.ts'",
+    "test:movement": "NODE_ENV=test mocha --grep 'lane:movement' 'test/movement-jerk.test.ts'",
+    "test:core": "NODE_ENV=test mocha --grep 'lane:core' 'test/GameRoom.test.ts'",
     "bot-fight": "NODE_ENV=development tsx scripts/bot_fight.ts"
   },
   "author": "",

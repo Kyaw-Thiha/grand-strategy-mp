@@ -88,7 +88,7 @@ async function startCombat(
   return { client, room, divAId: divA, divBId: divB, engagementId };
 }
 
-describe("6b — Round System", function () {
+describe("lane:tactical | 6b — Round System", function () {
   this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

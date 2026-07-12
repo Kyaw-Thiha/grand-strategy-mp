@@ -17,7 +17,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("6b — Perk System Extensibility", function () {
+describe("lane:tactical | 6b — Perk System Extensibility", function () {
   this.timeout(15_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

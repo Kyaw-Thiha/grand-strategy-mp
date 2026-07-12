@@ -35,7 +35,7 @@ function makeRule(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("terrain-modifier-system — unit tests", () => {
+describe("lane:tactical | terrain-modifier-system — unit tests", () => {
 
   // ── getActiveTerrainModifierRules ─────────────────────────────────────────
 
@@ -184,7 +184,7 @@ describe("terrain-modifier-system — unit tests", () => {
 
 // ── Integration tests (no active rules = no change, regression) ─────────────
 
-describe("terrain-modifier-system — integration (no active rules = no change)", function () {
+describe("lane:tactical | terrain-modifier-system — integration (no active rules = no change)", function () {
   this.timeout(180_000);
 
   async function makeToken(sub = "test-user") {

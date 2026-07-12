@@ -23,7 +23,7 @@ function makeGrid(occupied: Record<number, string>): GridCellState[] {
   });
 }
 
-describe("6d — Infantry attack patterns", function () {
+describe("lane:tactical | 6d — Infantry attack patterns", function () {
 
   // ── _getFrontmostOccupiedRow ───────────────────────────────────────────────
 

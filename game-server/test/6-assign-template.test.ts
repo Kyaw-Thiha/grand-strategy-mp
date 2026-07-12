@@ -19,7 +19,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("ASSIGN_TEMPLATE handler", function () {
+describe("lane:tactical | ASSIGN_TEMPLATE handler", function () {
   this.timeout(60_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

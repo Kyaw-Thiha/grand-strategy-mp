@@ -22,7 +22,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12b-patch — Air wing lifecycle handlers", function () {
+describe("lane:air-combat | 12b-patch — Air wing lifecycle handlers", function () {
   this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

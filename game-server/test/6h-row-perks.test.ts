@@ -35,7 +35,7 @@ function waitForEngagementRound(client: any, engagementId: string, timeoutMs = 6
   });
 }
 
-describe("row-perk-system — unit tests", () => {
+describe("lane:tactical | row-perk-system — unit tests", () => {
 
   it("VANGUARD (row 4): supp_dealt_mult > 1, hp/resist/decay all identity", () => {
     const m = getRowPerkModifiers(4);
@@ -99,7 +99,7 @@ describe("row-perk-system — unit tests", () => {
   });
 });
 
-describe("row-perk-system — integration", function () {
+describe("lane:tactical | row-perk-system — integration", function () {
   this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

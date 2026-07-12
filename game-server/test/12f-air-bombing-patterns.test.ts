@@ -49,7 +49,7 @@ const DEFAULT_CTX: BombingContext = {
   recon_quality:           0.0,
 };
 
-describe("AirAttackPatternRegistry — pure unit tests", () => {
+describe("lane:air-combat | AirAttackPatternRegistry — pure unit tests", () => {
 
   describe("Dive bomber", () => {
     it("hits exactly 1 occupied cell by default", () => {
@@ -214,7 +214,7 @@ describe("AirAttackPatternRegistry — pure unit tests", () => {
   });
 });
 
-describe("12f — AirBombingSystem integration", function () {
+describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
   this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

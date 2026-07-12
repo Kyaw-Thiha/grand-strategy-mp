@@ -33,7 +33,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12e-patch — Formation Density & Escort Path", function () {
+describe("lane:air-combat | 12e-patch — Formation Density & Escort Path", function () {
   this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

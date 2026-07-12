@@ -18,7 +18,7 @@ function buildMockCells(
   return cells;
 }
 
-describe("6c — Unit combat stats: pure functions", function () {
+describe("lane:tactical | 6c — Unit combat stats: pure functions", function () {
   it("_armorPenMultiplier: pen=30 vs armour=60 → 0%", () => {
     assert.strictEqual(_armorPenMultiplier(30, 60), 0);
   });
@@ -108,7 +108,7 @@ function waitForMessage(client: any, type: string, timeoutMs = 60_000): Promise<
   });
 }
 
-describe("6c — Combat stats: integration", function () {
+describe("lane:tactical | 6c — Combat stats: integration", function () {
   this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

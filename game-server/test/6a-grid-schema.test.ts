@@ -16,7 +16,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("6a — Tactical Grid Schema", function () {
+describe("lane:tactical | 6a — Tactical Grid Schema", function () {
   this.timeout(15_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;

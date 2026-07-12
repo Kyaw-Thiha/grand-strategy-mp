@@ -57,7 +57,7 @@ function setStance(room: any, nationA: string, nationB: string, stance: string):
   relation.stance = stance;
 }
 
-describe("Phase 6 gate", function () {
+describe("lane:tactical | Phase 6 gate", function () {
   this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

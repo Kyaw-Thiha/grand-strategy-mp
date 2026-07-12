@@ -15,7 +15,7 @@ async function makeToken(payload: object, secret = jwtSecret) {
     .sign(secret);
 }
 
-describe("GameRoom", () => {
+describe("lane:core | GameRoom", () => {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
