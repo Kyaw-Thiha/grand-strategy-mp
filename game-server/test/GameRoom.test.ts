@@ -113,7 +113,7 @@ describe("lane:core | GameRoom", () => {
       });
 
       client.send("SEND_CHAT", { message: "   " });
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await room.waitForNextPatch();
 
       assert.strictEqual(received, false);
     });
@@ -129,7 +129,7 @@ describe("lane:core | GameRoom", () => {
       assert.strictEqual(room.state.players.size, 1);
 
       client.leave();
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await room.waitForNextPatch();
       assert.strictEqual(room.state.players.size, 0);
     });
   });

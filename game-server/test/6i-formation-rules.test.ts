@@ -212,7 +212,6 @@ describe("lane:tactical | formation-rule-system — unit tests", () => {
 // formation bonuses are identity (1.0) and all damage/suppression is unchanged.
 
 describe("lane:tactical | formation-rule-system — integration (no active rules = no change)", function () {
-  this.timeout(180_000);
 
   const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
   const jwtSecret  = new TextEncoder().encode(JWT_SECRET);
@@ -277,6 +276,9 @@ describe("lane:tactical | formation-rule-system — integration (no active rules
     await room.waitForNextPatch();
 
     await (room as any).startGame();
+    // startGame() resets all relations to neutral via _initRelations().
+    // Declare war so _detectEngagements() can trigger COMBAT_STARTED.
+    client.send("SET_RELATION", { nation_a: "germany", nation_b: "france", stance: "war" });
     await room.waitForNextPatch();
     await client.waitForMessage("COMBAT_STARTED", 60_000);
 

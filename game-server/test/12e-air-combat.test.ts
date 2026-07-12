@@ -33,7 +33,6 @@ async function makeToken(sub = "test-user") {
 }
 
 describe("lane:air-combat | 12e — Air Combat System", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
   let previousDevMode: string | undefined;

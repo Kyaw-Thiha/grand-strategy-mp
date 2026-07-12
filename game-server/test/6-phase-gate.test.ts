@@ -59,7 +59,6 @@ function setStance(room: any, nationA: string, nationB: string, stance: string):
 }
 
 describe("lane:tactical | Phase 6 gate", function () {
-  this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {

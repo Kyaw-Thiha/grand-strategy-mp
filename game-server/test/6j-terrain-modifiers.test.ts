@@ -186,7 +186,6 @@ describe("lane:tactical | terrain-modifier-system — unit tests", () => {
 // ── Integration tests (no active rules = no change, regression) ─────────────
 
 describe("lane:tactical | terrain-modifier-system — integration (no active rules = no change)", function () {
-  this.timeout(180_000);
 
   async function makeToken(sub = "test-user") {
     return new SignJWT({ sub, steam_id: "dev_steam", has_host_pass: true })

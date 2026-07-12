@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { getCachedFile } from "../data/map_cache.js";
 import { randomUUID } from "crypto";
 import type { GameRoomState, DivisionState, GridCellState, RelationState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
@@ -315,7 +316,7 @@ export class CombatSystem {
 
     let raw: Record<string, unknown>;
     try {
-      raw = JSON.parse(readFileSync(dataPath, "utf-8"));
+      raw = getCachedFile(dataPath);
     } catch {
       console.warn(`[CombatSystem] map_data.json not found at ${dataPath} — terrain modifiers disabled`);
       return;

@@ -110,7 +110,6 @@ function waitForMessage(client: any, type: string, timeoutMs = 60_000): Promise<
 }
 
 describe("lane:tactical | 6c — Combat stats: integration", function () {
-  this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {

@@ -4,4 +4,5 @@ module.exports = {
   timeout: 180000,
   parallel: true,
   jobs: 8,
+  reporter: 'min',
 };

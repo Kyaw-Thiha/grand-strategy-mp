@@ -90,7 +90,6 @@ async function startCombat(
 }
 
 describe("lane:tactical | 6b — Round System", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

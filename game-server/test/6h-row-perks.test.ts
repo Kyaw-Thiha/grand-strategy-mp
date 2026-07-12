@@ -101,7 +101,6 @@ describe("lane:tactical | row-perk-system — unit tests", () => {
 });
 
 describe("lane:tactical | row-perk-system — integration", function () {
-  this.timeout(180_000);
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {

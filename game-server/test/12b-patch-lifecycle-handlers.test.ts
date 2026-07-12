@@ -24,7 +24,6 @@ async function makeToken(sub = "test-user") {
 }
 
 describe("lane:air-combat | 12b-patch — Air wing lifecycle handlers", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
@@ -121,7 +120,7 @@ async function waitForWingState(room: any, wingId: string, expectedState: string
     await spawnWing(client, room);
 
     client.send("RETREAT_WING", { wing_id: "wing-1" });
-    await new Promise(r => setTimeout(r, 200));
+    await room.waitForNextPatch();
 
     assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.IDLE);
   });

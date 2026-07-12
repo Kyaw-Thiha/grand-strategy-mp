@@ -216,7 +216,6 @@ describe("lane:air-combat | AirAttackPatternRegistry — pure unit tests", () =>
 });
 
 describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
   let previousDevMode: string | undefined;
@@ -253,7 +252,7 @@ describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
 
   async function tick(room: any): Promise<void> {
     (room as any).gameTick();
-    await new Promise(r => setTimeout(r, 500));
+    await room.waitForNextPatch();
   }
 
   async function spawnWing(client: any, room: any, overrides: Record<string, unknown> = {}) {

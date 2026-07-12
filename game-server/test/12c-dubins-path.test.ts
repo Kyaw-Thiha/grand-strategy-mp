@@ -165,7 +165,6 @@ async function makeToken(sub = "test-user") {
 }
 
 describe("lane:air-combat | 12c — Air wing path integration", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
@@ -286,7 +285,7 @@ describe("lane:air-combat | 12c — Air wing path integration", function () {
     await room.waitForNextPatch();
 
     client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-france", target_lng: 10, target_lat: 50 });
-    await new Promise(r => setTimeout(r, 200));
+    await room.waitForNextPatch();
 
     const wing = room.state.air_wings.get("wing-france");
     assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.IDLE);

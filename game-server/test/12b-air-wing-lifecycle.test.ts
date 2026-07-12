@@ -30,7 +30,6 @@ async function makeToken(sub = "test-user") {
 }
 
 describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
-  this.timeout(180_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 

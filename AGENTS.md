@@ -55,7 +55,7 @@ There is currently no root workspace `package.json` and no `packages/shared-type
 ### Tests and Checks
 
 - `cd game-server && npm test` — auto-detects affected lanes from git diff
-- `cd game-server && npm run test:full` — all test files in parallel (takes ~4 min)
+- `cd game-server && npm run test:full` — all test files in parallel (~5 min, ~446 passing)
 - `cd game-server && npm run test:air` — air combat tests only
 - `cd game-server && npm run test:tactical` — tactical combat tests only
 - `cd game-server && npm run test:movement` — movement tests only
