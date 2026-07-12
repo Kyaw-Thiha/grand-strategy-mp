@@ -50,6 +50,25 @@ room.send("ATTACK", { unit_id: "u1", target_province_id: "p6" })
 Write one bot script per scenario. They become your regression suite — run them whenever
 you add a new system to confirm nothing broke.
 
+### Server Test Lanes
+
+Server tests in `game-server/test/` are organized into four lanes defined in `game-server/test-lanes.json`:
+
+| Lane | Source files | Test files |
+|---|---|---|
+| `air-combat` | `src/systems/air_*`, `src/data/air_*` | `test/12*.test.ts` |
+| `tactical` | `src/systems/combat_system.ts`, `src/systems/attack_patterns.ts`, etc. | `test/6*.test.ts` |
+| `movement` | `src/systems/movement_system.ts` | `test/movement-jerk.test.ts` |
+| `core` | `src/rooms/GameRoom.ts`, `src/app.config.ts` | `test/GameRoom.test.ts` |
+
+`npm test` auto-detects which lanes are affected by your changes (via `git diff`) and runs only those. Shared files (`src/rooms/schema/GameRoomState.ts`, `src/data/map_loader.ts`) trigger the full suite.
+
+Use `npm run test:<lane>` to explicitly run a lane. Use `npm run test:full` for comprehensive coverage.
+
+New test files must:
+1. Be listed in their lane's `tests` array in `test-lanes.json`
+2. Prefix their top-level `describe()` with `lane:<name> | ` (e.g. `describe("lane:air-combat | 12z — New feature", ...)`)
+
 ---
 
 ## Phase 1 — Auth + Bare-Bones Connection
