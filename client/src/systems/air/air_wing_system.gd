@@ -46,6 +46,8 @@ var _engaged_pairs: Dictionary = {}   # wing_id → opponent wing_id
 var _engagement_lines: Dictionary = {} # pair_key → Line2D
 var _wing_path_generations_by_id: Dictionary = {}
 var _wing_total_elapsed_ms: Dictionary = {}
+var _wing_reconcile_from: Dictionary = {}   # wing_id → Vector2 screen pos (blend start)
+var _wing_reconcile_ms: Dictionary   = {}   # wing_id → float ms elapsed in blend
 var _last_synced_gen_id: Dictionary = {}
 var _detected_wings: Dictionary = {}
 var _bombing_indicators: Dictionary = {}    # province_id → BombingRunIndicator
@@ -100,6 +102,16 @@ func _process(delta: float) -> void:
 		var wing_id: String = str(wing_id_variant)
 		_wing_total_elapsed_ms[wing_id] = float(_wing_total_elapsed_ms.get(wing_id, 0.0)) + delta * 1000.0
 		_refresh_wing_icon_position(wing_id)
+		if _wing_reconcile_ms.has(wing_id):
+			const RECONCILE_DURATION_MS := 150.0
+			var t: float = minf(_wing_reconcile_ms[wing_id] / RECONCILE_DURATION_MS, 1.0)
+			var icon_node = _icons.get(wing_id)
+			if icon_node and is_instance_valid(icon_node):
+				icon_node.position = _wing_reconcile_from[wing_id].lerp(icon_node.position, t)
+			_wing_reconcile_ms[wing_id] += delta * 1000.0
+			if _wing_reconcile_ms[wing_id] >= RECONCILE_DURATION_MS:
+				_wing_reconcile_ms.erase(wing_id)
+				_wing_reconcile_from.erase(wing_id)
 		_sync_detection_overlay(wing_id)
 	if _range_overlay != null:
 		_range_overlay.tick_interpolate(delta)
@@ -158,6 +170,8 @@ func _on_air_wing_updated(wing_id: String) -> void:
 		_wing_path_by_id.erase(wing_id)
 		_wing_path_generations_by_id.erase(wing_id)
 		_wing_total_elapsed_ms.erase(wing_id)
+		_wing_reconcile_from.erase(wing_id)
+		_wing_reconcile_ms.erase(wing_id)
 		_last_synced_gen_id.erase(wing_id)
 		_refresh_wing_icon_position(wing_id)
 		if wing_id == _selected_wing_id:
@@ -203,30 +217,59 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
 	if not mouse_button.pressed:
 		return false
-	if mouse_button.button_index == MOUSE_BUTTON_RIGHT:
-		if _selected_wing_id.is_empty():
+	if mouse_button.button_index == MOUSE_BUTTON_RIGHT and _selected_wing_id != "":
+		var selected_wing: Dictionary = GameState.get_air_wing(_selected_wing_id)
+		if not selected_wing:
 			return false
-		if mouse_button.shift_pressed:
-			_append_pending_milestone(_encode_pending_point(world_pos))
-			return true
-		if _pending_milestones.is_empty():
-			# Only a click on a city dot → RELOCATE; province area clicks → TRANSIT
-			var city_province_id: String = ""
-			if _map_loader != null:
-				city_province_id = _resolve_province_at_screen_pos(world_pos)
-			if not city_province_id.is_empty():
-				if _is_friendly_province(city_province_id):
-					_submit_redeploy_order(city_province_id)
-				else:
-					_submit_transit_order(world_pos)
+
+		# Priority 1: Enemy wing icons (intercept)
+		if _can_intercept(selected_wing.aircraft_type):
+			for wing_id in _detected_wings:
+				if _detected_wings[wing_id] == false:
+					continue
+				var wing_data: Dictionary = GameState.get_air_wing(wing_id)
+				if wing_data.is_empty() or wing_data.get("nation_id", "") == GameState.get_my_nation_id():
+					continue
+				var icon_pos: Vector2 = _get_wing_screen_pos(wing_id)
+				if icon_pos != Vector2.INF and icon_pos.distance_to(world_pos) <= HIT_THRESHOLD_PX:
+					_submit_air_command("ASSIGN_WING_MISSION", {
+						"wing_id":   _selected_wing_id,
+						"mission":   "interception",
+						"target_id": wing_id,
+						"is_manual": true,
+					})
+					return true
+
+		# Priority 2: Land division icons (ground attack)
+		if _can_ground_attack(selected_wing.aircraft_type,
+				selected_wing.get("perks", [])):
+			var div: Dictionary = _resolve_division_at_screen_pos(world_pos)
+			if not div.is_empty() and div.get("nation_id", "") != GameState.get_my_nation_id():
+				_submit_air_command("ASSIGN_WING_MISSION", {
+					"wing_id":   _selected_wing_id,
+					"mission":   "tactical_bombing",
+					"target_id": div.get("province_id", ""),
+					"is_manual": true,
+				})
 				return true
-			_submit_transit_order(world_pos)
-			return true
-		var last_point: Vector2 = _get_last_pending_point()
-		if last_point != Vector2.INF and world_pos.distance_to(last_point) <= HIT_THRESHOLD_PX * 2.0:
-			_remove_last_pending_milestone()
-			return true
-		return false
+
+		# Priority 3: Province city markers (strategic bombing)
+		if _can_strategic_bomb(selected_wing.aircraft_type):
+			var prov_id: String = _resolve_province_at_screen_pos(world_pos)
+			if not prov_id.is_empty():
+				var prov: Dictionary = GameState.get_province(prov_id)
+				if not prov.is_empty() and prov.get("owner_id", "") != GameState.get_my_nation_id():
+					_submit_air_command("ASSIGN_WING_MISSION", {
+						"wing_id":   _selected_wing_id,
+						"mission":   "industry",
+						"target_id": prov_id,
+						"is_manual": true,
+					})
+					return true
+
+		# Priority 4: Fallback — existing move / redeploy behavior
+		_handle_existing_right_click(event, world_pos)
+		return true
 
 	if mouse_button.button_index != MOUSE_BUTTON_LEFT:
 		return false
@@ -334,8 +377,18 @@ func _on_air_wing_path(path_data: Dictionary) -> void:
 		_wing_path_generations_by_id[wing_id][path_gen_id] = path_data.duplicate()
 		var last_synced: String = str(_last_synced_gen_id.get(wing_id, ""))
 		if path_gen_id != last_synced:
+			var icon = _icons.get(wing_id)
+			if icon and is_instance_valid(icon):
+				_wing_reconcile_from[wing_id] = icon.position
+				_wing_reconcile_ms[wing_id]   = 0.0
 			_last_synced_gen_id[wing_id] = path_gen_id
-			_wing_total_elapsed_ms[wing_id] = 0.0
+			const MAX_PRE_ADVANCE_MS := 500.0
+			var path_ts: float = float(path_data.get("timestamp_ms", 0.0))
+			var pre_advance: float = 0.0
+			if path_ts > 0.0:
+				var now_ms: float = Time.get_unix_time_from_system() * 1000.0
+				pre_advance = clampf(now_ms - path_ts, 0.0, MAX_PRE_ADVANCE_MS)
+			_wing_total_elapsed_ms[wing_id] = pre_advance
 	if wing_id == _selected_wing_id:
 		_update_ghost()
 
@@ -510,6 +563,68 @@ func _clear_pending() -> void:
 ## - type: Colyseus command name.
 ## - payload: command payload dictionary.
 ## Returns: nothing.
+func _can_intercept(aircraft_type: String) -> bool:
+	return aircraft_type in ["fighter", "heavy_fighter"]
+
+
+func _can_ground_attack(aircraft_type: String, perks: Array) -> bool:
+	if aircraft_type in ["cas_plane", "dive_bomber", "tactical_bomber"]:
+		return true
+	if aircraft_type == "fighter" and "perk_strafing" in perks:
+		return true
+	return false
+
+
+func _can_strategic_bomb(aircraft_type: String) -> bool:
+	return aircraft_type in ["strategic_bomber", "tactical_bomber"]
+
+
+func _get_wing_screen_pos(wing_id: String) -> Vector2:
+	var icon = _icons.get(wing_id)
+	if icon and is_instance_valid(icon):
+		return icon.position
+	return Vector2.INF
+
+
+func _resolve_division_at_screen_pos(screen_pos: Vector2) -> Dictionary:
+	const PROXIMITY_PX := 18.0
+	var best_div: Dictionary = {}
+	var best_dist: float = PROXIMITY_PX
+	for div_id: String in GameState.divisions:
+		var div_data: Dictionary = GameState.get_division(div_id)
+		if div_data.is_empty():
+			continue
+		var div_lng: float = float(div_data.get("position_lng", 0.0))
+		var div_lat: float = float(div_data.get("position_lat", 0.0))
+		var icon_pos: Vector2 = _map_loader.project_lng_lat(div_lng, div_lat)
+		var dist: float = screen_pos.distance_to(icon_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_div = div_data
+	return best_div
+
+
+func _handle_existing_right_click(event: InputEvent, world_pos: Vector2) -> void:
+	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_button.shift_pressed:
+		return  # shift-right-click handled upstream
+	if _pending_milestones.is_empty():
+		var city_province_id: String = ""
+		if _map_loader != null:
+			city_province_id = _resolve_province_at_screen_pos(world_pos)
+		if not city_province_id.is_empty():
+			if _is_friendly_province(city_province_id):
+				_submit_redeploy_order(city_province_id)
+			else:
+				_submit_transit_order(world_pos)
+			return
+		_submit_transit_order(world_pos)
+		return
+	var last_point: Vector2 = _get_last_pending_point()
+	if last_point != Vector2.INF and world_pos.distance_to(last_point) <= HIT_THRESHOLD_PX * 2.0:
+		_remove_last_pending_milestone()
+
+
 func _submit_air_command(type: String, payload: Dictionary) -> void:
 	CommandQueue.submit(type, payload)
 
@@ -668,41 +783,27 @@ func _get_selected_wing_color() -> Color:
 	if _selected_wing_id.is_empty():
 		return NEUTRAL_COLOR
 	var data: Dictionary = GameState.get_air_wing(_selected_wing_id)
+	if data.get("target_id", "") != "":
+		return Color(1.0, 0.55, 0.1, 0.7)  # Amber — pursuit / following target
 	return NATION_COLORS.get(data.get("nation_id", ""), NEUTRAL_COLOR)
 
 
-func _get_selected_wing_path_points() -> Array[Vector2]:
-	if _selected_wing_id.is_empty():
-		return []
-	var path_data: Dictionary = _wing_path_by_id.get(_selected_wing_id, {})
+func _get_selected_wing_path_points(wing_id: String) -> Array[Vector2]:
+	var path_data: Dictionary = _wing_path_by_id.get(wing_id, {})
 	if path_data.is_empty():
 		return []
-
-	var points: Array[Vector2] = []
-	var segments: Array = path_data.get("segments", [])
-	if segments.is_empty():
-		if path_data.has("start_lng") and path_data.has("start_lat"):
-			points.append(_map_loader.project_lng_lat(float(path_data.get("start_lng", 0.0)), float(path_data.get("start_lat", 0.0))))
-		if path_data.has("end_lng") and path_data.has("end_lat"):
-			points.append(_map_loader.project_lng_lat(float(path_data.get("end_lng", 0.0)), float(path_data.get("end_lat", 0.0))))
-		return points
-
-	var first_segment: Dictionary = segments[0]
-	if first_segment.has("start_lng") and first_segment.has("start_lat"):
-		points.append(_map_loader.project_lng_lat(float(first_segment.get("start_lng", 0.0)), float(first_segment.get("start_lat", 0.0))))
-	for segment_variant: Variant in segments:
-		if not segment_variant is Dictionary:
-			continue
-		var segment: Dictionary = segment_variant
-		if segment.has("end_lng") and segment.has("end_lat"):
-			points.append(_map_loader.project_lng_lat(float(segment.get("end_lng", 0.0)), float(segment.get("end_lat", 0.0))))
-	return points
+	var elapsed: float = float(_wing_total_elapsed_ms.get(wing_id, 0.0))
+	var lnglat_pts: Array = DubinsInterpolator.get_remaining_endpoints(path_data, elapsed)
+	var screen_pts: Array[Vector2] = []
+	for pt in lnglat_pts:
+		screen_pts.append(_map_loader.project_lng_lat(pt.x, pt.y))
+	return screen_pts
 
 
 func _get_preview_route_points() -> Array[Vector2]:
 	if not _pending_chain.is_empty():
 		return _get_pending_chain_positions()
-	return _get_selected_wing_path_points()
+	return _get_selected_wing_path_points(_selected_wing_id)
 
 
 func _get_pending_chain_positions() -> Array[Vector2]:

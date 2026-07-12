@@ -55,6 +55,12 @@ export class AirBombingSystem {
 
       if (!engagement) continue;
 
+      // RTB if the target province's defender is now a friendly nation
+      if (engagement.defender_nation_id === wing.nation_id) {
+        lifecycleSystem.resolveEngagement(wing.wing_id, state, broadcast);
+        continue;
+      }
+
       const recon_quality = this._computeReconQuality(wing, state);
 
       const ctx = {

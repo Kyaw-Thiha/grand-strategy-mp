@@ -4,6 +4,7 @@ import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/Ai
 import type { AirWingState } from "../rooms/schema/AirWingState.js";
 import { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import { AirSpatialBucket } from "./air_spatial_bucket.js";
+import { getAirUnitStats } from "../data/air_unit_stats.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
 
@@ -45,6 +46,7 @@ export interface WingPosition {
 
 export interface AirWingPathMessage extends DubinsPath {
   wing_id: string;
+  timestamp_ms?: number;
 }
 
 let WING_SPEED_DEG_PER_MS = 0.0002;
@@ -54,6 +56,26 @@ let ENGAGEMENT_RANGE_DEG = 0.3;
 export function setWingSpeedForTesting(v: number): void { WING_SPEED_DEG_PER_MS = v; }
 export function setTurnRadiusForTesting(v: number): void { WING_TURN_RADIUS_DEG = v; }
 export function setEngagementRangeForTesting(v: number): void { ENGAGEMENT_RANGE_DEG = v; }
+
+// ── Lost-contact tracking ──────────────────────────────────────────────────────
+const _lastKnownPositions = new Map<string, { lng: number; lat: number }>();
+const _manualTargets = new Map<string, string>(); // interceptor wing_id → target wing_id
+const _lostContactLoiterTicks = new Map<string, number>(); // interceptor wing_id → tick count
+
+let LOST_CONTACT_LOITER_TICKS = 5;
+export function setLostContactLoiterTicksForTesting(n: number): void {
+  LOST_CONTACT_LOITER_TICKS = n;
+}
+
+export function registerManualTarget(interceptorId: string, targetId: string): void {
+  _manualTargets.set(interceptorId, targetId);
+}
+
+export function clearManualTarget(interceptorId: string): void {
+  _manualTargets.delete(interceptorId);
+  _lostContactLoiterTicks.delete(interceptorId);
+}
+// ────────────────────────────────────────────────────────────────────────────────
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -142,9 +164,15 @@ function buildSmoothPath(
 ): DubinsPath {
   const pathGenId = randomUUID();
   const directDistance = distance(startPos, endPos);
-  const controlLength = directDistance <= 0.0001
+  const bearingToTarget = bearingCompassDeg(startPos, endPos);
+  let headingDelta = bearingToTarget - startHeadingCompassDeg;
+  if (headingDelta > 180) headingDelta -= 360;
+  if (headingDelta < -180) headingDelta += 360;
+  const needsHardTurn = Math.abs(headingDelta) > 90;
+
+  const controlLength = directDistance <= 0.0001 || needsHardTurn
     ? 0.0
-    : clamp(directDistance * 0.12, Math.max(turnRadiusDeg * 0.1, 0.02), directDistance / 3);
+    : clamp(directDistance * 0.12, Math.max(turnRadiusDeg * 0.01, 0.001), directDistance / 3);
 
   const turnPoint = pointAtDistanceAndHeading(startPos, startHeadingCompassDeg, controlLength);
   const segments: DubinsSegment[] = [];
@@ -236,9 +264,10 @@ export class DubinsPathfinder {
     startPos: { lng: number; lat: number },
     startHeadingCompassDeg: number,
     endPos: { lng: number; lat: number },
+    turnRadiusDeg?: number,
   ): DubinsPath {
     const endHeading = bearingCompassDeg(startPos, endPos);
-    return buildSmoothPath(startPos, startHeadingCompassDeg, endPos, endHeading, "TRANSIT", WING_TURN_RADIUS_DEG);
+    return buildSmoothPath(startPos, startHeadingCompassDeg, endPos, endHeading, "TRANSIT", turnRadiusDeg ?? WING_TURN_RADIUS_DEG);
   }
 
   computeRtbPath(
@@ -246,8 +275,9 @@ export class DubinsPathfinder {
     startHeadingCompassDeg: number,
     airbasePos: { lng: number; lat: number },
     airbaseEntryHeadingCompassDeg: number,
+    turnRadiusDeg?: number,
   ): DubinsPath {
-    return buildSmoothPath(startPos, startHeadingCompassDeg, airbasePos, airbaseEntryHeadingCompassDeg, "RTB", WING_TURN_RADIUS_DEG);
+    return buildSmoothPath(startPos, startHeadingCompassDeg, airbasePos, airbaseEntryHeadingCompassDeg, "RTB", turnRadiusDeg ?? WING_TURN_RADIUS_DEG);
   }
 
   computeLoiterArc(
@@ -522,7 +552,7 @@ export class DubinsPathfinder {
       this.storePath(wing.wing_id, loiterPath);
       wing.path_gen_id = loiterPath.path_gen_id;
       wing.path_elapsed_ms = 0;
-      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...loiterPath } satisfies AirWingPathMessage);
+      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...loiterPath, timestamp_ms: Date.now() } satisfies AirWingPathMessage);
     }
 
     // Re-path TRANSIT wings that have no stored path (or an expired path) toward their target.
@@ -538,22 +568,39 @@ export class DubinsPathfinder {
         || (existingPath.speed_deg_per_ms > 0
             && wing.path_elapsed_ms >= existingPath.total_length_deg / existingPath.speed_deg_per_ms);
 
-      if (!pathExpired) continue;
+      // For interception with a target, always re-path (continuous pursuit toward lead point).
+      // For other missions (or interception without a target), only re-path when the current path expires.
+      if (!(wing.mission === MISSION_TYPES.INTERCEPTION && wing.target_id) && !pathExpired) continue;
 
       if (wing.target_id) {
         const target = state.air_wings.get(wing.target_id);
         if (target
             && target.lifecycle_state !== WING_LIFECYCLE.IDLE
             && target.lifecycle_state !== WING_LIFECYCLE.REFUEL) {
-          const newPath = this.computeTransitPath(
-            { lng: wing.position_lng, lat: wing.position_lat },
-            wing.heading_deg,
-            { lng: target.position_lng, lat: target.position_lat },
-          );
+          const targetPos = { lng: target.position_lng, lat: target.position_lat };
+          const startPos  = { lng: wing.position_lng, lat: wing.position_lat };
+          const turnRadius = getAirUnitStats(wing.aircraft_type).min_turn_radius_deg;
+
+          let leadTarget: { lng: number; lat: number };
+          if (wing.mission === MISSION_TYPES.INTERCEPTION) {
+            // Pursuit: compute lead position ahead of the moving target
+            const directDist = distance(startPos, targetPos);
+            const leadMs = clamp(directDist / Math.max(WING_SPEED_DEG_PER_MS, 0.000001), 1000, 8000);
+            const tSpeed = WING_SPEED_DEG_PER_MS * Math.max(0.01, target.status_engine);
+            const vec = vectorFromCompass(target.heading_deg);
+            leadTarget = {
+              lng: targetPos.lng + vec.x * tSpeed * leadMs,
+              lat: targetPos.lat + vec.y * tSpeed * leadMs,
+            };
+          } else {
+            leadTarget = targetPos;
+          }
+
+          const newPath = this.computeTransitPath(startPos, wing.heading_deg, leadTarget, turnRadius);
           this.storePath(wing.wing_id, newPath);
           wing.path_gen_id     = newPath.path_gen_id;
           wing.path_elapsed_ms = 0;
-          broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...newPath } satisfies AirWingPathMessage);
+          broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...newPath, timestamp_ms: Date.now() } satisfies AirWingPathMessage);
         }
         // target_id set but target unavailable — leave wing in TRANSIT; lifecycle system
         // will clear target_id when engagement resolves or target is destroyed
@@ -570,7 +617,51 @@ export class DubinsPathfinder {
       wing.path_gen_id     = fallbackLoiter.path_gen_id;
       wing.path_elapsed_ms = 0;
       wing.lifecycle_state = WING_LIFECYCLE.LOITER as any;
-      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...fallbackLoiter } satisfies AirWingPathMessage);
+      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...fallbackLoiter, timestamp_ms: Date.now() } satisfies AirWingPathMessage);
+    }
+
+    // ── Lost-contact handling for manually assigned interceptors ──────────────
+    for (const [interceptorId, targetId] of _manualTargets) {
+      const interceptor = state.air_wings.get(interceptorId);
+      const target      = state.air_wings.get(targetId);
+      if (!interceptor || !target) {
+        _manualTargets.delete(interceptorId);
+        continue;
+      }
+
+      if (target.is_detected) {
+        _lastKnownPositions.set(targetId, {
+          lng: target.position_lng,
+          lat: target.position_lat,
+        });
+        _lostContactLoiterTicks.delete(interceptorId);
+        continue;
+      }
+
+      const lastKnown = _lastKnownPositions.get(targetId);
+      if (!lastKnown) continue;
+
+      if (interceptor.lifecycle_state === WING_LIFECYCLE.LOITER) {
+        const count = (_lostContactLoiterTicks.get(interceptorId) ?? 0) + 1;
+        _lostContactLoiterTicks.set(interceptorId, count);
+
+        if (count >= LOST_CONTACT_LOITER_TICKS) {
+          interceptor.target_id = "";
+          _manualTargets.delete(interceptorId);
+          _lostContactLoiterTicks.delete(interceptorId);
+          _lastKnownPositions.delete(targetId);
+        }
+      } else if (interceptor.lifecycle_state === WING_LIFECYCLE.TRANSIT) {
+        const lostPath = this.computeTransitPath(
+          { lng: interceptor.position_lng, lat: interceptor.position_lat },
+          interceptor.heading_deg,
+          lastKnown,
+          getAirUnitStats(interceptor.aircraft_type).min_turn_radius_deg,
+        );
+        this.storePath(interceptorId, lostPath);
+        interceptor.path_gen_id     = lostPath.path_gen_id;
+        interceptor.path_elapsed_ms = 0;
+      }
     }
   }
 }
