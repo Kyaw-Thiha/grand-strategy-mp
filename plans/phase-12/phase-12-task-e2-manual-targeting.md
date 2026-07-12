@@ -139,7 +139,348 @@ that lost-contact only applies to manual intercept wings, not all INTERCEPTION w
 | `game-server/src/systems/air_strategic_bombing_system.ts` | RTB when target province captured by friendly (amend to Branch G) |
 | `game-server/src/systems/air_wing_lifecycle_system.ts` | Ground attack loiter timeout |
 | `game-server/package.json` | Append 12h to test chain |
-| `client/src/systems/air/air_wing_system.gd` | Air combat banner wiring + right-click disambiguation logic |
+| `client/src/systems/air/air_wing_system.gd` | Air combat banner wiring + right-click disambiguation logic; path clipping + pursuit color; path-switch smoothness blend |
+| `client/src/systems/air/dubins_interpolator.gd` | Add `get_remaining_endpoints()` static helper for path overlay clipping |
+| `client/src/systems/military/military_system.gd` | Smooth blend replacing hard DR position reset on server correction |
+
+---
+
+## Step 0a: Path Display Fixes (Client-Only)
+
+Three visual issues with the current path overlay, all fixed here before the banner step.
+
+### Issues
+
+1. **Triangle / double-path bug** — When a wing is selected after it has moved, the
+   overlay shows: icon (current pos) → original path start (already behind icon) →
+   destination. Root cause: `_get_selected_wing_path_points()` returns ALL segment
+   endpoints; the overlay prepends `start_node.position` (icon), forming a V shape.
+2. **Path doesn't shrink as wing moves** — Same root cause; full chain is always drawn
+   regardless of how much has been traversed.
+3. **No visual distinction between normal transit and pursuit** — INTERCEPTION wings
+   chasing a `target_id` look identical to a normal move-to-point order.
+
+### Current state (read before touching)
+
+- `move_order_overlay.gd` `_draw()` (lines 33–49): builds `effective = [start_node.position] + _chain`.
+  `_chain` is an `Array[Vector2]` of screen-space waypoints set via `set_path(chain, milestones, color)`.
+  No elapsed-time clipping anywhere in the overlay.
+- `air_wing_system.gd` `_get_selected_wing_path_points()` (lines 674–699): reads
+  `segments[].start_lng/lat` and `end_lng/lat` from `_wing_path_by_id[wing_id]` and
+  returns ALL endpoints as screen-space points — past and future combined.
+- `_wing_total_elapsed_ms: Dictionary` (line 48) increments every frame; reset to `0.0`
+  when `path_gen_id` changes (lines 172, 338). This is the clock to clip against.
+- `dubins_interpolator.gd` already supports arc segments (`_evaluate_arc_segment` at
+  line 36+); no changes needed there beyond adding the new helper below.
+
+### 0a-1. Add `get_remaining_endpoints` to `dubins_interpolator.gd`
+
+Add a new static function (after `evaluate_position`):
+
+```gdscript
+## Returns lng/lat endpoints of segments not yet fully elapsed.
+## Returns [] for LOITER paths (circle has no destination to draw toward).
+## Caller projects each Vector2(lng, lat) to screen space.
+static func get_remaining_endpoints(path_data: Dictionary, elapsed_ms: float) -> Array:
+    var path_type: String = path_data.get("path_type", "")
+    if path_type == "LOITER":
+        return []
+
+    var segments: Array = path_data.get("segments", [])
+    if segments.is_empty():
+        return []
+
+    var speed: float  = path_data.get("speed_deg_per_ms", 0.001)
+    var total: float  = path_data.get("total_length_deg", 1e9)
+    var dist: float   = clampf(elapsed_ms * speed, 0.0, total)
+    var results: Array = []
+    var found := false
+
+    for seg in segments:
+        var seg_len: float = seg.get("length_deg", 0.0)
+        if not found:
+            if dist >= seg_len:
+                dist -= seg_len
+                continue        # Segment fully elapsed — skip
+            found = true        # First partially- or fully-remaining segment
+
+        # Endpoint of this segment in lng/lat
+        if seg.get("type", "") == "arc":
+            var clng: float  = seg.get("center_lng", 0.0)
+            var clat: float  = seg.get("center_lat", 0.0)
+            var r: float     = seg.get("radius_deg", 0.0)
+            var end_a: float = seg.get("start_angle_rad", 0.0) + seg.get("sweep_rad", 0.0)
+            results.append(Vector2(clng + cos(end_a) * r, clat + sin(end_a) * r))
+        else:
+            results.append(Vector2(seg.get("end_lng", 0.0), seg.get("end_lat", 0.0)))
+
+    return results
+```
+
+### 0a-2. Rewrite `_get_selected_wing_path_points()` in `air_wing_system.gd`
+
+Replace the current implementation (lines 674–699) with:
+
+```gdscript
+func _get_selected_wing_path_points(wing_id: String) -> Array[Vector2]:
+    var path_data: Dictionary = _wing_path_by_id.get(wing_id, {})
+    if path_data.is_empty():
+        return []
+    var elapsed: float = float(_wing_total_elapsed_ms.get(wing_id, 0.0))
+    var lnglat_pts: Array = DubinsInterpolator.get_remaining_endpoints(path_data, elapsed)
+    var screen_pts: Array[Vector2] = []
+    for pt in lnglat_pts:
+        screen_pts.append(_map_loader.project_lng_lat(pt.x, pt.y))
+    return screen_pts
+```
+
+The overlay's `start_node.position` is already prepended as point[0]; the chain must
+contain only the remaining segment END points — which `get_remaining_endpoints` provides.
+Do NOT include the path's original `start_lng/lat` in the returned array.
+
+### 0a-3. Pursuit color in the overlay call site
+
+In the function that calls `_pending_route_overlay.set_path(chain, milestones, color)`
+(inside `_update_ghost()` or wherever the color is passed), add a conditional:
+
+```gdscript
+var wing_state = _get_wing_data(_selected_wing_id)   # or however state is accessed
+var path_color: Color
+if wing_state and wing_state.get("target_id", "") != "":
+    path_color = Color(1.0, 0.55, 0.1, 0.7)           # Amber — pursuit / following target
+else:
+    var nid: String = wing_state.get("nation_id", "") if wing_state else ""
+    var nc: Color   = _nation_colors.get(nid, NEUTRAL_COLOR)
+    path_color      = Color(nc.r, nc.g, nc.b, 0.55)   # Nation color — normal movement
+```
+
+Check whether `set_path()` takes `color` as a parameter or reads it from a property on
+the overlay, and follow the existing call convention.
+
+### Notes for execution agent (Step 0a)
+
+- No server changes. No test file changes needed (client-only visual fix).
+- Manual verification: select a wing mid-flight → path shows only the remaining route
+  (no triangle). Path shrinks in real time as the wing advances. INTERCEPTION wing with
+  a `target_id` → path is amber; plain move order → nation color.
+- LOITER wings: overlay shows nothing (empty chain); icon still draws its own orbit.
+
+---
+
+## Step 0b: Air Wing Path-Switch Smoothness (B+C)
+
+### Problem
+
+When a new `AIR_WING_PATH` arrives, `_on_air_wing_path()` resets
+`_wing_total_elapsed_ms[wing_id] = 0.0` (line 338). The icon snaps to the path's
+start position on the next `_process()` frame — a visible backward jump for fast-moving
+wings, because the wing has already advanced past that start point during network transit.
+
+### Fix B: Server timestamp → client pre-advance elapsed
+
+**Server — `game-server/src/systems/air_dubins_pathfinder.ts`**
+
+At all three `broadcast("AIR_WING_PATH", ...)` call sites (lines 525, 556, 573),
+add `timestamp_ms: Date.now()` to the payload object. `Date.now()` is a built-in;
+no import needed. No other server changes.
+
+**Client — `client/src/systems/air/air_wing_system.gd` `_on_air_wing_path()` (line 338)**
+
+Replace the hard zero-reset with a Unix-time pre-advance:
+
+```gdscript
+# BEFORE (line 338):
+_wing_total_elapsed_ms[wing_id] = 0.0
+
+# AFTER:
+const MAX_PRE_ADVANCE_MS := 500.0
+var path_ts: float = float(path_data.get("timestamp_ms", 0.0))
+var pre_advance: float = 0.0
+if path_ts > 0.0:
+    var now_ms: float = Time.get_unix_time_from_system() * 1000.0
+    pre_advance = clampf(now_ms - path_ts, 0.0, MAX_PRE_ADVANCE_MS)
+_wing_total_elapsed_ms[wing_id] = pre_advance
+```
+
+`Time.get_unix_time_from_system() * 1000.0` gives Unix ms on the client;
+`Date.now()` on the server is also Unix ms — directly comparable.
+The 500ms clamp absorbs clock skew without over-advancing the path.
+
+### Fix C: 150ms position blend on path_gen_id change
+
+**New class-level variables** — add alongside existing `_wing_total_elapsed_ms`
+(line 48):
+
+```gdscript
+var _wing_reconcile_from: Dictionary = {}   # wing_id → Vector2 screen pos (blend start)
+var _wing_reconcile_ms: Dictionary   = {}   # wing_id → float ms elapsed in blend
+```
+
+**`_on_air_wing_path()` — record icon position BEFORE elapsed resets**
+
+Inside the `if path_gen_id != last_synced:` block (before line 337), insert:
+
+```gdscript
+var icon = _icons.get(wing_id)
+if icon and is_instance_valid(icon):
+    _wing_reconcile_from[wing_id] = icon.position
+    _wing_reconcile_ms[wing_id]   = 0.0
+```
+
+**`_process()` — blend override AFTER `_refresh_wing_icon_position()`**
+
+Current inner loop (lines 101–103):
+```gdscript
+_wing_total_elapsed_ms[wing_id] = ... + delta * 1000.0
+_refresh_wing_icon_position(wing_id)
+_sync_detection_overlay(wing_id)
+```
+
+Insert between `_refresh_wing_icon_position` and `_sync_detection_overlay`:
+```gdscript
+if _wing_reconcile_ms.has(wing_id):
+    const RECONCILE_DURATION_MS := 150.0
+    var t: float = minf(_wing_reconcile_ms[wing_id] / RECONCILE_DURATION_MS, 1.0)
+    var icon_node = _icons.get(wing_id)
+    if icon_node and is_instance_valid(icon_node):
+        icon_node.position = _wing_reconcile_from[wing_id].lerp(icon_node.position, t)
+    _wing_reconcile_ms[wing_id] += delta * 1000.0
+    if _wing_reconcile_ms[wing_id] >= RECONCILE_DURATION_MS:
+        _wing_reconcile_ms.erase(wing_id)
+        _wing_reconcile_from.erase(wing_id)
+```
+
+`_refresh_wing_icon_position` writes the path-evaluated "target" to `icon_node.position`.
+The blend then lerps FROM the saved pre-snap position TOWARD that target.
+
+**Cleanup on path erase** — in `_on_air_wing_updated()` lines 160–161 (idle/refuel
+early return), also erase:
+```gdscript
+_wing_reconcile_from.erase(wing_id)
+_wing_reconcile_ms.erase(wing_id)
+```
+
+### Files affected (Step 0b)
+
+| File | Change |
+|---|---|
+| `game-server/src/systems/air_dubins_pathfinder.ts` | Add `timestamp_ms: Date.now()` to 3 broadcast call sites (lines 525, 556, 573) |
+| `client/src/systems/air/air_wing_system.gd` | Pre-advance elapsed; add 2 reconcile dicts; blend in `_process()`; cleanup on erase |
+
+### Notes for execution agent (Step 0b)
+
+- No server tests needed.
+- Manual verify: give a wing a new order mid-flight. Icon should glide smoothly to the
+  new path start rather than jumping.
+- `_on_air_wing_path()` does NOT call `_refresh_wing_icon_position()` — icon.position
+  at that moment is the pre-snap value, exactly what we want to blend FROM. Do NOT
+  re-order the save vs. the elapsed reset.
+- Use `Time.get_unix_time_from_system() * 1000.0` (Unix ms) on the client, NOT
+  `Time.get_ticks_msec()` (uptime ms) — only Unix ms is comparable to `Date.now()`.
+
+---
+
+## Step 0c: Land Unit Divergence-Correction Smoothness
+
+### Problem
+
+After a new order is given, `_on_division_updated()` detects a leading-waypoint mismatch
+(`updated_lead != new_lead`, line 1394) and hard-resets:
+
+```gdscript
+# Lines 1394–1397 in client/src/systems/military/military_system.gd:
+elif not at_final_goal and updated_lead != new_lead:
+    _dr_final_goal.erase(division_id)
+    _dr_pos_deg[division_id] = Vector2(server_lng, server_lat)  # ← SNAP
+    _dr_order[division_id] = str_order
+```
+
+The server position at confirmation is where the unit was when the server processed the
+order (~1 tick behind). The client has already DR'd forward, so the reset snaps the
+icon visibly backward.
+
+### Fix: blend the icon position; keep `_dr_pos_deg` authoritative
+
+`_dr_pos_deg` must snap immediately for DR correctness — it is the starting point for
+all subsequent dead reckoning. Only the icon's SCREEN POSITION is blended.
+
+**New class-level variables** — add alongside `_dr_pos_deg` block (lines 83–89):
+
+```gdscript
+var _dr_icon_reconcile_from: Dictionary = {}  # div_id → Vector2 screen pos (blend start)
+var _dr_icon_reconcile_t: Dictionary    = {}  # div_id → float 0.0..1.0 blend progress
+```
+
+**`_on_division_updated()` — save icon position before the snap (at line 1394 block)**:
+
+```gdscript
+# BEFORE:
+elif not at_final_goal and updated_lead != new_lead:
+    _dr_final_goal.erase(division_id)
+    _dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+    _dr_order[division_id] = str_order
+
+# AFTER:
+elif not at_final_goal and updated_lead != new_lead:
+    _dr_final_goal.erase(division_id)
+    if _icons.has(division_id):
+        _dr_icon_reconcile_from[division_id] = _icons[division_id].position
+        _dr_icon_reconcile_t[division_id]    = 0.0
+    _dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+    _dr_order[division_id] = str_order
+```
+
+**`_process()` — blend override AFTER `_advance_dr()` (around lines 163–165)**:
+
+```gdscript
+# BEFORE:
+if _dr_order.has(div_id) and (not _dr_order[div_id].is_empty() or _dr_final_goal.has(div_id)):
+    _advance_dr(div_id, delta)
+    _update_division_route(div_id)
+
+# AFTER:
+if _dr_order.has(div_id) and (not _dr_order[div_id].is_empty() or _dr_final_goal.has(div_id)):
+    _advance_dr(div_id, delta)
+    if _dr_icon_reconcile_t.has(div_id):
+        const RECONCILE_DURATION_S := 0.15
+        var t: float = _dr_icon_reconcile_t[div_id]
+        if t < 1.0 and _icons.has(div_id):
+            _icons[div_id].position = _dr_icon_reconcile_from[div_id].lerp(
+                _icons[div_id].position, t
+            )
+            _dr_icon_reconcile_t[div_id] = minf(t + delta / RECONCILE_DURATION_S, 1.0)
+        else:
+            _dr_icon_reconcile_t.erase(div_id)
+            _dr_icon_reconcile_from.erase(div_id)
+    _update_division_route(div_id)
+```
+
+`_advance_dr()` sets `icon.position` to the path-evaluated screen position (correct,
+authoritative). The blend lerps FROM the pre-snap icon position TOWARD that target over
+150ms.
+
+**Cleanup on division despawn** — wherever `_icons[div_id]` is erased (find the despawn
+site in `military_system.gd`), also erase:
+```gdscript
+_dr_icon_reconcile_from.erase(div_id)
+_dr_icon_reconcile_t.erase(div_id)
+```
+
+### Files affected (Step 0c)
+
+| File | Change |
+|---|---|
+| `client/src/systems/military/military_system.gd` | Add 2 reconcile dicts; pre-snap save at line 1394 block; blend in `_process()` |
+
+### Notes for execution agent (Step 0c)
+
+- No server changes. No test changes.
+- Manual verify: give a moving division a new order. Icon should not snap backward when
+  server confirms (~1 tick later). Should glide smoothly to the correct DR position.
+- Do NOT blend `_dr_pos_deg` itself — only the icon's screen position. `_dr_pos_deg`
+  must snap to server position immediately for DR correctness.
+- `_advance_dr()` writes `icon.position` via `_map_loader.project_lng_lat`. Confirm
+  this is where icon position is set before inserting the blend override.
 
 ---
 
@@ -374,6 +715,101 @@ describe("Per-type turn radius applied in pathfinder", () => {
     // Tick until both paths are computed
     // Compare path total length (wider turn radius = longer arc = longer path)
     // Access path from AIR_WING_PATH broadcast stored during joinRoom
+  });
+});
+```
+
+### 1f. Replace straight forward-projection with true arc segment in `buildSmoothPath`
+
+**Current behavior (lines 135–195):** Two straight segments — a forward-projection leg
+in `startHeadingCompassDeg` direction, then a straight to destination. `turnRadiusDeg`
+only affects the projection leg's length clamp, not path shape. Large or opposite
+direction changes produce a visible kink.
+
+**Change:** Replace the forward-projection leg with a true arc that smoothly turns from
+`startHeadingCompassDeg` to the bearing toward `endPos`. The client's interpolator
+already evaluates arc segments identically to LOITER arcs — **no client changes needed**.
+
+**Reference:** `computeLoiterArc()` (lines 253–288) for compass→math-radians conversion
+and perpendicular-center calculation. `makeArcSegment()` (lines 197–212) for the arc
+segment constructor — read its signature before implementing.
+
+**Algorithm:**
+
+```typescript
+const targetBearing = bearingCompassDeg(startPos, endPos);
+// Normalize delta to −180..+180 (positive = right/CW turn needed in compass space)
+let delta = ((targetBearing - startHeadingCompassDeg + 540) % 360) - 180;
+
+const STRAIGHT_THRESHOLD_DEG = 5;
+
+if (Math.abs(delta) < STRAIGHT_THRESHOLD_DEG) {
+  // Already aligned — single straight segment to destination
+  segments = [makeStraightSegment(startPos, endPos, targetBearing)];
+} else {
+  // --- Arc to align heading ---
+  // Compass → math radians (0 = East, CCW positive)
+  const mathRad = (90 - startHeadingCompassDeg) * Math.PI / 180;
+
+  // Arc center: perpendicular to heading at turnRadiusDeg
+  //   delta > 0 → right turn → center 90° right of heading → mathRad − π/2
+  //   delta < 0 → left turn  → center 90° left  of heading → mathRad + π/2
+  const perpRad  = mathRad - Math.sign(delta) * Math.PI / 2;
+  const centerLng = startPos.lng + Math.cos(perpRad) * turnRadiusDeg;
+  const centerLat = startPos.lat + Math.sin(perpRad) * turnRadiusDeg;
+
+  // Angle from center to startPos (entry angle on the arc)
+  const startAngleRad = Math.atan2(startPos.lat - centerLat, startPos.lng - centerLng);
+  // Right turn = CW = negative sweep in math space; left turn = CCW = positive
+  const sweepRad = -delta * Math.PI / 180;
+
+  const endAngleRad = startAngleRad + sweepRad;
+  const arcExitLng  = centerLng + Math.cos(endAngleRad) * turnRadiusDeg;
+  const arcExitLat  = centerLat + Math.sin(endAngleRad) * turnRadiusDeg;
+
+  // Build segments using existing helpers
+  // Read makeArcSegment() signature at lines 197–212 and adapt accordingly
+  const arcSeg = makeArcSegment({
+    center_lng: centerLng, center_lat: centerLat,
+    radius_deg: turnRadiusDeg,
+    start_angle_rad: startAngleRad,
+    sweep_rad: sweepRad,
+  });
+  const exitBearing = bearingCompassDeg({ lng: arcExitLng, lat: arcExitLat }, endPos);
+  const straightSeg = makeStraightSegment(
+    { lng: arcExitLng, lat: arcExitLat }, endPos, exitBearing
+  );
+  segments = [arcSeg, straightSeg];
+}
+```
+
+`makeStraightSegment` may not exist as a named helper yet — check how straight segments
+are currently built in `buildSmoothPath` and extract the pattern or inline it.
+
+**Edge case — near-180° reversal:** `delta` is clamped to (−180, +180] by the
+normalization formula. A 180° case produces `sweepRad = ∓π` — a U-turn arc — which is
+correct. Verify the resulting arc is non-zero length.
+
+### 1g. Tests for arc segments (append to 12h test suite)
+
+```typescript
+describe("buildSmoothPath arc segments", () => {
+  it("large direction change produces arc as first segment", async () => {
+    // Spawn wing at (10, 50) heading North (0°), order to a point due East (~90° bearing)
+    // Capture AIR_WING_PATH broadcast
+    // Assert path.segments[0].type === "arc"
+    // Assert path.segments[1].type === "straight"
+  });
+
+  it("aligned direction produces single straight segment", async () => {
+    // Wing heading North (0°), target directly North
+    // Assert path.segments[0].type === "straight"
+    // Assert path.segments.length === 1
+  });
+
+  it("strategic_bomber arc length_deg > fighter arc length_deg for same 90° turn", async () => {
+    // Same start pos, same 90° heading change, same destination distance
+    // Bomber arc segment length_deg > fighter arc segment length_deg
   });
 });
 ```
@@ -687,3 +1123,11 @@ cd game-server && npm test
 | Strategic bomber should auto-find nearest alternate city when target is captured | **Wrong** — RTB; no "find nearest city" auto-search logic exists |
 | LOST_CONTACT_LOITER_TICKS and GROUND_ATTACK_LOITER_MAX_TICKS should be the same value | **Coincidence** — both happen to be 5 by default but are separate constants serving different systems |
 | `_resolve_province_at_screen_pos()` returns a province owned by an enemy only | **Wrong** — it returns any province; check `nation_id !== _local_nation_id` in the caller |
+| The path overlay clips itself to the remaining route | **Wrong** — it draws the full `_chain` from the original order start; clipping must be done in `_get_selected_wing_path_points()` before the chain is passed to `set_path()` |
+| `get_remaining_endpoints()` should return the start of the first remaining segment | **Wrong** — the overlay's `start_node.position` (icon's screen pos) is already prepended as point[0]; the chain must start from the first remaining segment's END only |
+| Arc segments in `buildSmoothPath` require client interpolator changes | **Wrong** — `dubins_interpolator.gd` already evaluates arc segments via `_evaluate_arc_segment()`; no client changes needed when the server starts emitting transit arcs |
+| `turnRadiusDeg` currently affects path geometry | **Wrong** — before Step 1f it only clamps the projection-leg length; after Step 1f it determines the actual arc radius and therefore path shape |
+| LOITER wings should show a shrinking arc in the overlay | **Wrong** — return `[]` from `get_remaining_endpoints()` for LOITER; a full-circle orbit is not a "remaining route to destination" |
+| `Time.get_ticks_msec()` can be compared to `Date.now()` for timestamp pre-advance | **Wrong** — `get_ticks_msec()` is uptime ms since process start; use `Time.get_unix_time_from_system() * 1000.0` for Unix ms comparable to JS `Date.now()` |
+| The land unit blend should modify `_dr_pos_deg` to avoid the snap | **Wrong** — `_dr_pos_deg` must snap to server position immediately for DR correctness; only the icon's screen position is blended |
+| `_on_air_wing_path()` calls `_refresh_wing_icon_position()`, so icon.position is already updated when we save it | **Wrong** — `_on_air_wing_path()` does NOT call `_refresh_wing_icon_position()`; icon.position at that point is the pre-snap value, exactly what we want to blend FROM |
