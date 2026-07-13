@@ -50,12 +50,6 @@ const NATION_PALETTE := {
 	"default":         Color(0.55, 0.55, 0.55),
 }
 
-const ELEVATION_COLORS := {
-	"flat":      Color(0.70, 0.85, 0.60),
-	"hills":     Color(0.55, 0.70, 0.35),
-	"mountains": Color(0.60, 0.50, 0.40),
-}
-
 const COVER_COLORS := {
 	"farmland":            Color(0.76, 0.70, 0.50),
 	"hot_desert":          Color(0.95, 0.85, 0.60),
@@ -82,11 +76,22 @@ const NATION_DISPLAY_NAMES := {
 	"spanish_morocco": "SP. MOROCCO",
 }
 
+const POLITICAL_ELEVATION_LAYER_ALPHA := 0.36
+const POLITICAL_COVER_LAYER_ALPHA := 0.20
+const POLITICAL_BORDER_COLOR := Color(0.68, 0.68, 0.68, 0.85)
+const POLITICAL_BORDER_CONTRAST_COLOR := Color(0.08, 0.08, 0.08, 0.82)
+const POLITICAL_BORDER_WIDTH := 1.4
+const POLITICAL_BORDER_CONTRAST_WIDTH := 3.2
+const ELEVATION_BORDER_COLOR := Color(0.0, 0.0, 0.0, 1.0)
+const ELEVATION_BORDER_WIDTH := 2.8
+
 var _map_loader: Node = null
 var _data_source: Object = null
 var _overlay_mode: OverlayMode = OverlayMode.POLITICAL
 var _highlighted: Dictionary = {}       # province_id → original Color
 var _nation_label_layer: Node2D = null
+var _border_overlay_layer: CanvasLayer = null
+var _border_overlay_root: Node2D = null
 var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
 
@@ -95,6 +100,7 @@ var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_Z
 func setup(map_loader: Node, data_source: Object) -> void:
 	_map_loader = map_loader
 	_data_source = data_source
+	_create_border_overlay()
 	_nation_label_layer = Node2D.new()
 	_nation_label_layer.name = "NationLabelLayer"
 	_nation_label_layer.visible = false
@@ -107,6 +113,7 @@ func setup(map_loader: Node, data_source: Object) -> void:
 
 func on_map_loaded(_province_count: int) -> void:
 	_refresh_all()
+	_rebuild_border_overlay()
 	_set_overlay_layer_visibility()
 	_build_nation_labels()
 
@@ -118,6 +125,7 @@ func set_overlay_mode(mode: String) -> void:
 		"cover":      _overlay_mode = OverlayMode.COVER
 	_highlighted.clear()
 	_refresh_all()
+	_rebuild_border_overlay()
 	_set_overlay_layer_visibility()
 	# Nation labels only make sense over political fills
 	if _nation_label_layer:
@@ -175,6 +183,8 @@ func refresh_province(province_id: String) -> void:
 	if node == null:
 		return
 	_set_all_fills(node, _province_color(province_id))
+	_set_province_borders(node)
+	_rebuild_border_overlay()
 	_highlighted.erase(province_id)
 
 
@@ -193,12 +203,153 @@ func _refresh_all() -> void:
 		if node == null:
 			continue
 		_set_all_fills(node, _province_color(pid))
+		_set_province_borders(node)
 
 
 func _set_all_fills(node: Node2D, colour: Color) -> void:
 	for child in node.get_children():
 		if child is Polygon2D and not child.has_meta("is_marker"):
 			child.color = colour
+
+
+func _set_province_borders(node: Node2D) -> void:
+	for child: Node in node.get_children():
+		if child is Line2D and _is_province_border(child as Line2D):
+			child.visible = false
+
+
+func _is_province_border(line: Line2D) -> bool:
+	return line.name == "Border" or line.name.begins_with("BorderPart")
+
+
+func _create_border_overlay() -> void:
+	_border_overlay_layer = CanvasLayer.new()
+	_border_overlay_layer.name = "ProvinceBorderOverlayLayer"
+	_border_overlay_layer.layer = 1
+	_border_overlay_layer.follow_viewport_enabled = true
+	_border_overlay_layer.follow_viewport_scale = 1.0
+	add_child(_border_overlay_layer)
+
+	_border_overlay_root = Node2D.new()
+	_border_overlay_root.name = "ProvinceBorderOverlay"
+	_border_overlay_layer.add_child(_border_overlay_root)
+
+
+func _rebuild_border_overlay() -> void:
+	if _map_loader == null or _border_overlay_root == null:
+		return
+
+	for child: Node in _border_overlay_root.get_children():
+		child.free()
+
+	var edge_segments: Dictionary = {}
+	for province_id: String in _map_loader.get_all_province_ids():
+		var province_node: Node2D = _map_loader.get_province_node(province_id)
+		if province_node == null:
+			continue
+		var owner_id: String = _province_owner_id(province_id)
+		for child: Node in province_node.get_children():
+			if not child is Polygon2D or not _is_province_fill(child as Polygon2D):
+				continue
+			_collect_province_edges(edge_segments, child as Polygon2D, province_id, owner_id)
+
+	var drawn_boundaries: Dictionary = {}
+	for edge_key: String in edge_segments.keys():
+		var entries: Array = edge_segments[edge_key] as Array
+		if entries.size() < 2:
+			continue
+		for first_index: int in range(entries.size()):
+			var first_entry: Dictionary = entries[first_index] as Dictionary
+			for second_index: int in range(first_index + 1, entries.size()):
+				var second_entry: Dictionary = entries[second_index] as Dictionary
+				var first_owner: String = first_entry["owner_id"]
+				var second_owner: String = second_entry["owner_id"]
+				if first_owner == second_owner:
+					continue
+				var owner_pair: Array[String] = [first_owner, second_owner]
+				owner_pair.sort()
+				var boundary_key: String = "%s|%s:%s" % [edge_key, owner_pair[0], owner_pair[1]]
+				if drawn_boundaries.has(boundary_key):
+					continue
+				drawn_boundaries[boundary_key] = true
+				_add_nation_border_overlay_line(
+					first_entry["start"] as Vector2,
+					first_entry["end"] as Vector2,
+					boundary_key
+				)
+
+
+func _is_province_fill(polygon: Polygon2D) -> bool:
+	return polygon.name == "Fill" or polygon.name.begins_with("FillPart")
+
+
+func _province_owner_id(province_id: String) -> String:
+	if _data_source == null:
+		return ""
+	var province_data: Dictionary = _data_source.get_province(province_id)
+	var owner_variant: Variant = province_data.get("nation_id", "")
+	return str(owner_variant)
+
+
+func _collect_province_edges(edge_segments: Dictionary, source_fill: Polygon2D,
+		province_id: String, owner_id: String) -> void:
+	if source_fill.polygon.size() < 2:
+		return
+	for point_index: int in range(source_fill.polygon.size()):
+		var next_index: int = (point_index + 1) % source_fill.polygon.size()
+		var start: Vector2 = source_fill.to_global(source_fill.polygon[point_index])
+		var end: Vector2 = source_fill.to_global(source_fill.polygon[next_index])
+		var edge_key: String = _make_border_edge_key(start, end)
+		var entries: Array = edge_segments.get(edge_key, []) as Array
+		entries.append({
+			"province_id": province_id,
+			"owner_id": owner_id,
+			"start": start,
+			"end": end,
+		})
+		edge_segments[edge_key] = entries
+
+
+func _make_border_edge_key(start: Vector2, end: Vector2) -> String:
+	var start_key: String = _make_border_point_key(start)
+	var end_key: String = _make_border_point_key(end)
+	if start_key < end_key:
+		return "%s|%s" % [start_key, end_key]
+	return "%s|%s" % [end_key, start_key]
+
+
+func _make_border_point_key(point: Vector2) -> String:
+	const EDGE_KEY_SCALE: float = 1000.0
+	return "%d:%d" % [int(round(point.x * EDGE_KEY_SCALE)), int(round(point.y * EDGE_KEY_SCALE))]
+
+
+func _add_nation_border_overlay_line(start: Vector2, end: Vector2, boundary_key: String) -> void:
+	var points: PackedVector2Array = PackedVector2Array()
+	points.append(_border_overlay_root.to_local(start))
+	points.append(_border_overlay_root.to_local(end))
+
+	if _overlay_mode == OverlayMode.ELEVATION or _overlay_mode == OverlayMode.COVER:
+		var elevation_border: Line2D = Line2D.new()
+		elevation_border.name = "%sNationBoundary" % boundary_key
+		elevation_border.points = points
+		elevation_border.width = ELEVATION_BORDER_WIDTH
+		elevation_border.default_color = ELEVATION_BORDER_COLOR
+		_border_overlay_root.add_child(elevation_border)
+		return
+
+	var contrast_border: Line2D = Line2D.new()
+	contrast_border.name = "%sContrast" % boundary_key
+	contrast_border.points = points
+	contrast_border.width = POLITICAL_BORDER_CONTRAST_WIDTH
+	contrast_border.default_color = POLITICAL_BORDER_CONTRAST_COLOR
+	_border_overlay_root.add_child(contrast_border)
+
+	var highlight_border: Line2D = Line2D.new()
+	highlight_border.name = "%sHighlight" % boundary_key
+	highlight_border.points = points
+	highlight_border.width = POLITICAL_BORDER_WIDTH
+	highlight_border.default_color = POLITICAL_BORDER_COLOR
+	_border_overlay_root.add_child(highlight_border)
 
 
 func _province_color(province_id: String) -> Color:
@@ -413,11 +564,23 @@ func _set_overlay_layer_visibility() -> void:
 
 	match _overlay_mode:
 		OverlayMode.POLITICAL:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = false
+			if cover_layer:
+				cover_layer.visible = true
+				cover_layer.modulate = Color(1.0, 1.0, 1.0, POLITICAL_COVER_LAYER_ALPHA)
+			if elev_layer:
+				elev_layer.visible = true
+				elev_layer.modulate = Color(1.0, 1.0, 1.0, POLITICAL_ELEVATION_LAYER_ALPHA)
 		OverlayMode.ELEVATION:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = true
+			if cover_layer:
+				cover_layer.visible = false
+				cover_layer.modulate = Color.WHITE
+			if elev_layer:
+				elev_layer.visible = true
+				elev_layer.modulate = Color.WHITE
 		OverlayMode.COVER:
-			if cover_layer:  cover_layer.visible = true
-			if elev_layer:   elev_layer.visible = false
+			if cover_layer:
+				cover_layer.visible = true
+				cover_layer.modulate = Color.WHITE
+			if elev_layer:
+				elev_layer.visible = false
+				elev_layer.modulate = Color.WHITE
