@@ -17,21 +17,36 @@ func _setup_ui() -> void:
 	add_child(outer)
 
 	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
 	outer.add_child(vbox)
 
 	var header := HBoxContainer.new()
 	vbox.add_child(header)
+	var icon_bg := Panel.new()
+	icon_bg.custom_minimum_size = Vector2(26, 26)
+	icon_bg.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var icon_style := StyleBoxFlat.new()
+	icon_style.bg_color = Color(0.85, 0.50, 0.10, 1.0)
+	icon_style.corner_radius_top_left     = 13
+	icon_style.corner_radius_top_right    = 13
+	icon_style.corner_radius_bottom_left  = 13
+	icon_style.corner_radius_bottom_right = 13
+	icon_bg.add_theme_stylebox_override("panel", icon_style)
+	header.add_child(icon_bg)
 	var icon := TextureRect.new()
 	icon.texture = preload("res://assets/icons/fire-solid-full.svg")
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(20, 20)
-	header.add_child(icon)
+	icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 4)
+	icon.modulate = Color(1.0, 1.0, 1.0, 0.95)
+	icon_bg.add_child(icon)
 	var title := Label.new()
 	title.text = "BOMBING RUN"
 	title.name = "TitleLabel"
 	header.add_child(title)
-	header.add_child(HSeparator.new())
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(spacer)
 	var close_btn := Button.new()
 	close_btn.text = "✕"
 	close_btn.pressed.connect(_close)
@@ -71,7 +86,7 @@ func _add_run_section(vbox: VBoxContainer, run: Dictionary) -> int:
 	var header := Label.new()
 	var count: int = run.get("count", 0)
 	var atype: String = run.get("aircraft_type", "")
-	header.text = "%d × %s" % [count, atype.replace("_", " ").capitalize()]
+	header.text = "%d × %s" % [count, _aircraft_label(atype)]
 	section.add_child(header)
 
 	var grid := GridContainer.new()
@@ -86,7 +101,7 @@ func _add_run_section(vbox: VBoxContainer, run: Dictionary) -> int:
 	var ptype: String = run.get("pattern_type", "")
 	var total_dmg: int = run.get("total_hp_damage", 0)
 	var casualties_label := Label.new()
-	casualties_label.text = "%s  ·  %d casualties" % [ptype.capitalize(), total_dmg]
+	casualties_label.text = "%s  ·  %d casualties" % [_pattern_label(ptype), total_dmg]
 	section.add_child(casualties_label)
 
 	vbox.add_child(section)
@@ -168,6 +183,19 @@ func _find_vbox() -> VBoxContainer:
 				if c2 is VBoxContainer:
 					return c2
 	return null
+
+
+func _aircraft_label(atype: String) -> String:
+	match atype:
+		"cas_plane": return "CAS Plane"
+		_: return atype.replace("_", " ").capitalize()
+
+
+func _pattern_label(ptype: String) -> String:
+	match ptype:
+		"cas": return "CAS"
+		"fighter_strafe": return "Fighter Strafe"
+		_: return ptype.capitalize()
 
 
 func _get_map_loader() -> Node:

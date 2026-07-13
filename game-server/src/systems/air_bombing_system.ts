@@ -1,7 +1,7 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE } from "../rooms/schema/AirWingState.js";
-import { resolvePattern } from "./air_attack_pattern_registry.js";
-import { BOMBING_RANGE_DEG, BOMBING_STATS } from "../data/air_bombing_stats.js";
+import { resolvePattern, type CellSnapshot } from "./air_attack_pattern_registry.js";
+import { BOMBING_RANGE_DEG } from "../data/air_bombing_stats.js";
 import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import type { CombatSystem } from "./combat_system.js";
 
@@ -64,68 +64,75 @@ export class AirBombingSystem {
                                targetDiv.position_lng, targetDiv.position_lat);
         if (dist > BOMBING_RANGE_DEG) continue;
 
-        const stats = (BOMBING_STATS as Record<string, { hp_per_plane: number; supp_per_plane: number }>)[wing.aircraft_type];
-        if (!stats) continue;
-
-        const totalHpDmg   = Math.floor(stats.hp_per_plane   * wing.count * wing.combat_readiness);
-        const totalSuppDmg = Math.floor(stats.supp_per_plane  * wing.count * wing.combat_readiness);
-
-        // Distribute damage across occupied grid cells
         const gridCells = (targetDiv as any).grid?.cells as Array<{
           unit_type: string; hp: number; suppression: number; incapacitated: boolean;
         }> | undefined;
 
-        console.log(`[BOMB-DEBUG] wing=${wing.wing_id} target=${wing.target_id}`);
-        console.log(`[BOMB-DEBUG] targetDiv found=${!!targetDiv} gridCells type=${typeof gridCells} length=${gridCells?.length}`);
+        // Build cell snapshots for the pattern registry (same path as engagement bombing)
+        const cellSnapshots: CellSnapshot[] = [];
         if (gridCells) {
-          const sample: string[] = [];
-          for (let i = 0; i < Math.min(5, gridCells.length); i++) {
-            sample.push(`${i}:${gridCells[i]?.unit_type}`);
+          for (let i = 0; i < gridCells.length; i++) {
+            const c = gridCells[i];
+            cellSnapshots.push({
+              unit_type: c.unit_type,
+              hp: c.hp,
+              suppression: c.suppression,
+              incapacitated: c.incapacitated,
+            });
           }
-          console.log(`[BOMB-DEBUG] first 5 cells: ${sample.join(', ')}`);
         }
 
+        const ctx = {
+          aircraft_type:          wing.aircraft_type,
+          count:                  wing.count,
+          combat_readiness:       wing.combat_readiness,
+          perk_strafing:          (wing as any).perk_strafing ?? false,
+          perk_precision_bombing: (wing as any).perk_precision_bombing ?? false,
+          recon_quality:          0.0,
+        };
+        const result = resolvePattern(cellSnapshots, ctx);
+
+        // Apply damage to actual grid cells
         const hitCells: Array<{
           cell_index: number; unit_type: string;
           hp_damage: number; supp_damage: number;
           hp_after: number; supp_after: number;
         }> = [];
-
-        let actualDmg = totalHpDmg;
-
-        if (gridCells && gridCells.length > 0) {
-          const occupied: Array<[number, typeof gridCells[0]]> = [];
-          for (let i = 0; i < gridCells.length; i++) {
-            const c = gridCells[i];
-            if (c.unit_type !== "" && !c.incapacitated) occupied.push([i, c]);
-          }
-
-          if (occupied.length > 0) {
-            const hpPerCell   = Math.floor(totalHpDmg   / occupied.length);
-            const suppPerCell = Math.floor(totalSuppDmg  / occupied.length);
-            for (const [idx, cell] of occupied) {
-              const hp_after   = Math.max(0,   cell.hp          - hpPerCell);
-              const supp_after = Math.min(100, cell.suppression + suppPerCell);
-              cell.hp          = hp_after;
-              cell.suppression = supp_after;
-              if (cell.hp <= 0) cell.incapacitated = true;
-              hitCells.push({ cell_index: idx, unit_type: cell.unit_type,
-                hp_damage: hpPerCell, supp_damage: suppPerCell, hp_after, supp_after });
-            }
-            actualDmg = hitCells.reduce((s, h) => s + h.hp_damage, 0) || totalHpDmg;
+        if (gridCells) {
+          for (const hit of result.hit_cells) {
+            const cell = gridCells[hit.cell_index];
+            const hp_after   = Math.max(0,   cell.hp          - hit.hp_damage);
+            const supp_after = Math.min(100, cell.suppression + hit.supp_damage);
+            cell.hp          = hp_after;
+            cell.suppression = supp_after;
+            if (cell.hp <= 0) cell.incapacitated = true;
+            hitCells.push({
+              cell_index:  hit.cell_index,
+              unit_type:   cell.unit_type,
+              hp_damage:   hit.hp_damage,
+              supp_damage: hit.supp_damage,
+              hp_after,
+              supp_after,
+            });
           }
         }
-
+        const actualDmg = result.total_hp_damage;
         targetDiv.hp = Math.max(0, targetDiv.hp - actualDmg);
-        console.log(`[BOMB-DEBUG] occupied=${hitCells.length} actualDmg=${actualDmg}`);
 
         // Full grid snapshot so client can render the formation
-        const gridSnapshot = gridCells
-          ? Array.from(gridCells).map((c, i) => ({
+        const gridSnapshot: Array<{
+          cell_index: number; unit_type: string;
+          hp: number; suppression: number; incapacitated: boolean;
+        }> = [];
+        if (gridCells) {
+          for (let i = 0; i < gridCells.length; i++) {
+            const c = gridCells[i];
+            gridSnapshot.push({
               cell_index: i, unit_type: c.unit_type,
               hp: c.hp, suppression: c.suppression, incapacitated: c.incapacitated,
-            }))
-          : [];
+            });
+          }
+        }
 
         const batchKey = "div:" + wing.target_id;
         if (!batchByProvince.has(batchKey)) {
@@ -138,12 +145,11 @@ export class AirBombingSystem {
             runs: [],
           });
         }
-        console.log(`[BOMB-DEBUG] gridSnapshot length=${gridSnapshot.length} sample=${JSON.stringify(gridSnapshot.slice(0,3))}`);
         batchByProvince.get(batchKey)!.runs.push({
           wing_id: wing.wing_id, nation_id: wing.nation_id,
           aircraft_type: wing.aircraft_type, count: wing.count,
           hit_cells: hitCells, grid_snapshot: gridSnapshot,
-          pattern_type: "direct", total_hp_damage: actualDmg,
+          pattern_type: result.pattern_type, total_hp_damage: actualDmg,
         });
 
         wing.combat_readiness = Math.max(READINESS_FLOOR,
