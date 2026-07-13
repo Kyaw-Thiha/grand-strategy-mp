@@ -26,6 +26,8 @@ func _setup_ui() -> void:
 	vbox.add_child(header)
 	var icon := TextureRect.new()
 	icon.texture = preload("res://assets/icons/fire-solid-full.svg")
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.custom_minimum_size = Vector2(20, 20)
 	header.add_child(icon)
 	var title := Label.new()
@@ -55,7 +57,9 @@ func populate(data: Dictionary) -> void:
 
 	var subtitle := Label.new()
 	var province_id: String = data.get("province_id", "")
-	if not province_id.is_empty():
+	if province_id.begins_with("div:"):
+		subtitle.text = "Ground Attack"
+	elif not province_id.is_empty():
 		var province_data: Dictionary = _get_map_loader().get_province_data(province_id)
 		subtitle.text = province_data.get("name", province_id)
 	else:
@@ -82,17 +86,19 @@ func _add_run_section(vbox: VBoxContainer, run: Dictionary) -> int:
 	header.text = "%d × %s" % [count, atype.replace("_", " ").capitalize()]
 	section.add_child(header)
 
-	var grid := GridContainer.new()
-	grid.columns = 5
-	var cells := _build_run_grid(grid)
-	_populate_run_grid(cells, run.get("hit_cells", []))
-	section.add_child(grid)
-
-	var casualities_label := Label.new()
-	var total_dmg: int = run.get("total_hp_damage", 0)
 	var ptype: String = run.get("pattern_type", "")
-	casualities_label.text = "%s struck  ·  %d casualties" % [ptype.capitalize(), total_dmg]
-	section.add_child(casualities_label)
+	var total_dmg: int = run.get("total_hp_damage", 0)
+
+	if ptype != "direct":
+		var grid := GridContainer.new()
+		grid.columns = 5
+		var cells := _build_run_grid(grid)
+		_populate_run_grid(cells, run.get("hit_cells", []))
+		section.add_child(grid)
+
+	var casualties_label := Label.new()
+	casualties_label.text = "%s  ·  %d casualties" % [ptype.capitalize(), total_dmg]
+	section.add_child(casualties_label)
 
 	vbox.add_child(section)
 	return total_dmg
