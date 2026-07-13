@@ -84,6 +84,9 @@ const POLITICAL_BORDER_WIDTH := 1.4
 const POLITICAL_BORDER_CONTRAST_WIDTH := 3.2
 const ELEVATION_BORDER_COLOR := Color(0.0, 0.0, 0.0, 1.0)
 const ELEVATION_BORDER_WIDTH := 2.8
+const TERRAIN_CACHE_SIZE := Vector2i(2048, 1500)
+const TERRAIN_CACHE_SCALE := Vector2(0.5, 0.5)
+const BASE_FILL_SHADER_PATH := "res://src/systems/map/map_base_fill.gdshader"
 
 var _map_loader: Node = null
 var _data_source: Object = null
@@ -92,11 +95,10 @@ var _highlighted: Dictionary = {}       # province_id → original Color
 var _nation_label_layer: Node2D = null
 var _border_overlay_layer: CanvasLayer = null
 var _border_overlay_root: Node2D = null
-var _border_overlay_roots: Dictionary = {}
-var _political_fill_layer: Node2D = null
-var _neutral_fill_layer: Node2D = null
-var _political_cached_fills: Dictionary = {}
-var _neutral_cached_fills: Dictionary = {}
+var _terrain_cache_layer: Node2D = null
+var _terrain_cache_sprites: Dictionary = {}
+var _terrain_cache_ready: bool = false
+var _base_fill_material: ShaderMaterial = null
 var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
 
@@ -117,13 +119,14 @@ func setup(map_loader: Node, data_source: Object) -> void:
 
 
 func on_map_loaded(_province_count: int) -> void:
-	_create_cached_visual_fills()
 	_refresh_all()
+	_setup_base_fill_material()
 	_rebuild_border_overlay()
+	_apply_border_style()
 	_set_overlay_layer_visibility()
-	_set_mode_fill_visibility()
-	_set_border_mode_visibility()
+	_set_base_fill_mode()
 	_build_nation_labels()
+	call_deferred("_build_terrain_cache")
 
 
 func set_overlay_mode(mode: String) -> void:
@@ -132,9 +135,9 @@ func set_overlay_mode(mode: String) -> void:
 		"elevation":  _overlay_mode = OverlayMode.ELEVATION
 		"cover":      _overlay_mode = OverlayMode.COVER
 	_highlighted.clear()
-	_set_mode_fill_visibility()
+	_set_base_fill_mode()
 	_set_overlay_layer_visibility()
-	_set_border_mode_visibility()
+	_apply_border_style()
 	# Nation labels only make sense over political fills
 	if _nation_label_layer:
 		_nation_label_layer.visible = (
@@ -152,7 +155,6 @@ func highlight_province(province_id: String) -> void:
 	var base := fill.color
 	var highlight := base.darkened(0.3) if base.a > 0.01 else Color(0, 0, 0, 0.30)
 	_set_all_fills(node, highlight)
-	_set_cached_fills(province_id, highlight, highlight.darkened(0.15))
 
 
 func is_highlighted(province_id: String) -> bool:
@@ -164,7 +166,6 @@ func clear_highlights() -> void:
 		var node: Node2D = _map_loader.get_province_node(pid)
 		if node:
 			_set_all_fills(node, _highlighted[pid])
-			_set_cached_fills(pid, _highlighted[pid], Color(0.55, 0.55, 0.55, 0.35))
 	_highlighted.clear()
 
 
@@ -193,7 +194,6 @@ func refresh_province(province_id: String) -> void:
 	if node == null:
 		return
 	_set_all_fills(node, _political_province_color(province_id))
-	_set_cached_fills(province_id, _political_province_color(province_id), Color(0.55, 0.55, 0.55, 0.35))
 	_set_province_borders(node)
 	_rebuild_border_overlay()
 	_highlighted.erase(province_id)
@@ -214,72 +214,41 @@ func _refresh_all() -> void:
 		if node == null:
 			continue
 		_set_all_fills(node, _political_province_color(pid))
-		_set_cached_fills(pid, _political_province_color(pid), Color(0.55, 0.55, 0.55, 0.35))
 		_set_province_borders(node)
 
 
 func _set_all_fills(node: Node2D, colour: Color) -> void:
 	for child in node.get_children():
-		if child is Polygon2D and not child.has_meta("is_marker") and not child.has_meta("is_cached_neutral_fill"):
+		if child is Polygon2D and not child.has_meta("is_marker"):
 			child.color = colour
 
 
-func _set_cached_fills(province_id: String, political_colour: Color, neutral_colour: Color) -> void:
-	for fill_variant: Variant in _political_cached_fills.get(province_id, []):
-		(fill_variant as Polygon2D).color = political_colour
-	for fill_variant: Variant in _neutral_cached_fills.get(province_id, []):
-		(fill_variant as Polygon2D).color = neutral_colour
-
-
-func _create_cached_visual_fills() -> void:
-	if _map_loader == null:
+func _setup_base_fill_material() -> void:
+	var shader: Shader = load(BASE_FILL_SHADER_PATH) as Shader
+	if shader == null:
+		push_error("MapRenderer: failed to load base fill shader")
 		return
-	if is_instance_valid(_political_fill_layer) or is_instance_valid(_neutral_fill_layer):
-		return
-	_political_cached_fills.clear()
-	_neutral_cached_fills.clear()
-	_political_fill_layer = Node2D.new()
-	_political_fill_layer.name = "CachedPoliticalFills"
-	_neutral_fill_layer = Node2D.new()
-	_neutral_fill_layer.name = "CachedNeutralFills"
-	_neutral_fill_layer.visible = false
-	var province_container: Node2D = _map_loader.get_node_or_null("Provinces") as Node2D
-	var fill_parent: Node = province_container if province_container != null else _map_loader
-	fill_parent.add_child(_political_fill_layer)
-	fill_parent.add_child(_neutral_fill_layer)
-
+	_base_fill_material = ShaderMaterial.new()
+	_base_fill_material.shader = shader
 	for province_id: String in _map_loader.get_all_province_ids():
 		var province_node: Node2D = _map_loader.get_province_node(province_id)
 		if province_node == null:
 			continue
-		_political_cached_fills[province_id] = []
-		_neutral_cached_fills[province_id] = []
 		for child: Node in province_node.get_children():
-			if not child is Polygon2D or not _is_province_fill(child as Polygon2D):
-				continue
-			var source_fill: Polygon2D = child as Polygon2D
-			var political_fill: Polygon2D = source_fill.duplicate() as Polygon2D
-			political_fill.name = "%sCachedPolitical" % source_fill.name
-			political_fill.color = _political_province_color(province_id)
-			_political_fill_layer.add_child(political_fill)
-			political_fill.global_transform = source_fill.global_transform
-			(_political_cached_fills[province_id] as Array).append(political_fill)
-
-			var neutral_fill: Polygon2D = source_fill.duplicate() as Polygon2D
-			neutral_fill.name = "%sCachedNeutral" % source_fill.name
-			neutral_fill.set_meta("is_cached_neutral_fill", true)
-			neutral_fill.color = Color(0.55, 0.55, 0.55, 0.35)
-			_neutral_fill_layer.add_child(neutral_fill)
-			neutral_fill.global_transform = source_fill.global_transform
-			(_neutral_cached_fills[province_id] as Array).append(neutral_fill)
-			source_fill.visible = false
+			if child is Polygon2D and not child.has_meta("is_marker") and _is_province_fill(child as Polygon2D):
+				(child as Polygon2D).material = _base_fill_material
+	_set_base_fill_mode()
 
 
-func _set_mode_fill_visibility() -> void:
-	if _political_fill_layer == null or _neutral_fill_layer == null:
+func _set_base_fill_mode() -> void:
+	if _base_fill_material == null:
 		return
-	_political_fill_layer.visible = _overlay_mode == OverlayMode.POLITICAL
-	_neutral_fill_layer.visible = _overlay_mode == OverlayMode.COVER
+	var fill_mode: int = 0
+	if _overlay_mode == OverlayMode.COVER:
+		fill_mode = 1
+	elif _overlay_mode == OverlayMode.ELEVATION:
+		fill_mode = 2
+	_base_fill_material.set_shader_parameter("map_fill_mode", fill_mode)
 
 
 func _set_province_borders(node: Node2D) -> void:
@@ -300,29 +269,17 @@ func _create_border_overlay() -> void:
 	_border_overlay_layer.follow_viewport_scale = 1.0
 	add_child(_border_overlay_layer)
 
-	for mode: int in [OverlayMode.POLITICAL, OverlayMode.ELEVATION, OverlayMode.COVER]:
-		var mode_root: Node2D = Node2D.new()
-		mode_root.name = "ProvinceBorderOverlay_%s" % OverlayMode.keys()[mode]
-		mode_root.visible = mode == OverlayMode.POLITICAL
-		_border_overlay_layer.add_child(mode_root)
-		_border_overlay_roots[mode] = mode_root
-	_border_overlay_root = _border_overlay_roots[OverlayMode.POLITICAL] as Node2D
-
-
-func _set_border_mode_visibility() -> void:
-	for mode: int in _border_overlay_roots.keys():
-		var mode_root: Node2D = _border_overlay_roots[mode] as Node2D
-		mode_root.visible = mode == _overlay_mode
+	_border_overlay_root = Node2D.new()
+	_border_overlay_root.name = "ProvinceBorderOverlay"
+	_border_overlay_layer.add_child(_border_overlay_root)
 
 
 func _rebuild_border_overlay() -> void:
-	if _map_loader == null or _border_overlay_roots.is_empty():
+	if _map_loader == null or _border_overlay_root == null:
 		return
 
-	for root_variant: Variant in _border_overlay_roots.values():
-		var mode_root: Node2D = root_variant as Node2D
-		for child: Node in mode_root.get_children():
-			child.free()
+	for child: Node in _border_overlay_root.get_children():
+		child.free()
 
 	var edge_segments: Dictionary = {}
 	for province_id: String in _map_loader.get_all_province_ids():
@@ -331,7 +288,7 @@ func _rebuild_border_overlay() -> void:
 			continue
 		var owner_id: String = _province_owner_id(province_id)
 		for child: Node in province_node.get_children():
-			if not child is Polygon2D or child.has_meta("is_cached_neutral_fill") or not _is_province_fill(child as Polygon2D):
+			if not child is Polygon2D or not _is_province_fill(child as Polygon2D):
 				continue
 			_collect_province_edges(edge_segments, child as Polygon2D, province_id, owner_id)
 
@@ -406,34 +363,37 @@ func _make_border_point_key(point: Vector2) -> String:
 
 
 func _add_nation_border_overlay_line(start: Vector2, end: Vector2, boundary_key: String) -> void:
-	for mode: int in [OverlayMode.POLITICAL, OverlayMode.ELEVATION, OverlayMode.COVER]:
-		var mode_root: Node2D = _border_overlay_roots[mode] as Node2D
-		var points: PackedVector2Array = PackedVector2Array()
-		points.append(mode_root.to_local(start))
-		points.append(mode_root.to_local(end))
+	var points: PackedVector2Array = PackedVector2Array()
+	points.append(_border_overlay_root.to_local(start))
+	points.append(_border_overlay_root.to_local(end))
 
-		if mode == OverlayMode.ELEVATION or mode == OverlayMode.COVER:
-			var dark_border: Line2D = Line2D.new()
-			dark_border.name = "%sNationBoundary" % boundary_key
-			dark_border.points = points
-			dark_border.width = ELEVATION_BORDER_WIDTH
-			dark_border.default_color = ELEVATION_BORDER_COLOR
-			mode_root.add_child(dark_border)
+	var contrast_border: Line2D = Line2D.new()
+	contrast_border.name = "%sContrast" % boundary_key
+	contrast_border.set_meta("border_role", "contrast")
+	contrast_border.points = points
+	_border_overlay_root.add_child(contrast_border)
+
+	var highlight_border: Line2D = Line2D.new()
+	highlight_border.name = "%sHighlight" % boundary_key
+	highlight_border.set_meta("border_role", "highlight")
+	highlight_border.points = points
+	_border_overlay_root.add_child(highlight_border)
+
+
+func _apply_border_style() -> void:
+	if _border_overlay_root == null:
+		return
+	var debug_border: bool = _overlay_mode == OverlayMode.COVER or _overlay_mode == OverlayMode.ELEVATION
+	for child: Node in _border_overlay_root.get_children():
+		if not child is Line2D:
 			continue
-
-		var contrast_border: Line2D = Line2D.new()
-		contrast_border.name = "%sContrast" % boundary_key
-		contrast_border.points = points
-		contrast_border.width = POLITICAL_BORDER_CONTRAST_WIDTH
-		contrast_border.default_color = POLITICAL_BORDER_CONTRAST_COLOR
-		mode_root.add_child(contrast_border)
-
-		var highlight_border: Line2D = Line2D.new()
-		highlight_border.name = "%sHighlight" % boundary_key
-		highlight_border.points = points
-		highlight_border.width = POLITICAL_BORDER_WIDTH
-		highlight_border.default_color = POLITICAL_BORDER_COLOR
-		mode_root.add_child(highlight_border)
+		var line: Line2D = child as Line2D
+		if line.get_meta("border_role", "") == "contrast":
+			line.width = ELEVATION_BORDER_WIDTH if debug_border else POLITICAL_BORDER_CONTRAST_WIDTH
+			line.default_color = ELEVATION_BORDER_COLOR if debug_border else POLITICAL_BORDER_CONTRAST_COLOR
+		else:
+			line.width = 0.0 if debug_border else POLITICAL_BORDER_WIDTH
+			line.default_color = Color.TRANSPARENT if debug_border else POLITICAL_BORDER_COLOR
 
 
 func _political_province_color(province_id: String) -> Color:
@@ -447,6 +407,80 @@ func _political_province_color(province_id: String) -> Color:
 
 func _on_province_captured(province_id: String, _new_owner_id: String) -> void:
 	refresh_province(province_id)
+
+
+func _build_terrain_cache() -> void:
+	if _map_loader == null or _terrain_cache_ready:
+		return
+	var cache_modes: Array[int] = [OverlayMode.POLITICAL, OverlayMode.COVER, OverlayMode.ELEVATION]
+	for mode: int in cache_modes:
+		var texture: Texture2D = await _render_terrain_mode(mode)
+		if texture == null:
+			return
+		_create_terrain_cache_sprite(mode, texture)
+	_terrain_cache_ready = true
+	_set_overlay_layer_visibility()
+
+
+func _render_terrain_mode(mode: int) -> Texture2D:
+	var viewport: SubViewport = SubViewport.new()
+	viewport.name = "TerrainCacheViewport_%s" % OverlayMode.keys()[mode]
+	viewport.size = TERRAIN_CACHE_SIZE
+	viewport.transparent_bg = true
+	viewport.disable_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_map_loader.add_child(viewport)
+
+	var cache_root: Node2D = Node2D.new()
+	cache_root.position = Vector2(TERRAIN_CACHE_SIZE) * 0.5
+	cache_root.scale = TERRAIN_CACHE_SCALE
+	viewport.add_child(cache_root)
+
+	if mode == OverlayMode.POLITICAL or mode == OverlayMode.COVER:
+		var cover_layer: Node = _map_loader.get_node_or_null("CoverLayer")
+		if cover_layer:
+			var cover_copy: Node = cover_layer.duplicate()
+			cover_copy.modulate = Color.WHITE if mode == OverlayMode.COVER else Color(1.0, 1.0, 1.0, POLITICAL_COVER_LAYER_ALPHA)
+			cache_root.add_child(cover_copy)
+	if mode == OverlayMode.POLITICAL or mode == OverlayMode.ELEVATION:
+		var elevation_layer: Node = _map_loader.get_node_or_null("ElevationLayer")
+		if elevation_layer:
+			var elevation_copy: Node = elevation_layer.duplicate()
+			elevation_copy.modulate = Color.WHITE if mode == OverlayMode.ELEVATION else Color(1.0, 1.0, 1.0, POLITICAL_ELEVATION_LAYER_ALPHA)
+			cache_root.add_child(elevation_copy)
+
+	await RenderingServer.frame_post_draw
+	var image: Image = viewport.get_texture().get_image()
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	viewport.free()
+	return texture
+
+
+func _create_terrain_cache_sprite(mode: int, texture: Texture2D) -> void:
+	if _terrain_cache_layer == null:
+		_terrain_cache_layer = Node2D.new()
+		_terrain_cache_layer.name = "TerrainCacheLayer"
+		_map_loader.add_child(_terrain_cache_layer)
+		var cover_layer: Node = _map_loader.get_node_or_null("CoverLayer")
+		if cover_layer:
+			_map_loader.move_child(_terrain_cache_layer, cover_layer.get_index())
+
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "TerrainCache_%s" % OverlayMode.keys()[mode]
+	sprite.texture = texture
+	sprite.position = Vector2.ZERO
+	sprite.scale = Vector2(2.0, 2.0)
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	sprite.visible = false
+	_terrain_cache_layer.add_child(sprite)
+	_terrain_cache_sprites[mode] = sprite
+
+
+func _set_terrain_cache_visibility() -> void:
+	for mode_variant: Variant in _terrain_cache_sprites.keys():
+		var mode: int = mode_variant
+		var sprite: Sprite2D = _terrain_cache_sprites[mode] as Sprite2D
+		sprite.visible = mode == _overlay_mode
 
 
 func _build_nation_labels() -> void:
@@ -638,6 +672,13 @@ func _set_overlay_layer_visibility() -> void:
 
 	var cover_layer := _map_loader.get_node_or_null("CoverLayer")
 	var elev_layer := _map_loader.get_node_or_null("ElevationLayer")
+	if _terrain_cache_ready:
+		if cover_layer:
+			cover_layer.visible = false
+		if elev_layer:
+			elev_layer.visible = false
+		_set_terrain_cache_visibility()
+		return
 
 	match _overlay_mode:
 		OverlayMode.POLITICAL:
