@@ -1,7 +1,7 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE } from "../rooms/schema/AirWingState.js";
 import { resolvePattern } from "./air_attack_pattern_registry.js";
-import { BOMBING_RANGE_DEG } from "../data/air_bombing_stats.js";
+import { BOMBING_RANGE_DEG, BOMBING_STATS } from "../data/air_bombing_stats.js";
 import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import type { CombatSystem } from "./combat_system.js";
 
@@ -53,7 +53,49 @@ export class AirBombingSystem {
         state,
       );
 
-      if (!engagement) continue;
+      if (!engagement) {
+        // Fallback: direct division bombing when the target is an idle division
+        // (not in a land-vs-land engagement that getEngagementAtPosition can find)
+        const targetDiv = wing.target_id ? state.divisions.get(wing.target_id) : undefined;
+        if (!targetDiv) continue;
+
+        const dist = euclidDeg(wing.position_lng, wing.position_lat,
+                               targetDiv.position_lng, targetDiv.position_lat);
+        if (dist > BOMBING_RANGE_DEG) continue;
+
+        const stats = (BOMBING_STATS as Record<string, { hp_per_plane: number; supp_per_plane: number }>)[wing.aircraft_type];
+        if (!stats) continue;
+
+        const totalHpDamage = Math.floor(stats.hp_per_plane * wing.count * wing.combat_readiness);
+        targetDiv.hp = Math.max(0, targetDiv.hp - totalHpDamage);
+
+        const batchKey = "div:" + wing.target_id;
+        if (!batchByProvince.has(batchKey)) {
+          batchByProvince.set(batchKey, {
+            province_id:        batchKey,
+            position_lng:       targetDiv.position_lng,
+            position_lat:       targetDiv.position_lat,
+            attacker_nation_id: wing.nation_id,
+            defender_nation_id: targetDiv.nation_id,
+            runs: [],
+          } as any);
+        }
+        batchByProvince.get(batchKey)!.runs.push({
+          wing_id:         wing.wing_id,
+          nation_id:       wing.nation_id,
+          aircraft_type:   wing.aircraft_type,
+          count:           wing.count,
+          hit_cells:       [],
+          pattern_type:    "direct",
+          total_hp_damage: totalHpDamage,
+        });
+
+        wing.combat_readiness = Math.max(READINESS_FLOOR,
+          wing.combat_readiness - READINESS_BOMBING_SPIKE);
+
+        lifecycleSystem.resolveEngagement(wing.wing_id, state, broadcast);
+        continue;
+      }
 
       // RTB if the target province's defender is now a friendly nation
       if (engagement.defender_nation_id === wing.nation_id) {

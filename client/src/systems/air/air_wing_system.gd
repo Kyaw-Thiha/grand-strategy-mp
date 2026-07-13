@@ -505,14 +505,21 @@ func _on_air_bombing_result(data: Dictionary) -> void:
 		return
 	if not _bombing_indicators.has(province_id) or \
 	   not is_instance_valid(_bombing_indicators[province_id]):
+		var b_lng: float = 0.0
+		var b_lat: float = 0.0
 		var province_data: Dictionary = _map_loader.get_province_data(province_id)
 		if province_data.is_empty():
-			return
-		var city_pos: Array = province_data.get("city_position", [])
-		if city_pos.size() < 2:
-			return
-		var b_lng: float = float(city_pos[0])
-		var b_lat: float = float(city_pos[1])
+			# Fallback for division bombing: use raw coordinates from payload
+			b_lng = float(data.get("position_lng", 0.0))
+			b_lat = float(data.get("position_lat", 0.0))
+			if b_lng == 0.0 and b_lat == 0.0:
+				return
+		else:
+			var city_pos: Array = province_data.get("city_position", [])
+			if city_pos.size() < 2:
+				return
+			b_lng = float(city_pos[0])
+			b_lat = float(city_pos[1])
 		var key: String = _bucket_key(b_lng, b_lat)
 		var slot: int = _bucket_slot_counts.get(key, 0)
 		var indicator = BombingRunIndicatorScene.instantiate()
