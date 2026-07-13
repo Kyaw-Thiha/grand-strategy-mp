@@ -454,6 +454,19 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         div.position_lat = msg.position_lat;
         if (msg.observation_radius !== undefined) div.observation_radius = msg.observation_radius;
         this.state.divisions.set(msg.division_id, div);
+        const defaultCells = [
+          { row: 0, col: 0, unit_type: "recon_infantry" },
+          { row: 0, col: 2, unit_type: "recon_infantry" },
+          { row: 1, col: 0, unit_type: "medium_tank" },
+          { row: 1, col: 1, unit_type: "medium_tank" },
+          { row: 1, col: 2, unit_type: "infantry" },
+          { row: 2, col: 0, unit_type: "artillery" },
+          { row: 2, col: 1, unit_type: "at_gun" },
+          { row: 3, col: 0, unit_type: "infantry" },
+        ];
+        for (const c of defaultCells) {
+          div.grid.cells[c.row * 5 + c.col].unit_type = c.unit_type;
+        }
       });
       this.onMessage("SET_RELATION", (_client, msg: {
         nation_a: string;

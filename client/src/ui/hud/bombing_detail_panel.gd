@@ -1,10 +1,7 @@
 extends PanelContainer
 
-const GLYPH_SCENE := preload("res://scenes/game/panels/unit_glyph_cell.tscn")
-const DISMISS_SEC := 8.0
-
-var _dismiss_timer: float = 0.0
-var _progress_bar: TextureProgressBar
+const GLYPH_SCENE        := preload("res://scenes/game/panels/unit_glyph_cell.tscn")
+const STATUS_BARS_SCRIPT := preload("res://src/ui/hud/status_bars.gd")
 
 
 func _ready() -> void:
@@ -40,17 +37,8 @@ func _setup_ui() -> void:
 	close_btn.pressed.connect(_close)
 	header.add_child(close_btn)
 
-	_progress_bar = TextureProgressBar.new()
-	_progress_bar.max_value = 1.0
-	_progress_bar.value = 1.0
-	_progress_bar.custom_minimum_size = Vector2(0, 6)
-	vbox.add_child(_progress_bar)
-
 
 func populate(data: Dictionary) -> void:
-	_dismiss_timer = 0.0
-	_progress_bar.value = 1.0
-
 	var vbox := _find_vbox()
 	if vbox == null:
 		return
@@ -86,16 +74,17 @@ func _add_run_section(vbox: VBoxContainer, run: Dictionary) -> int:
 	header.text = "%d × %s" % [count, atype.replace("_", " ").capitalize()]
 	section.add_child(header)
 
+	var grid := GridContainer.new()
+	grid.columns = 5
+	var result := _build_run_grid(grid)
+	var glyphs: Array   = result[0]
+	var bars_list: Array = result[1]
+	_populate_run_grid(glyphs, bars_list,
+		run.get("grid_snapshot", []), run.get("hit_cells", []))
+	section.add_child(grid)
+
 	var ptype: String = run.get("pattern_type", "")
 	var total_dmg: int = run.get("total_hp_damage", 0)
-
-	if ptype != "direct":
-		var grid := GridContainer.new()
-		grid.columns = 5
-		var cells := _build_run_grid(grid)
-		_populate_run_grid(cells, run.get("hit_cells", []))
-		section.add_child(grid)
-
 	var casualties_label := Label.new()
 	casualties_label.text = "%s  ·  %d casualties" % [ptype.capitalize(), total_dmg]
 	section.add_child(casualties_label)
@@ -105,42 +94,71 @@ func _add_run_section(vbox: VBoxContainer, run: Dictionary) -> int:
 
 
 func _build_run_grid(container: GridContainer) -> Array:
-	var result := []
-	for i in range(25):
-		var cell = GLYPH_SCENE.instantiate()
-		container.add_child(cell)
-		result.append(cell)
-	return result
+	var glyphs    := []
+	var bars_list := []
+	for _i in range(25):
+		var vbox := VBoxContainer.new()
+		vbox.add_theme_constant_override("separation", 0)
+
+		var glyph = GLYPH_SCENE.instantiate()
+		glyph.set("unit_type", "")
+		glyph.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+		glyph.size_flags_vertical   = Control.SIZE_FILL | Control.SIZE_EXPAND
+		vbox.add_child(glyph)
+		glyphs.append(glyph)
+
+		var bars = STATUS_BARS_SCRIPT.new()
+		bars.custom_minimum_size = Vector2(0, 10)
+		bars.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+		bars.visible = false
+		vbox.add_child(bars)
+		bars_list.append(bars)
+
+		container.add_child(vbox)
+	return [glyphs, bars_list]
 
 
-func _populate_run_grid(cells: Array, hit_cells: Array) -> void:
-	for cell in cells:
-		cell.unit_type = ""
-		cell.modulate = Color(1, 1, 1, 1)
-	var hit_set := {}
+func _populate_run_grid(glyphs: Array, bars_list: Array,
+		grid_snapshot: Array, hit_cells: Array) -> void:
+	for i in range(glyphs.size()):
+		glyphs[i].unit_type = ""
+		glyphs[i].modulate  = Color(1, 1, 1, 1)
+		glyphs[i].set("is_targeted", false)
+		bars_list[i].visible = false
+
+	# Legacy fallback: no snapshot, synthesise from hit_cells
+	if grid_snapshot.is_empty() and not hit_cells.is_empty():
+		for h in hit_cells:
+			var idx: int = h.get("cell_index", -1)
+			if idx < 0 or idx >= glyphs.size():
+				continue
+			glyphs[idx].unit_type = h.get("unit_type", "infantry")
+			glyphs[idx].set("is_targeted", true)
+		return
+
+	# Apply full formation from snapshot
+	for snap in grid_snapshot:
+		var idx: int = snap.get("cell_index", -1)
+		if idx < 0 or idx >= glyphs.size():
+			continue
+		var utype: String = snap.get("unit_type", "")
+		if utype.is_empty():
+			continue
+		glyphs[idx].unit_type = utype
+		glyphs[idx].set("incapacitated", snap.get("incapacitated", false))
+		bars_list[idx].visible = true
+		bars_list[idx].set("hp_pct",   snap.get("hp",          100.0) / 100.0)
+		bars_list[idx].set("supp_pct", snap.get("suppression",   0.0) / 100.0)
+
+	# Red overlay on cells that were actually hit
 	for h in hit_cells:
-		hit_set[h.cell_index] = h.hp_damage
-	for i in range(cells.size()):
-		if hit_set.has(i):
-			cells[i].unit_type = "infantry"
-			cells[i].modulate = Color(1.0, 0.2, 0.2, 0.9)
-
-
-func _process(delta: float) -> void:
-	_dismiss_timer += delta
-	_progress_bar.value = 1.0 - (_dismiss_timer / DISMISS_SEC)
-	if _dismiss_timer >= DISMISS_SEC:
-		_close()
+		var idx: int = h.get("cell_index", -1)
+		if idx >= 0 and idx < glyphs.size():
+			glyphs[idx].set("is_targeted", true)
 
 
 func _close() -> void:
 	EventBus.bombing_detail_closed.emit()
-	var ml: MainLoop = Engine.get_main_loop()
-	if ml != null:
-		var root_node: Window = ml.root
-		var hud: Node = root_node.find_child("GameHUD", true, false)
-		if hud != null and hud.has_method("_hide_bombing_detail"):
-			hud._hide_bombing_detail()
 
 
 func _find_vbox() -> VBoxContainer:

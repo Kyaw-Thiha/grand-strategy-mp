@@ -40,6 +40,8 @@ export class AirBombingSystem {
 
     const batchByProvince = new Map<string, {
       province_id: string;
+      position_lng?: number;
+      position_lat?: number;
       attacker_nation_id: string;
       defender_nation_id: string;
       runs: unknown[];
@@ -54,8 +56,7 @@ export class AirBombingSystem {
       );
 
       if (!engagement) {
-        // Fallback: direct division bombing when the target is an idle division
-        // (not in a land-vs-land engagement that getEngagementAtPosition can find)
+        // Fallback: direct division bombing when target is an idle division
         const targetDiv = wing.target_id ? state.divisions.get(wing.target_id) : undefined;
         if (!targetDiv) continue;
 
@@ -66,8 +67,65 @@ export class AirBombingSystem {
         const stats = (BOMBING_STATS as Record<string, { hp_per_plane: number; supp_per_plane: number }>)[wing.aircraft_type];
         if (!stats) continue;
 
-        const totalHpDamage = Math.floor(stats.hp_per_plane * wing.count * wing.combat_readiness);
-        targetDiv.hp = Math.max(0, targetDiv.hp - totalHpDamage);
+        const totalHpDmg   = Math.floor(stats.hp_per_plane   * wing.count * wing.combat_readiness);
+        const totalSuppDmg = Math.floor(stats.supp_per_plane  * wing.count * wing.combat_readiness);
+
+        // Distribute damage across occupied grid cells
+        const gridCells = (targetDiv as any).grid?.cells as Array<{
+          unit_type: string; hp: number; suppression: number; incapacitated: boolean;
+        }> | undefined;
+
+        console.log(`[BOMB-DEBUG] wing=${wing.wing_id} target=${wing.target_id}`);
+        console.log(`[BOMB-DEBUG] targetDiv found=${!!targetDiv} gridCells type=${typeof gridCells} length=${gridCells?.length}`);
+        if (gridCells) {
+          const sample: string[] = [];
+          for (let i = 0; i < Math.min(5, gridCells.length); i++) {
+            sample.push(`${i}:${gridCells[i]?.unit_type}`);
+          }
+          console.log(`[BOMB-DEBUG] first 5 cells: ${sample.join(', ')}`);
+        }
+
+        const hitCells: Array<{
+          cell_index: number; unit_type: string;
+          hp_damage: number; supp_damage: number;
+          hp_after: number; supp_after: number;
+        }> = [];
+
+        let actualDmg = totalHpDmg;
+
+        if (gridCells && gridCells.length > 0) {
+          const occupied: Array<[number, typeof gridCells[0]]> = [];
+          for (let i = 0; i < gridCells.length; i++) {
+            const c = gridCells[i];
+            if (c.unit_type !== "" && !c.incapacitated) occupied.push([i, c]);
+          }
+
+          if (occupied.length > 0) {
+            const hpPerCell   = Math.floor(totalHpDmg   / occupied.length);
+            const suppPerCell = Math.floor(totalSuppDmg  / occupied.length);
+            for (const [idx, cell] of occupied) {
+              const hp_after   = Math.max(0,   cell.hp          - hpPerCell);
+              const supp_after = Math.min(100, cell.suppression + suppPerCell);
+              cell.hp          = hp_after;
+              cell.suppression = supp_after;
+              if (cell.hp <= 0) cell.incapacitated = true;
+              hitCells.push({ cell_index: idx, unit_type: cell.unit_type,
+                hp_damage: hpPerCell, supp_damage: suppPerCell, hp_after, supp_after });
+            }
+            actualDmg = hitCells.reduce((s, h) => s + h.hp_damage, 0) || totalHpDmg;
+          }
+        }
+
+        targetDiv.hp = Math.max(0, targetDiv.hp - actualDmg);
+        console.log(`[BOMB-DEBUG] occupied=${hitCells.length} actualDmg=${actualDmg}`);
+
+        // Full grid snapshot so client can render the formation
+        const gridSnapshot = gridCells
+          ? Array.from(gridCells).map((c, i) => ({
+              cell_index: i, unit_type: c.unit_type,
+              hp: c.hp, suppression: c.suppression, incapacitated: c.incapacitated,
+            }))
+          : [];
 
         const batchKey = "div:" + wing.target_id;
         if (!batchByProvince.has(batchKey)) {
@@ -78,16 +136,14 @@ export class AirBombingSystem {
             attacker_nation_id: wing.nation_id,
             defender_nation_id: targetDiv.nation_id,
             runs: [],
-          } as any);
+          });
         }
+        console.log(`[BOMB-DEBUG] gridSnapshot length=${gridSnapshot.length} sample=${JSON.stringify(gridSnapshot.slice(0,3))}`);
         batchByProvince.get(batchKey)!.runs.push({
-          wing_id:         wing.wing_id,
-          nation_id:       wing.nation_id,
-          aircraft_type:   wing.aircraft_type,
-          count:           wing.count,
-          hit_cells:       [],
-          pattern_type:    "direct",
-          total_hp_damage: totalHpDamage,
+          wing_id: wing.wing_id, nation_id: wing.nation_id,
+          aircraft_type: wing.aircraft_type, count: wing.count,
+          hit_cells: hitCells, grid_snapshot: gridSnapshot,
+          pattern_type: "direct", total_hp_damage: actualDmg,
         });
 
         wing.combat_readiness = Math.max(READINESS_FLOOR,
