@@ -16,6 +16,7 @@ export interface AirWingSpawnConfig {
 export const AIR_WING_STARTING_POSITIONS: AirWingSpawnConfig[] = [
   { wing_id: "germany_wing_01",        nation_id: "germany",        lng: 13.385771, lat: 52.483566, aircraft_type: "fighter", home_airbase_province_id: "we6_germany_06" },
   { wing_id: "germany_wing_02",        nation_id: "germany",        lng:  8.684450, lat: 50.063147, aircraft_type: "fighter", home_airbase_province_id: "we6_germany_01" },
+  { wing_id: "germany_cas_frankfurt_01", nation_id: "germany",        lng:  8.685450, lat: 50.063147, aircraft_type: "cas_plane", home_airbase_province_id: "we6_germany_01" },
   { wing_id: "france_wing_01",         nation_id: "france",         lng:  2.335453, lat: 48.896725, aircraft_type: "fighter", home_airbase_province_id: "we6_france_03" },
   // Spawned 0.3° south of Nancy heading east so loiter circle centers ON Nancy (6.184, 48.692)
   { wing_id: "france_wing_02",         nation_id: "france",         lng:  6.184000, lat: 48.392000, heading_deg: 90, aircraft_type: "fighter", home_airbase_province_id: "we6_france_05", lifecycle_state: "loiter", mission: "interception" },

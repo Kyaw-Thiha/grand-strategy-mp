@@ -31,6 +31,7 @@ var _map_loader: Node     = null
 var _icon_layer: Node2D   = null
 var _center: Vector2      = Vector2.ZERO
 var _icons: Dictionary    = {}             # wing_id → AirWingIcon node
+var _military_system: Node = null
 var _target_positions: Dictionary = {}    # wing_id → Vector2 screen-space
 var _selected_wing_id: String = ""
 var _pending_milestones: Array[String] = []
@@ -55,9 +56,10 @@ var _air_combat_indicators: Dictionary = {} # bucket_key → AirCombatBanner nod
 var _bucket_slot_counts: Dictionary    = {} # bucket_key → int (all indicator types)
 
 
-func setup(map_loader: Node, icon_layer: Node2D) -> void:
+func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -> void:
 	_map_loader = map_loader
 	_icon_layer = icon_layer
+	_military_system = military_system
 	_center = _map_loader.project_lng_lat(0.0, 0.0)
 	_recon_radius_px   = _center.distance_to(_map_loader.project_lng_lat(RECON_RADIUS_DEG, 0.0))
 	_combat_radius_px  = _center.distance_to(_map_loader.project_lng_lat(COMBAT_RADIUS_DEG, 0.0))
@@ -222,47 +224,53 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 		if not selected_wing:
 			return false
 
-		# Priority 1: Enemy wing icons (intercept)
-		if _can_intercept(selected_wing.aircraft_type):
-			for wing_id in _detected_wings:
-				if _detected_wings[wing_id] == false:
-					continue
-				var wing_data: Dictionary = GameState.get_air_wing(wing_id)
-				if wing_data.is_empty() or wing_data.get("nation_id", "") == GameState.get_my_nation_id():
-					continue
-				var icon_pos: Vector2 = _get_wing_screen_pos(wing_id)
-				if icon_pos != Vector2.INF and icon_pos.distance_to(world_pos) <= HIT_THRESHOLD_PX:
-					_submit_air_command("ASSIGN_WING_MISSION", {
-						"wing_id":   _selected_wing_id,
-						"mission":   "interception",
-						"target_id": wing_id,
-						"is_manual": true,
-					})
-					return true
+		var my_nation: String = GameState.get_my_nation_id()
 
-		# Priority 2: Land division icons (ground attack)
-		if _can_ground_attack(selected_wing.aircraft_type,
-				selected_wing.get("perks", [])):
-			var div: Dictionary = _resolve_division_at_screen_pos(world_pos)
-			if not div.is_empty() and div.get("nation_id", "") != GameState.get_my_nation_id():
+		# -- Phase 1: Find all click targets --
+		var hit_wing: String = _find_nearest_enemy_wing_at(world_pos, my_nation)
+		var hit_div_id: String = ""
+		if _military_system != null:
+			hit_div_id = _military_system.find_division_at_world(world_pos)
+		var near_banner: bool = _is_near_engagement_banner(world_pos)
+		var hit_prov: String = _resolve_province_at_screen_pos(world_pos)
+
+		# -- Phase 2: Act by target priority --
+		# Priority 1: Enemy wing → intercept (if capable)
+		if hit_wing != "" and _can_intercept(selected_wing.aircraft_type):
+			_submit_air_command("ASSIGN_WING_MISSION", {
+				"wing_id":   _selected_wing_id,
+				"mission":   "interception",
+				"target_id": hit_wing,
+				"is_manual": true,
+			})
+			return true
+
+		# Priority 2: Enemy division or engagement banner → ground attack
+		var hit_div_data: Dictionary = {}
+		var hit_div_enemy: bool = false
+		if hit_div_id != "":
+			hit_div_data = GameState.get_division(hit_div_id)
+			hit_div_enemy = not hit_div_data.is_empty() and hit_div_data.get("nation_id", "") != my_nation
+		if hit_div_enemy or near_banner:
+			if _can_ground_attack(selected_wing.aircraft_type,
+					selected_wing.get("perk_strafing", false)):
 				_submit_air_command("ASSIGN_WING_MISSION", {
 					"wing_id":   _selected_wing_id,
 					"mission":   "tactical_bombing",
-					"target_id": div.get("province_id", ""),
+					"target_id": hit_div_id,
 					"is_manual": true,
 				})
 				return true
 
-		# Priority 3: Province city markers (strategic bombing)
-		if _can_strategic_bomb(selected_wing.aircraft_type):
-			var prov_id: String = _resolve_province_at_screen_pos(world_pos)
-			if not prov_id.is_empty():
-				var prov: Dictionary = GameState.get_province(prov_id)
-				if not prov.is_empty() and prov.get("owner_id", "") != GameState.get_my_nation_id():
+		# Priority 3: Enemy city → strategic bombing (if capable)
+		if hit_prov != "":
+			var prov: Dictionary = GameState.get_province(hit_prov)
+			if not prov.is_empty() and prov.get("owner_id", "") != my_nation:
+				if _can_strategic_bomb(selected_wing.aircraft_type):
 					_submit_air_command("ASSIGN_WING_MISSION", {
 						"wing_id":   _selected_wing_id,
 						"mission":   "industry",
-						"target_id": prov_id,
+						"target_id": hit_prov,
 						"is_manual": true,
 					})
 					return true
@@ -564,13 +572,13 @@ func _clear_pending() -> void:
 ## - payload: command payload dictionary.
 ## Returns: nothing.
 func _can_intercept(aircraft_type: String) -> bool:
-	return aircraft_type in ["fighter", "heavy_fighter"]
+	return aircraft_type in ["fighter", "heavy_fighter", "cas_plane", "dive_bomber"]
 
 
-func _can_ground_attack(aircraft_type: String, perks: Array) -> bool:
+func _can_ground_attack(aircraft_type: String, has_strafing: bool) -> bool:
 	if aircraft_type in ["cas_plane", "dive_bomber", "tactical_bomber"]:
 		return true
-	if aircraft_type == "fighter" and "perk_strafing" in perks:
+	if aircraft_type == "fighter" and has_strafing:
 		return true
 	return false
 
@@ -586,22 +594,34 @@ func _get_wing_screen_pos(wing_id: String) -> Vector2:
 	return Vector2.INF
 
 
-func _resolve_division_at_screen_pos(screen_pos: Vector2) -> Dictionary:
-	const PROXIMITY_PX := 18.0
-	var best_div: Dictionary = {}
-	var best_dist: float = PROXIMITY_PX
-	for div_id: String in GameState.divisions:
-		var div_data: Dictionary = GameState.get_division(div_id)
-		if div_data.is_empty():
+func _find_nearest_enemy_wing_at(screen_pos: Vector2, my_nation: String) -> String:
+	var best_id: String = ""
+	var best_dist: float = HIT_THRESHOLD_PX
+	for wing_id: String in GameState.air_wings:
+		var wing_data: Dictionary = GameState.get_air_wing(wing_id)
+		if wing_data.is_empty() or wing_data.get("nation_id", "") == my_nation:
 			continue
-		var div_lng: float = float(div_data.get("position_lng", 0.0))
-		var div_lat: float = float(div_data.get("position_lat", 0.0))
-		var icon_pos: Vector2 = _map_loader.project_lng_lat(div_lng, div_lat)
-		var dist: float = screen_pos.distance_to(icon_pos)
+		var icon = _icons.get(wing_id)
+		if not icon or not is_instance_valid(icon) or not icon.visible:
+			continue
+		var dist: float = icon.position.distance_to(screen_pos)
 		if dist < best_dist:
 			best_dist = dist
-			best_div = div_data
-	return best_div
+			best_id = wing_id
+	return best_id
+
+
+func _is_near_engagement_banner(screen_pos: Vector2) -> bool:
+	if _military_system == null:
+		return false
+	var banners: Dictionary = _military_system.get_banners()
+	for eng_key: String in banners:
+		var banner: Node2D = banners[eng_key]
+		if not is_instance_valid(banner):
+			continue
+		if banner.position.distance_to(screen_pos) <= 20.0:
+			return true
+	return false
 
 
 func _handle_existing_right_click(event: InputEvent, world_pos: Vector2) -> void:

@@ -52,6 +52,9 @@ func cleanup() -> void:
 		EventBus.round_resolved.disconnect(_on_round_resolved)
 	queue_free()
 
+func on_clicked() -> void:
+	EventBus.tactical_combat_opened.emit(_engagement_id)
+
 func get_uses_dashed_border() -> bool: return false
 
 func get_border_color() -> Color:
@@ -105,17 +108,6 @@ func _draw() -> void:
 	draw_line(Vector2(-7,  1), Vector2(-1,  1), sw, 1.5)
 	draw_line(Vector2(-4,  3), Vector2(-4,  5), sw, 1.0)
 	draw_circle(Vector2(-4,  6), 1.0, sw)
-
-
-func _input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton):
-		return
-	if not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
-		return
-	var local := to_local(get_global_mouse_position())
-	if local.length() <= CLICK_R:
-		EventBus.tactical_combat_opened.emit(_engagement_id)
-		get_viewport().set_input_as_handled()
 
 
 func _on_division_updated(div_id: String) -> void:

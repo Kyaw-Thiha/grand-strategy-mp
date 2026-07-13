@@ -100,6 +100,9 @@ const GROUP_MOVE_SLOT_SPACING_DEG := 0.045
 func get_icons() -> Dictionary:
 	return _icons
 
+func get_banners() -> Dictionary:
+	return _banners
+
 
 func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> void:
 	_map_loader = map_loader
@@ -342,6 +345,15 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 		else:
 			_handle_group_move_click(ll.x, ll.y)
 		return true
+
+	const BANNER_CLICK_R := 20.0
+	for eng_key: String in _banners:
+		var banner: Node2D = _banners[eng_key]
+		if not is_instance_valid(banner):
+			continue
+		if banner.position.distance_to(world_pos) <= BANNER_CLICK_R:
+			banner.on_clicked()
+			return true
 
 	var clicked_id := find_division_at_world(world_pos)
 	if clicked_id != "":

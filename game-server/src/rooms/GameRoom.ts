@@ -2021,6 +2021,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (targetWing) {
       return { lng: targetWing.position_lng, lat: targetWing.position_lat };
     }
+    const targetDiv = this.state.divisions.get(targetId);
+    if (targetDiv) {
+      return { lng: targetDiv.position_lng, lat: targetDiv.position_lat };
+    }
     return this._provinceCityPositionLookup.get(targetId) ?? null;
   }
 
