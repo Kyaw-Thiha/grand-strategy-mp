@@ -214,6 +214,12 @@ func _ready() -> void:
 		HUDManager.PlacementMode.FULL_CENTER
 	)
 	EventBus.bombing_detail_open_requested.connect(func(data: Dictionary) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _air_wing_system != null and _air_wing_system.has_method("deselect"):
+			_air_wing_system.deselect()
 		_bombing_detail_panel.populate(data)
 		hud_manager.show_panel("bombing_detail")
 	)
