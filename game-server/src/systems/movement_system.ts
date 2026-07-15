@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { getCachedFile } from "../data/map_cache.js";
 import type { GameRoomState, DivisionState, RelationState } from "../rooms/schema/GameRoomState.js";
 import { UNIT_TERRAIN_COSTS, TERRAIN_KEYS } from "../data/unit_terrain_costs.js";
 import type { TemplateCell } from "../data/maps/western_europe_6/default_template.js";
@@ -68,7 +69,7 @@ export class MovementSystem {
 
     let raw: { nodes: WaypointNode[]; edges: WaypointEdge[]; road_connections: { road_id: string; waypoint_id: string }[] };
     try {
-      raw = JSON.parse(readFileSync(dataPath, "utf-8"));
+      raw = getCachedFile(dataPath);
     } catch {
       console.warn(`[MovementSystem] waypoints.json not found at ${dataPath} — road movement disabled`);
       return;
@@ -105,10 +106,7 @@ export class MovementSystem {
     // Load terrain grid (server-only — client uses road-only waypoints.json)
     const terrainPath = join(gameServerRoot, "..", "client", "assets", "data", mapId, "waypoints_terrain.json");
     if (existsSync(terrainPath)) {
-      const tRaw = JSON.parse(readFileSync(terrainPath, "utf-8")) as {
-        nodes: WaypointNode[];
-        edges: WaypointEdge[];
-      };
+      const tRaw = getCachedFile<{ nodes: WaypointNode[]; edges: WaypointEdge[] }>(terrainPath);
       for (const node of tRaw.nodes) {
         this.graph.nodes.set(node.id, node);
         this.graph.adjacency.set(node.id, []);
@@ -158,7 +156,7 @@ export class MovementSystem {
 
     let raw: { provinces: Array<{ nation_id: string; polygons: number[][][] }> };
     try {
-      raw = JSON.parse(readFileSync(dataPath, "utf-8"));
+      raw = getCachedFile(dataPath);
     } catch {
       console.warn(`[MovementSystem] map_data.json not found — territory checks disabled`);
       return;

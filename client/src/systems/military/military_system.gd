@@ -87,6 +87,8 @@ var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0
 var _dr_final_goal: Dictionary = {}   # div_id -> Vector2(lng, lat) of exact click
 var _dr_last_waypoint_road: bool = false    # was the last consumed waypoint on a road?
 var _dr_last_waypoint_terrain: String = ""  # "cover_elevation" of the last consumed waypoint
+var _dr_icon_reconcile_from: Dictionary = {}  # div_id → Vector2 screen pos (blend start)
+var _dr_icon_reconcile_t: Dictionary    = {}  # div_id → float 0.0..1.0 blend progress
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -97,6 +99,9 @@ const GROUP_MOVE_SLOT_SPACING_DEG := 0.045
 
 func get_icons() -> Dictionary:
 	return _icons
+
+func get_banners() -> Dictionary:
+	return _banners
 
 
 func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> void:
@@ -162,6 +167,17 @@ func _process(delta: float) -> void:
 		var icon: Node2D = _icons[div_id]
 		if _dr_order.has(div_id) and (not _dr_order[div_id].is_empty() or _dr_final_goal.has(div_id)):
 			_advance_dr(div_id, delta)
+			if _dr_icon_reconcile_t.has(div_id):
+				const RECONCILE_DURATION_S := 0.15
+				var t: float = _dr_icon_reconcile_t[div_id]
+				if t < 1.0 and _icons.has(div_id):
+					_icons[div_id].position = _dr_icon_reconcile_from[div_id].lerp(
+						_icons[div_id].position, t
+					)
+					_dr_icon_reconcile_t[div_id] = minf(t + delta / RECONCILE_DURATION_S, 1.0)
+				else:
+					_dr_icon_reconcile_t.erase(div_id)
+					_dr_icon_reconcile_from.erase(div_id)
 			_update_division_route(div_id)
 		else:
 			var target: Vector2 = _target_positions.get(div_id, icon.position)
@@ -329,6 +345,15 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 		else:
 			_handle_group_move_click(ll.x, ll.y)
 		return true
+
+	const BANNER_CLICK_R := 20.0
+	for eng_key: String in _banners:
+		var banner: Node2D = _banners[eng_key]
+		if not is_instance_valid(banner):
+			continue
+		if banner.position.distance_to(world_pos) <= BANNER_CLICK_R:
+			banner.on_clicked()
+			return true
 
 	var clicked_id := find_division_at_world(world_pos)
 	if clicked_id != "":
@@ -1393,6 +1418,9 @@ func _on_division_updated(division_id: String) -> void:
 					_dr_pos_deg[division_id] = Vector2(float(last_consumed_node["lng"]), float(last_consumed_node["lat"]))
 		elif not at_final_goal and updated_lead != new_lead:
 			_dr_final_goal.erase(division_id)
+			if _icons.has(division_id):
+				_dr_icon_reconcile_from[division_id] = _icons[division_id].position
+				_dr_icon_reconcile_t[division_id]    = 0.0
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
 			_dr_order[division_id] = str_order
 
@@ -1414,6 +1442,8 @@ func _on_division_removed(division_id: String) -> void:
 	_dr_order.erase(division_id)
 	_dr_profiles.erase(division_id)
 	_dr_speed_mult.erase(division_id)
+	_dr_icon_reconcile_from.erase(division_id)
+	_dr_icon_reconcile_t.erase(division_id)
 	if _selected_division_ids.has(division_id):
 		_selected_division_ids.erase(division_id)
 		_selection_preview_division_ids.erase(division_id)

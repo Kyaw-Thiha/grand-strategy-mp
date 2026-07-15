@@ -61,7 +61,7 @@ function makeDiv(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("Phase 1 — movement-jerk regression", () => {
+describe("lane:movement | Phase 1 — movement-jerk regression", () => {
   it("DivisionState schema includes consumed_waypoint_ids field with default []", () => {
     const div = new DivisionState();
     assert.ok(

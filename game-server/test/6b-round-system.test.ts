@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { setRoundTicksForTesting, setCombatGraceTicksForTesting, _isGridLocked } from "../src/systems/combat_system.js";
 
@@ -88,21 +89,19 @@ async function startCombat(
   return { client, room, divAId: divA, divBId: divB, engagementId };
 }
 
-describe("6b — Round System", function () {
-  this.timeout(180_000);
+describe("lane:tactical | 6b — Round System", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
     setRoundTicksForTesting(3);
     setCombatGraceTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
     setRoundTicksForTesting(20);
     setCombatGraceTicksForTesting(10);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 

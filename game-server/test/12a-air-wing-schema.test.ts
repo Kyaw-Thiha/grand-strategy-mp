@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import {
   AirWingState,
@@ -22,14 +23,13 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12a — Air Wing Schema", function () {
+describe("lane:air-combat | 12a — Air Wing Schema", function () {
   this.timeout(15_000);
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
-  before(async () => { colyseus = await boot(appConfig); });
+  before(async () => { colyseus = await boot(appConfig, getTestPort()); });
   after(async () => {
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
   beforeEach(async () => { await colyseus.cleanup(); });

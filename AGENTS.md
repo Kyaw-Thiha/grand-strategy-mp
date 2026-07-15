@@ -31,7 +31,7 @@ There is currently no root workspace `package.json` and no `packages/shared-type
 - Development auth is email/password through Hono; Steam auth is still later work.
 - Phases 1-5 are substantially complete. Phase 6 tactical grid work is active. Phase 12 air-combat scaffolding/work has started in code and plans.
 - The client has many Godot scene/script tests under `client/test/`, `client/tests/`, and `client/scenes/test/`.
-- `npm test` in `game-server/` runs a focused subset of server tests. Many additional test files exist under `game-server/test/`; run the relevant direct tests when touching their area.
+- `npm test` in `game-server/` auto-detects changed files via git diff and runs only the affected test lanes (air-combat, tactical, movement, or core). Use `npm run test:full` to run all tests unconditionally. See `game-server/test-lanes.json` for lane mappings.
 
 ## Commands
 
@@ -54,7 +54,12 @@ There is currently no root workspace `package.json` and no `packages/shared-type
 
 ### Tests and Checks
 
-- `cd game-server && npm test` — focused server regression suite
+- `cd game-server && npm test` — auto-detects affected lanes from git diff
+- `cd game-server && npm run test:full` — all test files in parallel (~5 min, ~446 passing)
+- `cd game-server && npm run test:air` — air combat tests only
+- `cd game-server && npm run test:tactical` — tactical combat tests only
+- `cd game-server && npm run test:movement` — movement tests only
+- `cd game-server && npm run test:core` — GameRoom/core tests only
 - `cd game-server && npm run build` — TypeScript build/type check for server source
 - `cd api-server && bun test src/routes/auth.test.ts` — API auth/profile route tests
 - `bash scripts/e2e-auth-handshake.sh` — starts both servers and runs the Godot auth handshake scene
@@ -146,7 +151,8 @@ Registered in `client/project.godot`:
 Before marking a task complete:
 
 - Run the smallest relevant automated checks for the files changed.
-- For server simulation changes, run `cd game-server && npm test` plus any directly relevant tests in `game-server/test/`.
+- For server simulation changes, run `cd game-server && npm test` (auto-detects which lane to run based on your diff). Run `cd game-server && npm run test:full` before merging to main.
+- Adding a new server test file? Import `getTestPort` from `./helpers.js`, pass it to `boot(appConfig, getTestPort())`, add it to the relevant lane in `game-server/test-lanes.json`, and prefix its top-level `describe()` with `lane:<name> | `.
 - For API changes, run `cd api-server && bun test <relevant test file>` and consider adding a package script if the test surface grows.
 - For full flow changes, run the relevant `scripts/e2e-*.sh` script.
 - For Godot UI/client changes, run targeted headless scene tests when available and describe manual checks for visual/interaction behavior.

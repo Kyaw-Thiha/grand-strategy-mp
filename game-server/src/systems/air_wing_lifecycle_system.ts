@@ -4,7 +4,7 @@ import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/Ai
 // ── Module-level mutable constants — mutated ONLY by exported test helpers ───
 
 // Fuel: fast decay defines range; forced RTB when empty; fast recovery at base
-let FUEL_DECAY_TRANSIT = 0.02;   // cruise-power engines
+let FUEL_DECAY_TRANSIT = 0.012;   // cruise-power engines
 let FUEL_DECAY_LOITER  = 0.008;  // throttled back in orbit
 let FUEL_RECOVERY_RATE    = 0.20;   // ~5 ticks to full refuel
 let FUEL_RTB_THRESHOLD    = 0.10;   // forced RTB below this level
@@ -41,6 +41,10 @@ let _landingToggle = false;
 const CONGESTION_FREE_WINGS = 3;
 const CONGESTION_FACTOR     = 0.15;
 
+const GROUND_ATTACK_LOITER_MAX_TICKS = 5;
+const _groundAttackLoiterCount = new Map<string, number>();
+const GROUND_ATTACK_MISSIONS = new Set(["area", "tactical_bombing"]);
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -73,6 +77,11 @@ export class AirWingLifecycleSystem {
 
     for (const [wingId, wing] of state.air_wings.entries()) {
       let didChange = false;
+
+      // Clear ground-attack loiter counter for non-LOITER wings
+      if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
+        _groundAttackLoiterCount.delete(wingId);
+      }
 
       // 1. Fuel + Readiness: decay while airborne, recover while IDLE/REFUEL
       const isAirborne = wing.lifecycle_state !== WING_LIFECYCLE.IDLE
@@ -155,9 +164,22 @@ export class AirWingLifecycleSystem {
             didChange = true;
             break;
           }
+          // Ground-attack specific loiter timeout (shorter than generic MAX_LOITER_TICKS)
+          if (GROUND_ATTACK_MISSIONS.has(wing.mission)) {
+            const gaCount = (_groundAttackLoiterCount.get(wingId) ?? 0) + 1;
+            _groundAttackLoiterCount.set(wingId, gaCount);
+            if (gaCount >= GROUND_ATTACK_LOITER_MAX_TICKS) {
+              _groundAttackLoiterCount.delete(wingId);
+              this.resolveWingBombed(wingId, state, broadcast);
+              didChange = true;
+              break;
+            }
+          }
+
           const ticks = (this._loiterTicks.get(wingId) ?? 0) + 1;
           this._loiterTicks.set(wingId, ticks);
           if (!isPatrolMission && ticks >= MAX_LOITER_TICKS) {
+            this.applyLandingDecay(wingId, state);
             wing.lifecycle_state = WING_LIFECYCLE.RTB;
             this._loiterTicks.delete(wingId);
             broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
@@ -312,6 +334,10 @@ export class AirWingLifecycleSystem {
     this._pendingRedeployTarget.delete(wingId);
     wing.lifecycle_state = WING_LIFECYCLE.RTB;
     broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "player_retreat" });
+  }
+
+  resolveWingBombed(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void {
+    this.retreatWing(wingId, state, broadcast);
   }
 
   startRedeploy(wingId: string, newProvinceId: string, state: GameRoomState): boolean {

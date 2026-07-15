@@ -3,17 +3,19 @@ import { jwtVerify } from "jose";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { getCachedFile } from "../data/map_cache.js";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
-import { AirWingState, WING_LIFECYCLE, serializeWing } from "./schema/AirWingState.js";
+import { AirWingState, WING_LIFECYCLE, MISSION_TYPES, serializeWing } from "./schema/AirWingState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
+import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
-import { DubinsPathfinder } from "../systems/air_dubins_pathfinder.js";
+import { DubinsPathfinder, registerManualTarget } from "../systems/air_dubins_pathfinder.js";
 import { AirCombatSystem } from "../systems/air_combat_system.js";
 import { AirBombingSystem } from "../systems/air_bombing_system.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
@@ -166,6 +168,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wing_id: string;
       mission: string;
       target_id: string;
+      is_manual?: boolean;
     }) => {
       if (this.state.phase !== "running") return;
       const player = this.state.players.get(client.sessionId);
@@ -192,12 +195,17 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         { lng: updated.position_lng, lat: updated.position_lat },
         updated.heading_deg,
         targetPos,
+        getAirUnitStats(updated.aircraft_type).min_turn_radius_deg,
       );
       this.airDubinsPathfinder.clearPath(updated.wing_id);
       this.airDubinsPathfinder.storePath(updated.wing_id, path);
       updated.path_gen_id = path.path_gen_id;
       updated.path_elapsed_ms = 0;
       this.broadcast("AIR_WING_PATH", { wing_id: updated.wing_id, ...path });
+
+      if (msg.is_manual && msg.target_id && msg.mission === MISSION_TYPES.INTERCEPTION) {
+        registerManualTarget(msg.wing_id, msg.target_id);
+      }
     });
 
     this.onMessage("RETREAT_WING", (client, msg: { wing_id: string }) => {
@@ -247,6 +255,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
             { lng: updated.position_lng, lat: updated.position_lat },
             startHeading,
             targetPos,
+            getAirUnitStats(updated.aircraft_type).min_turn_radius_deg,
           );
           this.airDubinsPathfinder.clearPath(updated.wing_id);
           this.airDubinsPathfinder.storePath(updated.wing_id, path);
@@ -355,6 +364,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         startPos,
         startHeading,
         endPos,
+        getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
       );
       this.airDubinsPathfinder.clearPath(wing.wing_id);
       this.airDubinsPathfinder.storePath(wing.wing_id, path);
@@ -376,7 +386,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this.airDubinsPathfinder.clearPath(msg.wing_id);
       this.airWingLifecycleSystem.disbandWing(msg.wing_id, this.state,
-        (type, m) => this.broadcast(type, m));
+        (type, m) => this.broadcast(type, m), "WING_DESTROYED");
       this.airDetectionSystem.clearWing(msg.wing_id);
     });
 
@@ -444,6 +454,19 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         div.position_lat = msg.position_lat;
         if (msg.observation_radius !== undefined) div.observation_radius = msg.observation_radius;
         this.state.divisions.set(msg.division_id, div);
+        const defaultCells = [
+          { row: 0, col: 0, unit_type: "recon_infantry" },
+          { row: 0, col: 2, unit_type: "recon_infantry" },
+          { row: 1, col: 0, unit_type: "medium_tank" },
+          { row: 1, col: 1, unit_type: "medium_tank" },
+          { row: 1, col: 2, unit_type: "infantry" },
+          { row: 2, col: 0, unit_type: "artillery" },
+          { row: 2, col: 1, unit_type: "at_gun" },
+          { row: 3, col: 0, unit_type: "infantry" },
+        ];
+        for (const c of defaultCells) {
+          div.grid.cells[c.row * 5 + c.col].unit_type = c.unit_type;
+        }
       });
       this.onMessage("SET_RELATION", (_client, msg: {
         nation_a: string;
@@ -1248,10 +1271,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       const airbasePos = this._resolveTargetPosition(wing.home_airbase_province_id);
       if (!airbasePos) continue;
-      const rtbPath = this.airDubinsPathfinder.computeRtbPath(startPos, startHeading, airbasePos, 0);
+      const rtbPath = this.airDubinsPathfinder.computeRtbPath(startPos, startHeading, airbasePos, 0, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
       this.airDubinsPathfinder.storePath(wing.wing_id, rtbPath);
       wing.path_gen_id = rtbPath.path_gen_id;
       wing.path_elapsed_ms = 0;
+      this.airDubinsPathfinder.advanceWingOnePath(wing, TICK_MS);
       this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...rtbPath });
       this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
     }
@@ -1322,6 +1346,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           { lng: wing.position_lng, lat: wing.position_lat },
           startHeading,
           targetPos,
+          getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
         );
         this.airDubinsPathfinder.storePath(wing.wing_id, path);
         wing.path_gen_id = path.path_gen_id;
@@ -1345,7 +1370,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
             endPos.lng - startPos.lng,
             endPos.lat - startPos.lat,
           ) * 180 / Math.PI + 360) % 360;
-          const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos);
+          const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
           this.airDubinsPathfinder.storePath(wing.wing_id, path);
           wing.path_gen_id = path.path_gen_id;
           wing.path_elapsed_ms = 0;
@@ -1365,7 +1390,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           endPos.lng - startPos.lng,
           endPos.lat - startPos.lat,
         ) * 180 / Math.PI + 360) % 360;
-        const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos);
+        const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
         this.airDubinsPathfinder.storePath(wing.wing_id, path);
         wing.path_gen_id = path.path_gen_id;
         wing.path_elapsed_ms = 0;
@@ -1984,9 +2009,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const __dir = dirname(fileURLToPath(import.meta.url));
     const dataPath = join(__dir, "../..", "..", "client", "assets", "data", mapId, "map_data.json");
     try {
-      const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
-        provinces: Array<{ province_id: string; nation_id: string; city_position?: [number, number] }>;
-      };
+      const raw = getCachedFile<{ provinces: Array<{ province_id: string; nation_id: string; city_position?: [number, number] }> }>(dataPath);
       for (const p of raw.provinces ?? []) {
         if (!p.province_id) continue;
         const slot = new ProvinceState();
@@ -2010,6 +2033,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const targetWing = this.state.air_wings.get(targetId);
     if (targetWing) {
       return { lng: targetWing.position_lng, lat: targetWing.position_lat };
+    }
+    const targetDiv = this.state.divisions.get(targetId);
+    if (targetDiv) {
+      return { lng: targetDiv.position_lng, lat: targetDiv.position_lat };
     }
     return this._provinceCityPositionLookup.get(targetId) ?? null;
   }

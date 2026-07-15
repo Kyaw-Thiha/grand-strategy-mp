@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -49,7 +50,7 @@ const DEFAULT_CTX: BombingContext = {
   recon_quality:           0.0,
 };
 
-describe("AirAttackPatternRegistry — pure unit tests", () => {
+describe("lane:air-combat | AirAttackPatternRegistry — pure unit tests", () => {
 
   describe("Dive bomber", () => {
     it("hits exactly 1 occupied cell by default", () => {
@@ -214,8 +215,7 @@ describe("AirAttackPatternRegistry — pure unit tests", () => {
   });
 });
 
-describe("12f — AirBombingSystem integration", function () {
-  this.timeout(180_000);
+describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
   let previousDevMode: string | undefined;
@@ -225,14 +225,13 @@ describe("12f — AirBombingSystem integration", function () {
     process.env.DEV_MODE = "true";
     setRtbDurationTicksForTesting(2);
     setRefuelDurationTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
     if (previousDevMode === undefined) delete process.env.DEV_MODE;
     else process.env.DEV_MODE = previousDevMode;
     resetRng();
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
@@ -253,7 +252,7 @@ describe("12f — AirBombingSystem integration", function () {
 
   async function tick(room: any): Promise<void> {
     (room as any).gameTick();
-    await new Promise(r => setTimeout(r, 500));
+    await room.waitForNextPatch();
   }
 
   async function spawnWing(client: any, room: any, overrides: Record<string, unknown> = {}) {

@@ -4,6 +4,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { Encoder } from "@colyseus/schema";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -33,8 +34,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12e-patch — Formation Density & Escort Path", function () {
-  this.timeout(180_000);
+describe("lane:air-combat | 12e-patch — Formation Density & Escort Path", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
   let previousDevMode: string | undefined;
@@ -53,7 +53,7 @@ describe("12e-patch — Formation Density & Escort Path", function () {
     setFuelDecayTransitForTesting(0.02);
     setFuelDecayLoiterForTesting(0.008);
     setFuelRecoveryForTesting(0.2);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
@@ -71,7 +71,6 @@ describe("12e-patch — Formation Density & Escort Path", function () {
     setFuelDecayLoiterForTesting(0.01);
     setFuelRecoveryForTesting(0.2);
     setMaxLoiterTicksForTesting(15);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
@@ -108,7 +107,7 @@ describe("12e-patch — Formation Density & Escort Path", function () {
 
   async function tickRoom(room: any): Promise<void> {
     (room as any).gameTick();
-    await new Promise(r => setTimeout(r, 500));
+    await room.waitForNextPatch();
   }
 
   // ── Step 1: Escort Path Mirroring ─────────────────────────────────────────
@@ -668,8 +667,9 @@ describe("12e-patch — Formation Density & Escort Path", function () {
         getWing(room, `extra_${i}`).lifecycle_state = WING_LIFECYCLE.IDLE;
       }
 
-      // Record fuel BEFORE the tick (auto-tick may have already fired during setup,
-      // but both wings were set up identically, so any prior recovery is equalized)
+      // Reset fuel to a known low value so neither wing hits the cap on the next tick.
+      soloWing.fuel = 0.5;
+      crowdedWing.fuel = 0.5;
       const soloBefore = soloWing.fuel;
       const crowdBefore = crowdedWing.fuel;
 

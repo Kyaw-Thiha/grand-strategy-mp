@@ -7,6 +7,7 @@ import {
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
@@ -57,19 +58,17 @@ function setStance(room: any, nationA: string, nationB: string, stance: string):
   relation.stance = stance;
 }
 
-describe("Phase 6 gate", function () {
-  this.timeout(180_000);
+describe("lane:tactical | Phase 6 gate", function () {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
     setRoundTicksForTesting(1);
     setCombatGraceTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
   after(async () => {
     setRoundTicksForTesting(20);
     setCombatGraceTicksForTesting(10);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
   beforeEach(async () => { await colyseus.cleanup(); });

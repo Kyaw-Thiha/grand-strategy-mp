@@ -54,6 +54,7 @@ var _active_dock_btn: Button = null
 var _map_loader: Node = null
 var _military_system: Node = null
 var _map_interaction: Node = null
+var _air_wing_system: Node = null
 var _map_renderer: Node = null
 var _ui_pointer_blocker_roots: Array[Control] = []
 var _ui_text_focus_controls: Dictionary = {}
@@ -78,6 +79,7 @@ func _ready() -> void:
 	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
 	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
 	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
+	_air_wing_system = get_node_or_null("/root/MapDebug/AirWingSystem")
 	_map_renderer = get_node_or_null("/root/MapDebug/MapRenderer")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_register_initial_ui_input_ownership()
@@ -212,11 +214,39 @@ func _ready() -> void:
 		HUDManager.PlacementMode.FULL_CENTER
 	)
 	EventBus.bombing_detail_open_requested.connect(func(data: Dictionary) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _air_wing_system != null and _air_wing_system.has_method("deselect"):
+			_air_wing_system.deselect()
 		_bombing_detail_panel.populate(data)
 		hud_manager.show_panel("bombing_detail")
 	)
 	EventBus.bombing_detail_closed.connect(func() -> void:
 		hud_manager.hide_panel("bombing_detail")
+	)
+
+	# AirCombatDetailPanel — full-center overlay for air-to-air combat results
+	const AirCombatDetailPanelScene := preload("res://src/ui/hud/air_combat_detail_panel.tscn")
+	var _air_combat_detail_panel: Control = AirCombatDetailPanelScene.instantiate()
+	add_child(_air_combat_detail_panel)
+	_register_ui_input_ownership_root(_air_combat_detail_panel)
+	hud_manager.register_panel("air_combat_detail", _air_combat_detail_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
+	EventBus.air_combat_detail_open_requested.connect(func(data: Dictionary) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _air_wing_system != null and _air_wing_system.has_method("deselect"):
+			_air_wing_system.deselect()
+		_air_combat_detail_panel.populate(data)
+		hud_manager.show_panel("air_combat_detail")
+	)
+	EventBus.air_combat_detail_closed.connect(func() -> void:
+		hud_manager.hide_panel("air_combat_detail")
 	)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
@@ -551,11 +581,11 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 	var entry: Dictionary = hud_manager._registry.get(open_name, {})
 	if entry.get("placement", -1) != HUDManager.PlacementMode.FULL_CENTER:
 		return
-	# Check if click landed outside the center panel
-	var center_child: Node = _center_panel_anchor.get_child(0) if _center_panel_anchor.get_child_count() > 0 else null
-	if center_child == null:
+	# Check if click landed outside the currently-open panel
+	var panel_node: Control = entry.get("node") as Control
+	if panel_node == null:
 		return
-	var panel_rect: Rect2 = center_child.get_global_rect()
+	var panel_rect: Rect2 = panel_node.get_global_rect()
 	if not panel_rect.has_point(mb.position):
 		hud_manager.hide_panel(open_name)
 		get_viewport().set_input_as_handled()

@@ -1,6 +1,41 @@
 extends RefCounted
 
 
+static func get_remaining_endpoints(path_data: Dictionary, elapsed_ms: float) -> Array:
+	var path_type: String = path_data.get("path_type", "")
+	if path_type == "LOITER":
+		return []
+
+	var segments: Array = path_data.get("segments", [])
+	if segments.is_empty():
+		return []
+
+	var speed: float  = path_data.get("speed_deg_per_ms", 0.001)
+	var total: float  = path_data.get("total_length_deg", 1e9)
+	var dist: float   = clampf(elapsed_ms * speed, 0.0, total)
+	var results: Array = []
+	var found := false
+
+	for seg in segments:
+		var seg_len: float = seg.get("length_deg", 0.0)
+		if not found:
+			if dist >= seg_len:
+				dist -= seg_len
+				continue
+			found = true
+
+		if seg.get("type", "") == "arc":
+			var clng: float  = seg.get("center_lng", 0.0)
+			var clat: float  = seg.get("center_lat", 0.0)
+			var r: float     = seg.get("radius_deg", 0.0)
+			var end_a: float = seg.get("start_angle_rad", 0.0) + seg.get("sweep_rad", 0.0)
+			results.append(Vector2(clng + cos(end_a) * r, clat + sin(end_a) * r))
+		else:
+			results.append(Vector2(seg.get("end_lng", 0.0), seg.get("end_lat", 0.0)))
+
+	return results
+
+
 static func evaluate_position(path_data: Dictionary, elapsed_ms: int) -> Vector2:
 	if path_data.is_empty():
 		return Vector2.INF

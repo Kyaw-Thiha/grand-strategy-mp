@@ -23,7 +23,7 @@ function makeGrid(occupied: Record<number, string>): GridCellState[] {
   });
 }
 
-describe("6e — Armour, AT, and AA attack patterns", function () {
+describe("lane:tactical | 6e — Armour, AT, and AA attack patterns", function () {
 
   // ── _columnTargets ─────────────────────────────────────────────────────────
 

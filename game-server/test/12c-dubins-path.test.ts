@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import { DubinsPathfinder, setWingSpeedForTesting, setTurnRadiusForTesting } from "../src/systems/air_dubins_pathfinder.js";
@@ -26,7 +27,7 @@ function dist(a: { lng: number; lat: number }, b: { lng: number; lat: number }):
   return Math.sqrt((a.lng - b.lng) ** 2 + (a.lat - b.lat) ** 2);
 }
 
-describe("12c — Dubins pathfinding", () => {
+describe("lane:air-combat | 12c — Dubins pathfinding", () => {
   it("computeTransitPath: evaluatePosition at t=0 returns start heading", () => {
     const path = pf.computeTransitPath({ lng: 10, lat: 50 }, 0, { lng: 11, lat: 50 });
     const start = pf.evaluatePosition(path, 0);
@@ -50,8 +51,9 @@ describe("12c — Dubins pathfinding", () => {
   });
 
   it("computeLoiterArc: is a closed circle (start and end positions match)", () => {
-    const center = { lng: 10, lat: 50 };
-    const loiter = pf.computeLoiterArc(center, RADIUS);
+    // entryPos is one radius east of center with heading=0 (north), so actualCenter=(10,50)
+    const entry = { lng: 10 + RADIUS, lat: 50 };
+    const loiter = pf.computeLoiterArc(entry, 0, RADIUS);
     assert.strictEqual(loiter.path_type, "LOITER");
     assert.strictEqual(loiter.segments.length, 1, "loiter must be one arc segment");
     const totalMs = loiter.total_length_deg / SPEED;
@@ -62,8 +64,10 @@ describe("12c — Dubins pathfinding", () => {
   });
 
   it("computeLoiterArc: all sampled points are at constant radius from center", () => {
+    // entryPos is one radius east of center with heading=0 (north), so actualCenter=(10,50)
     const center = { lng: 10, lat: 50 };
-    const loiter = pf.computeLoiterArc(center, RADIUS);
+    const entry  = { lng: 10 + RADIUS, lat: 50 };
+    const loiter = pf.computeLoiterArc(entry, 0, RADIUS);
     const totalMs = loiter.total_length_deg / SPEED;
     for (let i = 0; i <= 8; i++) {
       const p = pf.evaluatePosition(loiter, (i / 8) * totalMs);
@@ -160,21 +164,19 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12c — Air wing path integration", function () {
-  this.timeout(180_000);
+describe("lane:air-combat | 12c — Air wing path integration", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
     setWingSpeedForTesting(0.0005);
     setTurnRadiusForTesting(0.1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
     setWingSpeedForTesting(SPEED);
     setTurnRadiusForTesting(RADIUS);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
@@ -283,7 +285,7 @@ describe("12c — Air wing path integration", function () {
     await room.waitForNextPatch();
 
     client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-france", target_lng: 10, target_lat: 50 });
-    await new Promise(r => setTimeout(r, 200));
+    await room.waitForNextPatch();
 
     const wing = room.state.air_wings.get("wing-france");
     assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.IDLE);
@@ -329,7 +331,7 @@ describe("12c — Air wing path integration", function () {
     await spawnWing(client, room);
 
     client.send("REDEPLOY_WING", { wing_id: "wing-1", new_province_id: "we6_germany_01" });
-    await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
+    await waitForWingState(room, "wing-1", WING_LIFECYCLE.RELOCATE);
 
     client.send("SET_PATH_ELAPSED", { wing_id: "wing-1", elapsed_ms: 999_999 });
     (room as any).gameTick();
@@ -341,11 +343,12 @@ describe("12c — Air wing path integration", function () {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
 
-    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 20, target_lat: 50 });
+    // Use targets within max range (~2.8 deg from we6_germany_06 home at 13.39,52.48)
+    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 14, target_lat: 52.5 });
     await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
     const firstId = room.state.air_wings.get("wing-1").path_gen_id;
 
-    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 5, target_lat: 45 });
+    client.send("SUBMIT_AIR_WING_MOVE", { wing_id: "wing-1", target_lng: 13.5, target_lat: 52.0 });
     await waitForWingPredicate(room, "wing-1", (wing) => wing?.path_gen_id !== firstId && wing.path_elapsed_ms === 0);
   });
 

@@ -44,7 +44,7 @@ const DEFAULT_ARTY_CFG: SpecialAttackConfig = {
   rng_seed:         42,
 };
 
-describe("6f — Sniper, artillery, and recon patterns", function () {
+describe("lane:tactical | 6f — Sniper, artillery, and recon patterns", function () {
 
   // ── _hashString ────────────────────────────────────────────────────────────
 

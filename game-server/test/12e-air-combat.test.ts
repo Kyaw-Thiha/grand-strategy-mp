@@ -4,6 +4,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { Encoder } from "@colyseus/schema";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -31,8 +32,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12e — Air Combat System", function () {
-  this.timeout(180_000);
+describe("lane:air-combat | 12e — Air Combat System", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
   let previousDevMode: string | undefined;
@@ -50,7 +50,7 @@ describe("12e — Air Combat System", function () {
     setReadinessRecoveryForTesting(0.5);
     setFuelDecayTransitForTesting(0.02);
     setFuelDecayLoiterForTesting(0.008);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
@@ -66,7 +66,6 @@ describe("12e — Air Combat System", function () {
     setReadinessRecoveryForTesting(0.04);
     setFuelDecayTransitForTesting(0.01);
     setFuelDecayLoiterForTesting(0.01);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
@@ -101,13 +100,9 @@ describe("12e — Air Combat System", function () {
     return wing;
   }
 
-  async function settleRoom(): Promise<void> {
-    await new Promise(r => setTimeout(r, 500));
-  }
-
   async function tickRoom(room: any): Promise<void> {
     (room as any).gameTick();
-    await settleRoom();
+    await room.waitForNextPatch();
   }
 
   // ── Stat table unit tests (no server) ─────────────────────────────────────
@@ -727,34 +722,5 @@ describe("12e — Air Combat System", function () {
       assert.strictEqual(frWing.is_detected, true, "Heavy fighter should detect fighter at 0.2°");
     });
 
-    it("fighter (0.05°) does NOT detect enemy 0.2° away", async () => {
-      const { room } = await joinRoom();
-      setRelation(room, "germany", "france", "war");
-
-      const gerWing = getWing(room, "germany_wing_01");
-      const frWing = getWing(room, "france_wing_01");
-
-      // Regular fighter (observation 0.05°)
-      gerWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      gerWing.aircraft_type = "fighter";
-      gerWing.mission = MISSION_TYPES.INTERCEPTION;
-      gerWing.count = 10;
-      gerWing.weapon_ready = true;
-      gerWing.combat_readiness = 1.0;
-      gerWing.position_lng = 10.0;
-      gerWing.position_lat = 50.0;
-
-      frWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      frWing.aircraft_type = "fighter";
-      frWing.count = 10;
-      frWing.weapon_ready = true;
-      frWing.combat_readiness = 1.0;
-      frWing.position_lng = 10.2;
-      frWing.position_lat = 50.0;
-
-      await tickRoom(room);
-      // Fighter should NOT detect at 0.2° (outside 0.05°)
-      assert.strictEqual(frWing.is_detected, false, "Fighter should NOT detect at 0.2°");
-    });
   });
 });

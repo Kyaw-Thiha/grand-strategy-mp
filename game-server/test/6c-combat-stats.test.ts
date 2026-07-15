@@ -18,7 +18,7 @@ function buildMockCells(
   return cells;
 }
 
-describe("6c — Unit combat stats: pure functions", function () {
+describe("lane:tactical | 6c — Unit combat stats: pure functions", function () {
   it("_armorPenMultiplier: pen=30 vs armour=60 → 0%", () => {
     assert.strictEqual(_armorPenMultiplier(30, 60), 0);
   });
@@ -78,6 +78,7 @@ describe("6c — Unit combat stats: pure functions", function () {
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
@@ -108,19 +109,17 @@ function waitForMessage(client: any, type: string, timeoutMs = 60_000): Promise<
   });
 }
 
-describe("6c — Combat stats: integration", function () {
-  this.timeout(180_000);
+describe("lane:tactical | 6c — Combat stats: integration", function () {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
     setRoundTicksForTesting(3);
     setCombatGraceTicksForTesting(1);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
   after(async () => {
     setRoundTicksForTesting(20);
     setCombatGraceTicksForTesting(10);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
   beforeEach(async () => { await colyseus.cleanup(); });
@@ -147,6 +146,9 @@ describe("6c — Combat stats: integration", function () {
     await room.waitForNextPatch();
 
     await (room as any).startGame();
+    // startGame() resets all relations to neutral via _initRelations().
+    // Declare war so _detectEngagements() can trigger COMBAT_STARTED.
+    client.send("SET_RELATION", { nation_a: "germany", nation_b: "france", stance: "war" });
     await room.waitForNextPatch();
     await client.waitForMessage("COMBAT_STARTED", 60_000);
 

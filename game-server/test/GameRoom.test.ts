@@ -2,6 +2,7 @@ import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { setCombatGraceTicksForTesting } from "../src/systems/combat_system.js";
 
@@ -15,16 +16,16 @@ async function makeToken(payload: object, secret = jwtSecret) {
     .sign(secret);
 }
 
-describe("GameRoom", () => {
+describe("lane:core | GameRoom", () => {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
     setCombatGraceTicksForTesting(0);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
   after(async () => {
     setCombatGraceTicksForTesting(10);
-    colyseus.shutdown();
+    await colyseus.shutdown();
   });
   beforeEach(async () => await colyseus.cleanup());
 
@@ -112,7 +113,7 @@ describe("GameRoom", () => {
       });
 
       client.send("SEND_CHAT", { message: "   " });
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await room.waitForNextPatch();
 
       assert.strictEqual(received, false);
     });
@@ -128,7 +129,7 @@ describe("GameRoom", () => {
       assert.strictEqual(room.state.players.size, 1);
 
       client.leave();
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await room.waitForNextPatch();
       assert.strictEqual(room.state.players.size, 0);
     });
   });

@@ -1,0 +1,75 @@
+{
+  "lanes": {
+    "air-combat": {
+      "source_prefixes": [
+        "src/systems/air_",
+        "src/data/air_",
+        "src/rooms/schema/AirWingState.ts"
+      ],
+      "tests": [
+        "test/12a-air-wing-schema.test.ts",
+        "test/12b-air-wing-lifecycle.test.ts",
+        "test/12b-patch-lifecycle-handlers.test.ts",
+        "test/12c-dubins-path.test.ts",
+        "test/12d-air-detection.test.ts",
+        "test/12e-air-combat.test.ts",
+        "test/12e-patch-formation-density.test.ts",
+        "test/12f-air-bombing-patterns.test.ts",
+        "test/12h-manual-targeting.test.ts"
+      ]
+    },
+    "tactical": {
+      "source_prefixes": [
+        "src/systems/combat_system.ts",
+        "src/systems/attack_patterns.ts",
+        "src/systems/formation_rule_system.ts",
+        "src/systems/frontline_system.ts",
+        "src/systems/row_perk_system.ts",
+        "src/systems/terrain_modifier_system.ts",
+        "src/data/combat_constants.ts",
+        "src/data/unit_combat_stats.ts",
+        "src/data/unit_terrain_costs.ts",
+        "src/data/perks.ts",
+        "src/types/"
+      ],
+      "tests": [
+        "test/6a-grid-schema.test.ts",
+        "test/6b-perk-extensibility.test.ts",
+        "test/6b-round-system.test.ts",
+        "test/6-phase-gate.test.ts",
+        "test/6c-combat-stats.test.ts",
+        "test/6d-infantry-patterns.test.ts",
+        "test/6f-special-patterns.test.ts",
+        "test/6g-xp-stealth.test.ts",
+        "test/6h-row-perks.test.ts",
+        "test/6j-terrain-modifiers.test.ts",
+        "test/6-assign-template.test.ts"
+      ]
+    },
+    "movement": {
+      "source_prefixes": [
+        "src/systems/movement_system.ts"
+      ],
+      "tests": [
+        "test/movement-jerk.test.ts"
+      ]
+    },
+    "core": {
+      "source_prefixes": [
+        "src/rooms/GameRoom.ts",
+        "src/app.config.ts",
+        "src/index.ts"
+      ],
+      "tests": [
+        "test/GameRoom.test.ts"
+      ]
+    }
+  },
+  "shared": {
+    "source_prefixes": [
+      "src/rooms/schema/GameRoomState.ts",
+      "src/data/map_loader.ts",
+      "src/systems/supply_system.ts"
+    ]
+  }
+}

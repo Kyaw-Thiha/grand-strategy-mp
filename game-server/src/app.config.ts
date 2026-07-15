@@ -1,8 +1,6 @@
 import {
-    defineServer,
     defineRoom,
     monitor,
-    playground,
     createRouter,
     createEndpoint,
 } from "colyseus";
@@ -13,56 +11,30 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
  */
 import { GameRoom } from "./rooms/GameRoom.js";
 
-const server = defineServer({
-    transport: new WebSocketTransport({
+// Export a plain config object instead of a Server instance so that boot() and
+// listen() each call buildServerFromOptions(), creating a fresh Server + transport
+// on every invocation. This lets test suites reuse the same imported module
+// without the previous suite's closed transport poisoning the next boot().
+export default {
+    initializeTransport: () => new WebSocketTransport({
         maxPayload: 1 * 1024 * 1024, // 1 MB — Colyseus default is 4 KB which rejects long move orders
     }),
 
-    /**
-     * Define your room handlers:
-     */
     rooms: {
         game_room: defineRoom(GameRoom)
     },
 
-    /**
-     * Experimental: Define API routes. Built-in integration with the "playground" and SDK.
-     * 
-     * Usage from SDK: 
-     *   client.http.get("/api/hello").then((response) => {})
-     * 
-     */
     routes: createRouter({
         api_hello: createEndpoint("/api/hello", { method: "GET", }, async (ctx) => {
             return { message: "Hello World" }
         })
     }),
 
-    /**
-     * Bind your custom express routes here:
-     * Read more: https://expressjs.com/en/starter/basic-routing.html
-     */
-    express: (app) => {
-        app.get("/hi", (req, res) => {
+    initializeExpress: (app: any) => {
+        app.get("/hi", (req: any, res: any) => {
             res.send("It's time to kick ass and chew bubblegum!");
         });
 
-        /**
-         * Use @colyseus/monitor
-         * It is recommended to protect this route with a password
-         * Read more: https://docs.colyseus.io/tools/monitoring/#restrict-access-to-the-panel-using-a-password
-         */
         app.use("/monitor", monitor());
-
-        /**
-         * Use @colyseus/playground
-         * (It is not recommended to expose this route in a production environment)
-         */
-        // if (process.env.NODE_ENV !== "production") {
-        //     app.use("/", playground());
-        // }
     }
-
-});
-
-export default server;
+};

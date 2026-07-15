@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { getCachedFile } from "../data/map_cache.js";
 import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
@@ -57,13 +58,7 @@ export class SupplySystem {
     const __dir    = dirname(fileURLToPath(import.meta.url));
     const dataPath = join(__dir, "../..", "..", "client", "assets", "data", mapId, "map_data.json");
     try {
-      const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
-        provinces: Array<{
-          province_id:  string;
-          nation_id:    string;
-          city_position: [number, number];
-        }>;
-      };
+      const raw = getCachedFile<{ provinces: Array<{ province_id: string; nation_id: string; city_position: [number, number] }> }>(dataPath);
       for (const p of raw.provinces ?? []) {
         if (!p.province_id || !p.city_position) continue;
         this.provinces.set(p.province_id, {

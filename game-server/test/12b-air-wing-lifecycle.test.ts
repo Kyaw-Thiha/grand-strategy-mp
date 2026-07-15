@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from "mocha";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
@@ -28,8 +29,7 @@ async function makeToken(sub = "test-user") {
     .sign(jwtSecret);
 }
 
-describe("12b — Air Wing Lifecycle", function () {
-  this.timeout(180_000);
+describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
 
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
@@ -44,7 +44,7 @@ describe("12b — Air Wing Lifecycle", function () {
     setFuelDecayForTesting(0.1);
     setFuelRecoveryForTesting(0.5);
     setFuelRtbThresholdForTesting(0.25);
-    colyseus = await boot(appConfig);
+    colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
@@ -53,12 +53,11 @@ describe("12b — Air Wing Lifecycle", function () {
     setMaxLoiterTicksForTesting(15);
     setRtbDurationTicksForTesting(5);
     setRefuelDurationTicksForTesting(5);
-    setReadinessDecayForTesting(0.015);
+    setReadinessDecayForTesting(0.003);
     setReadinessRecoveryForTesting(0.04);
-    setFuelDecayForTesting(0.065);
+    setFuelDecayForTesting(0.02);
     setFuelRecoveryForTesting(0.20);
     setFuelRtbThresholdForTesting(0.10);
-    await new Promise(r => setTimeout(r, 300));
     await colyseus.shutdown();
   });
 
@@ -86,9 +85,14 @@ describe("12b — Air Wing Lifecycle", function () {
       count:                    10,
       lifecycle_state:          WING_LIFECYCLE.IDLE,
       mission:                  MISSION_TYPES.INTERCEPTION,
-      home_airbase_province_id: "berlin",
+      home_airbase_province_id: "we6_germany_06",
     };
     client.send("SPAWN_WING", { ...defaults, ...overrides });
+    await room.waitForNextPatch();
+  }
+
+  async function tickRoom(room: any): Promise<void> {
+    (room as any).gameTick();
     await room.waitForNextPatch();
   }
 
@@ -96,24 +100,16 @@ describe("12b — Air Wing Lifecycle", function () {
     room: any,
     wingId: string,
     expectedState: string,
-    timeoutMs = 10_000
+    maxTicks = 20,
   ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const wing = room.state.air_wings.get(wingId);
-      if (wing?.lifecycle_state === expectedState) return;
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
-      await Promise.race([
-        room.waitForNextPatch(),
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error("deadline")), remaining)
-        ),
-      ]).catch(() => { /* deadline expired — fall through to deadline check */ });
+    for (let i = 0; i <= maxTicks; i++) {
+      if (room.state.air_wings.get(wingId)?.lifecycle_state === expectedState) return;
+      if (i === maxTicks) break;
+      await tickRoom(room);
     }
     const wing = room.state.air_wings.get(wingId);
     throw new Error(
-      `waitForWingState timed out: expected "${expectedState}", got "${wing?.lifecycle_state}"`
+      `timed out waiting for wing ${wingId}; last state=${wing?.lifecycle_state}`
     );
   }
 
@@ -121,31 +117,19 @@ describe("12b — Air Wing Lifecycle", function () {
     room: any,
     wingId: string,
     predicate: (wing: any | undefined) => boolean,
-    timeoutMs = 10_000
+    maxTicks = 20,
   ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const wing = room.state.air_wings.get(wingId);
-      if (predicate(wing)) return;
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
-      await Promise.race([
-        room.waitForNextPatch(),
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error("deadline")), remaining)
-        ),
-      ]).catch(() => { /* deadline expired — fall through to deadline check */ });
+    for (let i = 0; i <= maxTicks; i++) {
+      if (predicate(room.state.air_wings.get(wingId))) return;
+      if (i === maxTicks) break;
+      await tickRoom(room);
     }
     const wing = room.state.air_wings.get(wingId);
-    throw new Error(`waitForWingPredicate timed out for wing ${wingId}; last state was ${wing?.lifecycle_state}`);
+    throw new Error(`waitForWingPredicate timed out for wing ${wingId}; last state=${wing?.lifecycle_state}`);
   }
 
-  async function waitForWingRemoval(
-    room: any,
-    wingId: string,
-    timeoutMs = 10_000
-  ): Promise<void> {
-    await waitForWingPredicate(room, wingId, (wing) => !wing, timeoutMs);
+  async function waitForWingRemoval(room: any, wingId: string, maxTicks = 20): Promise<void> {
+    await waitForWingPredicate(room, wingId, (wing) => !wing, maxTicks);
   }
 
   // ── Test Group 1: ASSIGN_WING_MISSION (IDLE → TRANSIT) ───────────────────
@@ -188,7 +172,7 @@ describe("12b — Air Wing Lifecycle", function () {
     await room.waitForNextPatch();
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "wing-1", mission: MISSION_TYPES.INTERCEPTION, target_id: "t1" });
-    await new Promise(r => setTimeout(r, 200));
+    await tickRoom(room);
     const wing = room.state.air_wings.get("wing-1");
     assert.notStrictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT,
       "ENGAGED wing must not be moved to TRANSIT by a rejected ASSIGN_WING_MISSION");
@@ -197,7 +181,7 @@ describe("12b — Air Wing Lifecycle", function () {
   it("ASSIGN_WING_MISSION on unknown wing_id is a no-op (no crash)", async () => {
     const { client, room } = await joinRoom();
     client.send("ASSIGN_WING_MISSION", { wing_id: "nonexistent", mission: MISSION_TYPES.INTERCEPTION, target_id: "t1" });
-    await new Promise(r => setTimeout(r, 200));
+    await tickRoom(room);
     assert.ok(room.state);
   });
 
@@ -216,7 +200,8 @@ describe("12b — Air Wing Lifecycle", function () {
 
   it("single-sortie wing progresses RTB → REFUEL → IDLE", async () => {
     const { client, room } = await joinRoom();
-    await spawnWing(client, room);
+    // Place wing at its home airbase so the RTB Dubins path is near-zero length and completes in one tick.
+    await spawnWing(client, room, { position_lng: 13.385771, position_lat: 52.483566 });
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.RTB });
     await room.waitForNextPatch();
 
@@ -325,11 +310,8 @@ describe("12b — Air Wing Lifecycle", function () {
     await spawnWing(client, room);
     client.send("SET_WING_READINESS", { wing_id: "wing-1", combat_readiness: 0.5 });
     await room.waitForNextPatch();
-
-    const before = room.state.air_wings.get("wing-1").combat_readiness;
-    await waitForWingPredicate(room, "wing-1", (wing) => !!wing && wing.combat_readiness > before);
-    const after = room.state.air_wings.get("wing-1").combat_readiness;
-    assert.ok(after > before, "readiness must recover while IDLE");
+    await waitForWingPredicate(room, "wing-1", (wing) => !!wing && wing.combat_readiness > 0.5);
+    assert.ok(room.state.air_wings.get("wing-1").combat_readiness > 0.5, "readiness must recover while IDLE");
   });
 
   it("combat_readiness does not exceed 1.0 while recovering", async () => {
@@ -416,7 +398,7 @@ describe("12b — Air Wing Lifecycle", function () {
   it("DISBAND_WING on unknown wing_id is a no-op (no crash)", async () => {
     const { client, room } = await joinRoom();
     client.send("DISBAND_WING", { wing_id: "nonexistent" });
-    await new Promise(r => setTimeout(r, 200));
+    await tickRoom(room);
     assert.ok(room.state);
   });
 
@@ -436,7 +418,7 @@ describe("12b — Air Wing Lifecycle", function () {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
     client.send("SET_WING_PERK", { wing_id: "wing-1", perk: "nonexistent_perk", value: true });
-    await new Promise(r => setTimeout(r, 200));
+    await tickRoom(room);
     assert.ok(room.state.air_wings.get("wing-1"));
   });
 
@@ -445,8 +427,8 @@ describe("12b — Air Wing Lifecycle", function () {
   it("lifecycle tick broadcasts AIR_WING_UPDATES with accurate wing state after lifecycle change", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
-    // Drain the SPAWN_WING broadcast before registering the listener.
-    await new Promise(r => setTimeout(r, 100));
+    // Yield to let any spawn-related AIR_WING_UPDATES flush before registering our listener.
+    await room.waitForNextPatch();
 
     const updateReceived = new Promise<any>((resolve) => {
       client.onMessage("AIR_WING_UPDATES", (msg: any) => {
@@ -457,7 +439,7 @@ describe("12b — Air Wing Lifecycle", function () {
     });
 
     client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.TRANSIT });
-    await room.waitForNextPatch();
+    await tickRoom(room);
 
     const msg = await updateReceived;
     assert.ok(Array.isArray(msg.wings), "AIR_WING_UPDATES.wings must be an array");
@@ -472,5 +454,54 @@ describe("12b — Air Wing Lifecycle", function () {
     assert.strictEqual(w.perk_strafing, false);
     assert.strictEqual(w.perk_extended_range, false);
     assert.strictEqual(w.perk_precision_bombing, false);
+  });
+
+  // ── Test Group 9: TRANSIT pursuit re-pathing ─────────────────────────────
+
+  it("INTERCEPTION wing in TRANSIT with no path re-paths toward target after one tick", async () => {
+    const { client, room } = await joinRoom();
+
+    // Spawn interceptor: TRANSIT with INTERCEPTION mission but NO stored path
+    client.send("SPAWN_WING", {
+      wing_id:                  "wing-1",
+      nation_id:                "germany",
+      aircraft_type:            AIR_UNIT_TYPES.FIGHTER,
+      count:                    10,
+      lifecycle_state:          WING_LIFECYCLE.TRANSIT,
+      mission:                  MISSION_TYPES.INTERCEPTION,
+      home_airbase_province_id: "we6_germany_06",
+      position_lng:             10.0,
+      position_lat:             50.0,
+      heading_deg:              90,
+    });
+    await room.waitForNextPatch();
+
+    // Spawn target wing in TRANSIT at a reachable position
+    client.send("SPAWN_WING", {
+      wing_id:                  "wing-2",
+      nation_id:                "france",
+      aircraft_type:            AIR_UNIT_TYPES.FIGHTER,
+      count:                    10,
+      lifecycle_state:          WING_LIFECYCLE.TRANSIT,
+      mission:                  MISSION_TYPES.INTERCEPTION,
+      home_airbase_province_id: "we6_germany_06",
+      position_lng:             10.5,
+      position_lat:             50.0,
+    });
+    await room.waitForNextPatch();
+
+    // Link interceptor to target (no path yet — this is the freeze scenario)
+    client.send("SET_WING_TARGET", { wing_id: "wing-1", target_id: "wing-2" });
+    await room.waitForNextPatch();
+
+    // Wait until the interceptor starts moving (path assigned + first advance)
+    await waitForWingPredicate(
+      room, "wing-1",
+      (wing) => wing !== undefined && wing.position_lng !== 10.0,
+    );
+
+    const wing = room.state.air_wings.get("wing-1")!;
+    assert.ok(wing.position_lng !== 10.0,
+      `interceptor should have moved from start toward target; got lng=${wing.position_lng}`);
   });
 });
