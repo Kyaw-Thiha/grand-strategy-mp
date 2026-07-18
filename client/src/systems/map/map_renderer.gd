@@ -87,8 +87,6 @@ const ELEVATION_BORDER_WIDTH := 2.8
 const TERRAIN_CACHE_SIZE := Vector2i(2048, 1500)
 const TERRAIN_CACHE_SCALE := Vector2(0.5, 0.5)
 const BASE_FILL_SHADER_PATH := "res://src/systems/map/map_base_fill.gdshader"
-const TERRAIN_TRANSITION_DURATION := 0.20
-const BORDER_TRANSITION_BRIGHTNESS := 1.10
 
 var _map_loader: Node = null
 var _data_source: Object = null
@@ -100,8 +98,6 @@ var _border_overlay_root: Node2D = null
 var _terrain_cache_layer: Node2D = null
 var _terrain_cache_sprites: Dictionary = {}
 var _terrain_cache_ready: bool = false
-var _terrain_transition_tween: Tween = null
-var _border_emphasis_tween: Tween = null
 var _base_fill_material: ShaderMaterial = null
 var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
@@ -142,7 +138,6 @@ func set_overlay_mode(mode: String) -> void:
 	_set_base_fill_mode()
 	_set_overlay_layer_visibility()
 	_apply_border_style()
-	_pulse_border_emphasis()
 	# Nation labels only make sense over political fills
 	if _nation_label_layer:
 		_nation_label_layer.visible = (
@@ -401,18 +396,6 @@ func _apply_border_style() -> void:
 			line.default_color = Color.TRANSPARENT if debug_border else POLITICAL_BORDER_COLOR
 
 
-func _pulse_border_emphasis() -> void:
-	if _border_overlay_root == null:
-		return
-	if _border_emphasis_tween != null:
-		_border_emphasis_tween.kill()
-	_border_overlay_root.modulate = Color(BORDER_TRANSITION_BRIGHTNESS, BORDER_TRANSITION_BRIGHTNESS, BORDER_TRANSITION_BRIGHTNESS, 1.0)
-	_border_emphasis_tween = create_tween()
-	_border_emphasis_tween.set_trans(Tween.TRANS_SINE)
-	_border_emphasis_tween.set_ease(Tween.EASE_OUT)
-	_border_emphasis_tween.tween_property(_border_overlay_root, "modulate", Color.WHITE, TERRAIN_TRANSITION_DURATION)
-
-
 func _political_province_color(province_id: String) -> Color:
 	if _data_source == null:
 		return NATION_PALETTE["default"]
@@ -493,40 +476,11 @@ func _create_terrain_cache_sprite(mode: int, texture: Texture2D) -> void:
 	_terrain_cache_sprites[mode] = sprite
 
 
-func _transition_terrain_cache() -> void:
-	if _terrain_transition_tween != null:
-		_terrain_transition_tween.kill()
-
+func _set_terrain_cache_visibility() -> void:
 	for mode_variant: Variant in _terrain_cache_sprites.keys():
 		var mode: int = mode_variant
 		var sprite: Sprite2D = _terrain_cache_sprites[mode] as Sprite2D
-		sprite.visible = true
-
-	_terrain_transition_tween = create_tween()
-	_terrain_transition_tween.set_trans(Tween.TRANS_SINE)
-	_terrain_transition_tween.set_ease(Tween.EASE_IN_OUT)
-	_terrain_transition_tween.set_parallel(true)
-	for mode_variant: Variant in _terrain_cache_sprites.keys():
-		var mode: int = mode_variant
-		var sprite: Sprite2D = _terrain_cache_sprites[mode] as Sprite2D
-		var target_alpha: float = 1.0 if mode == _overlay_mode else 0.0
-		_terrain_transition_tween.tween_property(
-			sprite,
-			"modulate:a",
-			target_alpha,
-			TERRAIN_TRANSITION_DURATION
-		)
-	_terrain_transition_tween.set_parallel(false)
-	_terrain_transition_tween.tween_callback(_finish_terrain_transition)
-
-
-func _finish_terrain_transition() -> void:
-	for mode_variant: Variant in _terrain_cache_sprites.keys():
-		var mode: int = mode_variant
-		var sprite: Sprite2D = _terrain_cache_sprites[mode] as Sprite2D
-		var is_active: bool = mode == _overlay_mode
-		sprite.visible = is_active
-		sprite.modulate = Color(1.0, 1.0, 1.0, 1.0 if is_active else 0.0)
+		sprite.visible = mode == _overlay_mode
 
 
 func _build_nation_labels() -> void:
@@ -723,7 +677,7 @@ func _set_overlay_layer_visibility() -> void:
 			cover_layer.visible = false
 		if elev_layer:
 			elev_layer.visible = false
-		_transition_terrain_cache()
+		_set_terrain_cache_visibility()
 		return
 
 	match _overlay_mode:
