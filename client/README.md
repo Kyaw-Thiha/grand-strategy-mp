@@ -13,9 +13,6 @@ Font Awesome Icons (for icon assets, not font!):
 - https://docs.fontawesome.com/
 - https://fontawesome.com/v4/license/
 
-OpenSVG (for font assets):
-- https://opensvg.dev/icons
-
 ## Requirements
 - Godot 4.x (Forward+ renderer)
 - GodotSteam and Supabase addons (included in `addons/`)
