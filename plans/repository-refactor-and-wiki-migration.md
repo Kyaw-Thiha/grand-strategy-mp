@@ -35,11 +35,32 @@ Current code is authoritative. `plans/` remains a record of implementation work 
 ### 2. Client Review, Refactor, and Documentation
 
 - [x] Map client autoload ownership, scene composition, networking, and read-only game-state boundaries.
-- [x] Document core/runtime systems: auth, configuration, networking, commands, sessions, and events.
-- [x] Document gameplay/display systems: map, camera/input, military, diplomacy, research, air, vision, and UI.
-- [x] Review client tests and debugging scenes; document the supported verification workflow.
+- [x] Create the `wiki/client/` component-folder structure and direct-child indexes for Core, Auth, Networking, Session, Map, Military, Air, Diplomacy, Research, Vision, UI, Debugging, and Testing.
+- [x] Apply player/game-designer-first writing style to current client notes; keep source-file references inline where implementation detail needs them.
+
+#### Component Documentation
+
+- [x] Review and document **Core**: configuration/serialization, GameState and commands, EventBus, scene lifecycle, and local preferences/templates.
+- [x] Review and document **Authentication**: login, JWT claims, logout, and the Steam-auth boundary.
+- [x] Review and document **Networking**: API client, Colyseus matchmaking/WebSocket transport, packet handling, and server-message routing.
+- [x] Review and document **Sessions**: lobby creation/joining, nation selection/readiness, loading, session start/end, and postgame flow.
+- [x] Review and document **Map**: generated-map loading, static versus changing map data, rendering, camera, interaction, and the production match scene.
+- [x] Review and document **Military**: division display, selection, movement previews, pathfinding, stacks, engagements, and tactical panels.
+- [x] Review and document **Air**: wings, missions, route/range previews, detection, air combat, bombing, and air UI.
+- [x] Review and document **Diplomacy**: player actions, votes, relations, notifications, and panels.
+- [x] Review and document **Research**: local prototype data, progression rules, research-tree UI, and the planned server-authority boundary.
+- [x] Review and document **Vision**: owned-province and unit visibility, fog/light display, air detection, and reveal events.
+- [x] Review and document **User Interface**: menus, HUD, panels, chat, notifications, focus/input blocking, pause behavior, settings, and required visual checks.
+- [x] Review and document **Debugging**: retained MapDebug fixtures and its separation from the production match scene.
+- [x] Review and document **Testing**: test-scene ownership, supported headless commands, E2E dependencies, and manual UI verification.
+
+- [x] Remove or split superseded flat client notes after their component migration, then repair all incoming/outgoing links and parent indexes.
+- [x] Complete source-file references and player-first documentation for every component note.
 - [x] Explain each worthwhile client refactor proposal and wait for user confirmation before implementation.
-- [ ] Implement only user-approved client refactors and ingest the affected notes.
+- [x] Add an unwired production match scene that shares map/HUD composition with MapDebug and does not inject debug fixtures.
+- [ ] Wire the production match scene into `SceneManager` only after explicit approval and verify the complete local login → lobby → loading → game flow.
+- [ ] Decide and implement the generated-map scene optimization: preserve JSON as pipeline/server source data, bake approved static map data into generated Godot artifacts, and keep match-changing state outside those artifacts.
+- [ ] Implement only further user-approved client refactors and ingest the affected notes.
 
 ### 3. Map Pipeline Review, Refactor, and Documentation
 

@@ -1,8 +1,12 @@
 # Client Military
 
-Military will explain how players inspect divisions, give ground-force orders, and follow battles on the map.
+Military lets players inspect divisions, select forces, plan movement, manage templates, and follow ground engagements on the map.
 
 # Wiki
+
+- [[client/military/divisions-and-selection|Divisions and Selection]]
+- [[client/military/movement-and-pathfinding|Movement and Pathfinding]]
+- [[client/military/stacks-engagements-and-tactical-ui|Stacks, Engagements, and Tactical UI]]
 
 # Related Notes
 

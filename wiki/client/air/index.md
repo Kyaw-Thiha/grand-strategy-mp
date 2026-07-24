@@ -1,8 +1,11 @@
 # Client Air Operations
 
-Air Operations will explain how players select wings, plan missions, follow flights, and read air-combat feedback on the map.
+Air Operations lets players select wings, assign supported missions, follow flights, and inspect detection, air-combat, and bombing feedback.
 
 # Wiki
+
+- [[client/air/wings-missions-and-movement|Wings, Missions, and Movement]]
+- [[client/air/detection-combat-and-bombing|Detection, Combat, and Bombing]]
 
 # Related Notes
 

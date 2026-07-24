@@ -1,8 +1,10 @@
 # Client Research
 
-Research will explain how players browse the current prototype technology tree and track its progress.
+Research explains the current local technology-tree prototype and the server boundary it still needs before becoming multiplayer progression.
 
 # Wiki
+
+- [[client/research/local-research-prototype|Local Research Prototype]]
 
 # Related Notes
 

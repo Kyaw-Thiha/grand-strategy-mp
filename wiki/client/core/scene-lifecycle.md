@@ -6,7 +6,7 @@ The scene manager takes players between the main menu, lobby, loading screen, ma
 
 ## Transition targets
 
-`SceneManager`, implemented by `client/src/core/scene_manager.gd`, names the main-menu, lobby, loading, game, and postgame scene paths and emits the resulting scene name after a transition. **Current:** the game target is `scenes/debug/map_debug.tscn`; this is a development composition choice, not a dedicated production game scene.
+`SceneManager`, implemented by `client/src/core/scene_manager.gd`, names the main-menu, lobby, loading, game, and postgame scene paths and emits the resulting scene name after a transition. **Current:** the game target remains `scenes/debug/map_debug.tscn`. `scenes/game/game.tscn` is a dedicated production composition that is ready for later wiring but is deliberately not the transition target yet.
 
 The current targets are defined in `client/src/core/scene_manager.gd`:
 
@@ -22,11 +22,12 @@ These constants keep the menu-to-lobby-to-loading-to-match sequence in one autol
 
 ## Loading handshake
 
-The manager stores a pending target while the loading scene asynchronously prepares it. A caller can request that loading wait for `GAME_STARTED`; `SessionManager` confirms that event, while an error cancels the wait and returns the player to the main menu. The loading scene completes the transition only after both the scene resource and required start confirmation are available.
+The manager stores a pending target while the loading scene asynchronously prepares it. A caller can request that loading wait for `GAME_STARTED`; `SessionManager` confirms that event, while an error cancels the wait and returns the player to the lobby. The loading scene completes the transition only after both the scene resource and required start confirmation are available.
 
 # Related Notes
 
 - [[client/core/index|Client Core Runtime]]
 - [[client/session/index|Sessions]]
 - [[client/debugging/index|Debugging]]
+- [[client/map/match-scene-composition|Production Match Scene]]
 - [[client/ui/index|User Interface]]

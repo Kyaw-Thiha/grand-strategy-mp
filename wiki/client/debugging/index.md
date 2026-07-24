@@ -1,8 +1,10 @@
 # Client Debugging
 
-Debugging will explain the tools developers use to inspect the map, units, and interface outside a normal multiplayer match.
+Debugging explains the retained diagnostic map composition and its deliberate sample-state boundary outside normal multiplayer play.
 
 # Wiki
+
+- [[client/debugging/map-debug-scene|Map Debug Scene]]
 
 # Related Notes
 

@@ -6,7 +6,7 @@ The client is where players log in, choose a country, inspect the map, issue ord
 
 ## Runtime services
 
-`client/project.godot` registers the runtime autoloads. The cross-cutting configuration, state/command, event, scene-transition, and local-preference services are documented by [[client/core/index|Client Core Runtime]]. Authentication, networking, session, and gameplay display ownership are being migrated into their matching component folders.
+`client/project.godot` registers the runtime autoloads. Cross-cutting configuration, state/command, event, scene-transition, and local-preference services are documented by [[client/core/index|Client Core Runtime]]. Authentication, networking, sessions, and gameplay presentation each have a focused component under this client wiki.
 
 Scene systems should not hold direct references to unrelated systems outside their composition root. They communicate across subsystem ownership through [[client/core/events|Event Bus]] or through explicit autoload service boundaries.
 
@@ -23,7 +23,7 @@ The `*` makes each script a global runtime service, so scenes use the named faca
 
 ## Scene composition
 
-The main scene is `scenes/main_menu/main_menu.tscn`. `SceneManager` transitions through main menu, lobby, loading, game, and postgame scenes. **Current:** its game target is `scenes/debug/map_debug.tscn`, so the active gameplay scene is also the map debug composition root.
+The main scene is `scenes/main_menu/main_menu.tscn`. `SceneManager` transitions through main menu, lobby, loading, game, and postgame scenes. **Current:** its game target is `scenes/debug/map_debug.tscn`, so the active gameplay scene is also the map debug composition root. The fixture-free `scenes/game/game.tscn` production composition exists but is not wired into this transition.
 
 `MapDebug` composes `MapLoader`, `MapRenderer`, `MapInteraction`, `CameraSystem`, `MilitarySystem`, `VisionSystem`, `AirWingSystem`, layers for units and wings, `PauseMenu`, and `GameHUD`. It wires those systems after map loading. Menu, lobby, loading, postgame, HUD, pause-menu, and keybind scenes each own their local controls and use autoload façades to communicate with runtime services.
 
@@ -36,5 +36,6 @@ The client may calculate display-only paths, interpolation, selection, overlays,
 - [[client/index|Client]]
 - [[client/core/index|Client Core Runtime]]
 - [[client/networking/index|Networking]]
-- [[client/ui|User Interface]]
+- [[client/ui/index|User Interface]]
+- [[client/map/match-scene-composition|Production Match Scene]]
 - [[game-server/overview|Game Server Role and Boundaries]]

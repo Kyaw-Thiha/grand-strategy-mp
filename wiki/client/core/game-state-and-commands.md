@@ -31,7 +31,7 @@ Local validation only prevents clearly unusable sends. The game server validates
 # Related Notes
 
 - [[client/core/index|Client Core Runtime]]
-- [[client/networking/index|Networking]]
+- [[client/networking/commands-state-and-events|Commands, State, and Events]]
 - [[client/session/index|Sessions]]
 - [[game-server/game-state|Authoritative Game State]]
 - [[game-server/commands-and-events|Commands and Events]]
