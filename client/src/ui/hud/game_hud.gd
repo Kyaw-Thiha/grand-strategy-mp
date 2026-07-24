@@ -72,26 +72,15 @@ const _TOAST_WIDTH: float = 328.0
 const _TOAST_HEIGHT: float = 280.0
 
 
-## Supplies the scene-owned map systems used by HUD panels and UI actions.
-## Parameters: map, military, interaction, air, and renderer system nodes.
-## Returns: nothing.
-func setup_game_context(
-		map_loader: Node,
-		military_system: Node,
-		map_interaction: Node,
-		air_wing_system: Node,
-		map_renderer: Node
-) -> void:
-	_map_loader = map_loader
-	_military_system = military_system
-	_map_interaction = map_interaction
-	_air_wing_system = air_wing_system
-	_map_renderer = map_renderer
-
-
 func _ready() -> void:
 	set_session_time(0)
 
+	# MapLoader is a sibling of GameHUD in the MapDebug scene tree
+	_map_loader = get_node_or_null("/root/MapDebug/MapLoader")
+	_military_system = get_node_or_null("/root/MapDebug/MilitarySystem")
+	_map_interaction = get_node_or_null("/root/MapDebug/MapInteraction")
+	_air_wing_system = get_node_or_null("/root/MapDebug/AirWingSystem")
+	_map_renderer = get_node_or_null("/root/MapDebug/MapRenderer")
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_register_initial_ui_input_ownership()
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())

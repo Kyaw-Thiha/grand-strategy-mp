@@ -6,10 +6,10 @@
 [ext_resource type="Script" uid="uid://ysq1gwl2alpv" path="res://src/systems/map/map_interaction.gd" id="4"]
 [ext_resource type="Script" uid="uid://2xapaninscrt" path="res://src/systems/map/camera_system.gd" id="5"]
 [ext_resource type="Script" uid="uid://dfwuurc2gegdp" path="res://src/systems/military/military_system.gd" id="6"]
-[ext_resource type="PackedScene" uid="uid://dnxk3rd7ud6u5" path="res://scenes/game/pause_menu.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/game/pause_menu.tscn" id="7"]
 [ext_resource type="Script" uid="uid://c3mnf7bq2xlap" path="res://src/systems/map/vision_system.gd" id="9"]
-[ext_resource type="PackedScene" uid="uid://bafvbna6oqbcy" path="res://scenes/game/game_hud.tscn" id="10"]
-[ext_resource type="Script" uid="uid://dswfqd4vft1f3" path="res://src/systems/air/air_wing_system.gd" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/game/game_hud.tscn" id="10"]
+[ext_resource type="Script" path="res://src/systems/air/air_wing_system.gd" id="11"]
 
 [node name="MapDebug" type="Node" unique_id=693291787]
 script = ExtResource("1")

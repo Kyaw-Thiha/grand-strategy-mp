@@ -1,31 +1,21 @@
 # AGENTS.md
 
-This file is the repository operating guide for AI agents. Prefer current code and the canonical wiki over assumptions from historical material.
+Read `docs/GAME_CONTEXT.md` first in every session. Then load only the docs relevant to the work.
 
-## Documentation Is Part of Every Completed Change
-
-Read and follow [`wiki/AGENTS.md`](wiki/AGENTS.md) before creating or changing documentation. It defines the wiki's ownership, note format, linking rules, and approval boundary.
-
-After completing a change to source, schemas, configuration, tests, scripts, or assets, use [`skills/ingest/SKILL.md`](skills/ingest/SKILL.md). The skill updates the affected wiki notes and links after the final implementation is complete. Do not update `old-docs/`; it is historical reference material that will be removed after the refactor and documentation migration are complete.
-
-Write wiki notes for the game developer and product designer first: explain what a system does for the game or player in plain language before its ownership, authority, or implementation details.
+This file is the repo operating guide for AI agents. Prefer current code and local docs over assumptions from older phase notes.
 
 ## Repo Structure
 
-```text
+```
 grand-strategy-mp/
 ├── client/        # Godot 4 project (res:// = client root)
 ├── game-server/   # Colyseus authoritative simulation server (Node.js / TypeScript)
 ├── api-server/    # Hono API server on Bun (auth, persistence, lobby/internal APIs)
 ├── map/           # Map data and Python map-generation pipeline
-├── wiki/          # Canonical developer wiki, viewed through Obsidian
-├── skills/        # Repository-local agent skills
-├── old-docs/      # Historical reference only; do not update
+├── docs/          # Architecture, contracts, systems, testing, and design docs
 ├── plans/         # One stored plan per task
 └── scripts/       # E2E scripts and R2 asset sync helpers
 ```
-
-The wiki's `.obsidian/` directory is local reader state and is ignored. Do not add Obsidian workspace settings, application settings, or themes to the repository.
 
 There is currently no root workspace `package.json` and no `packages/shared-types/` directory. Install and run API/game-server dependencies from their own folders.
 
@@ -33,15 +23,13 @@ There is currently no root workspace `package.json` and no `packages/shared-type
 
 1. **Plan first.** Propose a plan, discuss, and refine until agreed.
 2. **Store the plan.** Save it as `plans/*.md` before implementation.
-3. **Execute phase-by-phase.** Work through the stored plan in order. These are task phases, not necessarily development-roadmap phases.
-4. **Ingest documentation at completion.** After final code, tests, configuration, scripts, schemas, or assets are in place, follow `skills/ingest/SKILL.md` once for the completed task.
-5. **Keep changes scoped.** Do not clean up unrelated files or revert user changes.
+3. **Execute phase-by-phase.** Work through the stored plan in order. These are task phases, not necessarily `docs/DEV_PHASES.md` phases.
+4. **Keep changes scoped.** Do not clean up unrelated files or revert user changes.
 
 ## Current State
 
-- The full codebase refactor and documentation migration are active work. The wiki replaces the legacy documentation gradually; current code remains authoritative while the migration is incomplete.
-- Development auth is email/password through Hono; Steam auth is later work.
-- Phases 1–5 are substantially complete. Phase 6 tactical grid work is active. Phase 12 air-combat scaffolding/work has started in code and plans.
+- Development auth is email/password through Hono; Steam auth is still later work.
+- Phases 1-5 are substantially complete. Phase 6 tactical grid work is active. Phase 12 air-combat scaffolding/work has started in code and plans.
 - The client has many Godot scene/script tests under `client/test/`, `client/tests/`, and `client/scenes/test/`.
 - `npm test` in `game-server/` auto-detects changed files via git diff and runs only the affected test lanes (air-combat, tactical, movement, or core). Use `npm run test:full` to run all tests unconditionally. See `game-server/test-lanes.json` for lane mappings.
 
@@ -114,14 +102,11 @@ Registered in `client/project.godot`:
 ## Subsystem Ownership
 
 | Area | Source of truth |
-| --- | --- |
+|---|---|
 | Client display/input/UI | `client/src/`, `client/scenes/` |
 | Server simulation/rooms/schema | `game-server/src/` |
 | API/auth/persistence/lobby/internal routes | `api-server/src/` |
 | Map source data and generation | `map/`, `map/tools/map_pipeline/` |
-| Canonical developer documentation | `wiki/` |
-| Historical documentation | `old-docs/` (reference only) |
-| Repository-local agent skills | `skills/` |
 | Task plans | `plans/` |
 | Local/E2E helpers | `scripts/` |
 
@@ -142,6 +127,24 @@ Registered in `client/project.godot`:
 - Use short tactical inline comments to orient complex logic.
 - GDScript must use strict type annotations: `var name: Type` and `func f() -> Type`. Avoid `:=` where a call may return `Variant`, such as `Dictionary.get()`, `get_node()`, or `JSON.parse_string()`.
 - Keep generated/imported Godot `.uid` and `.import` files consistent when adding scenes/assets through Godot.
+
+## Documentation Map
+
+| When | Read |
+|---|---|
+| Every session | `docs/GAME_CONTEXT.md` |
+| Infra/auth/folder structure/architecture rules | `docs/ARCHITECTURE.md` |
+| Implementing or modifying a module | `docs/MODULES.md` |
+| Networking/API/persistence/schema work | `docs/DATA_CONTRACTS.md` |
+| Planning what to build next | `docs/DEV_PHASES.md` |
+| Local two-instance testing | `docs/LOCAL_TESTING.md` |
+| Tactical combat/grid work | `docs/TACTICAL_COMBAT.md` |
+| Air combat work | `docs/AIR_COMBAT.md` |
+| Map generation/rendering work | `docs/MAP_DATA_CONTRACT.md`, `docs/MAP_PRODUCTION_DOCS.md`, `docs/EDITOR_MAP_GENERATION.md` |
+| Pathfinding/movement work | `docs/PATHFINDING.md` |
+| UI/UX work | `docs/UI_UX_DESIGN.md`, `docs/PANEL_WIREFRAME_BRIEF.md` |
+| Economy/resource work | `docs/ECONOMY_BUILDINGS.md`, `docs/RESOURCE_ECONOMY.md` |
+| Naval combat work | `docs/NAVAL_COMBAT.md` |
 
 ## Verification Expectations
 
