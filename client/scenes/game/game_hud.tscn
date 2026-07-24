@@ -426,7 +426,7 @@ layout_mode = 2
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 58)
 layout_mode = 2
-tooltip_text = "Political map mode with elevation detail"
+tooltip_text = "Political map mode"
 
 [node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical" unique_id=759560892]
 layout_mode = 1
@@ -620,7 +620,7 @@ offset_top = -160.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="FriendlyAirWingPanel" parent="." unique_id=1025496055 instance=ExtResource("36")]
+[node name="FriendlyAirWingPanel" parent="." instance=ExtResource("36")]
 visible = false
 anchors_preset = 2
 anchor_top = 1.0
