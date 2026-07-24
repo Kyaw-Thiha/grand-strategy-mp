@@ -8,5 +8,3 @@ scripts/r2/rclone.conf
 opencode.json
 skills-lock.json
 
-# Obsidian is a local reader; its workspace, settings, and installed themes are not project assets.
-wiki/.obsidian/
