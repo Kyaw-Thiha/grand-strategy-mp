@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki Ingest"
+  short_description: "Keep wiki aligned with completed changes"
+  default_prompt: "Use $ingest to document the completed codebase change and repair affected wiki links."

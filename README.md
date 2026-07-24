@@ -145,3 +145,20 @@ Game server: ws://localhost:2567
 
 Make sure both servers are running before pressing **Play**.
 
+---
+## Coding Agent Skills
+Currently, the coding agent skills are located in `skills/*`.
+
+### Claude
+```bash
+mkdir -p .claude/skills/ingest
+cp -r skills/ingest/* .claude/skills/ingest/
+```
+
+### Opencode
+It can load from same path as claude.
+
+### OpenAI
+Use the `skills/*/agents/openai.yaml`.
+
+
