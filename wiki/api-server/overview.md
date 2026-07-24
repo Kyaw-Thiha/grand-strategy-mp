@@ -8,15 +8,6 @@ The service boundaries are:
 - The game server owns live simulation concerns.
 - The Godot client owns presentation and player intent, not authoritative data.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/lobby|Lobby Coordination]]
-- [[api-server/internal-api|Internal API]]
-- [[api-server/database|Database and RLS]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ## Account and session lifecycle responsibilities
@@ -59,3 +50,25 @@ The database is for data that should remain meaningful after a room ends. The in
 - The old contracts describe Steam auth, division CRUD, shop APIs, public profiles, and richer game-session history that are not live routes today.
 - `division_templates` exists in the database schema but is not currently exposed through API routes.
 - The in-memory lobby design works for one development process, not for reliable multi-instance deployment.
+
+## Verified route composition example
+
+`api-server/src/index.ts` composes the public route groups before the separately guarded internal group:
+
+```ts
+app.route('/auth', auth)
+app.use('/profile/*', jwt({ secret: process.env.JWT_SECRET!, alg: 'HS256' }))
+app.route('/profile', profile)
+app.route('/lobby', lobby)
+```
+
+The internal group is registered after its secret-checking middleware; together these route groups keep account, lobby, and trusted persistence responsibilities outside live match simulation.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/lobby|Lobby Coordination]]
+- [[api-server/internal-api|Internal API]]
+- [[api-server/database|Database and RLS]]
+- [[api-server/deployment|Development and Deployment]]

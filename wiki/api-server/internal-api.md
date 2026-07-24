@@ -4,14 +4,6 @@ The internal API is the trusted interface used by the Colyseus game server. It c
 
 These routes are not part of the Godot client API. A player JWT is deliberately rejected; the caller must prove it is the game-server service with `INTERNAL_SECRET`.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/lobby|Lobby Coordination]]
-- [[api-server/database|Database and RLS]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ## Authentication
@@ -51,3 +43,27 @@ The current caller sends:
 The route inserts a `game_sessions` row with start time, end time, and result JSON, then removes the in-memory lobby entry whose room ID matches. It returns `{ "session_id": "<uuid>" }`.
 
 The route currently does not persist the room ID, map ID, duration, winner column, end reason, or per-player results. It also does not make retries idempotent. The current `GameRoom.notifyGameEnd()` sends only the room ID, a result object containing `winner_id`, and the room start time.
+
+## Verified trust-boundary example
+
+`api-server/src/index.ts` rejects an internal request unless it carries the configured service secret:
+
+```ts
+app.use('/internal/*', (c, next) => {
+  const header = c.req.header('Authorization')
+  if (header !== `Internal ${process.env.INTERNAL_SECRET}`) {
+    return c.json({ error: 'Forbidden' }, 403)
+  }
+  return next()
+})
+```
+
+This middleware distinguishes the game-server-to-API trust boundary from a player JWT.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/lobby|Lobby Coordination]]
+- [[api-server/database|Database and RLS]]
+- [[api-server/deployment|Development and Deployment]]

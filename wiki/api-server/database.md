@@ -10,14 +10,6 @@ It does not contain live room state: nations, units, readiness, combat, movement
 
 The current implementation uses Supabase Postgres, Drizzle for schema definitions and queries, and the `postgres` driver for the API server's direct connection.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/profile|Player Profile]]
-- [[api-server/internal-api|Internal API]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ## Current tables
@@ -53,12 +45,12 @@ Player-owned persistent division layouts. The table is defined but no current AP
 
 Minimal durable record of a Colyseus room ending. It is not yet a complete match-history model: it has no room ID, map, end reason, or per-player results stored in dedicated columns.
 
-| Column | Type | Contents |
-| --- | --- | --- |
-| `id` | UUID | Primary key for the recorded session. |
-| `started_at` | Timestamp | Reported or default session start time. |
-| `ended_at` | Timestamp, optional | Time the game-end event was recorded. |
-| `result_json` | JSONB, optional | Flexible result payload; currently includes the winner ID. |
+| Column        | Type                | Contents                                                   |
+| ------------- | ------------------- | ---------------------------------------------------------- |
+| `id`          | UUID                | Primary key for the recorded session.                      |
+| `started_at`  | Timestamp           | Reported or default session start time.                    |
+| `ended_at`    | Timestamp, optional | Time the game-end event was recorded.                      |
+| `result_json` | JSONB, optional     | Flexible result payload; currently includes the winner ID. |
 
 `POST /internal/game-end` creates these records when the game server reports that a room has ended.
 
@@ -75,3 +67,28 @@ The old documentation describes a larger schema and Supabase service-role write 
 ## Schema changes
 
 The current README instructs developers to use `drizzle-kit push`. A tracked migration workflow has not yet been established in the repository. Treat schema changes as cross-service changes: route payloads, client expectations, RLS policies, and game-server end-of-session data may all depend on them.
+
+## Verified schema example
+
+`api-server/src/db/schema.ts` defines the durable account fields with Drizzle:
+
+```ts
+export const players = pgTable('players', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  steamId: text('steam_id'),
+  hasHostPass: boolean('has_host_pass').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+```
+
+This is the current source of the player fields used by authentication and profile routes.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/profile|Player Profile]]
+- [[api-server/internal-api|Internal API]]
+- [[api-server/deployment|Development and Deployment]]

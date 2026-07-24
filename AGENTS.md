@@ -8,6 +8,8 @@ Read and follow [`wiki/AGENTS.md`](wiki/AGENTS.md) before creating or changing d
 
 After completing a change to source, schemas, configuration, tests, scripts, or assets, use [`skills/ingest/SKILL.md`](skills/ingest/SKILL.md). The skill updates the affected wiki notes and links after the final implementation is complete. Do not update `old-docs/`; it is historical reference material that will be removed after the refactor and documentation migration are complete.
 
+Write wiki notes for the game developer and product designer first: explain what a system does for the game or player in plain language before its ownership, authority, or implementation details.
+
 ## Repo Structure
 
 ```text
@@ -22,6 +24,8 @@ grand-strategy-mp/
 ├── plans/         # One stored plan per task
 └── scripts/       # E2E scripts and R2 asset sync helpers
 ```
+
+The wiki's `.obsidian/` directory is local reader state and is ignored. Do not add Obsidian workspace settings, application settings, or themes to the repository.
 
 There is currently no root workspace `package.json` and no `packages/shared-types/` directory. Install and run API/game-server dependencies from their own folders.
 

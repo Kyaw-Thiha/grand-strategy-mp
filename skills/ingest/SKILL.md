@@ -14,7 +14,7 @@ Run this skill once after the final code, schema, configuration, test, script, o
 1. Inspect the completed task's final diff and changed files. Identify the changed behavior, owned data, public or internal interfaces, configuration, tests, and runtime dependencies.
 2. Find the likely affected wiki notes from the changed path, imports and call sites, schema/contract references, and the current component index. Read those notes and their direct related notes only. Do not perform a full wiki skim.
 3. Decide whether each affected note is still accurate, needs revision, must be created, or should be moved, renamed, split, merged, or retired. Treat current code as authoritative; mark incomplete or future work as **Planned**, and obsolete behavior as **Deprecated** when useful.
-4. Update the affected notes so a developer can first understand responsibility, owned data, scope, and application role. Put implementation mechanics, interfaces, lifecycle, constraints, and limitations in Details.
+4. Update the affected notes so a game developer or product designer can first understand what the system does for the game or player. Put ownership, authority, interfaces, implementation mechanics, lifecycle, constraints, and limitations in Details.
 5. Update the relevant parent indexes and repair links affected by the documentation changes. Check direct incoming and outgoing links for every note that was created, moved, renamed, split, merged, or removed.
 6. If the change appears to affect an architecture-wide, cross-component, or policy-level note, leave that broader note unchanged. Finish the local ingest work, then ask the user for approval to make the broader documentation update.
 7. In the final handoff, provide a brief ingestion report: notes created/updated/moved or deliberately left unchanged, link repairs, and any broader update awaiting approval. Do not write a persistent ingestion log.
@@ -26,7 +26,7 @@ Use this exact top-level order for every non-index note:
 ```md
 # Title
 
-[Concise, responsibility-first description. State what the subject is responsible for, the data it owns when applicable, and its role in the application. Write for developers. Do not lead with frameworks, libraries, or implementation mechanics.]
+[Concise, product/design-oriented description. State what the system means in the game: what a player can do with it, what game behavior it controls, or why it exists. Use plain language before technical terminology.]
 
 # Details
 
@@ -44,9 +44,18 @@ Requirements:
 
 - Use `# Details` and `# Related Notes` as level-one headings.
 - Use `##` and `###` only under Details.
-- Keep the opening short, concrete, and responsibility-first. For example, describe a database note by the records it contains and excludes before describing its ORM or driver.
+- Keep the opening short, concrete, and game- or player-facing. For example, describe a preference service as the settings a player can save outside a match before explaining local storage or runtime ownership.
+- Do not lead with ownership, authority, data-flow, or architecture jargon. Explain those details in `# Details` when they matter for safe implementation.
 - Put explicit **Current**, **Planned**, or **Deprecated** labels near behavior whose implementation state could be misunderstood.
 - Keep Related Notes at the end and include only useful navigational links.
+
+## Verified Examples
+
+Examples belong only in `# Details`. Add a short verified example when it materially helps a developer locate or understand the real implementation; do not add examples to openings, indexes, or related-links sections.
+
+- Verify the path, symbol, command, payload, and excerpt against the completed repository state.
+- Name the relevant function, class, autoload, route, command, scene, or test and explain what the small example demonstrates in plain language.
+- Prefer five to twenty lines with the correct code-fence language. Do not add filler examples to indexes or policy-only notes.
 
 ## Index Format
 
@@ -55,7 +64,7 @@ Use this format for `index.md` files:
 ```md
 # Component Title
 
-[Concise responsibility and scope description for the component.]
+[Concise, product/design-oriented description of what this component contributes to the game.]
 
 # Wiki
 

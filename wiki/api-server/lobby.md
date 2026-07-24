@@ -4,13 +4,6 @@ The lobby API is the room-discovery service. It keeps a temporary registry of hu
 
 It lets a host publish a room and lets another player find that room by code or through the public list. It does not own the room, its player list, nation selection, ready state, or game-start rules; those belong to the game server after clients connect.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/internal-api|Internal API]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ## Lifecycle
@@ -72,3 +65,27 @@ There is currently no privacy field, map field, player count, host display name,
 ## Limitations
 
 The registry is an in-memory `Map`. It is lost on restart, is not shared between service replicas, has no expiration for abandoned pending lobbies, and uses a non-cryptographic random code generator. A failed host flow can therefore leave a pending code behind until the API process restarts.
+
+## Verified lobby reservation example
+
+`api-server/src/routes/lobby.ts` records a pending code before a Colyseus room exists:
+
+```ts
+lobbies.set(code, {
+  join_code: code,
+  room_id: null,
+  host_player_id: payload.sub,
+  created_at: Date.now(),
+})
+
+return c.json({ join_code: code })
+```
+
+The null room ID is why activation is a separate step after the host has created the room.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/internal-api|Internal API]]
+- [[api-server/deployment|Development and Deployment]]

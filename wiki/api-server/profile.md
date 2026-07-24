@@ -4,13 +4,6 @@ The profile is the persisted account record for an individual player. The curren
 
 It does not contain a player's current nation, units, readiness, or tactical state; those belong to the active Colyseus room. Both profile routes operate only on the account identified by the player's JWT, so a client cannot select another player's record.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/database|Database and RLS]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ## Profile lifecycle
@@ -51,3 +44,26 @@ Request body:
 The route updates only the authenticated player's email and returns the updated ID and email. An absent email returns `400`. The current implementation does not reissue a JWT after an email change, so an existing token can contain the previous email until it is refreshed.
 
 The current route does not expose display names, statistics, cosmetics, or division templates, despite those appearing in older design contracts. Those are separate future domains, not hidden behavior of this route.
+
+## Verified authenticated query example
+
+`api-server/src/routes/profile.ts` selects the profile by the JWT subject:
+
+```ts
+const payload = c.get('jwtPayload') as JwtPayload
+const [player] = await db.select({
+  id: players.id,
+  email: players.email,
+  steamId: players.steamId,
+  hasHostPass: players.hasHostPass,
+}).from(players).where(eq(players.id, payload.sub)).limit(1)
+```
+
+The route never accepts a player ID in the request path, so the authenticated subject determines which profile is read.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/database|Database and RLS]]
+- [[api-server/deployment|Development and Deployment]]

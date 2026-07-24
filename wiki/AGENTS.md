@@ -2,6 +2,8 @@
 
 `wiki/` is the canonical developer documentation for this repository. Write it for developers who need to understand what a component owns, what it is responsible for, and how it relates to the rest of the application. Use current code as the authority. Use `old-docs/` only as historical reference and never modify it.
 
+The `.obsidian/` directory is local reader state and is ignored. Do not add or update Obsidian workspace settings, application settings, or themes as documentation changes.
+
 ## Required Ingestion
 
 After completing a coherent task that changes source, schemas, configuration, tests, scripts, or assets, use [`skills/ingest/SKILL.md`](../skills/ingest/SKILL.md). Run ingestion once after the final implementation and relevant verification, not after each intermediate edit.
@@ -15,7 +17,7 @@ Every ordinary documentation note uses this order:
 ```md
 # Title
 
-[A concise, developer-oriented description of what this component, concept, or contract is responsible for, the data it owns, and what it does in the application. Do not lead with frameworks, libraries, or implementation mechanics.]
+[A concise, product/design-oriented description of what this system means in the game: what a player can do with it, what game behavior it controls, or why it exists. Use plain language.]
 
 # Details
 
@@ -28,7 +30,24 @@ Every ordinary documentation note uses this order:
 - [[api-server/index|API Server]]
 ```
 
-Use `# Details` and `# Related Notes` as level-one headings. Use `##` and `###` only for supporting structure inside Details. Keep the opening concise and responsibility-first; move implementation mechanics into Details. Mark behavior accurately as **Current**, **Planned**, or **Deprecated** where that distinction matters. Do not present an older design as current behavior.
+Use `# Details` and `# Related Notes` as level-one headings. Use `##` and `###` only for supporting structure inside Details. Keep the opening concise and game- or player-facing; move ownership, authority boundaries, data flow, and implementation mechanics into Details. Mark behavior accurately as **Current**, **Planned**, or **Deprecated** where that distinction matters. Do not present an older design as current behavior.
+
+## Writing Tone
+
+Write for the game developer and product designer before the infrastructure engineer. Start with what the feature does for the game or player, then explain the technical details needed to change it safely.
+
+- Prefer concrete language such as “Stores preferences a player sets outside a match” over “Owns player-specific local data.”
+- Do not lead with terms such as “authoritative,” “replicated,” “presentation layer,” “contract,” or “client-side.” Use and explain them later only when they prevent a misunderstanding.
+- Keep source-of-truth rules, interfaces, files, lifecycle, constraints, and verification details in `# Details`; do not omit them.
+- Define unfamiliar technical terms the first time they matter.
+
+## Verified Examples
+
+Examples belong only in `# Details`. Add a short verified example when it materially helps a developer locate or understand the real implementation; do not add examples to openings, indexes, or related-links sections.
+
+- Verify the referenced path, symbol, command, payload, and excerpt against current repository contents.
+- Name the source path and the relevant function, class, autoload, route, command, scene, or test, then explain what the small example demonstrates in plain language.
+- Prefer five to twenty lines and the appropriate fence language. Do not add filler examples to navigational indexes or policy-only notes.
 
 ## Index Format
 
@@ -37,7 +56,7 @@ Every component folder has an `index.md` that describes the component and links 
 ```md
 # Component Title
 
-[A concise description of the component's responsibility and scope.]
+[A concise, product/design-oriented description of what this component contributes to the game.]
 
 # Wiki
 

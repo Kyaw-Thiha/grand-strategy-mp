@@ -4,15 +4,6 @@ The API server runs as a separate HTTP service alongside the Godot client and Co
 
 For local development, it serves HTTP at `http://localhost:3000`. The Godot client defaults to that address in debug builds. Game-server tests commonly override their API endpoint with `HONO_URL`; `GameRoom` uses `API_SERVER_URL` and defaults to the same localhost address.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/overview|Role and Boundaries]]
-- [[api-server/authentication|Authentication]]
-- [[api-server/database|Database and RLS]]
-- [[api-server/lobby|Lobby Coordination]]
-- [[api-server/internal-api|Internal API]]
-
 # Details
 
 ## Requirements
@@ -85,3 +76,25 @@ bun drizzle-kit push
 API changes should include route tests for authentication, authorization, validation, database failures, and side effects. Full session changes should also run the relevant `scripts/e2e-*.sh` or game-server integration flow.
 
 If tests return database connection errors, check `DATABASE_URL` and database availability before treating the route code as the failure. The current route tests use the configured database rather than an isolated in-memory test database.
+
+## Verified environment example
+
+`api-server/.env.example` declares the values the service expects locally:
+
+```bash
+JWT_SECRET=
+DATABASE_URL=
+INTERNAL_SECRET=
+PORT=3000
+```
+
+`JWT_SECRET` and `INTERNAL_SECRET` must agree with the game-server configuration; the values themselves stay outside the repository.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/overview|Role and Boundaries]]
+- [[api-server/authentication|Authentication]]
+- [[api-server/database|Database and RLS]]
+- [[api-server/lobby|Lobby Coordination]]
+- [[api-server/internal-api|Internal API]]

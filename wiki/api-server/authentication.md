@@ -4,13 +4,6 @@ Authentication creates the identity shared by the API server and game server for
 
 The client uses that JWT to access its own API resources and to join a Colyseus room. The token identifies a player; it does not grant access to the internal API or make the client authoritative over game state.
 
-# Related Notes
-
-- [[api-server/index|API Server]]
-- [[api-server/profile|Player Profile]]
-- [[api-server/lobby|Lobby Coordination]]
-- [[api-server/deployment|Development and Deployment]]
-
 # Details
 
 ### Login flow through the app
@@ -68,3 +61,26 @@ Requires `Authorization: Bearer <jwt>`. The existing token is verified, the play
 Steam ticket authentication remains future work. The old design documents a Steam-to-Hono verification bridge, but no `/auth/steam` route exists in the current code.
 
 When Steam authentication is added, Hono should remain the only service that sees the Steam Web API secret. The client should provide a ticket, not the server secret.
+
+## Verified route example
+
+`api-server/src/routes/auth.ts` makes the email route register a new account or verify the existing password before signing a token:
+
+```ts
+auth.post('/email', async (c) => {
+  const { email, password } = await c.req.json<{ email: string; password: string }>()
+  if (!email || !password) return c.json({ error: 'email and password required' }, 400)
+  const [existing] = await db.select().from(players).where(eq(players.email, email)).limit(1)
+  let player: typeof players.$inferSelect
+  if (!existing) {
+    const passwordHash = await Bun.password.hash(password)
+```
+
+This is the verified implementation behind the development registration/login behavior described above.
+
+# Related Notes
+
+- [[api-server/index|API Server]]
+- [[api-server/profile|Player Profile]]
+- [[api-server/lobby|Lobby Coordination]]
+- [[api-server/deployment|Development and Deployment]]
