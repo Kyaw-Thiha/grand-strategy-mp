@@ -15,6 +15,7 @@
         "test/12e-air-combat.test.ts",
         "test/12e-patch-formation-density.test.ts",
         "test/12f-air-bombing-patterns.test.ts",
+        "test/12g-strategic-bombing.test.ts",
         "test/12h-manual-targeting.test.ts"
       ]
     },

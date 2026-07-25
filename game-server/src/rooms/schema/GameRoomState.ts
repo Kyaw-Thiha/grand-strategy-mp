@@ -34,6 +34,10 @@ export class NationState extends Schema {
 export class ProvinceState extends Schema {
   @type("string") province_id: string = "";
   @type("string") owner_id: string = "";
+  @type("number") industry:            number = 50;
+  @type("number") population:          number = 50;
+  @type("number") infrastructure:      number = 50;
+  @type("number") oil_bombed_until_ms: number = 0;
 }
 
 // ── Phase 4: Division (replaces skeleton UnitState) ───────────────────────────

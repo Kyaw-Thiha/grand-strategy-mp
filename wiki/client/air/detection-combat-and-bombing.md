@@ -16,11 +16,19 @@ Own wings are displayed regardless of detection. Enemy wings are shown only whil
 
 Clicking a banner opens `AirCombatDetailPanel`, which presents the server payload through aircraft glyphs and result details. The client does not calculate hits, losses, readiness changes, or the winner.
 
+## Strategic bombing presentation
+
+**Current:** `AIR_BOMBING_PROVINCE_RESULT` creates a purple `AirCombatBanner` at the target province
+
 ## Bombing presentation
 
 `AIR_BOMBING_RESULT` creates or updates a temporary bombing indicator at the province city or the payload’s fallback coordinates. Clicking it opens `BombingDetailPanel` with the reported runs.
 
 The indicator and detail panel visualize the server result. Strategic and tactical bombing effects remain game-server outcomes.
+
+`PROVINCE_AA_FIRED` spawns a brief flak burst (orange/yellow `draw_circle`/`draw_arc` effect) that fades over 0.6 seconds at the province city. This is broadcast to all clients.
+
+`EventBus` signals `air_bombing_province_result`, `province_aa_fired`, `strategic_bombing_detail_open_requested`, and `strategic_bombing_detail_closed` are added in `event_bus.gd`. `SessionManager` routes `AIR_BOMBING_PROVINCE_RESULT` and `PROVINCE_AA_FIRED` to these signals. `AirCombatBanner.on_clicked()` checks `_combat_type` and dispatches to `strategic_bombing_detail_open_requested` for strategic results.
 
 ## Rejections and lifecycle notices
 

@@ -13,6 +13,10 @@ var _buildings_val: Label
 var _btn_upgrade: Button
 var _btn_build_radar: Button
 var _btn_manage_prod: Button
+var _industry_val:       Label
+var _population_val:     Label
+var _infrastructure_val: Label
+var _oil_status_label:   Label
 
 
 func _ready() -> void:
@@ -28,6 +32,10 @@ func _ready() -> void:
 	_btn_upgrade = get_node_or_null("Margin/HBox/ActionsBlock/BtnUpgrade")
 	_btn_build_radar = get_node_or_null("Margin/HBox/ActionsBlock/BtnBuildRadar")
 	_btn_manage_prod = get_node_or_null("Margin/HBox/ActionsBlock/BtnManageProd")
+	_industry_val       = get_node_or_null("Margin/HBox/StatsBlock/StatsGrid/IndustryVal")
+	_population_val     = get_node_or_null("Margin/HBox/StatsBlock/StatsGrid/PopulationVal")
+	_infrastructure_val = get_node_or_null("Margin/HBox/StatsBlock/StatsGrid/InfrastructureVal")
+	_oil_status_label   = get_node_or_null("Margin/HBox/StatsBlock/StatsGrid/OilStatus")
 
 
 func populate(province_id: String, data: Dictionary) -> void:
@@ -50,6 +58,25 @@ func populate(province_id: String, data: Dictionary) -> void:
 		_btn_build_radar.visible = is_friendly
 	if _btn_manage_prod != null:
 		_btn_manage_prod.visible = is_friendly
+
+	# Bombing-affected scalars (live from Colyseus schema, 0–100)
+	var industry: Variant   = data.get("industry",       null)
+	var pop: Variant        = data.get("population",     null)
+	var infra: Variant      = data.get("infrastructure", null)
+	var oil_until: float    = float(data.get("oil_bombed_until_ms", 0))
+
+	if industry != null and is_instance_valid(_industry_val):
+		_industry_val.text = str(int(industry))
+	if pop != null and is_instance_valid(_population_val):
+		_population_val.text = str(int(pop))
+	if infra != null and is_instance_valid(_infrastructure_val):
+		_infrastructure_val.text = str(int(infra))
+
+	var now_ms := Time.get_unix_time_from_system() * 1000.0
+	var oil_disrupted := oil_until > 0.0 and now_ms < oil_until
+	if is_instance_valid(_oil_status_label):
+		_oil_status_label.text     = "OIL DISRUPTED" if oil_disrupted else ""
+		_oil_status_label.modulate = Color(1.0, 0.4, 0.4) if oil_disrupted else Color.WHITE
 
 	# Resources show placeholder dashes until Phase 9 economy data feeds in
 	if _steel_val != null:

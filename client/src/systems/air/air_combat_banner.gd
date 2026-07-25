@@ -18,6 +18,7 @@ const C_OBSERVER: Color = Color(0.70, 0.70, 0.70, 1.0)  # gray  — not our figh
 
 const C_BORDER: Color = Color(0.08, 0.05, 0.02, 0.8)
 
+var _combat_type: String = "air"
 var _fill_color: Color = C_AIR
 var _ring_color: Color = C_OBSERVER
 var _show_ring:  bool  = false
@@ -54,6 +55,7 @@ func setup_with_data(wing_a_pos: Vector2, wing_b_pos: Vector2,
 		wing_b_nation_id: String,
 		first_combat_data: Dictionary) -> void:
 	position = (wing_a_pos + wing_b_pos) * 0.5 + Vector2(0, -24)
+	_combat_type = combat_type
 	_combats.append(first_combat_data)
 	var _p := PackedStringArray([first_combat_data.get("wing_a_id", ""), first_combat_data.get("wing_b_id", "")])
 	_p.sort()
@@ -125,7 +127,10 @@ func on_clicked() -> void:
 	if _dismissing:
 		return
 	_begin_dismiss()
-	EventBus.air_combat_detail_open_requested.emit({ "combats": _combats })
+	if _combat_type == "strategic":
+		EventBus.strategic_bombing_detail_open_requested.emit({ "combats": _combats })
+	else:
+		EventBus.air_combat_detail_open_requested.emit({ "combats": _combats })
 
 
 func _begin_dismiss() -> void:

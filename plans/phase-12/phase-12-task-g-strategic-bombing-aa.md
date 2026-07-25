@@ -62,15 +62,17 @@ This `Map<string, { lng: number; lat: number }>` lives on `GameRoom` and is not
 passed to any system. `AirStrategicBombingSystem` receives it as a **constructor
 argument** — same dependency-injection pattern as other systems.
 
-### `air_bombing_system.ts` — two things to fix before writing new tests
+### `air_bombing_system.ts` — verify before touching (Task F may have already fixed these)
 
-1. **`MISSION_TYPES.AREA` is currently in `BOMBING_MISSIONS`** (line 13). AREA is a
-   strategic mission targeting province scalars — it must be **removed** from the
-   tactical system so it is never passed to `resolvePattern()`.
-2. **`this.state` bug**: line `lifecycleSystem.resolveWingBombed(wing.wing_id, this.state)`
-   references `this.state` which does not exist on `AirBombingSystem`. The correct
-   call is `lifecycleSystem.resolveWingBombed(wing.wing_id, state)` (using the `tick()`
-   parameter). **Do not copy this bug into the new strategic system.**
+**Read `air_bombing_system.ts` before Step 3 and verify both items:**
+
+1. **`MISSION_TYPES.AREA` in `BOMBING_MISSIONS`** — Task F may have already removed it.
+   If `BOMBING_MISSIONS` contains only `TACTICAL_BOMBING`, Step 3a is a no-op; skip it.
+2. **`this.state` bug** — check whether the `resolveWingBombed` call uses `this.state`
+   (bug) or the `state` tick parameter (already correct). Only apply Step 3b if the bug
+   is still present.
+
+Do **not** copy either pattern into the new strategic system regardless.
 
 ### MISSION_TYPES confirmed (AirWingState.ts)
 
@@ -117,7 +119,7 @@ movementSystem → combatSystem → supplySystem → frontlineSystem
 ### `lifecycleSystem.resolveWingBombed` — added in Task F
 
 This method exists on `AirWingLifecycleSystem`. Signature:
-`resolveWingBombed(wingId: string, state: GameRoomState): void`
+`resolveWingBombed(wingId: string, state: GameRoomState, broadcast: BroadcastFn): void`
 Call it with the `state` **parameter** from `tick()`, not `this.state`.
 
 ### Test-only handlers already registered (do NOT re-register)
@@ -144,10 +146,12 @@ Step 10.
 `air_wing_added`, `air_wing_updated`, `air_wing_removed`, `air_wing_selected`,
 `air_wing_deselected`, `air_wing_path`, `air_wing_detected`, `air_wing_detection_lost`,
 `air_combat_started`, `air_combat_ended`, `radar_updated`, `division_revealed`,
-`division_hidden`.
+`division_hidden`, `air_bombing_result`, `air_combat_detail_open_requested`,
+`air_combat_detail_closed`, `bombing_detail_open_requested`, `bombing_detail_closed`.
 
-`air_bombing_province_result` and `province_aa_fired` do **NOT** exist — add in
-Step 10a.
+The following do **NOT** exist yet — add in Step 10a:
+`air_bombing_province_result`, `province_aa_fired`,
+`strategic_bombing_detail_open_requested`, `strategic_bombing_detail_closed`.
 
 ### Province panel — `friendly_province_panel.gd`
 
@@ -181,6 +185,8 @@ Province fixed AA deals **more** damage to low-altitude aircraft (easier flak ta
 | `game-server/src/systems/air_province_aa_system.ts` | `ProvinceAaSystem` class |
 | `game-server/src/systems/air_strategic_bombing_system.ts` | `AirStrategicBombingSystem` class |
 | `game-server/test/12g-strategic-bombing.test.ts` | All Branch G tests |
+| `client/src/ui/hud/strategic_bombing_detail_panel.gd` | Detail panel for strategic bombing results |
+| `client/src/ui/hud/strategic_bombing_detail_panel.tscn` | Scene for the detail panel |
 
 ## Files to Modify
 
@@ -188,14 +194,15 @@ Province fixed AA deals **more** damage to low-altitude aircraft (easier flak ta
 |---|---|
 | `game-server/src/rooms/schema/GameRoomState.ts` | Add 4 fields to `ProvinceState` |
 | `game-server/src/rooms/GameRoom.ts` | Widen `_initProvinces` type; construct new systems; add test handlers; wire tick |
-| `game-server/src/systems/air_bombing_system.ts` | Remove `MISSION_TYPES.AREA` from `BOMBING_MISSIONS`; fix `this.state` bug |
+| `game-server/src/systems/air_bombing_system.ts` | Verify/fix `BOMBING_MISSIONS` and `this.state` bug (see Step 3) |
 | `game-server/src/data/air_bombing_stats.ts` | Append province bombing stats + oil debuff duration |
 | `game-server/package.json` | Append 12g to test chain |
-| `client/src/core/event_bus.gd` | Add 2 new signals |
+| `client/src/core/event_bus.gd` | Add 4 new signals |
 | `client/src/systems/session/session_manager.gd` | Add 2 new message handlers |
 | `client/src/ui/hud/friendly_province_panel.gd` | Display live industry/pop/infra/oil-status |
-| `client/src/ui/hud/game_hud.gd` | Merge live Colyseus province data into populate call |
-| `client/src/systems/air/air_wing_system.gd` | Connect `province_aa_fired`; spawn flak burst |
+| `client/src/ui/hud/game_hud.gd` | Merge live Colyseus province data; register strategic bombing detail panel |
+| `client/src/systems/air/air_combat_banner.gd` | Dispatch `strategic_bombing_detail_open_requested` when `combat_type == "strategic"` |
+| `client/src/systems/air/air_wing_system.gd` | Handle `province_aa_fired` (flak burst) and `air_bombing_province_result` (strategic banner) |
 
 ---
 
@@ -245,16 +252,15 @@ Run the four schema tests — all must pass before proceeding.
 
 ## Step 2: Load Province Stats in `_initProvinces`
 
-### 2a. Widen the type assertion in `GameRoom.ts`
+### 2a. Widen the type in `GameRoom.ts`
+
+The actual code uses `getCachedFile<T>(dataPath)` (not `JSON.parse`/`readFileSync`).
+Read `_initProvinces` to find the `getCachedFile` call and its current type parameter,
+then widen the type to include the new fields:
 
 ```typescript
-// Before:
-const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
-  provinces: Array<{ province_id: string; nation_id: string; city_position?: [number, number] }>;
-};
-
-// After:
-const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
+// Find the getCachedFile<T> call — widen T to:
+type ProvinceMapData = {
   provinces: Array<{
     province_id:     string;
     nation_id:       string;
@@ -265,6 +271,7 @@ const raw = JSON.parse(readFileSync(dataPath, "utf-8")) as {
     resources?:      { oil?: number };
   }>;
 };
+// Pass ProvinceMapData as the type argument: getCachedFile<ProvinceMapData>(dataPath)
 ```
 
 ### 2b. Populate fields in the loop body
@@ -281,34 +288,30 @@ if (p.infrastructure !== undefined) slot.infrastructure = p.infrastructure;
 
 ---
 
-## Step 3: Fix `air_bombing_system.ts`
+## Step 3: Verify/Fix `air_bombing_system.ts`
 
-Make both fixes before writing more tests so the test file can import cleanly.
+**Read `air_bombing_system.ts` first.** Task F may have already made these fixes.
 
-### 3a. Remove AREA from BOMBING_MISSIONS
+### 3a. Check `BOMBING_MISSIONS` set
+
+If `BOMBING_MISSIONS` already contains **only** `MISSION_TYPES.TACTICAL_BOMBING` →
+**skip this step** (already correct).
+
+If it still contains `MISSION_TYPES.AREA`, remove it:
 
 ```typescript
-// Before:
-const BOMBING_MISSIONS = new Set([
-  MISSION_TYPES.TACTICAL_BOMBING,
-  MISSION_TYPES.AREA,
-]);
-
-// After:
+// ONLY apply if AREA is still present:
 const BOMBING_MISSIONS = new Set([
   MISSION_TYPES.TACTICAL_BOMBING,
 ]);
 ```
 
-### 3b. Fix `this.state` bug
+### 3b. Check `resolveEngagement` call site (method name is `resolveEngagement`, NOT `resolveWingBombed`)
 
-```typescript
-// Before:
-lifecycleSystem.resolveWingBombed(wing.wing_id, this.state);
-
-// After:
-lifecycleSystem.resolveWingBombed(wing.wing_id, state);
-```
+Find the call to `lifecycleSystem.resolveEngagement(...)` inside
+`AirBombingSystem.tick()`. If it already passes `state` as the second parameter →
+**skip this step** (already correct). The actual method called here is
+`resolveEngagement`, not `resolveWingBombed` — do not confuse the two.
 
 **Run 12f tests after Step 3 — must all still pass:**
 ```bash
@@ -568,7 +571,7 @@ export class AirStrategicBombingSystem {
 
       // LOGISTICS — stub, no-op; wing still RTBs
       if (wing.mission === MISSION_TYPES.LOGISTICS) {
-        lifecycleSystem.resolveWingBombed(wing.wing_id, state);
+        lifecycleSystem.resolveWingBombed(wing.wing_id, state, broadcast);
         continue;
       }
 
@@ -586,9 +589,14 @@ export class AirStrategicBombingSystem {
       }
 
       if (wing.count <= 0) {
-        lifecycleSystem.resolveWingBombed(wing.wing_id, state);
+        lifecycleSystem.resolveWingBombed(wing.wing_id, state, broadcast);
         continue;
       }
+
+      // Snapshot before-damage values for the broadcast payload
+      const industryBefore       = province.industry;
+      const populationBefore     = province.population;
+      const infrastructureBefore = province.infrastructure;
 
       // Apply province damage
       const stats = getProvinceBombingStats(wing.aircraft_type);
@@ -606,21 +614,33 @@ export class AirStrategicBombingSystem {
         province.oil_bombed_until_ms = Date.now() + OIL_DEBUFF_DURATION_MS;
       }
 
-      // Broadcast only to attacker + defender
+      // Capture before-damage values for the detail panel (snapshot already applied above)
+      // NOTE: snapshot the values BEFORE applying damage earlier in the tick() method.
+      // Move the snapshot to just before the if/else damage block and use these in resultMsg.
+      // The broadcast payload must include wing info + before/after so the client panel
+      // can display "50 → 46 (−4)" without the client having to remember prior values.
       const resultMsg = {
-        province_id:         provinceId,
-        mission:             wing.mission,
-        attacker_nation_id:  wing.nation_id,
-        defender_nation_id:  province.owner_id,
-        industry:            province.industry,
-        population:          province.population,
-        infrastructure:      province.infrastructure,
-        oil_bombed_until_ms: province.oil_bombed_until_ms,
+        province_id:              provinceId,
+        mission:                  wing.mission,
+        attacker_nation_id:       wing.nation_id,
+        defender_nation_id:       province.owner_id,
+        wing_id:                  wing.wing_id,
+        aircraft_type:            wing.aircraft_type,
+        count:                    wing.count,
+        // After-damage values (current state):
+        industry:                 province.industry,
+        population:               province.population,
+        infrastructure:           province.infrastructure,
+        oil_bombed_until_ms:      province.oil_bombed_until_ms,
+        // Before-damage values (snapshot taken before damage was applied):
+        industry_before:          industryBefore,
+        population_before:        populationBefore,
+        infrastructure_before:    infrastructureBefore,
       };
       broadcastToNation("AIR_BOMBING_PROVINCE_RESULT", resultMsg, wing.nation_id);
       broadcastToNation("AIR_BOMBING_PROVINCE_RESULT", resultMsg, province.owner_id);
 
-      lifecycleSystem.resolveWingBombed(wing.wing_id, state);
+      lifecycleSystem.resolveWingBombed(wing.wing_id, state, broadcast);
     }
   }
 
@@ -743,12 +763,14 @@ cd game-server && npm test
 
 ## Step 10: Client Changes
 
-### 10a. `event_bus.gd` — add 2 signals
+### 10a. `event_bus.gd` — add 4 signals
 
-After the last existing air signal (`division_hidden`):
+After the last existing air signal (`bombing_detail_closed`):
 ```gdscript
 signal air_bombing_province_result(data: Dictionary)
 signal province_aa_fired(data: Dictionary)
+signal strategic_bombing_detail_open_requested(data: Dictionary)
+signal strategic_bombing_detail_closed()
 ```
 
 ### 10b. `session_manager.gd` — add 2 message handlers
@@ -758,18 +780,13 @@ In the `match type:` block, after `AIR_WING_MOVE_REJECTED`:
 ```gdscript
 "AIR_BOMBING_PROVINCE_RESULT":
     EventBus.air_bombing_province_result.emit(data)
-    var mission: String = data.get("mission", "")
-    var prov_id: String = data.get("province_id", "")
-    EventBus.notification_requested.emit(
-        "Air strike on %s — %s bombing complete." % [prov_id, mission.capitalize()],
-        "info"
-    )
 "PROVINCE_AA_FIRED":
     EventBus.province_aa_fired.emit(data)
 ```
 
-### 10c. `game_hud.gd` — merge live Colyseus province data into populate call
+### 10c. `game_hud.gd` — merge live Colyseus province data; register new panel
 
+**Part 1 — province populate call.**
 In `_on_province_selected` (line ~702), after building `data` from
 `_map_loader.get_province_data()`, merge in live bombing-affected scalars.
 
@@ -791,6 +808,30 @@ if live_prov:
     data["population"]          = live_prov.population
     data["infrastructure"]      = live_prov.infrastructure
     data["oil_bombed_until_ms"] = live_prov.oil_bombed_until_ms
+```
+
+**Part 2 — register `StrategicBombingDetailPanel`.**
+Follow the same pattern used for `BombingDetailPanel` and `AirCombatDetailPanel`:
+
+```gdscript
+const StrategicBombingDetailPanelScene = preload(
+    "res://client/src/ui/hud/strategic_bombing_detail_panel.tscn")
+
+# In _ready() alongside other panel instantiations:
+_strategic_bombing_detail_panel = StrategicBombingDetailPanelScene.instantiate()
+add_child(_strategic_bombing_detail_panel)
+_register_ui_input_ownership_root(_strategic_bombing_detail_panel)
+hud_manager.register_panel("strategic_bombing_detail", _strategic_bombing_detail_panel,
+    HUDManager.PlacementMode.FULL_CENTER)
+
+# Connect open/close signals (same pattern as bombing_detail):
+EventBus.strategic_bombing_detail_open_requested.connect(func(data: Dictionary) -> void:
+    _strategic_bombing_detail_panel.populate(data)
+    hud_manager.show_panel("strategic_bombing_detail")
+)
+EventBus.strategic_bombing_detail_closed.connect(func() -> void:
+    hud_manager.hide_panel("strategic_bombing_detail")
+)
 ```
 
 ### 10d. `friendly_province_panel.gd` — display live scalars
@@ -832,14 +873,18 @@ var _infrastructure_val: Label
 var _oil_status_label:   Label
 ```
 
-### 10e. `air_wing_system.gd` — flak burst visual
+### 10e. `air_wing_system.gd` — flak burst (AA) + strategic bombing banner
 
-In `setup()`, connect the new signal:
+**Read `air_wing_system.gd`'s `_on_air_combat_ended` and `_on_air_bombing_result`
+methods before implementing.** These are the reference implementations to mirror.
+
+In `setup()`, connect both new signals:
 ```gdscript
 EventBus.province_aa_fired.connect(_on_province_aa_fired)
+EventBus.air_bombing_province_result.connect(_on_air_bombing_province_result)
 ```
 
-Handler and burst implementation:
+**Flak burst handler** — a brief transient circle (not clickable, no banner):
 ```gdscript
 func _on_province_aa_fired(data: Dictionary) -> void:
     var province_id: String = data.get("province_id", "")
@@ -854,21 +899,168 @@ func _on_province_aa_fired(data: Dictionary) -> void:
     _spawn_flak_burst(screen_pos)
 
 func _spawn_flak_burst(pos: Vector2) -> void:
-    var lbl := Label.new()
-    lbl.text = "✸"
-    lbl.position = pos - Vector2(8.0, 8.0)
-    lbl.modulate = Color(1.0, 0.8, 0.2, 1.0)
-    _icon_layer.add_child(lbl)
+    # Brief transient visual — matches draw_circle style used throughout air system.
+    # Not clickable; no banner; fades in 0.6s.
+    var burst := Node2D.new()
+    burst.position = pos
+    _icon_layer.add_child(burst)
+    var script := GDScript.new()
+    script.source_code = """
+extends Node2D
+var _alpha := 1.0
+func _draw():
+    draw_circle(Vector2.ZERO, 14.0, Color(1.0, 0.75, 0.2, _alpha))
+    draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 20, Color(0.9, 0.4, 0.1, _alpha), 2.0)
+"""
+    burst.set_script(script)
     var tween := create_tween()
-    tween.tween_property(lbl, "modulate:a", 0.0, 0.6)
-    tween.tween_callback(lbl.queue_free)
+    tween.tween_method(func(a: float):
+        if is_instance_valid(burst):
+            burst.set("_alpha", a)
+            burst.queue_redraw()
+    , 1.0, 0.0, 0.6)
+    tween.tween_callback(burst.queue_free)
 ```
 
-In `cleanup()` or `_exit_tree()`, disconnect:
+> **Alternative if inline GDScript feels fragile**: make `_spawn_flak_burst` a
+> dedicated small class file `client/src/systems/air/flak_burst.gd` (extends Node2D,
+> draws circle in `_draw()`, tween in `_ready()`). Instantiate it the same way
+> `BombingRunIndicator` is instantiated in `_on_air_bombing_result`. Either approach
+> works; pick whichever is simpler to read during implementation.
+
+**Strategic bombing banner handler** — reuses `AirCombatBanner` (already has
+`combat_type = "strategic"` → purple, with stacking/auto-dismiss built in):
+
+```gdscript
+# Tracks strategic bombing banners by province bucket key (same 0.5° logic as
+# the existing _dogfight_indicators and _air_combat_banners dictionaries)
+var _strategic_bombing_banners: Dictionary = {}  # bucket_key → AirCombatBanner
+
+func _on_air_bombing_province_result(data: Dictionary) -> void:
+    var province_id: String = data.get("province_id", "")
+    var pdata: Dictionary = _map_loader.get_province_data(province_id)
+    if pdata.is_empty():
+        return
+    var city_pos: Array = pdata.get("city_position", [])
+    if city_pos.size() < 2:
+        return
+    var lng := float(city_pos[0])
+    var lat := float(city_pos[1])
+    var screen_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
+    var key := _bucket_key(lng, lat)   # reuse existing _bucket_key() helper
+
+    if not _strategic_bombing_banners.has(key) or \
+       not is_instance_valid(_strategic_bombing_banners[key]):
+        # AirCombatBanner has no .tscn — instantiate from script directly.
+        # This is the same pattern used in _on_air_combat_ended. Read that method
+        # to confirm the exact preload path ("res://src/systems/air/air_combat_banner.gd").
+        var banner: Node2D = preload("res://src/systems/air/air_combat_banner.gd").new()
+        _icon_layer.add_child(banner)
+        # Pass the same province city position for both "wing" positions so the
+        # banner appears at the target, not mid-air between bomber and target.
+        banner.setup_with_data(
+            screen_pos, screen_pos,
+            "strategic",              # combat_type — already defined as purple
+            _local_nation_id,
+            data.get("attacker_nation_id", ""),
+            data.get("defender_nation_id", ""),
+            data,                     # first_combat_data — full province result payload
+        )
+        banner.tree_exited.connect(func(): _strategic_bombing_banners.erase(key))
+        _strategic_bombing_banners[key] = banner
+    else:
+        _strategic_bombing_banners[key].add_combat(data)
+```
+
+> **Read `_on_air_combat_ended` in `air_wing_system.gd` and `setup_with_data` in
+> `air_combat_banner.gd` before implementing** to get the exact parameter names and
+> types. There is no `AirCombatBannerScene` preload constant — the banner is always
+> created via `preload("...air_combat_banner.gd").new()`.
+
+In `cleanup()` or `_exit_tree()`, disconnect and clear:
 ```gdscript
 if EventBus.province_aa_fired.is_connected(_on_province_aa_fired):
     EventBus.province_aa_fired.disconnect(_on_province_aa_fired)
+if EventBus.air_bombing_province_result.is_connected(_on_air_bombing_province_result):
+    EventBus.air_bombing_province_result.disconnect(_on_air_bombing_province_result)
+for banner in _strategic_bombing_banners.values():
+    if is_instance_valid(banner):
+        banner.queue_free()
+_strategic_bombing_banners.clear()
 ```
+
+### 10f. `air_combat_banner.gd` — dispatch to strategic detail panel on click
+
+In `on_clicked()`, check `combat_type` before emitting:
+
+```gdscript
+func on_clicked() -> void:
+    if _combat_type == "strategic":
+        EventBus.strategic_bombing_detail_open_requested.emit({
+            "combats": _combats,    # full data array accumulated via add_combat()
+        })
+    else:
+        EventBus.air_combat_detail_open_requested.emit({
+            "combats": _combats,
+        })
+```
+
+> **Read the actual `on_clicked()` implementation** in `air_combat_banner.gd` before
+> editing — use the exact variable names for `_combat_type` and `_combats` that already
+> exist in the file.
+
+### 10g. Create `strategic_bombing_detail_panel.gd` + `.tscn`
+
+**Copy the structure of `air_combat_detail_panel.gd`** (header row with icon + title +
+close button, stacked run sections with HSeparator, ESC key, auto-dismiss timer bar,
+`populate()` method, `_close()` emitting `strategic_bombing_detail_closed`).
+
+**Data shape** — each entry in the `combats` array from the banner:
+```
+{
+  province_id, mission, attacker_nation_id, defender_nation_id,
+  wing_id, aircraft_type, count,
+  industry, population, infrastructure, oil_bombed_until_ms,
+  industry_before, population_before, infrastructure_before,
+}
+```
+
+**Panel layout** (mirrors air_combat_detail_panel style):
+
+```
+┌─────────────────────────────────────────────┐
+│  ✈  STRATEGIC BOMBING              [✕ close] │
+│  Île-de-France  ·  Germany → France          │
+├─────────────────────────────────────────────┤
+│  12 × Strategic Bomber  (Germany)            │
+│  Mission: Area Bombing                       │
+│                                              │
+│  Industry        50  (unchanged)             │
+│  Population      62  →  57   (−5)            │
+│  Infrastructure  55  →  52   (−3)            │
+│  Oil supply      OK                          │
+├─────────────────────────────────────────────┤  ← HSeparator if >1 run
+│  [█████████████████░░░░░░]   6.1s            │
+└─────────────────────────────────────────────┘
+```
+
+**Implementation notes:**
+- Use `jet-fighter-up-solid-full.svg` as the header icon (already preloaded elsewhere
+  in the project — find the preload path from `air_combat_detail_panel.gd`).
+- For each scalar row: if before == after, show `"XX  (unchanged)"` in gray; otherwise
+  show `"XX  →  YY  (−Z)"` where Z = before − after.
+- Oil row: if `oil_bombed_until_ms > Time.get_unix_time_from_system() * 1000.0`,
+  show `"DISRUPTED"` in red; otherwise `"OK"` in normal color.
+- **Auto-dismiss timer** — neither `bombing_detail_panel.gd` nor
+  `air_combat_detail_panel.gd` implement auto-dismiss; this is **new design work**.
+  Add a `Timer` node (or `_process` accumulator) that calls `_close()` after 8 seconds.
+  Draw a draining progress bar in `_draw()` using `draw_rect` — same approach as
+  `bombing_run_indicator.gd`'s timer arc, adapted to a horizontal bar.
+- `_close()` emits `EventBus.strategic_bombing_detail_closed` and calls
+  `hud_manager.hide_panel("strategic_bombing_detail")` (same as how `BombingDetailPanel._close()` works — read that file for the exact pattern).
+- ESC key closes (copy from `air_combat_detail_panel.gd`).
+- Create the `.tscn` file — required so `game_hud.gd` can `preload()` it. Minimal
+  scene with just the `PanelContainer` root node + script attached.
 
 ---
 
@@ -893,16 +1085,21 @@ All suites 12a–12g must pass. Note pass/skip count per suite.
 4. Fly any bomber on OIL mission → province panel shows "OIL DISRUPTED" in red.
 
 5. Use dev command to set province AA = 1.0. Fly CAS plane (AREA mission, low
-   altitude) → `✸` flak burst at city; wing count decreases; `PROVINCE_AA_FIRED`
-   in Godot debug output.
+   altitude) → orange/yellow circle burst at city fades out; wing count decreases;
+   `PROVINCE_AA_FIRED` in Godot debug output.
 
 6. Same with strategic bomber (high altitude) → burst appears; wing loses fewer
    planes than CAS plane test at same AA strength.
 
-7. Fly LOGISTICS mission → no scalar changes; wing RTBs normally; no
+7. Fly STRATEGIC_BOMBER on AREA mission to enemy province → LOITER → **purple
+   `AirCombatBanner` appears at province city** on the map; click it → `StrategicBombingDetailPanel`
+   opens showing Population and Infrastructure decreased with before→after values;
+   Industry row shows "unchanged"; Oil row shows "OK". Panel auto-dismisses after 8s.
+
+8. Fly LOGISTICS mission → no scalar changes; wing RTBs normally; no banner, no
    `AIR_BOMBING_PROVINCE_RESULT` notification.
 
-8. Fly bomber over own province → no damage; wing RTBs; no result broadcast.
+9. Fly bomber over own province → no damage; wing RTBs; no result broadcast.
 
 ---
 
@@ -925,3 +1122,16 @@ All suites 12a–12g must pass. Note pass/skip count per suite.
 | `friendly_province_panel` already has Label nodes for industry/pop/infra | **Unknown** — verify in scene; create if missing |
 | `GameState.provinces` is always a Dictionary in GDScript | **Verify** — check how other code reads Colyseus province state; use that pattern |
 | `SET_PROVINCE_RADAR` can double as the AA setter | **Wrong** — it sets detection radar; `SET_PROVINCE_AA` is a new separate handler |
+| Step 3a and 3b always need to be applied | **Wrong** — Task F may have already cleaned these up; verify before touching |
+| The strategic bombing map indicator is a new file | **Wrong** — reuse `AirCombatBanner` with `combat_type = "strategic"` (already purple); do NOT create a new indicator scene |
+| `AirCombatBannerScene` needs to be preloaded in `air_wing_system.gd` | **Wrong** — no such const exists; use `preload("res://src/systems/air/air_combat_banner.gd").new()` (read `_on_air_combat_ended` for exact path) |
+| `air_bombing_result` signal doesn't exist yet | **Wrong** — it exists (added by Task F for tactical bombing); the NEW signal is `air_bombing_province_result` for strategic bombing |
+| The flak burst should use a Label with "✸" text | **Wrong** — use a `draw_circle`/`draw_arc` based Node2D (or a small dedicated script file) to match the project's visual style |
+| `resultMsg` should only contain after-damage values | **Wrong** — include `industry_before`, `population_before`, `infrastructure_before` so the detail panel can show "50 → 46 (−4)" without client-side memory |
+| Damage values are final | **Wrong** — `PROVINCE_BOMBING_STATS` values are tuning stubs; the scalars (industry/population/infrastructure) are stored in ProvinceState but don't feed economy calculations yet (Phase 7+) |
+| `on_clicked()` in `air_combat_banner.gd` already handles strategic type | **Wrong** — it currently always emits `air_combat_detail_open_requested`; must add a combat_type check to dispatch to `strategic_bombing_detail_open_requested` instead |
+| `resolveWingBombed` takes 2 params `(wingId, state)` | **Wrong** — actual signature is `(wingId, state, broadcast)`; all 3 call sites in Step 7 must pass `broadcast` |
+| The method called in `air_bombing_system.ts` is `resolveWingBombed` | **Wrong** — it calls `resolveEngagement`; Step 3b is about `resolveEngagement`, not `resolveWingBombed` |
+| `_initProvinces` uses `JSON.parse(readFileSync(...))` | **Wrong** — it uses `getCachedFile<T>(dataPath)`; widen the type parameter on that call, not a `JSON.parse` cast |
+| `AirCombatBannerScene` is a preloaded const in `air_wing_system.gd` | **Wrong** — no such const exists; the banner has no `.tscn` scene file; use `preload("res://src/systems/air/air_combat_banner.gd").new()` (read `_on_air_combat_ended` for exact path) |
+| `bombing_detail_panel.gd` / `air_combat_detail_panel.gd` have auto-dismiss timers | **Wrong** — neither has one; auto-dismiss in `strategic_bombing_detail_panel.gd` is new work; implement via `Timer` node or `_process` accumulator |

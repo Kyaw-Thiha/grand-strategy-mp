@@ -13,7 +13,7 @@ It is temporary match state, not persistence. The Godot client receives a replic
 | `phase`, `map_id`, `game_speed` | Match lifecycle, selected map, and current speed vote value.                            |
 | `players`                       | Connected session IDs mapped to account ID, Steam ID, and host-pass claim.              |
 | `nations`                       | Playable nation slots, assigned player IDs, readiness, and researched perk IDs.         |
-| `provinces`                     | Current owner for every province loaded from the map.                                   |
+| `provinces`                     | Current owner, industry, population, infrastructure, and oil-disruption timer for every province loaded from the map. |
 | `divisions`                     | Live ground forces, orders, combat state, supply, stacks, and tactical grid.            |
 | `relations`                     | Pairwise diplomatic stance: neutral, war, or alliance.                                  |
 | `proposals`                     | Replicated proposal shape; current diplomacy voting is also tracked in room-local maps. |
@@ -37,6 +37,10 @@ The Colyseus schema identifies the room-owned collections that clients can obser
 A division records its nation, geographical position, HP, suppression, movement and reposition orders, engagement state, supply status, stack membership, and opponent IDs. It also has a 5×5 tactical grid of unit cells.
 
 Each grid cell stores unit type, HP, suppression, experience, incapacitation, and stealth. The grid is server-side rather than Colyseus-schema synchronized; the server includes it in division serialization and combat-round events where clients need it.
+
+## Province bombing fields
+
+**Current:** every province now has `industry`, `population`, `infrastructure` (default 50) and `oil_bombed_until_ms` (default 0). These are loaded from `map_data.json` at game start and modified by strategic bombing. They are Colyseus schema fields so the client can read live values.
 
 ## Air wings
 
