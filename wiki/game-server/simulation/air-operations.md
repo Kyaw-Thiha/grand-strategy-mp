@@ -42,6 +42,28 @@ The air-combat system finds hostile candidates, deconflicts pairings, applies su
 
 Tactical-bombing wings loitering near an engagement or targeted division select tactical cells through aircraft-specific bombing patterns. The bombing system applies HP and suppression damage to those cells and the affected division, then reports the strike to the relevant players.
 
+## Strategic bombing
+
+Strategic bombers (STRATEGIC_BOMBER and TACTICAL_BOMBER) on AREA, INDUSTRY, OIL, or LOGISTICS missions damage province-level scalars instead of the tactical grid. `AirStrategicBombingSystem` (`game-server/src/systems/air_strategic_bombing_system.ts`) runs each tick after the tactical bombing system. It filters for LOITER wings with strategic missions, resolves their target province, applies the mission-specific damage, and transitions the wing to RTB.
+
+**Current:** four mission types:
+- **AREA** — reduces `population` and `infrastructure` on the target province.
+- **INDUSTRY** — reduces `industry` on the target province.
+- **OIL** — sets `oil_bombed_until_ms` to `Date.now() + OIL_DEBUFF_DURATION_MS` (2 minutes by default).
+- **LOGISTICS** — no-op stub that still calls `resolveWingBombed` to RTB the wing.
+
+Damage per plane per run uses `PROVINCE_BOMBING_STATS` in `air_bombing_stats.ts`. The damage formula is `planes × combat_readiness × DAMAGE_SCALE`. Province scalars never go below 0. The system broadcasts `AIR_BOMBING_PROVINCE_RESULT` to the attacker and defender nation and `PROVINCE_AA_FIRED` to all clients.
+
+## Province fixed AA
+
+`ProvinceAaSystem` (`game-server/src/systems/air_province_aa_system.ts`) checks fixed AA once per bombing run. AA strength per province is set via `setProvinceAaStrength()` (used by the `SET_PROVINCE_AA` test handler). Damage formula:
+
+```
+floor(strength × wingCount × altitudeMult × AA_DAMAGE_COEFFICIENT)
+```
+
+Low-altitude aircraft (`cas_plane`, `dive_bomber`, `fighter`, `naval_bomber`) take 1.5× damage; high-altitude aircraft take 1.0×. The system runs inside `AirStrategicBombingSystem.tick()` before province damage is applied. When AA destroys the entire wing, the bombing run is skipped. `PROVINCE_AA_FIRED` is broadcast to all clients (flak is visible to all players).
+
 # Related Notes
 
 - [[game-server/simulation/index|Simulation]]
