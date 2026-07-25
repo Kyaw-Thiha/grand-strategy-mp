@@ -100,6 +100,7 @@ func _ready() -> void:
 	_btn_map_ele.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("elevation"))
 
 	# Click outside center panel = close
+	overlay_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay_dim.gui_input.connect(_on_overlay_clicked)
 
 	# Wire dock buttons to panel toggles
@@ -258,6 +259,28 @@ func _ready() -> void:
 	)
 	EventBus.air_combat_detail_closed.connect(func() -> void:
 		hud_manager.hide_panel("air_combat_detail")
+	)
+
+	# StrategicBombingDetailPanel — full-center overlay for strategic bombing results
+	const StrategicBombingDetailPanelScene := preload("res://src/ui/hud/strategic_bombing_detail_panel.tscn")
+	var _strategic_bombing_detail_panel: Control = StrategicBombingDetailPanelScene.instantiate()
+	add_child(_strategic_bombing_detail_panel)
+	_register_ui_input_ownership_root(_strategic_bombing_detail_panel)
+	hud_manager.register_panel("strategic_bombing_detail", _strategic_bombing_detail_panel,
+		HUDManager.PlacementMode.FULL_CENTER
+	)
+	EventBus.strategic_bombing_detail_open_requested.connect(func(data: Dictionary) -> void:
+		if _military_system != null and _military_system.has_method("deselect"):
+			_military_system.deselect()
+		if _map_interaction != null and _map_interaction.has_method("deselect"):
+			_map_interaction.deselect()
+		if _air_wing_system != null and _air_wing_system.has_method("deselect"):
+			_air_wing_system.deselect()
+		_strategic_bombing_detail_panel.populate(data)
+		hud_manager.show_panel("strategic_bombing_detail")
+	)
+	EventBus.strategic_bombing_detail_closed.connect(func() -> void:
+		hud_manager.hide_panel("strategic_bombing_detail")
 	)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
@@ -596,7 +619,7 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 	var panel_node: Control = entry.get("node") as Control
 	if panel_node == null:
 		return
-	var panel_rect: Rect2 = panel_node.get_global_rect()
+	var panel_rect: Rect2 = Rect2(panel_node.position, panel_node.size)
 	if not panel_rect.has_point(mb.position):
 		hud_manager.hide_panel(open_name)
 		get_viewport().set_input_as_handled()
@@ -778,6 +801,10 @@ func _on_province_selected(province_id: String) -> void:
 		"owner_id": owner_id,
 		"nation_display": nation_display,
 	}
+	var live: Dictionary = GameState.provinces.get(province_id, {})
+	for key in ["industry", "population", "infrastructure", "oil_bombed_until_ms"]:
+		if live.has(key):
+			data[key] = live[key]
 	_friendly_prov_panel.populate(province_id, data)
 	_friendly_prov_panel.visible = true
 	_layout_bottom_hud()
