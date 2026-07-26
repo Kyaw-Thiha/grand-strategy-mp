@@ -30,3 +30,6 @@ export let OIL_DEBUFF_DURATION_MS = 120_000;
 export function setOilDebuffDurationForTesting(ms: number): void {
   OIL_DEBUFF_DURATION_MS = ms;
 }
+
+export const PORT_STRIKE_NAVAL_BASE_DAMAGE_PER_PLANE = 0.1;
+export const PORT_STRIKE_DAMAGE_SCALE = 0.1;
