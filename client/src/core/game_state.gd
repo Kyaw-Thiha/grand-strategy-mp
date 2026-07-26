@@ -35,6 +35,8 @@ var air_wings: Dictionary = {}
 # air_wing_paths: { wing_id → AIR_WING_PATH payload } — cached so the hydration loop
 # can replay paths that arrived before air_wing_system was set up (GAME_STARTED race).
 var air_wing_paths: Dictionary = {}
+# naval_contact_markers: { marker_id → {marker_id, nation_id, position_lng, position_lat, ...} }
+var naval_contact_markers: Dictionary = {}
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -307,3 +309,11 @@ func _apply_air_wing_destroyed(data: Dictionary) -> void:
 		return
 	air_wings.erase(id)
 	EventBus.air_wing_removed.emit(id)
+
+func _apply_naval_contact_updates(data: Dictionary) -> void:
+	for marker in data.get("markers", []):
+		var mid: String = marker.get("marker_id", "")
+		if mid.is_empty():
+			continue
+		naval_contact_markers[mid] = marker
+		EventBus.naval_contact_marker_added.emit(marker)
