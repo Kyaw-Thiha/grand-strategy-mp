@@ -355,3 +355,215 @@ describe("lane:air-combat | 12h — Port strike", function () {
     );
   });
 });
+
+// ── Mission stubs ────────────────────────────────────────────────────────────
+
+describe("lane:air-combat | 12h — Anti-ship and trade interdiction stubs", function () {
+  let colyseus: ColyseusTestServer<typeof appConfig>;
+  let previousDevMode: string | undefined;
+
+  before(async () => {
+    previousDevMode = process.env.DEV_MODE;
+    process.env.DEV_MODE = "true";
+    setRtbDurationTicksForTesting(1);
+    setRefuelDurationTicksForTesting(1);
+    colyseus = await boot(appConfig, getTestPort());
+  });
+
+  after(async () => {
+    if (previousDevMode === undefined) delete process.env.DEV_MODE;
+    else process.env.DEV_MODE = previousDevMode;
+    await colyseus.shutdown();
+  });
+
+  beforeEach(async () => { await colyseus.cleanup(); });
+
+  async function joinRoom() {
+    const token = await makeToken();
+    const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus.connectTo(room, { token });
+    await room.waitForNextPatch();
+    client.send("SELECT_NATION", { nation_id: "germany" });
+    await room.waitForNextPatch();
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    (room as any).clock.clear();
+    return { client, room };
+  }
+
+  async function tick(room: any): Promise<void> {
+    (room as any).gameTick();
+    await room.waitForNextPatch();
+  }
+
+  it("resolves HIT when target marker exists and is not expired", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "as1", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.MARITIME_PATROL,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+
+    const hitEvents: any[] = [];
+    client.onMessage("NAVAL_BOMBER_STRIKE_HIT", (d) => hitEvents.push(d));
+
+    const state = room.state as GameRoomState;
+    client.send("SPAWN_WING", {
+      wing_id: "as_w1", nation_id: "germany",
+      aircraft_type: "naval_bomber", count: 5,
+      home_airbase_province_id: PORT_PROVINCE,
+      mission: "anti_ship",
+      lifecycle_state: "loiter",
+    });
+    await room.waitForNextPatch();
+    const wing = state.air_wings.get("as_w1");
+    if (!wing) throw new Error("wing not found");
+    wing.fuel = 1.0;
+    wing.target_id = "as1";
+    await tick(room);
+
+    assert.strictEqual(hitEvents.length, 1);
+    assert.strictEqual(hitEvents[0].marker_id, "as1");
+  });
+
+  it("resolves MISS when target marker is expired or missing", async () => {
+    const { client, room } = await joinRoom();
+    const missEvents: any[] = [];
+    client.onMessage("NAVAL_BOMBER_STRIKE_MISSED", (d) => missEvents.push(d));
+
+    const state = room.state as GameRoomState;
+    client.send("SPAWN_WING", {
+      wing_id: "as_w2", nation_id: "germany",
+      aircraft_type: "naval_bomber", count: 5,
+      home_airbase_province_id: PORT_PROVINCE,
+      mission: "anti_ship",
+      lifecycle_state: "loiter",
+    });
+    await room.waitForNextPatch();
+    const wing = state.air_wings.get("as_w2");
+    if (!wing) throw new Error("wing not found");
+    wing.fuel = 1.0;
+    wing.target_id = "nonexistent_marker";
+    await tick(room);
+
+    assert.strictEqual(missEvents.length, 1);
+    assert.strictEqual(missEvents[0].wing_id, "as_w2");
+  });
+
+  it("trade interdiction does not touch province scalars", async () => {
+    const { client, room } = await joinRoom();
+    const state = room.state as GameRoomState;
+    const provinceBefore = { ...state.provinces.get(PORT_PROVINCE) };
+
+    client.send("SPAWN_WING", {
+      wing_id: "ti_w1", nation_id: "germany",
+      aircraft_type: "naval_bomber", count: 5,
+      home_airbase_province_id: PORT_PROVINCE,
+      mission: "trade_interdiction",
+      lifecycle_state: "loiter",
+    });
+    await room.waitForNextPatch();
+    const wing = state.air_wings.get("ti_w1");
+    if (!wing) throw new Error("wing not found");
+    wing.fuel = 1.0;
+    await tick(room);
+
+    const provinceAfter = state.provinces.get(PORT_PROVINCE) as any;
+    assert.strictEqual(provinceAfter.industry, (provinceBefore as any).industry,
+      "trade interdiction must not touch province scalars");
+  });
+});
+
+// ── Splash perk tests ────────────────────────────────────────────────────────
+
+describe("lane:air-combat | 12h — Splash perk", function () {
+  let colyseus2: ColyseusTestServer<typeof appConfig>;
+  let prevDevMode: string | undefined;
+
+  before(async () => {
+    prevDevMode = process.env.DEV_MODE;
+    process.env.DEV_MODE = "true";
+    setRtbDurationTicksForTesting(1);
+    setRefuelDurationTicksForTesting(1);
+    colyseus2 = await boot(appConfig, getTestPort());
+  });
+
+  after(async () => {
+    if (prevDevMode === undefined) delete process.env.DEV_MODE;
+    else process.env.DEV_MODE = prevDevMode;
+    await colyseus2.shutdown();
+  });
+
+  beforeEach(async () => { await colyseus2.cleanup(); });
+
+  async function joinRoom() {
+    const token = await makeToken();
+    const room = await colyseus2.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus2.connectTo(room, { token });
+    await room.waitForNextPatch();
+    client.send("SELECT_NATION", { nation_id: "germany" });
+    await room.waitForNextPatch();
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    (room as any).clock.clear();
+    return { client, room };
+  }
+
+  async function tick(room: any): Promise<void> {
+    (room as any).gameTick();
+    await room.waitForNextPatch();
+  }
+
+  it("perk_splash=false: only primary target hit — no crash with empty flotilla", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "sp1", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.MARITIME_PATROL,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+    const state = room.state as GameRoomState;
+    client.send("SPAWN_WING", {
+      wing_id: "sp_w1", nation_id: "germany",
+      aircraft_type: "naval_bomber", count: 5,
+      home_airbase_province_id: PORT_PROVINCE,
+      mission: "anti_ship", lifecycle_state: "loiter",
+    });
+    await room.waitForNextPatch();
+    const wing = state.air_wings.get("sp_w1");
+    if (!wing) throw new Error("wing not found");
+    wing.fuel = 1.0;
+    wing.target_id = "sp1";
+    await tick(room);
+  });
+
+  it("perk_splash=true with empty StubFlotillaProvider: no crash, HIT fires", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "sp2", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.MARITIME_PATROL,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+    const state = room.state as GameRoomState;
+    client.send("SPAWN_WING", {
+      wing_id: "sp_w2", nation_id: "germany",
+      aircraft_type: "naval_bomber", count: 5,
+      home_airbase_province_id: PORT_PROVINCE,
+      mission: "anti_ship", lifecycle_state: "loiter",
+    });
+    await room.waitForNextPatch();
+    client.send("SET_WING_PERK", { wing_id: "sp_w2", perk: "splash", value: true });
+    await room.waitForNextPatch();
+    const wing = state.air_wings.get("sp_w2");
+    if (!wing) throw new Error("wing not found");
+    wing.fuel = 1.0;
+    wing.target_id = "sp2";
+
+    const hitEvents: any[] = [];
+    client.onMessage("NAVAL_BOMBER_STRIKE_HIT", (d) => hitEvents.push(d));
+    await tick(room);
+    assert.strictEqual(hitEvents.length, 1, "HIT should fire even with empty flotilla");
+  });
+});

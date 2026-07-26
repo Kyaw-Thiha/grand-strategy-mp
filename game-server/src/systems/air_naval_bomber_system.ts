@@ -11,7 +11,30 @@ type BroadcastToNationFn = (type: string, msg: unknown, nationId: string) => voi
 
 type LifecycleSystem = import("./air_wing_lifecycle_system.js").AirWingLifecycleSystem;
 
+export interface MockShip {
+  ship_id: string;
+  ship_class: string;
+}
+
+export interface IFlotillaProvider {
+  getFlotillaMembers(flotillaId: string): MockShip[];
+}
+
+export class StubFlotillaProvider implements IFlotillaProvider {
+  getFlotillaMembers(_flotillaId: string): MockShip[] {
+    return [];
+  }
+}
+
+export const SPLASH_PERCENT = 0.15;
+
 export class AirNavalBomberSystem {
+  private readonly _flotillaProvider: IFlotillaProvider;
+
+  constructor(flotillaProvider: IFlotillaProvider = new StubFlotillaProvider()) {
+    this._flotillaProvider = flotillaProvider;
+  }
+
   tick(
     state: GameRoomState,
     lifecycleSystem: LifecycleSystem,
@@ -20,6 +43,7 @@ export class AirNavalBomberSystem {
   ): void {
     this._tickMarkerExpiry(state, broadcastToNation);
     this._tickPortStrike(state, lifecycleSystem, broadcast);
+    this._tickNavalMissionStubs(state, lifecycleSystem, broadcast);
   }
 
   _tickMarkerExpiry(state: GameRoomState, broadcastToNation: BroadcastToNationFn): void {
@@ -61,6 +85,52 @@ export class AirNavalBomberSystem {
         province_id:       wing.target_id,
         naval_base_damage: damage,
       });
+
+      lifecycleSystem.resolveWingBombed(wingId, state, broadcast);
+    }
+  }
+
+  _tickNavalMissionStubs(
+    state: GameRoomState,
+    lifecycleSystem: LifecycleSystem,
+    broadcast: BroadcastFn,
+  ): void {
+    const STUB_MISSIONS = new Set([
+      MISSION_TYPES.ANTI_SHIP,
+      MISSION_TYPES.ANTI_SUBMARINE,
+      MISSION_TYPES.TRADE_INTERDICTION,
+    ]);
+
+    for (const [wingId, wing] of state.air_wings) {
+      if (
+        wing.lifecycle_state !== WING_LIFECYCLE.LOITER ||
+        !STUB_MISSIONS.has(wing.mission)
+      ) continue;
+
+      if (wing.mission === MISSION_TYPES.TRADE_INTERDICTION) {
+        lifecycleSystem.resolveWingBombed(wingId, state, broadcast);
+        continue;
+      }
+
+      const markerExists = wing.target_id &&
+        state.naval_contact_markers.has(wing.target_id);
+
+      if (markerExists) {
+        broadcast("NAVAL_BOMBER_STRIKE_HIT", {
+          wing_id:    wingId,
+          marker_id:  wing.target_id,
+        });
+
+        if (wing.perk_splash) {
+          const members = this._flotillaProvider.getFlotillaMembers(wing.target_id ?? "");
+          if (members.length > 0) {
+            const primaryDamage = wing.count * wing.combat_readiness;
+            const splash = primaryDamage * SPLASH_PERCENT;
+          }
+        }
+      } else {
+        broadcast("NAVAL_BOMBER_STRIKE_MISSED", { wing_id: wingId });
+      }
 
       lifecycleSystem.resolveWingBombed(wingId, state, broadcast);
     }

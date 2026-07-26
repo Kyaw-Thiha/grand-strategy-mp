@@ -316,6 +316,7 @@ export class AirWingLifecycleSystem {
       case "strafing":          wing.perk_strafing          = value; return true;
       case "extended_range":    wing.perk_extended_range    = value; return true;
       case "precision_bombing": wing.perk_precision_bombing = value; return true;
+      case "splash":           wing.perk_splash           = value; return true;
       default: return false;
     }
   }

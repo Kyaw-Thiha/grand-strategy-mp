@@ -116,6 +116,7 @@ export class AirWingState extends Schema {
   @type("boolean") perk_strafing: boolean = false;
   @type("boolean") perk_extended_range: boolean = false;
   @type("boolean") perk_precision_bombing: boolean = false;
+  @type("boolean") perk_splash:           boolean = false;
 }
 
 // ── Event payload interfaces (emitted via room broadcast) ─────────────────────
