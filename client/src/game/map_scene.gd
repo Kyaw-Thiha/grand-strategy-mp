@@ -19,6 +19,8 @@ var _nation_definitions_by_id: Dictionary = {}
 @onready var _pause_menu: PauseMenu = $PauseMenu
 @onready var _game_hud: GameHUD = $GameHUD
 
+var _naval_contact_marker_system: Node = null
+
 var _chat_input_focused: bool = false
 
 
@@ -31,6 +33,7 @@ func _ready() -> void:
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
+	_naval_contact_marker_system = get_node_or_null("NavalContactMarkerSystem")
 
 	var map_id: String = _get_map_id()
 	if map_id.is_empty():
@@ -126,6 +129,8 @@ func _on_map_loaded(province_count: int) -> void:
 	_military_system.setup(_map_loader, _division_layer, _vision_system)
 	_air_wing_system.setup(_map_loader, _air_wing_layer, _military_system)
 	_vision_system.setup(_map_loader)
+	if _naval_contact_marker_system:
+		_naval_contact_marker_system.setup($MapLoader)
 	_vision_system.on_map_loaded(province_count)
 	_game_hud.setup_game_context(
 		_map_loader, _military_system, _map_interaction, _air_wing_system, _map_renderer

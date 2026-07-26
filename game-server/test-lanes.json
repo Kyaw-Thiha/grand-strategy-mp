@@ -4,7 +4,9 @@
       "source_prefixes": [
         "src/systems/air_",
         "src/data/air_",
-        "src/rooms/schema/AirWingState.ts"
+        "src/data/naval_",
+        "src/rooms/schema/AirWingState.ts",
+        "src/rooms/schema/NavalContactMarkerState.ts"
       ],
       "tests": [
         "test/12a-air-wing-schema.test.ts",
@@ -16,7 +18,8 @@
         "test/12e-patch-formation-density.test.ts",
         "test/12f-air-bombing-patterns.test.ts",
         "test/12g-strategic-bombing.test.ts",
-        "test/12h-manual-targeting.test.ts"
+        "test/12h-manual-targeting.test.ts",
+        "test/12h-naval-bomber.test.ts"
       ]
     },
     "tactical": {

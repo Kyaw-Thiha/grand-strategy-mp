@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://c3mnf7bq2xlap" path="res://src/systems/map/vision_system.gd" id="9"]
 [ext_resource type="PackedScene" uid="uid://bafvbna6oqbcy" path="res://scenes/game/game_hud.tscn" id="10"]
 [ext_resource type="Script" uid="uid://dswfqd4vft1f3" path="res://src/systems/air/air_wing_system.gd" id="11"]
+[ext_resource type="Script" path="res://src/systems/air/naval_contact_marker_system.gd" id="12"]
 
 [node name="MapDebug" type="Node" unique_id=693291787]
 script = ExtResource("1")
@@ -40,6 +41,9 @@ script = ExtResource("9")
 
 [node name="AirWingSystem" type="Node" parent="." unique_id=123456789]
 script = ExtResource("11")
+
+[node name="NavalContactMarkerSystem" type="Node2D" parent="."]
+script = ExtResource("12")
 
 [node name="PauseMenu" parent="." unique_id=1071408045 instance=ExtResource("7")]
 
