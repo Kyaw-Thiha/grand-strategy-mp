@@ -32,7 +32,7 @@ The indicator and detail panel visualize the server result. Strategic and tactic
 
 ## Naval contact markers
 
-**Planned (Branch H).** When the server adds a `NavalContactMarkerState` entry to the player's own nation, the client renders a translucent circle at the marker's `position_lng/lat` with radius proportional to `radius_deg`. The circle alpha decays toward zero as `expires_at_ms` approaches; the circle is removed when `CONTACT_MARKER_EXPIRED` fires. Enemy-nation markers are never sent to a client (server filters by `nation_id` before broadcast). No interaction beyond display — the naval bomber's strike is ordered by clicking the map position, not the marker itself.
+**Current (Branch H).** When the server broadcasts `NAVAL_CONTACT_UPDATES`, `SessionManager` routes to `GameState._apply_naval_contact_updates()`, which stores the marker data and emits `EventBus.naval_contact_marker_added`. `NavalContactMarkerSystem` (`client/src/systems/air/naval_contact_marker_system.gd`), a scene child node of `game.tscn` and `map_debug.tscn`, subscribes to this signal and renders a translucent circle at the marker's `position_lng/lat` with radius proportional to `radius_deg`. The circle alpha decays toward zero as `expires_at_ms` approaches; the circle is removed when `CONTACT_MARKER_EXPIRED` fires and `EventBus.naval_contact_marker_expired` is emitted. Enemy-nation markers are never sent to a client (server filters by `nation_id` before broadcast). The system receives `MapLoader` through a `setup()` call from `map_scene.gd` `_on_map_loaded()` — the same pattern `AirWingSystem` uses. No interaction beyond display.
 
 ## Rejections and lifecycle notices
 

@@ -66,7 +66,7 @@ Low-altitude aircraft (`cas_plane`, `dive_bomber`, `fighter`, `naval_bomber`) ta
 
 ## Naval Bomber Missions
 
-**Planned (Branch H).** Naval bombers (`NAVAL_BOMBER` aircraft type) operate over sea zones rather than the land tactical grid. All naval missions are gated by naval fog-of-war: a bomber needs a contact marker to have a target.
+**Current (Branch H).** Naval bombers (`NAVAL_BOMBER` aircraft type) operate over sea zones rather than the land tactical grid. All naval missions are gated by naval fog-of-war: a bomber needs a contact marker to have a target. `AirNavalBomberSystem` (`game-server/src/systems/air_naval_bomber_system.ts`) runs each tick after the strategic bombing system. It maintains marker lifetimes, resolves port strikes, and forwards anti-ship/anti-sub/trade interdiction missions as Phase 13-ready stubs.
 
 ### Naval Contact Marker system
 
@@ -96,7 +96,7 @@ The server expiry tick removes markers past `expires_at_ms` and broadcasts `CONT
 
 ### Mission stubs and interfaces
 
-**Planned stub:** Anti-ship, Anti-submarine, and Trade interdiction handlers exist with the correct event payload shape but produce no game effect until Phase 13 supplies real flotilla data. Trade interdiction fires `onCargoSinkingEvent({ target_nation_id, sea_zone, flow_reduction_percent, duration_ticks })` — Phase 13's cargo system subscribes to this event; no air code changes needed then.
+**Current.** Anti-ship, Anti-submarine, and Trade interdiction handlers exist with the correct event payload shape but produce no game effect until Phase 13 supplies real flotilla data. Trade interdiction calls `resolveWingBombed` immediately — Phase 13's cargo system will intercept the tick. Anti-ship and anti-sub check `state.naval_contact_markers` for the target marker and broadcast `NAVAL_BOMBER_STRIKE_HIT` or `NAVAL_BOMBER_STRIKE_MISSED` accordingly.
 
 ### Port strike
 
@@ -104,7 +104,7 @@ Port strike is **fully implemented in Branch H**. A naval bomber targeting a coa
 
 ### Splash damage perk
 
-**Planned.** `perk_splash = true` on `AirWingState` routes the naval bomber strike through an `IFlotillaProvider` interface: primary target takes full damage, 15% splashes across remaining flotilla members. The interface is defined and the math is implemented in Branch H; `StubFlotillaProvider` returns an empty member list until Phase 13 injects a real implementation. No air code changes needed in Phase 13.
+**Current.** `perk_splash = true` on `AirWingState` routes the naval bomber strike through an `IFlotillaProvider` interface: primary target takes full damage, 15% splashes across remaining flotilla members. The interface is defined and the math guard is implemented in Branch H; `StubFlotillaProvider` returns an empty member list until Phase 13 injects a real implementation. No air code changes needed in Phase 13.
 
 ### Phase 13 seams
 
