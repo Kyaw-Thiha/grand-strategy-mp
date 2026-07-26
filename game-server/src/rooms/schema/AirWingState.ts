@@ -29,6 +29,7 @@ export const MISSION_TYPES = {
   TRADE_INTERDICTION:  "trade_interdiction",
   ANTI_SUBMARINE:      "anti_submarine",
   ANTI_SHIP:           "anti_ship",
+  PORT_STRIKE:         "port_strike",
 } as const;
 export type MissionType = typeof MISSION_TYPES[keyof typeof MISSION_TYPES];
 
