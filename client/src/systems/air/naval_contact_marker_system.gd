@@ -16,7 +16,7 @@ const QUALITY_ICONS := {
 var _markers: Dictionary = {}
 var _map_loader  # set via setup(), not get_node
 
-func setup(map_loader) -> void:
+func setup(map_loader: Node) -> void:
 	_map_loader = map_loader
 
 func _ready() -> void:
@@ -47,11 +47,11 @@ class _MarkerCircle extends Node2D:
 	var _icon_tex: Texture2D = null
 	var _quality: String = ""
 
-	func setup(data: Dictionary, map_loader) -> void:
-		var center := map_loader.project_lng_lat(
+	func setup(data: Dictionary, map_loader: Node) -> void:
+		var center: Vector2 = map_loader.project_lng_lat(
 			data["position_lng"], data["position_lat"])
 		position = center
-		var edge := map_loader.project_lng_lat(
+		var edge: Vector2 = map_loader.project_lng_lat(
 			data["position_lng"] + data["radius_deg"], data["position_lat"])
 		_radius_px = center.distance_to(edge)
 		_expires_at_ms = float(data["expires_at_ms"])
