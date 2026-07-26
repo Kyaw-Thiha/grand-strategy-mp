@@ -20,6 +20,7 @@ import { DubinsPathfinder, registerManualTarget } from "../systems/air_dubins_pa
 import { AirCombatSystem } from "../systems/air_combat_system.js";
 import { AirBombingSystem } from "../systems/air_bombing_system.js";
 import { AirStrategicBombingSystem } from "../systems/air_strategic_bombing_system.js";
+import { AirNavalBomberSystem }      from "../systems/air_naval_bomber_system.js";
 import { ProvinceAaSystem }          from "../systems/air_province_aa_system.js";
 import { QUALITY_DEFAULTS }           from "../data/naval_contact_quality.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
@@ -89,6 +90,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airBombingSystem = new AirBombingSystem();
   private provinceAaSystem           = new ProvinceAaSystem();
   private airStrategicBombingSystem!: AirStrategicBombingSystem;
+  private airNavalBomberSystem       = new AirNavalBomberSystem();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -1493,6 +1495,21 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.state,
         this.airWingLifecycleSystem,
         this.provinceAaSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => {
+          for (const c of this.clients) {
+            const p = this.state.players.get(c.sessionId);
+            if (!p) continue;
+            const n = this.getNationForPlayer(p.userId);
+            if (!n || n.nation_id !== nationId) continue;
+            c.send(type, msg);
+          }
+        },
+      );
+
+      this.airNavalBomberSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
         (type, msg, nationId) => {
           for (const c of this.clients) {

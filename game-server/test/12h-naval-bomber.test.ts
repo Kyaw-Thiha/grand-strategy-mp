@@ -112,3 +112,96 @@ describe("lane:air-combat | 12h — CREATE_NAVAL_CONTACT handler", function () {
     assert.strictEqual(marker.is_refreshable, false);
   });
 });
+
+// ── Contact marker expiry tests ───────────────────────────────────────────────
+
+describe("lane:air-combat | 12h — Contact marker expiry", function () {
+  let colyseus: ColyseusTestServer<typeof appConfig>;
+  let previousDevMode: string | undefined;
+
+  before(async () => {
+    previousDevMode = process.env.DEV_MODE;
+    process.env.DEV_MODE = "true";
+    setRtbDurationTicksForTesting(1);
+    setRefuelDurationTicksForTesting(1);
+    colyseus = await boot(appConfig, getTestPort());
+  });
+
+  after(async () => {
+    if (previousDevMode === undefined) delete process.env.DEV_MODE;
+    else process.env.DEV_MODE = previousDevMode;
+    await colyseus.shutdown();
+  });
+
+  beforeEach(async () => { await colyseus.cleanup(); });
+
+  async function joinRoom() {
+    const token = await makeToken();
+    const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus.connectTo(room, { token });
+    await room.waitForNextPatch();
+    client.send("SELECT_NATION", { nation_id: "germany" });
+    await room.waitForNextPatch();
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    return { client, room };
+  }
+
+  async function tick(room: any): Promise<void> {
+    (room as any).gameTick();
+    await room.waitForNextPatch();
+  }
+
+  it("expired marker is removed from state and CONTACT_MARKER_EXPIRED is broadcast", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "exp1", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.CARGO_SINKING,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+    const marker = (room.state as GameRoomState).naval_contact_markers.get("exp1");
+    (marker as any).expires_at_ms = Date.now() - 1000;
+
+    const events: string[] = [];
+    client.onMessage("CONTACT_MARKER_EXPIRED", (data: any) => {
+      events.push(data.marker_id);
+    });
+
+    await tick(room);
+    assert.ok(
+      !(room.state as GameRoomState).naval_contact_markers.has("exp1"),
+      "expired marker should be removed"
+    );
+    assert.ok(events.includes("exp1"), "CONTACT_MARKER_EXPIRED should be broadcast");
+  });
+
+  it("non-expired marker is NOT removed", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "live1", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.MARITIME_PATROL,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+    await tick(room);
+    assert.ok(
+      (room.state as GameRoomState).naval_contact_markers.has("live1"),
+      "non-expired marker should remain"
+    );
+  });
+
+  it("refreshContact() extends expires_at_ms for refreshable markers", async () => {
+    const { client, room } = await joinRoom();
+    client.send("CREATE_NAVAL_CONTACT", {
+      marker_id: "ref1", nation_id: "germany",
+      quality: NAVAL_CONTACT_QUALITY.MARITIME_PATROL,
+      position_lng: 5.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+    const marker = (room.state as GameRoomState).naval_contact_markers.get("ref1") as any;
+    const originalExpiry = marker.expires_at_ms;
+    (room as any).airNavalBomberSystem.refreshContact("ref1", room.state);
+    assert.ok(marker.expires_at_ms >= originalExpiry, "expiry should extend on refresh");
+  });
+});
