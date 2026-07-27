@@ -46,6 +46,8 @@ type AirborneWingSnapshot = {
 export class AirDetectionSystem {
   private _radars: Map<string, RadarEntry> = new Map();
   private _prevDetected: Map<string, boolean> = new Map();
+  private _prevWingDetectedByNation: Map<string, Set<string>> = new Map();
+  // wingId → set of nationIds that currently detect this wing
   private _prevVisibleDivisions: Map<string, Set<string>> = new Map();
 
   setRadarEntry(provinceId: string, entry: RadarEntry): void {
@@ -58,6 +60,10 @@ export class AirDetectionSystem {
 
   clearWing(wingId: string): void {
     this._prevDetected.delete(wingId);
+  }
+
+  getWingDetectedByNations(wingId: string): Set<string> {
+    return this._prevWingDetectedByNation.get(wingId) ?? new Set();
   }
 
   getVisibleDivisionsForNation(nationId: string): Set<string> {
@@ -79,9 +85,23 @@ export class AirDetectionSystem {
 
     const airborneWings = [...state.air_wings.values()].filter(wing => airborne.has(wing.lifecycle_state as WING_LIFECYCLE));
 
-    // ── Air-to-air detection ────────────────────────────────────────────────
+    // ── Air-to-air detection (per-nation) ───────────────────────────────────
+    const newWingDetectedByNation = new Map<string, Set<string>>();
     for (const wing of airborneWings) {
-      const detected = this._isWingDetected(wing.wing_id, wing.nation_id, wing.position_lng, wing.position_lat, state, airborneWings);
+      const detectors = new Set<string>();
+      for (const [nationId] of state.nations) {
+        if (nationId === wing.nation_id) continue;
+        if (!this._areNationsHostile(nationId, wing.nation_id, state)) continue;
+        if (this._canNationDetectWing(
+          nationId, wing.wing_id, wing.nation_id,
+          wing.position_lng, wing.position_lat, state, airborneWings,
+        )) {
+          detectors.add(nationId);
+        }
+      }
+      newWingDetectedByNation.set(wing.wing_id, detectors);
+      // Backwards compat: is_detected = detected by any hostile nation
+      const detected = detectors.size > 0;
       const wasDetected = this._prevDetected.get(wing.wing_id) ?? false;
       wing.is_detected = detected;
       this._prevDetected.set(wing.wing_id, detected);
@@ -91,6 +111,7 @@ export class AirDetectionSystem {
         broadcast("WING_LOST_DETECTION", { wing_id: wing.wing_id, nation_id: wing.nation_id });
       }
     }
+    this._prevWingDetectedByNation = newWingDetectedByNation;
 
     // ── Interception pursuit trigger ────────────────────────────────────────
     const INTERCEPTION_PURSUIT_RANGE_DEG = 2.0;
@@ -189,7 +210,8 @@ export class AirDetectionSystem {
     return result;
   }
 
-  private _isWingDetected(
+  private _canNationDetectWing(
+    observerNationId: string,
     wingId: string,
     wingNationId: string,
     wingLng: number,
@@ -197,32 +219,29 @@ export class AirDetectionSystem {
     state: GameRoomState,
     airborneWingsList: AirborneWingSnapshot[],
   ): boolean {
+    // Radar: only this observer's radars count
     for (const radar of this._radars.values()) {
-      if (!this._areNationsHostile(radar.nation_id, wingNationId, state)) continue;
-      if (euclidDeg(wingLng, wingLat, radar.position_lng, radar.position_lat) <= radar.radius_deg) {
+      if (radar.nation_id !== observerNationId) continue;
+      if (euclidDeg(wingLng, wingLat, radar.position_lng, radar.position_lat) <= radar.radius_deg)
         return true;
-      }
     }
-
+    // Other airborne wings belonging to observerNation
     for (const source of airborneWingsList) {
       if (source.wing_id === wingId) continue;
-      if (!this._areNationsHostile(source.nation_id, wingNationId, state)) continue;
+      if (source.nation_id !== observerNationId) continue;
       const radius = source.mission === MISSION_TYPES.RECON
         ? RECON_WING_RADIUS_DEG
         : getObservationDeg(source.aircraft_type);
-      if (euclidDeg(wingLng, wingLat, source.position_lng, source.position_lat) <= radius) {
+      if (euclidDeg(wingLng, wingLat, source.position_lng, source.position_lat) <= radius)
         return true;
-      }
     }
-
+    // Ground divisions belonging to observerNation
     for (const division of state.divisions.values()) {
-      if (division.nation_id === wingNationId) continue; // own divisions don't detect own wings
+      if (division.nation_id !== observerNationId) continue;
       const radiusDeg = division.observation_radius / KM_PER_DEG;
-      if (euclidDeg(wingLng, wingLat, division.position_lng, division.position_lat) <= radiusDeg) {
+      if (euclidDeg(wingLng, wingLat, division.position_lng, division.position_lat) <= radiusDeg)
         return true;
-      }
     }
-
     return false;
   }
 
