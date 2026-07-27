@@ -719,6 +719,16 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.provinceAaSystem.setProvinceAaStrength(msg.province_id, msg.strength);
       });
 
+      this.onMessage("SET_DIVISION_POSITION", (
+        _client, msg: { division_id: string; lng: number; lat: number },
+      ) => {
+        const div = this.state.divisions.get(msg.division_id);
+        if (div) {
+          div.position_lng = msg.lng;
+          div.position_lat = msg.lat;
+        }
+      });
+
       this.onMessage("CREATE_NAVAL_CONTACT", (_client, msg: {
         marker_id:    string;
         nation_id:    string;
