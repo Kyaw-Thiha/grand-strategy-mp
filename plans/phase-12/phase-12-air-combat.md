@@ -374,18 +374,21 @@ port strike resolves with no AA; splash perk distributes damage across flotilla.
 
 ---
 
-## Branch I — `feat/air-fleet-command`
-**Starts after E merges.**
+## Branch I — `feat/air-fleet-command` — DEFERRED
 
-**Server:**
-- `AirFleetState` schema (fleet_id, nation_id, wing_ids[], directive)
-- Handlers: `CREATE_AIR_FLEET`, `DISBAND_AIR_FLEET`, `ASSIGN_WINGS_TO_FLEET`,
-  `SET_FLEET_DIRECTIVE`
-- Directives: `HOLD_AIR_SUPERIORITY`, `INTERDICT_SUPPLY`, `ESCORT_BOMBERS`
-- Auto-assignment: score unassigned wings by suitability (aircraft type × mission eligibility)
+**Deferred pending:** multi-select UI design. Air fleet value depends heavily on whether
+persistent named groupings are better than good ad-hoc multi-select. That question needs
+to be settled first; otherwise fleet membership management becomes overhead with no payoff.
 
-**Tests:** directive assigns correct mission type to eligible wings; ineligible types skipped;
-per-wing override survives fleet re-evaluation; fleet dissolve clears all wing assignments.
+**Design decisions captured in:**
+- `old-docs/AIR_COMBAT.md` → "Command Layer — Air Fleets" (fleet model, escort spread logic,
+  RELOCATE_FLEET deferred section)
+- `wiki/future-works/air-fleet-command.md` (full design notes + dependencies)
+- `wiki/future-works/multi-select-ui.md` (multi-select UI design, prerequisite for fleet)
+
+**When to revisit:** after multi-select UI is designed and implemented. If multi-select alone
+covers the use case (select wings on map → batch assign), fleet as a persistent concept may
+not be needed. If players need stable named theater groupings, fleet is the right layer on top.
 
 ---
 

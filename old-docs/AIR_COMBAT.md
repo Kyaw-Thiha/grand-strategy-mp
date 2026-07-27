@@ -612,14 +612,63 @@ selectable and overridable exactly like land-based wings, for players who want t
 
 ## Command Layer — Air Fleets
 
-Extends `STRATEGIC_COMBAT.md`'s existing Macro/Micro command layer (originally land-only) to
-air: a player groups wings into an **Air Fleet** and issues it a strategic directive ("hold
-air superiority over this front," "interdict this supply network"); the system auto-assigns
-individual wings to fulfil it, the same division of labour as an Army Group's advance axis.
-Per-wing override is always available and never required — this is the actual answer to
-commanding a late-game air force of dozens of wings without it becoming a second job, and it
-reuses a pattern this game has already validated for land rather than inventing new command
-UX for air specifically.
+A player groups wings into an **Air Fleet** — a named, persistent grouping of wings that
+represents a front or theater, not a unit type. Fleets are deliberately mixed-type (fighters,
+bombers, heavy fighters together) because players think in terms of "Eastern Front" not "all
+my fighters." Per-wing override is always available; the fleet is a convenience layer, not a
+cage.
+
+**Fleet is a grouping container only — it holds no mission state.** Individual wings hold
+their own missions, which persist through RTB/refuel cycles automatically (wings re-sortie
+without player input). `SET_FLEET_MISSION` is a one-shot batch operation: it assigns the
+specified mission to all eligible wings in the fleet right now; ineligible wings receive IDLE.
+When a wing is added to a fleet later, it keeps its current mission until the player
+explicitly batch-assigns again.
+
+**Escort spread logic (for `SET_FLEET_MISSION` with ESCORT):**
+- Heavy fighters → strategic/tactical bombers first; fall back to CAS/dive/naval if none
+- Fighters → CAS/dive/naval bombers first; fall back to strategic/tactical if none
+- Spread round-robin within each class so no bomber is double-covered while another is open
+- Excess heavy fighters (no bomber to escort) → keep current mission
+- Excess fighters (no bomber to escort) → AIR_SUPERIORITY
+
+### Fleet Relocation — Deferred (requires airbase levels)
+
+**Feature:** `RELOCATE_FLEET { fleet_id, target_province_id, radius_deg? }` — player selects
+a fleet, clicks a target airbase (new front center); system auto-distributes wings across
+that base and nearby friendly airbases optimally.
+
+**Design decisions locked in during Phase 12 brainstorming:**
+
+1. **Coverage-based, not ferry-range-based.** For each wing, the question is "from candidate
+   base B, can this wing cover target front T?" — not "can this wing ferry from its current
+   position to B?" The ferry is handled by the existing REDEPLOY_WING + auto-staging logic.
+
+2. **Wing type range determines placement depth.** Strategic/tactical bombers have long range
+   and can operate from bases further behind the front. Fighters need forward basing. The
+   distribution should not assign a fighter to a base too far to cover the front, and should
+   not waste a forward slot on a bomber that could operate from deeper.
+
+3. **"Nearby" = radius around the clicked airbase.** Candidate bases are all friendly
+   provinces with city positions within a calibrated radius of the target. The radius should
+   be anchored to typical fighter combat range (shortest-range type sets the zone size).
+
+4. **Airbase level weighting.** Higher-level airbases receive proportionally more wing
+   allocations. **Stubbed at uniform weight** until airbase levels are implemented
+   (economy buildings phase adds `airbase_level` to ProvinceState, analogous to
+   `naval_base_level`).
+
+5. **Load balancing.** Spread wings across candidate bases to avoid congestion; the
+   E-patch airbase recovery congestion mechanic already models the cost of over-stacking.
+
+6. **Any owned/allied province with a city position = valid airbase.** No explicit
+   `is_airbase` field exists; this matches how `_findNearestFriendlyAirbaseToPoint()` already
+   identifies candidate bases.
+
+**Why deferred:** The airbase level weighting (point 4) is the meaningful differentiator
+between candidate bases. Without it, the distribution reduces to pure load-balancing, which
+is not worth implementing and then reworking. Implement after the economy buildings phase
+introduces `airbase_level` on `ProvinceState`.
 
 ---
 
