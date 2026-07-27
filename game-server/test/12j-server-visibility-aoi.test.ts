@@ -248,29 +248,36 @@ describe("lane:visibility | 12j — ServerVisibilitySystem AOI", function () {
 
       setRelation(room, "germany", "france", "war");
 
-      // Spawn german division with observation radius
+      // Ensure the test area is a french-owned province so province ownership
+      // does not interfere with the vanish check.
+      client1.send("SET_PROVINCE_OWNER", { province_id: "we6_france_01", owner_id: "france" });
+      await room.waitForNextPatch();
+
+      // Spawn german division with observation radius — at a position that
+      // PIP maps to we6_france_01 (french-owned), so province ownership does
+      // not provide detection to germany.
       client1.send("SPAWN_DIVISION", {
         division_id: "ger_div_watch",
         nation_id: "germany",
-        position_lng: 10.0,
-        position_lat: 50.0,
-        observation_radius: 1.0,
+        position_lng: 2.0,
+        position_lat: 48.0,
+        observation_radius: 100.0,
       });
       await room.waitForNextPatch();
 
-      // Spawn french division within observation range
+      // Spawn french division within german observation range
       client1.send("SPAWN_DIVISION", {
         division_id: "fra_div_vanish",
         nation_id: "france",
-        position_lng: 10.3,
-        position_lat: 50.0,
+        position_lng: 2.3,
+        position_lat: 48.0,
       });
       await room.waitForNextPatch();
 
       const firstTickAppeared: any[] = [];
       client1.onMessage("DIVISION_APPEARED", (data: any) => firstTickAppeared.push(data));
 
-      // First tick — french division should appear
+      // First tick — french division should appear via land-to-land obs
       await tickRoom(room);
 
       assert.ok(
@@ -278,11 +285,11 @@ describe("lane:visibility | 12j — ServerVisibilitySystem AOI", function () {
         "German client should see french division on first tick",
       );
 
-      // Move french division far away
+      // Move french division far outside observation range
       client1.send("SET_DIVISION_POSITION", {
         division_id: "fra_div_vanish",
-        lng: 50.0,
-        lat: 50.0,
+        lng: 0.0,
+        lat: 0.0,
       });
       await room.waitForNextPatch();
 
@@ -441,23 +448,28 @@ describe("lane:visibility | 12j — ServerVisibilitySystem AOI", function () {
 
       setRelation(room, "germany", "france", "war");
 
-      // Spawn french wing in TRANSIT close to where german division will be
+      // Set province to french ownership so province ownership does not
+      // keep the wing visible after the german division moves.
+      client1.send("SET_PROVINCE_OWNER", { province_id: "we6_france_01", owner_id: "france" });
+      await room.waitForNextPatch();
+
+      // Spawn french wing in TRANSIT inside french-owned province
       client1.send("SPAWN_WING", {
         wing_id: "fra_wing_vanish",
         nation_id: "france",
         lifecycle_state: WING_LIFECYCLE.TRANSIT,
-        position_lng: 10.0,
-        position_lat: 50.0,
+        position_lng: 2.0,
+        position_lat: 48.0,
       });
       await room.waitForNextPatch();
 
-      // Spawn german division within detection range of french wing
+      // Spawn german division near the wing with large obs radius
       client1.send("SPAWN_DIVISION", {
         division_id: "ger_div_detect2",
         nation_id: "germany",
-        position_lng: 10.1,
-        position_lat: 50.0,
-        observation_radius: 1.0,
+        position_lng: 2.3,
+        position_lat: 48.0,
+        observation_radius: 100.0,
       });
       await room.waitForNextPatch();
 
@@ -472,11 +484,11 @@ describe("lane:visibility | 12j — ServerVisibilitySystem AOI", function () {
       );
       assert.ok(detectedOnFirstTick, "German client should see french wing on first tick");
 
-      // Move german division far away to lose detection
-      client1.send("SET_DIVISION_POSITION", {
-        division_id: "ger_div_detect2",
-        lng: 50.0,
-        lat: 50.0,
+      // Move the french wing far away so it leaves detection range
+      client1.send("SET_WING_POSITION", {
+        wing_id: "fra_wing_vanish",
+        lng: 0.0,
+        lat: 0.0,
       });
       await room.waitForNextPatch();
 

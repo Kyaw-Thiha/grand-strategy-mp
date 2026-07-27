@@ -24,6 +24,8 @@ import { AirNavalBomberSystem }      from "../systems/air_naval_bomber_system.js
 import { ProvinceAaSystem }          from "../systems/air_province_aa_system.js";
 import { QUALITY_DEFAULTS }           from "../data/naval_contact_quality.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
+import { ServerVisibilitySystem } from "../systems/server_visibility_system.js";
+import { loadProvincePIPData }    from "../utils/geo_utils.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
@@ -90,6 +92,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airBombingSystem = new AirBombingSystem();
   private provinceAaSystem           = new ProvinceAaSystem();
   private airStrategicBombingSystem!: AirStrategicBombingSystem;
+  private serverVisibilitySystem!: ServerVisibilitySystem;
   private airNavalBomberSystem       = new AirNavalBomberSystem();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
@@ -194,7 +197,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       );
       if (!didChange) return;
       const updated = this.state.air_wings.get(msg.wing_id);
-      if (updated) this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
+      if (updated) this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
 
       const targetPos = this._resolveTargetPosition(msg.target_id);
       if (!targetPos || !updated) return;
@@ -247,7 +250,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const updated = this.state.air_wings.get(msg.wing_id);
       if (!updated) return;
 
-      this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
+      this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
 
       // Only compute path immediately if wing is now RELOCATE (was IDLE).
       // Airborne wings have been forced to RTB; their RELOCATE path is computed
@@ -310,7 +313,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
               (type, m) => this.broadcast(type, m));
             wing.pending_transit_lng = msg.target_lng;
             wing.pending_transit_lat = msg.target_lat;
-            this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+            this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
             client.send("AIR_WING_RTB_QUEUED", { wing_id: wing.wing_id });
             return;
           } else {
@@ -322,7 +325,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
               this.airWingLifecycleSystem.queueTransitAfterRedeploy(
                 wing.wing_id, msg.target_lng, msg.target_lat,
               );
-              this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+              this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
               this.broadcast("AIR_WING_STAGING", { wing_id: wing.wing_id, staging_province_id: stagingId });
               return;
             }
@@ -348,7 +351,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
             this.airWingLifecycleSystem.queueTransitAfterRedeploy(
               wing.wing_id, msg.target_lng, msg.target_lat,
             );
-            this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+            this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
             this.broadcast("AIR_WING_STAGING", { wing_id: wing.wing_id, staging_province_id: stagingId });
             return;
           }
@@ -380,7 +383,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wing.path_elapsed_ms = 0;
       wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
       this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
-      this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+      this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
     });
 
     this.onMessage("DISBAND_WING", (client, msg: { wing_id: string }) => {
@@ -414,7 +417,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const didChange = this.airWingLifecycleSystem.setPerk(msg.wing_id, msg.perk, msg.value, this.state);
       if (!didChange) return;
       const updated = this.state.air_wings.get(msg.wing_id);
-      if (updated) this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(updated)] });
+      if (updated) this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
     });
 
     if (process.env.DEV_MODE === "true") {
@@ -444,7 +447,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.mission                  !== undefined) wing.mission                  = msg.mission;
         if (msg.home_airbase_province_id !== undefined) wing.home_airbase_province_id = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
-        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+        this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
       });
 
       this.onMessage("CREATE_NAVAL_CONTACT", (_client, msg: {
@@ -466,13 +469,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         marker.expires_at_ms = Date.now() + defaults.duration_ms;
         marker.is_refreshable = defaults.is_refreshable;
         this.state.naval_contact_markers.set(msg.marker_id, marker);
-        for (const c of this.clients) {
-          const p = this.state.players.get(c.sessionId);
-          if (!p) continue;
-          const n = this.getNationForPlayer(p.userId);
-          if (!n || n.nation_id !== msg.nation_id) continue;
-          c.send("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] });
-        }
+        this.broadcastToNation("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] }, msg.nation_id);
       });
     }
     if (process.env.NODE_ENV === "test") {
@@ -575,7 +572,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (msg.mission                    !== undefined) wing.mission                    = msg.mission;
         if (msg.home_airbase_province_id   !== undefined) wing.home_airbase_province_id   = msg.home_airbase_province_id;
         this.state.air_wings.set(msg.wing_id, wing);
-        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+        this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
       });
 
       this.onMessage("SET_WING_LIFECYCLE", (_client, msg: {
@@ -748,13 +745,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         marker.expires_at_ms = Date.now() + defaults.duration_ms;
         marker.is_refreshable = defaults.is_refreshable;
         this.state.naval_contact_markers.set(msg.marker_id, marker);
-        for (const c of this.clients) {
-          const p = this.state.players.get(c.sessionId);
-          if (!p) continue;
-          const n = this.getNationForPlayer(p.userId);
-          if (!n || n.nation_id !== msg.nation_id) continue;
-          c.send("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] });
-        }
+        this.broadcastToNation("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] }, msg.nation_id);
       });
     }
 
@@ -1200,6 +1191,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.airStrategicBombingSystem = new AirStrategicBombingSystem(
       this._provinceCityPositionLookup,
     );
+    this.serverVisibilitySystem = new ServerVisibilitySystem(
+      loadProvincePIPData(this.state.map_id),
+    );
     this._initRelations();
     this.broadcastRelations();
 
@@ -1231,7 +1225,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       divisions: this.serializeDivisions(),
     });
 
-    this.broadcast("AIR_WING_UPDATES", {
+    this.broadcastFilteredAirWingUpdates({
       wings: [...this.state.air_wings.values()].map(w => serializeWing(w)),
     });
 
@@ -1363,7 +1357,37 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wing.path_elapsed_ms = 0;
       this.airDubinsPathfinder.advanceWingOnePath(wing, TICK_MS);
       this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...rtbPath });
-      this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+      this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
+    }
+  }
+
+  private broadcastToNation(type: string, msg: unknown, nationId: string): void {
+    for (const c of this.clients) {
+      const p = this.state.players.get(c.sessionId);
+      if (!p) continue;
+      const n = this.getNationForPlayer(p.userId);
+      if (!n || n.nation_id !== nationId) continue;
+      c.send(type, msg);
+    }
+  }
+
+  private broadcastFilteredAirWingUpdates(msg: { wings: unknown[] }): void {
+    if (!this.serverVisibilitySystem) {
+      this.broadcast("AIR_WING_UPDATES", msg);
+      return;
+    }
+    for (const client of this.clients) {
+      const p = this.state.players.get(client.sessionId);
+      if (!p) continue;
+      const nation = this.getNationForPlayer(p.userId);
+      if (!nation) continue;
+      const alliance = this.getAllianceFor(nation.nation_id);
+      const visibleWings = msg.wings.filter((w: any) => {
+        if (w.nation_id === nation.nation_id) return true;
+        if (alliance.has(w.nation_id)) return true;
+        return this.serverVisibilitySystem.canNationSeeWing(nation.nation_id, w.wing_id);
+      });
+      if (visibleWings.length > 0) client.send("AIR_WING_UPDATES", { wings: visibleWings });
     }
   }
 
@@ -1438,7 +1462,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         wing.path_gen_id = path.path_gen_id;
         wing.path_elapsed_ms = 0;
         this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
-        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+        this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
       }
 
       // Pending-transit loop: fire transit orders queued by auto-staging or RTB-queue
@@ -1462,7 +1486,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           wing.path_elapsed_ms = 0;
           wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
           this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
-          this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+          this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
           continue;
         }
 
@@ -1482,7 +1506,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         wing.path_elapsed_ms = 0;
         wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
         this.broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
-        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+        this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
       }
 
       this.airBombingSystem.tick(
@@ -1490,15 +1514,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.airWingLifecycleSystem,
         this.combatSystem,
         (type, msg) => this.broadcast(type, msg),
-        (type, msg, nationId) => {
-          for (const c of this.clients) {
-            const p = this.state.players.get(c.sessionId);
-            if (!p) continue;
-            const n = this.getNationForPlayer(p.userId);
-            if (!n || n.nation_id !== nationId) continue;
-            c.send(type, msg);
-          }
-        },
+        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );
 
       this.airStrategicBombingSystem.tick(
@@ -1506,55 +1522,49 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.airWingLifecycleSystem,
         this.provinceAaSystem,
         (type, msg) => this.broadcast(type, msg),
-        (type, msg, nationId) => {
-          for (const c of this.clients) {
-            const p = this.state.players.get(c.sessionId);
-            if (!p) continue;
-            const n = this.getNationForPlayer(p.userId);
-            if (!n || n.nation_id !== nationId) continue;
-            c.send(type, msg);
-          }
-        },
+        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );
 
       this.airNavalBomberSystem.tick(
         this.state,
         this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
-        (type, msg, nationId) => {
-          for (const c of this.clients) {
-            const p = this.state.players.get(c.sessionId);
-            if (!p) continue;
-            const n = this.getNationForPlayer(p.userId);
-            if (!n || n.nation_id !== nationId) continue;
-            c.send(type, msg);
-          }
-        },
+        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );
 
       this.airDetectionSystem.tick(
         this.state,
         this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
-        (type, msg, nationId) => {
-          for (const c of this.clients) {
-            const p = this.state.players.get(c.sessionId);
-            if (!p) continue;
-            const n = this.getNationForPlayer(p.userId);
-            if (!n || n.nation_id !== nationId) continue;
-            c.send(type, msg);
-          }
+        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
+      );
+
+      this.serverVisibilitySystem.tick(
+        this.state,
+        this.airDetectionSystem,
+        (nationId) => this.getAllianceFor(nationId),
+        (sessionId, type, msg) => {
+          const client = this.clients.find(c => c.sessionId === sessionId);
+          client?.send(type, msg);
         },
+        (sessionId) => {
+          const p = this.state.players.get(sessionId);
+          if (!p) return null;
+          return this.getNationForPlayer(p.userId)?.nation_id ?? null;
+        },
+        this.clients,
       );
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
-      const updates = [];
-      for (const id of toUpdate) {
-        const div = this.state.divisions.get(id);
-        if (div) updates.push(this.serializeDivision(div));
-      }
-      if (updates.length > 0) {
-        this.broadcast("DIVISION_UPDATES", { divisions: updates });
+      for (const client of this.clients) {
+        const p = this.state.players.get(client.sessionId);
+        if (!p) continue;
+        const nation = this.getNationForPlayer(p.userId);
+        if (!nation) continue;
+        const visibleUpdates = [...toUpdate]
+          .filter(divId => this.serverVisibilitySystem.canNationSeeDivision(nation.nation_id, divId))
+          .map(divId => this.serializeDivision(this.state.divisions.get(divId)!));
+        if (visibleUpdates.length > 0) client.send("DIVISION_UPDATES", { divisions: visibleUpdates });
       }
     } catch (err) {
       console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
@@ -2180,7 +2190,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const nearestId = this._findNearestFriendlyAirbase(wing, msg.province_id);
       if (nearestId) {
           this.airWingLifecycleSystem.startRedeploy(wing.wing_id, nearestId, this.state);
-        this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+        this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
       } else {
         this.airWingLifecycleSystem.disbandWing(wing.wing_id, this.state,
           (type, payload) => this.broadcast(type, payload));

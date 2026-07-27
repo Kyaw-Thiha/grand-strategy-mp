@@ -3,6 +3,8 @@
     "air-combat": {
       "source_prefixes": [
         "src/systems/air_",
+        "src/systems/server_visibility_system.ts",
+        "src/utils/geo_utils.ts",
         "src/data/air_",
         "src/data/naval_",
         "src/rooms/schema/AirWingState.ts",
@@ -19,7 +21,8 @@
         "test/12f-air-bombing-patterns.test.ts",
         "test/12g-strategic-bombing.test.ts",
         "test/12h-manual-targeting.test.ts",
-        "test/12h-naval-bomber.test.ts"
+        "test/12h-naval-bomber.test.ts",
+        "test/12j-server-visibility-aoi.test.ts"
       ]
     },
     "tactical": {
