@@ -38,6 +38,47 @@ Detection combines airborne wing observation, reconnaissance, and configured rad
 
 The air-combat system finds hostile candidates, deconflicts pairings, applies surprise when visibility differs, calculates losses and component damage, and transitions wings through engagement, return, destruction, or recovery.
 
+## Server-side visibility and area-of-interest filtering
+
+**Current.** `ServerVisibilitySystem` (`game-server/src/systems/server_visibility_system.ts`) filters division and wing broadcasts so each connected client only receives unit data it should see. It runs each tick after detection is complete and before division and wing broadcasts.
+
+Visibility for each nation is computed from four sources:
+- **Ownership** — a nation always sees its own divisions and wings.
+- **Alliance** — nations share all detected unit positions with allies.
+- **Detection** — `AirDetectionSystem` reports which enemy divisions and wings are visible through airborne wing observation, radar, or ground division observation radius.
+- **Province ownership** — any unit inside a player's owned province is visible regardless of nearby friendly forces.
+
+The system replaces the previous global broadcasts in `GameRoom.gameTick()`:
+
+- `DIVISION_UPDATES`: formerly sent to all clients; now sent per-client with only the divisions `canNationSeeDivision()` returns.
+- `AIR_WING_UPDATES`: filtered through `broadcastFilteredAirWingUpdates()`, which additionally always sends own and allied wings.
+- `DIVISION_APPEARED` / `DIVISION_VANISHED`: sent per-nation when a division enters or leaves a player's visible set.
+- `AIR_WING_VANISHED`: sent when a wing leaves visibility (distinct from `AIR_WING_DESTROYED` — destroyed is permanent, vanished is temporary fog-of-war loss).
+
+Idle and refuelling wings at base are not broadcast to hostile nations. Wings in transit, loiter, combat, or returning-to-base are visible to hostile nations only when inside detection coverage or over a hostile-owned province.
+
+Province polygon data is loaded separately from the existing province init via `geo_utils.ts` (`loadProvincePIPData`), which builds bounding-box-accelerated point-in-polygon entries from `map_data.json`. The `findProvinceAtPoint` function uses ray-casting against province polygon rings.
+
+### Alliance visibility propagation
+
+After per-nation visibility is computed, the system propagates each nation's visible entities to all allied nations. This means if Germany detects a French division, Germany's ally United Kingdom also receives that division — even if the UK has no units near it.
+
+### Broadcast helpers
+
+Two helpers extracted into `GameRoom.ts`:
+
+```ts
+// Replaces 6 identical inline patterns
+private broadcastToNation(type: string, msg: unknown, nationId: string): void
+
+// Wraps per-client wing filtering with own/allied fast path
+private broadcastFilteredAirWingUpdates(msg: { wings: unknown[] }): void
+```
+
+### Test support
+
+`game-server/test/12j-server-visibility-aoi.test.ts` covers 11 visibility scenarios: own-nation visibility, enemy hiding, land-to-land observation, province ownership reveal, vanish on range-out, alliance sharing, idle-wing hiding, airborne detection, wing vanish, and province ownership for wings.
+
 ## Ground attack
 
 Tactical-bombing wings loitering near an engagement or targeted division select tactical cells through aircraft-specific bombing patterns. The bombing system applies HP and suppression damage to those cells and the affected division, then reports the strike to the relevant players.

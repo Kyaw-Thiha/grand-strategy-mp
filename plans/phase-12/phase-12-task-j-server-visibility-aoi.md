@@ -6,17 +6,17 @@
 |---|---|---|---|
 | Step 1: Create `geo_utils.ts` | ✅ DONE | `58e1277` | Reviewed, approved |
 | Step 2: Refactor `AirDetectionSystem` | ✅ DONE | `8d4f7f3` | Reviewed, approved. 15/15 tests pass |
-| Step 3: Write failing tests (TDD) | ⚠️ PARTIAL | uncommitted | Agent interrupted. `12j-server-visibility-aoi.test.ts` exists in working tree (untracked), `GameRoom.ts` modified (SET_DIVISION_POSITION added). Need to verify, commit, and confirm tests fail as expected |
-| Step 4: Create `ServerVisibilitySystem` | ❌ TODO | — | |
-| Step 5: Wire into `GameRoom.ts` | ❌ TODO | — | 5a–5g |
-| Step 6: Update `package.json` | ❌ TODO | — | |
-| Step 7: Client — EventBus Signals | ❌ TODO | — | |
-| Step 8: Client — `session_manager.gd` handlers | ❌ TODO | — | |
-| Step 9: Client — `game_state.gd` | ❌ TODO | — | |
-| Step 10: Animations (`division_icon.gd`, `air_wing_icon.gd`) | ❌ TODO | — | |
-| Step 11: `military_system.gd` + `detection_ring.gd` | ❌ TODO | — | |
-| Step 12: `air_wing_system.gd` | ❌ TODO | — | |
-| Step 13: Verification | ❌ TODO | — | |
+| Step 3: Write failing tests (TDD) | ✅ DONE | `3318542` | 11 tests, initially 7 failing (TDD), committed |
+| Step 4: Create `ServerVisibilitySystem` | ✅ DONE | `ba150f4` | Alliance propagation added |
+| Step 5: Wire into `GameRoom.ts` | ✅ DONE | `ba150f4` | broadcastToNation helper, per-client division/wing filtering, broadcastFilteredAirWingUpdates |
+| Step 6: Update `package.json` | ✅ DONE | `ba150f4` | test-lanes.json updated with 12j source prefixes + test file |
+| Step 7: Client — EventBus Signals | ✅ DONE | `da14a76` | 4 new signals added |
+| Step 8: Client — `session_manager.gd` handlers | ✅ DONE | `da14a76` | 3 new handlers |
+| Step 9: Client — `game_state.gd` | ✅ DONE | `da14a76` | `_apply_division_appeared()` |
+| Step 10: Animations (`division_icon.gd`, `air_wing_icon.gd`) | ✅ DONE | `da14a76` | `reveal()` + `conceal()` tween methods |
+| Step 11: `military_system.gd` + `detection_ring.gd` | ✅ DONE | `da14a76` | Appear/vanish handlers, radar ping VFX |
+| Step 12: `air_wing_system.gd` | ✅ DONE | `da14a76` | Vanish handler, enemy wing reveal animation |
+| Step 13: Verification | ✅ DONE | — | 11/11 12j tests pass; 186/190 air suite (4 pre-existing failures in 12e/12g) |
 
 **Base commit (branch start):** `fc5020b`
 **Resume at:** Step 3 — check working tree, commit partial work, then proceed to Step 4.

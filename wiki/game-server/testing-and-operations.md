@@ -19,7 +19,7 @@ The server raises Colyseus' schema encoder buffer to 256 KB and accepts WebSocke
 | `npm run test:core`     | Room lifecycle, authentication, and core room behavior.            |
 | `npm run test:movement` | Movement behavior.                                                 |
 | `npm run test:tactical` | Ground tactical grid, combat, perks, and terrain work.             |
-| `npm run test:air`      | Air-wing schema, lifecycle, paths, detection, combat, and bombing. |
+| `npm run test:air`      | Air-wing schema, lifecycle, paths, detection, combat, bombing, and visibility/AOI filtering. |
 | `npm run build`         | Type-checks and produces the TypeScript build.                     |
 
 Schema, map-loader, and supply changes are shared dependencies and cause the changed-test runner to use the full suite. A source file outside the configured lanes also falls back to the full suite.
