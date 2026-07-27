@@ -12,3 +12,4 @@ Air Operations lets players select wings, assign supported missions, follow flig
 - [[client/index|Client]]
 - [[client/vision/index|Vision]]
 - [[game-server/simulation/air-operations|Air Operations]]
+- [[docs/AIR_COMBAT|Air Combat Design]]

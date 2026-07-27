@@ -11,3 +11,4 @@ Vision explains how ownership, friendly units, and air detection control what th
 - [[client/index|Client]]
 - [[client/map/index|Map]]
 - [[client/air/index|Air Operations]]
+- [[docs/VISION_SYSTEM|Vision System Design]]
