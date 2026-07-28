@@ -1,87 +1,132 @@
 # Wiki Documentation Guide
 
-`wiki/` is the canonical developer documentation for this repository. Write it for developers who need to understand what a component owns, what it is responsible for, and how it relates to the rest of the application. Use current code as the authority. Use `old-docs/` only as historical reference and never modify it.
+`wiki/` is the repository's single documentation tree and Obsidian vault. It contains
+authoritative design sources, concise implementation-facing notes, and temporary plans.
+Do not add or change `.obsidian/` workspace, application, or theme state.
 
-The `.obsidian/` directory is local reader state and is ignored. Do not add or update Obsidian workspace settings, application settings, or themes as documentation changes.
+## Document Classes
 
-## Required Ingestion
+### Authoritative sources
 
-After completing a coherent task that changes source, schemas, configuration, tests, scripts, or assets, use [`skills/ingest/SKILL.md`](../skills/ingest/SKILL.md). Run ingestion once after the final implementation and relevant verification, not after each intermediate edit.
+`wiki/docs/` defines intended behavior, implementation requirements, roadmap state, and
+completion checkboxes. Follow `wiki/docs/AGENTS.md` when reading or changing those files.
+When an implementation or ordinary wiki note disagrees with a confirmed source document,
+the source document wins.
 
-Ingestion must inspect the notes most likely to be affected by the completed change. It does not require a full wiki review. Create, update, move, rename, split, or remove notes when required to keep the affected documentation accurate, then repair the associated links and index entries.
+### Implementation notes
 
-## Note Format
+Ordinary component notes explain what the current repository actually does and where it is
+implemented. They are optimized for a developer, product designer, or LLM that needs useful
+context without loading the full source documents or codebase.
 
-Every ordinary documentation note uses this order:
+### Temporary plans
+
+Colocate each decision-complete active plan with the ordinary component notes that own most
+of its implementation, name it `<task>-plan.md`, and list it in that folder's `index.md`.
+For cross-component work, use the narrowest shared component and link the other affected
+notes. Do not put temporary plans in `wiki/docs/`; those files are durable authoritative
+sources. Delete a completed plan and its index entry after its durable facts have been
+reconciled into source documents and implementation notes.
+
+An active plan must link the authoritative sources and component notes that govern it,
+state verification and documentation-reconciliation requirements, and remain subordinate
+to `wiki/docs/`.
+
+## Required Reconciliation
+
+After a coherent change to source, schemas, configuration, tests, scripts, or assets, follow
+`skills/wiki-reconcile/SKILL.md` once after final implementation and verification.
+
+Also reconcile documentation when investigation reveals a material, confidently verified
+mismatch. Correct factual implementation notes automatically. Do not rewrite authoritative
+design requirements to accommodate accidental code drift; report or fix the drift instead.
+
+Keep reconciliation scoped to the changed or investigated behavior. Use the task's known
+file list as primary scope and the repository diff as supporting evidence so unrelated dirty
+worktree changes are not absorbed.
+
+## Ordinary Note Format
+
+Use this top-level order:
 
 ```md
 # Title
 
-[A concise, product/design-oriented description of what this system means in the game: what a player can do with it, what game behavior it controls, or why it exists. Use plain language.]
+[Short player- or product-facing description.]
 
 # Details
 
-## [Specific concern]
+## Current behavior
 
-[Implementation, interfaces, data contracts, lifecycle, constraints, limitations, and operational information.]
+[Implementation, lifecycle, interfaces, constraints, and limitations.]
+
+## Implementation anchors
+
+- `path/to/file` — relevant class, function, scene, route, command, or test.
 
 # Related Notes
 
-- [[api-server/index|API Server]]
+- [[component/index|Parent Component]]
+- [[docs/DESIGN_SOURCE|Authoritative Design Source]]
 ```
 
-Use `# Details` and `# Related Notes` as level-one headings. Use `##` and `###` only for supporting structure inside Details. Keep the opening concise and game- or player-facing; move ownership, authority boundaries, data flow, and implementation mechanics into Details. Mark behavior accurately as **Current**, **Planned**, or **Deprecated** where that distinction matters. Do not present an older design as current behavior.
+Requirements:
 
-## Writing Tone
-
-Write for the game developer and product designer before the infrastructure engineer. Start with what the feature does for the game or player, then explain the technical details needed to change it safely.
-
-- Prefer concrete language such as “Stores preferences a player sets outside a match” over “Owns player-specific local data.”
-- Do not lead with terms such as “authoritative,” “replicated,” “presentation layer,” “contract,” or “client-side.” Use and explain them later only when they prevent a misunderstanding.
-- Keep source-of-truth rules, interfaces, files, lifecycle, constraints, and verification details in `# Details`; do not omit them.
-- Define unfamiliar technical terms the first time they matter.
-
-## Verified Examples
-
-Examples belong only in `# Details`. Add a short verified example when it materially helps a developer locate or understand the real implementation; do not add examples to openings, indexes, or related-links sections.
-
-- Verify the referenced path, symbol, command, payload, and excerpt against current repository contents.
-- Name the source path and the relevant function, class, autoload, route, command, scene, or test, then explain what the small example demonstrates in plain language.
-- Prefer five to twenty lines and the appropriate fence language. Do not add filler examples to navigational indexes or policy-only notes.
+- Use `# Details` and `# Related Notes` as level-one headings.
+- Use `##` and `###` only inside Details.
+- Start with what the system means for the player or game, then explain ownership and
+  implementation mechanics.
+- Label behavior **Current**, **Planned**, or **Deprecated** wherever its state could be
+  misunderstood.
+- Keep implementation anchors selective: normally three to eight entry points, contracts,
+  or tests. Verify every referenced path and symbol.
+- Add short verified examples only when they materially improve understanding.
 
 ## Index Format
 
-Every component folder has an `index.md` that describes the component and links to every direct child note and direct child component index:
+Every component folder has an `index.md`:
 
 ```md
-# Component Title
+# Component
 
-[A concise, product/design-oriented description of what this component contributes to the game.]
+[Concise description.]
 
 # Wiki
 
-- [[api-server/database|Database and RLS]]
-- [[api-server/index|API Server]]
+- [[component/child|Child Note]]
+- [[component/subcomponent/index|Subcomponent]]
 
 # Related Notes
 
-- [[api-server/overview|Role and Boundaries]]
+- [[other-component/index|Related Component]]
 ```
 
-The root `wiki/index.md` follows the same structure. Keep the index description concise. `# Wiki` is the authoritative list of the folder's direct documentation children; do not list unrelated or nested descendants there.
+`# Wiki` lists every direct child note and direct child component index, excluding agent
+instruction files. Do not list nested descendants or unrelated notes.
 
-## Linking Rules
+## Links and Restructuring
 
-- Add every new, moved, renamed, or removed direct child to its parent index.
-- Use explicit path-based Obsidian links such as `[[api-server/database|Database and RLS]]` to avoid ambiguous note resolution.
-- Place a note's direct dependencies, related contracts, and parent/component index in `# Related Notes` when they help a reader navigate the subject.
-- Repair affected incoming and outgoing links after moving, renaming, splitting, merging, or removing notes.
-- Do not add links merely for keyword overlap. Each related link must provide useful navigation.
+- Use vault-relative Obsidian links such as
+  `[[client/networking/commands-state-and-events|Commands, State, and Events]]`.
+- Link ordinary notes to the authoritative design sources that govern them.
+- Update a parent index whenever a direct child is added, moved, renamed, or removed.
+- Repair affected incoming and outgoing links after restructuring.
+- Related links must provide useful navigation, not mere keyword overlap.
+- Preserve existing source-document filenames unless a rename has a concrete benefit.
 
-## Approval Boundary
+## Source and Design Updates
 
-Update local component notes and their related indexes automatically. When a completed change appears to require altering an architecture-wide, cross-component, or policy-level wiki note, do not change that broader note automatically. At the end of the task, explain the proposed update briefly and ask the user for approval. Do this after final code and local documentation work, not after every intermediate modification.
+Current code establishes what is presently implemented, but it does not override confirmed
+design. If current code is behind or contradicts `wiki/docs/`, document the implementation
+truth as a clearly labelled gap and treat the source design as the required outcome.
+
+After implementing a documented feature, update its source checklist only when repository
+evidence and relevant verification support completion. Change requirement prose only when
+the user's request changes the design or a clarification is necessary to implement it
+correctly.
 
 ## Completion Report
 
-Include a short documentation-ingestion report in the final response to the user. State which notes were created, updated, moved, or left unchanged; mention link repairs; and identify any broader documentation update awaiting approval. Do not create a persistent ingestion log unless the user asks for one.
+Report notes and source documents created, updated, moved, or removed; colocated plan
+deletion; link repairs; checklist changes; and any unresolved design/implementation
+mismatch. Do not create a persistent ingestion log.

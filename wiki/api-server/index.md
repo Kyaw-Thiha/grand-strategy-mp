@@ -65,3 +65,10 @@ The API server may authorize access to a game, but the game server remains autho
 - [[api-server/internal-api|Internal API]]
 - [[api-server/database|Database and RLS]]
 - [[api-server/deployment|Development and Deployment]]
+- [[api-server/backlog|API Server Backlog]]
+
+# Related Notes
+
+- [[docs/ARCHITECTURE|Architecture]]
+- [[docs/DATA_CONTRACTS|Data Contracts]]
+- [[game-server/index|Game Server]]

@@ -13,3 +13,6 @@ Military lets players inspect divisions, select forces, plan movement, manage te
 - [[client/index|Client]]
 - [[client/map/index|Map]]
 - [[game-server/simulation/tactical-divisions|Tactical Divisions]]
+- [[docs/STRATEGIC_COMBAT|Strategic Combat Design]]
+- [[docs/TACTICAL_COMBAT|Tactical Combat Design]]
+- [[docs/PATHFINDING|Pathfinding Design]]

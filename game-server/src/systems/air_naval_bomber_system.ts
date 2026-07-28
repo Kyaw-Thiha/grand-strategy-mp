@@ -95,7 +95,7 @@ export class AirNavalBomberSystem {
     lifecycleSystem: LifecycleSystem,
     broadcast: BroadcastFn,
   ): void {
-    const STUB_MISSIONS = new Set([
+    const STUB_MISSIONS = new Set<string>([
       MISSION_TYPES.ANTI_SHIP,
       MISSION_TYPES.ANTI_SUBMARINE,
       MISSION_TYPES.TRADE_INTERDICTION,

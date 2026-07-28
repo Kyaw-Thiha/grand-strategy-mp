@@ -151,10 +151,10 @@ Port strike is **fully implemented in Branch H**. A naval bomber targeting a coa
 
 | Stub in Branch H | Phase 13 wires |
 |---|---|
-| `getFlotillaMembers()` returns `[]` | Real flotilla composition from `FloatillaState` |
+| `getFlotillaMembers()` returns `[]` | Real flotilla composition from `FlotillaState` |
 | `refreshContact()` is defined but uncalled | Maritime patrol wing tick calls it |
 | Trade interdiction fires event, no consumer | Phase 13 cargo system subscribes |
-| Anti-ship targets mock highest-value contact | Real ship priority from `FloatillaState` |
+| Anti-ship targets mock highest-value contact | Real ship priority from `FlotillaState` |
 | Anti-sub targets no real contacts | Real submarine detection from Phase 13 |
 
 ### Visual checks (Branch H)

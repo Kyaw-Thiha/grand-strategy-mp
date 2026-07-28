@@ -2,13 +2,16 @@
 
 This wiki explains what each part of the game does, how the parts cooperate, and where the current implementation still differs from the intended design.
 
-Pages describe the current code first. Future work and legacy design notes are labelled explicitly.
+Authoritative design sources define the intended game and roadmap. Component notes describe
+the current code first, with future work and implementation gaps labelled explicitly.
 
 # Wiki
 
+- [[docs/index|Authoritative Design Sources]] — confirmed designs, implementation requirements, roadmap state, and completion checklists.
 - [[api-server/index|API Server]] — account and game-independent backend data, lobby coordination, and trusted persistence calls.
 - [[game-server/index|Game Server]] — authoritative multiplayer rooms, live game state, and simulation resolution.
 - [[client/index|Client]] — Godot presentation, input, local UI state, and the read-only mirror of live game state.
+- [[map/index|Map Production]] — geographic source data, validation, and generated map assets.
 
 # Future Works
 

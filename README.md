@@ -147,18 +147,11 @@ Make sure both servers are running before pressing **Play**.
 
 ---
 ## Coding Agent Skills
-Currently, the coding agent skills are located in `skills/*`.
 
-### Claude
-```bash
-mkdir -p .claude/skills/ingest
-cp -r skills/ingest/* .claude/skills/ingest/
-```
+Repository-wide instructions live in `AGENTS.md`. Claude Code reads the root
+`CLAUDE.md`, which imports the same guide, so the two tools share one policy.
 
-### Opencode
-It can load from same path as claude.
-
-### OpenAI
-Use the `skills/*/agents/openai.yaml`.
-
+Task workflows live under `skills/`. The post-change documentation workflow is
+`skills/wiki-reconcile/SKILL.md`; `AGENTS.md` tells every coding agent when to run it.
+OpenAI-facing skill metadata lives beside the skill under `agents/openai.yaml`.
 
