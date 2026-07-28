@@ -6,9 +6,21 @@ Map presentation lets players read national control and terrain, move around the
 
 ## Province and overlay rendering
 
-`MapRenderer`, implemented by `client/src/systems/map/map_renderer.gd`, owns display only. It colors province polygons, rebuilds national borders, highlights selections, shows cover or elevation layers, and switches nation labels and city markers as zoom changes.
+`MapRenderer`, implemented by `client/src/systems/map/map_renderer.gd`, owns display only. It colors province polygons, highlights selections, shows cover or elevation layers, and switches nation labels and city markers as zoom changes.
 
-Political mode reads the current province owner through the scene-provided data source. Cover and elevation presentation comes from layers already present in the generated map scene. A province capture refreshes the affected fill and rebuilt boundaries after `GameState` has received the server result.
+Political fills read the current province owner through the scene-provided data source when
+the map initializes and remain current underneath every view. Political mode also keeps
+both pre-triangulated terrain meshes visible as subtle context: cover uses 0.35 whole-mesh
+alpha and elevation uses 0.25, leaving nation colors visually dominant. Dedicated cover
+and elevation modes show only the selected mesh at full modulation.
+
+Switching modes changes visibility and modulation on those two combined mesh nodes; it
+does not traverse or recolor every province or propagate visibility through individual
+terrain polygons. The meshes crossfade over 250 ms with sine in/out easing. Repeated input
+interrupts the active tween from its current opacity values, so the latest selection wins
+without a visual reset; initial map hydration remains immediate. A province capture
+refreshes only the affected political fill after `GameState` has received the server
+result.
 
 Map cartography and runtime nation labels render below the combined visibility fog.
 World-space division, route, combat, aircraft, and naval marker roots render above it.

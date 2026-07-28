@@ -27,7 +27,7 @@
 
 | Mode | Default? | Content |
 |---|---|---|
-| **Political** | Yes | Bright nation fill + faint ambient elevation hillshade (always on, all modes) + river vector overlay (always on) + diagonal hatch on impassable tiles **only when a division is selected**, scoped to that division's movement profile |
+| **Political** | Yes | Bright dominant nation fill + subtle cover/elevation underlays + river vector overlay (always on) + diagonal hatch on impassable tiles **only when a division is selected**, scoped to that division's movement profile |
 | **Cover** | No | Flat, full 11-tier cover-type fill, distinct colors, no hatching needed (this mode IS the detail view) |
 | **Elevation** | No | Pure relief/hypsometric shading, no political fill |
 
