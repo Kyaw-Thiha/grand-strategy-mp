@@ -91,7 +91,6 @@ export class AirDetectionSystem {
       const detectors = new Set<string>();
       for (const [nationId] of state.nations) {
         if (nationId === wing.nation_id) continue;
-        if (!this._areNationsHostile(nationId, wing.nation_id, state)) continue;
         if (this._canNationDetectWing(
           nationId, wing.wing_id, wing.nation_id,
           wing.position_lng, wing.position_lat, state, airborneWings,
@@ -199,7 +198,6 @@ export class AirDetectionSystem {
 
       for (const [divId, div] of state.divisions.entries()) {
         if (div.nation_id === wing.nation_id) continue;
-        if (!this._areNationsHostile(wing.nation_id, div.nation_id, state)) continue;
         const dist = euclidDeg(wing.position_lng, wing.position_lat, div.position_lng, div.position_lat);
         if (dist > radius) continue;
 
