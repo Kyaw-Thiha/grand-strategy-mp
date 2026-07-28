@@ -110,15 +110,17 @@ relevant to what the player is currently doing (a unit is selected, a hover is a
 combat is about to start). This principle recurs throughout this spec — see also
 §5 (province quick-actions), §5 (bottom panel terrain strip), §8 (Tab attention-cycle).
 
-### Why a single "show everything" map mode doesn't work
+### Why full-strength "show everything" rendering doesn't work
 
 Cartographic precedent is direct on this: bivariate choropleth maps (overlaying two
 independent color-coded categorical layers on one map) were tried in the 1970s and
 found to "produce ambiguous representations that conveyed information poorly, being
 too difficult to interpret." Filling provinces with both nation-color AND
-full-fidelity cover-color simultaneously recreates this known failure mode.
+full-strength cover-color simultaneously recreates this known failure mode. Political
+mode therefore keeps the terrain layers subordinate through low whole-layer opacity,
+while the dedicated modes retain full-strength terrain presentation.
 
-### Elevation — ambient hillshade, visible in every mode
+### Elevation — ambient in Political mode; standalone in Elevation mode
 
 Elevation is ordinal and low-cardinality (3 values) — the correct cartographic solution
 is a relief/hillshade texture at low, constant opacity, generated directly from the same
@@ -126,12 +128,13 @@ elevation-tier data the pathfinder uses (not a separately authored "pretty" text
 this is what causes the visual/gameplay terrain mismatch HoI4 players still complain
 about and mod against a decade later).
 
-- Renders under the political fill in **every map mode**, all the time.
+- Renders subtly alongside cover in Political mode, is hidden in Cover mode, and becomes
+  the dominant terrain layer in Elevation mode.
 - A dedicated, high-contrast standalone Elevation mode is retained for the rare case
   where a player wants to study elevation in isolation — cheap to keep since it's
   already built, occasionally useful, no harm.
 
-### Cover — collapsed to gameplay-relevant tiers in Political mode; full fidelity in dedicated Cover mode
+### Cover — subtle in Political mode; full strength in dedicated Cover mode
 
 No player making a move decision needs to distinguish all 11 cover categories at a
 glance. They need three things, in order of how often they matter:
@@ -141,6 +144,9 @@ glance. They need three things, in order of how often they matter:
 3. **Will I get a combat bonus/penalty fighting here?**
 
 **In Political mode (default):**
+- The full cover mesh remains visible at low opacity beneath the dominant political
+  presentation. It provides ambient terrain texture without asking the player to decode
+  all 11 categories as a second primary choropleth.
 - Hard-impassable tiles for the **currently selected division's movement profile**
   rendered with a diagonal hatch/stipple texture — appears only when a division is
   selected, disappears otherwise. This is the conditional-reveal principle applied
@@ -175,7 +181,7 @@ an automatic consequence of camera height.**
 
 | Mode | Role | Always-on layers |
 |---|---|---|
-| **Political** (default) | ~90% of play: ownership, frontline, move orders | Nation fill (high-saturation) + ambient elevation hillshade + rivers + division-aware impassability hatch (conditional) |
+| **Political** (default) | ~90% of play: ownership, frontline, move orders | Dominant nation fill + subtle cover/elevation underlays + rivers + division-aware impassability hatch (conditional) |
 | **Cover** | Deliberate pre-offensive planning | Full 11-tier cover fidelity, flat color |
 | **Elevation** | Rare, standalone study of elevation only | Pure relief/hypsometric rendering |
 
@@ -189,6 +195,9 @@ in the genre's own playerbase.
 modes; Shift+backtick steps backward. Three dedicated keys were considered and rejected
 — a 3-state cycle is trivial to reason about and costs one key instead of three. See
 §9 for full keybind rationale.
+
+Mode presentation crossfades over 250 ms with sine in/out easing. A newer selection
+interrupts the active crossfade from its current opacity instead of queuing transitions.
 
 ### 4.1 Relationship-ring overlay (held key, Political mode only)
 

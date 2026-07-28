@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://test/test_generated_map_overlay_meshes.gd" id="1"]
+
+[node name="GeneratedMapOverlayMeshesTest" type="Node"]
+script = ExtResource("1")

@@ -254,8 +254,8 @@ Layers render in this order (earlier = further back):
 | Water | `base_water.json` | Polygon2D | Always |
 | Province fill | `map_data.json` | Polygon2D | Always |
 | Province border | `map_data.json` | Line2D | Always |
-| Cover overlay | `cover.json` | Polygon2D | "Cover" mode only |
-| Elevation overlay | `elevation.json` | Polygon2D | "Elevation" mode only |
+| Cover overlay | `cover.json` | MeshInstance2D / ArrayMesh | Full in "Cover"; subtle in "Political" |
+| Elevation overlay | `elevation.json` | MeshInstance2D / ArrayMesh | Full in "Elevation"; subtle in "Political" |
 | Rivers | `rivers.json` | Line2D | Always |
 | Roads | `roads.json` | Line2D | Always |
 | Division icons | game state | DivisionIcon scene | Always |
@@ -284,7 +284,18 @@ Islands and multi-polygon provinces get an extra Polygon2D + Area2D + CollisionP
 
 ### Overlay Coloring
 
-`MapRenderer.set_overlay_mode("political"|"elevation"|"cover")` shows/hides the two overlay layers. Province fill opacity is unchanged — overlays sit on top.
+`MapRenderer.set_overlay_mode("political"|"elevation"|"cover")` changes visibility and
+whole-mesh modulation without walking province or overlay geometry. Province fill opacity
+is unchanged. Political mode keeps both terrain meshes visible as contextual underlays,
+with cover modulated to 0.35 alpha and elevation to 0.25 alpha so nation colors remain
+dominant. Dedicated cover or elevation mode shows only its selected mesh at full
+modulation. Mode changes crossfade both meshes from their current values over 250 ms with
+sine in/out easing. A new selection interrupts the active transition from its current
+visual state, while initial map hydration applies political mode immediately.
+
+Each generated overlay is one indexed, vertex-coloured triangle mesh. Source polygons are
+combined offline so changing modes toggles one canvas item rather than propagating
+visibility through thousands of `Polygon2D` nodes.
 
 **Cover** (alpha 0.7, keyed by `cover_visual`):
 - farmland → tan `(0.76, 0.70, 0.50)`

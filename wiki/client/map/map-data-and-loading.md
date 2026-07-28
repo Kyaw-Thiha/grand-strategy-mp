@@ -10,7 +10,7 @@ The map loader turns a selected world map into the provinces, terrain, roads, ci
 
 The current client uses two kinds of generated input:
 
-- `client/scenes/map/<map-id>.scn` contains baked display geometry and province collision areas, including province polygons, cover and elevation layers, roads, rivers, cities, and other generated nodes.
+- `client/scenes/map/<map-id>.scn` contains baked display geometry and province collision areas, including province polygons, combined cover and elevation meshes, roads, rivers, cities, and other generated nodes.
 - `client/assets/data/<map-id>/` still supplies JSON metadata used at runtime, including bounds, province records, adjacency, terrain lookup, nations, and the waypoint graph.
 
 `MapLoader.load_map()` reads `map_data.json`, `terrain_lookup.json`, and `waypoints.json`, then instances the matching generated scene. It indexes province nodes and click areas so rendering, input, vision, and military systems can address them by province ID.

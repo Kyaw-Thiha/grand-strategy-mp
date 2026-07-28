@@ -22,6 +22,8 @@ Run commands from the repository root:
 godot --headless --path client test/research_system_test.tscn
 godot --headless --path client test/test_event_bus_signals.tscn
 godot --headless --path client test/test_tactical_combat_panel.tscn
+godot --headless --path client test/test_generated_map_overlay_meshes.tscn
+godot --headless --path client test/test_map_renderer_overlay_switch.tscn
 godot --headless --path client scenes/test/test_pathfinder_hpa.tscn
 godot --headless --path client scenes/test/test_air_wing_command_submission.tscn
 godot --headless --path client scenes/test/test_chat_panel.tscn
@@ -66,4 +68,3 @@ There is no broad visual-regression suite. UI work still needs manual checks for
 - [[client/testing/production-match-scene-check|Production Match Scene Check]]
 - [[client/debugging/map-debug-scene|Map Debug Scene]]
 - [[client/ui/index|Client User Interface]]
-

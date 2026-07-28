@@ -46,6 +46,32 @@ const NATION_PALETTE := {
 	"default":         Color(0.55, 0.55, 0.55),
 }
 
+const COVER_COLORS := {
+	"farmland":            Color(0.76, 0.70, 0.50, 0.7),
+	"hot_desert":          Color(0.95, 0.85, 0.60, 0.7),
+	"cold_desert":         Color(0.80, 0.80, 0.85, 0.7),
+	"steppe":              Color(0.85, 0.80, 0.55, 0.7),
+	"open_forest":         Color(0.45, 0.65, 0.35, 0.7),
+	"temperate_forest":    Color(0.35, 0.50, 0.25, 0.7),
+	"boreal_forest":       Color(0.30, 0.45, 0.35, 0.7),
+	"urban":               Color(0.55, 0.55, 0.60, 0.7),
+	"town":                Color(0.65, 0.60, 0.55, 0.7),
+	"grassland":           Color(0.65, 0.80, 0.45, 0.7),
+	"mediterranean_scrub": Color(0.70, 0.65, 0.45, 0.7),
+	"heathland":           Color(0.65, 0.50, 0.55, 0.7),
+	"wetland":             Color(0.40, 0.60, 0.55, 0.7),
+	"glacier":             Color(0.85, 0.92, 0.97, 0.7),
+	"tundra":              Color(0.72, 0.78, 0.72, 0.7),
+	"jungle":              Color(0.20, 0.50, 0.20, 0.7),
+	"mangrove":            Color(0.30, 0.55, 0.40, 0.7),
+}
+
+const ELEVATION_COLORS := {
+	"flat":      Color(0.70, 0.85, 0.60, 0.7),
+	"hills":     Color(0.55, 0.70, 0.35, 0.7),
+	"mountains": Color(0.60, 0.50, 0.40, 0.7),
+}
+
 # change these two for input and output folders
 @export_dir var map_asset_root: String = "res://assets/data/western_europe_6"
 @export_dir var output_scene_root: String = "res://scenes/map"
@@ -380,7 +406,7 @@ func _add_water_polygon(parent: Node, ring: Array) -> void:
 	polygon.owner = parent.owner
 
 
-## Adds cover or elevation overlay polygons when layer data is available.
+## Adds one combined cover or elevation mesh when layer data is available.
 ## Parameters:
 ## - root: generated scene root.
 ## - layer_name: cover or elevation.
@@ -392,11 +418,9 @@ func _load_overlay_layer(root: Node2D, layer_name: String, path: String) -> void
 		return
 	var geojson: Dictionary = geojson_raw
 
-	var container: Node2D = Node2D.new()
-	container.name = layer_name.capitalize() + "Layer"
-	container.visible = false
-	root.add_child(container)
-	container.owner = root
+	var vertices: Array[Vector2] = []
+	var colors: Array[Color] = []
+	var indices: Array[int] = []
 
 	for feature_variant: Variant in geojson.get("features", []):
 		if not feature_variant is Dictionary:
@@ -408,61 +432,79 @@ func _load_overlay_layer(root: Node2D, layer_name: String, path: String) -> void
 		var properties: Dictionary = feature.get("properties", {})
 
 		if geometry_type == "Polygon" and not coordinates.is_empty():
-			_add_overlay_polygon(container, coordinates[0], properties)
+			_append_overlay_polygon(
+				vertices, colors, indices, coordinates[0], properties, layer_name
+			)
 		elif geometry_type == "MultiPolygon":
 			for part_variant: Variant in coordinates:
 				var part: Array = part_variant
 				if not part.is_empty():
-					_add_overlay_polygon(container, part[0], properties)
+					_append_overlay_polygon(
+						vertices, colors, indices, part[0], properties, layer_name
+					)
+
+	var mesh_instance := MeshInstance2D.new()
+	mesh_instance.name = layer_name.capitalize() + "Layer"
+	mesh_instance.visible = false
+
+	if not vertices.is_empty():
+		var surface_arrays: Array = []
+		surface_arrays.resize(Mesh.ARRAY_MAX)
+		surface_arrays[Mesh.ARRAY_VERTEX] = PackedVector2Array(vertices)
+		surface_arrays[Mesh.ARRAY_COLOR] = PackedColorArray(colors)
+		surface_arrays[Mesh.ARRAY_INDEX] = PackedInt32Array(indices)
+
+		var overlay_mesh := ArrayMesh.new()
+		overlay_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface_arrays)
+		mesh_instance.mesh = overlay_mesh
+
+	root.add_child(mesh_instance)
+	mesh_instance.owner = root
 
 
-## Adds one projected overlay polygon with the same colors as MapLoader.
+## Appends one projected overlay polygon to combined mesh arrays.
 ## Parameters:
-## - parent: overlay layer node.
+## - vertices: combined projected vertex positions.
+## - colors: per-vertex overlay colors.
+## - indices: combined triangle indices.
 ## - ring: WGS84 polygon exterior ring.
 ## - properties: feature properties dictionary.
+## - layer_name: cover or elevation.
 ## Returns: nothing.
-func _add_overlay_polygon(parent: Node, ring: Array, properties: Dictionary) -> void:
-	var polygon: Polygon2D = Polygon2D.new()
-	if not _assign_polygon_if_valid(polygon, _ring_to_vector2_array(ring)):
+func _append_overlay_polygon(
+		vertices: Array[Vector2],
+		colors: Array[Color],
+		indices: Array[int],
+		ring: Array,
+		properties: Dictionary,
+		layer_name: String
+) -> void:
+	var points: PackedVector2Array = _ring_to_vector2_array(ring)
+	var polygon_indices: PackedInt32Array = Geometry2D.triangulate_polygon(points)
+	if points.size() < 3 or polygon_indices.size() < 3:
+		_skipped_polygon_count += 1
 		return
-	polygon.set_meta("props", properties)
 
-	if parent.name == "CoverLayer":
+	var overlay_color: Color
+	if layer_name == "cover":
 		var cover_type: String = properties.get("cover_visual", "grassland")
-		var cover_colors: Dictionary = {
-			"farmland":            Color(0.76, 0.70, 0.50, 0.7),
-			"hot_desert":          Color(0.95, 0.85, 0.60, 0.7),
-			"cold_desert":         Color(0.80, 0.80, 0.85, 0.7),
-			"steppe":              Color(0.85, 0.80, 0.55, 0.7),
-			"open_forest":         Color(0.45, 0.65, 0.35, 0.7),
-			"temperate_forest":    Color(0.35, 0.50, 0.25, 0.7),
-			"boreal_forest":       Color(0.30, 0.45, 0.35, 0.7),
-			"urban":               Color(0.55, 0.55, 0.60, 0.7),
-			"town":                Color(0.65, 0.60, 0.55, 0.7),
-			"grassland":           Color(0.65, 0.80, 0.45, 0.7),
-			"mediterranean_scrub": Color(0.70, 0.65, 0.45, 0.7),
-			"heathland":           Color(0.65, 0.50, 0.55, 0.7),
-			"wetland":             Color(0.40, 0.60, 0.55, 0.7),
-			"glacier":             Color(0.85, 0.92, 0.97, 0.7),
-			"tundra":              Color(0.72, 0.78, 0.72, 0.7),
-			"jungle":              Color(0.20, 0.50, 0.20, 0.7),
-			"mangrove":            Color(0.30, 0.55, 0.40, 0.7),
-		}
-		polygon.color = cover_colors.get(cover_type, Color(0.65, 0.80, 0.45, 0.7))
-	elif parent.name == "ElevationLayer":
+		overlay_color = COVER_COLORS.get(
+			cover_type, Color(0.65, 0.80, 0.45, 0.7)
+		)
+	elif layer_name == "elevation":
 		var elevation_type: String = properties.get("elev_type", properties.get("elevation_type", "flat"))
-		var elevation_colors: Dictionary = {
-			"flat":      Color(0.70, 0.85, 0.60, 0.7),
-			"hills":     Color(0.55, 0.70, 0.35, 0.7),
-			"mountains": Color(0.60, 0.50, 0.40, 0.7),
-		}
-		polygon.color = elevation_colors.get(elevation_type, Color(0.70, 0.85, 0.60, 0.7))
+		overlay_color = ELEVATION_COLORS.get(
+			elevation_type, Color(0.70, 0.85, 0.60, 0.7)
+		)
 	else:
-		polygon.color = Color(1, 1, 1, 0.4)
+		overlay_color = Color(1, 1, 1, 0.4)
 
-	parent.add_child(polygon)
-	polygon.owner = parent.owner
+	var vertex_offset: int = vertices.size()
+	for point: Vector2 in points:
+		vertices.append(point)
+		colors.append(overlay_color)
+	for polygon_index: int in polygon_indices:
+		indices.append(vertex_offset + polygon_index)
 
 
 ## Adds road or river line layers when data is available.

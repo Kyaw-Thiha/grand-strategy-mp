@@ -41,8 +41,8 @@ The script generates these layers:
 | `WaterLayer` | `base_water.json` | Always visible when present |
 | `Provinces` | `map_data.json` | Visual province fills, borders, labels, and markers |
 | `CollisionLayer` | `map_data.json` | Hidden by default; generated province click areas |
-| `CoverLayer` | `cover.json` | Hidden by default |
-| `ElevationLayer` | `elevation.json` | Hidden by default |
+| `CoverLayer` | `cover.json` | Hidden combined `MeshInstance2D` |
+| `ElevationLayer` | `elevation.json` | Hidden combined `MeshInstance2D` |
 | `RiversLayer` | `rivers.json` | Always visible when present |
 | `RoadsLayer` | `roads.json` | Always visible when present |
 
@@ -57,7 +57,12 @@ ProvinceNode
 └─ UnitAnchor
 ```
 
-The generator also adds city marker dots, port marker dots, province metadata, and overlay feature metadata.
+The generator also adds city marker dots, port marker dots, and province metadata.
+
+Cover and elevation features are projected and triangulated during generation. Each
+overlay is stored as one indexed, vertex-coloured `ArrayMesh` surface under its
+`MeshInstance2D`, preserving source feature order and the existing 0.7-alpha palette
+without retaining one canvas item per source polygon.
 
 Generated visual CanvasItems require no per-item fog material or light mask. Runtime
 cartography stays below the combined fog overlay as a layer-order contract; collision
@@ -75,7 +80,7 @@ Multi-part provinces use deterministic suffixes like `FillPart01`, `BorderPart01
 
 Province fills are baked with initial political colors from each province's `nation_id`, using the same palette as the runtime political overlay. This lets the generated map scene preview the political map directly in the editor.
 
-Before saving, polygon fills and collision shapes are checked with Godot triangulation. Rings that cannot be triangulated are skipped for fill/collision output, while their borders are still generated. This prevents editor spam like `Invalid polygon data, triangulation failed` when opening generated maps.
+Before saving, polygon fills, overlay triangles, and collision shapes are checked with Godot triangulation. Rings that cannot be triangulated are skipped for visual/collision output, while province borders are still generated. This prevents editor spam like `Invalid polygon data, triangulation failed` when opening generated maps.
 
 ---
 
@@ -113,6 +118,12 @@ The editor script was checked with Godot 4.7:
 ```bash
 HOME=/tmp XDG_CONFIG_HOME=/tmp/godot-config XDG_DATA_HOME=/tmp/godot-data \
 godot --headless --path client --check-only --script res://src/utils/map-generator.gd
+```
+
+Generated overlay mesh structure is checked with:
+
+```bash
+godot --headless --path client test/test_generated_map_overlay_meshes.tscn
 ```
 
 The project also loads headlessly with isolated Godot user data. Existing `.env` and Godot doc parser warnings may still appear.

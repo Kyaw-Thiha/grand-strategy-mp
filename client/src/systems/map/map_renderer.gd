@@ -76,6 +76,9 @@ const NATION_LABEL_MIN_EXTENT        := 100.0   # world-px PCA std-dev; below �
 const CHAR_WIDTH_RATIO               := 0.62    # avg capital letter width / font_size
 const NATION_LABEL_MIN_FONT          := 55
 const NATION_LABEL_MAX_FONT          := 130
+const POLITICAL_COVER_ALPHA          := 0.35
+const POLITICAL_ELEVATION_ALPHA      := 0.25
+const OVERLAY_TRANSITION_SECONDS     := 0.25
 
 const NATION_DISPLAY_NAMES := {
 	"united_kingdom":  "UK",
@@ -89,6 +92,7 @@ var _highlighted: Dictionary = {}       # province_id → original Color
 var _nation_label_layer: Node2D = null
 var _nation_labels: Dictionary = {}     # nation_id → Array[Label]
 var _zoom_in_label_region := false      # true when camera zoom < NATION_LABEL_ZOOM_THRESHOLD
+var _overlay_tween: Tween = null
 
 
 
@@ -106,19 +110,24 @@ func setup(map_loader: Node, data_source: Object) -> void:
 
 
 func on_map_loaded(_province_count: int) -> void:
-	_refresh_all()
-	_set_overlay_layer_visibility()
+	_refresh_all_political_fills()
+	_apply_overlay_mode_immediately()
 	_build_nation_labels()
 
 
 func set_overlay_mode(mode: String) -> void:
+	var next_mode: OverlayMode
 	match mode:
-		"political":  _overlay_mode = OverlayMode.POLITICAL
-		"elevation":  _overlay_mode = OverlayMode.ELEVATION
-		"cover":      _overlay_mode = OverlayMode.COVER
-	_highlighted.clear()
-	_refresh_all()
-	_set_overlay_layer_visibility()
+		"political":  next_mode = OverlayMode.POLITICAL
+		"elevation":  next_mode = OverlayMode.ELEVATION
+		"cover":      next_mode = OverlayMode.COVER
+		_:            return
+	if next_mode == _overlay_mode:
+		return
+
+	clear_highlights()
+	_overlay_mode = next_mode
+	_animate_overlay_mode()
 	# Nation labels only make sense over political fills
 	if _nation_label_layer:
 		_nation_label_layer.visible = (
@@ -174,7 +183,7 @@ func refresh_province(province_id: String) -> void:
 	var node: Node2D = _map_loader.get_province_node(province_id)
 	if node == null:
 		return
-	_set_all_fills(node, _province_color(province_id))
+	_set_all_fills(node, _political_province_color(province_id))
 	_highlighted.erase(province_id)
 
 
@@ -185,14 +194,14 @@ func update_province_owner(province_id: String, _new_owner_id: String) -> void:
 
 # ── internal ──────────────────────────────────────────────────────────────────
 
-func _refresh_all() -> void:
+func _refresh_all_political_fills() -> void:
 	if _map_loader == null:
 		return
 	for pid in _map_loader.get_all_province_ids():
 		var node: Node2D = _map_loader.get_province_node(pid)
 		if node == null:
 			continue
-		_set_all_fills(node, _province_color(pid))
+		_set_all_fills(node, _political_province_color(pid))
 
 
 func _set_all_fills(node: Node2D, colour: Color) -> void:
@@ -201,20 +210,13 @@ func _set_all_fills(node: Node2D, colour: Color) -> void:
 			child.color = colour
 
 
-func _province_color(province_id: String) -> Color:
+func _political_province_color(province_id: String) -> Color:
 	if _data_source == null:
 		return NATION_PALETTE["default"]
 
 	var pdata: Dictionary = _data_source.get_province(province_id)
-
-	match _overlay_mode:
-		OverlayMode.POLITICAL:
-			var owner: String = pdata.get("nation_id", "default")
-			return NATION_PALETTE.get(owner, NATION_PALETTE["default"])
-		OverlayMode.COVER:
-			return Color(0.55, 0.55, 0.55, 0.35)  # neutral grey; cover cells render on top, gaps show grey not ocean blue
-		_:
-			return Color(0, 0, 0, 0)
+	var owner: String = pdata.get("nation_id", "default")
+	return NATION_PALETTE.get(owner, NATION_PALETTE["default"])
 
 
 func _on_province_captured(province_id: String, _new_owner_id: String) -> void:
@@ -404,20 +406,88 @@ func _set_city_markers_visible(visible: bool) -> void:
 				child.visible = visible
 
 
-func _set_overlay_layer_visibility() -> void:
+## Applies the selected overlay blend without animation during initial map hydration.
+func _apply_overlay_mode_immediately() -> void:
 	if _map_loader == null:
 		return
+	_kill_overlay_tween()
 
-	var cover_layer := _map_loader.get_node_or_null("CoverLayer")
-	var elev_layer := _map_loader.get_node_or_null("ElevationLayer")
+	var cover_layer := _map_loader.get_node_or_null("CoverLayer") as CanvasItem
+	var elev_layer := _map_loader.get_node_or_null("ElevationLayer") as CanvasItem
+	var target_alphas: Vector2 = _overlay_alphas_for_mode(_overlay_mode)
+	_set_overlay_layer_state(cover_layer, target_alphas.x)
+	_set_overlay_layer_state(elev_layer, target_alphas.y)
 
-	match _overlay_mode:
+
+## Crossfades both combined overlay meshes from their current visual state.
+func _animate_overlay_mode() -> void:
+	if _map_loader == null:
+		return
+	_kill_overlay_tween()
+
+	var cover_layer := _map_loader.get_node_or_null("CoverLayer") as CanvasItem
+	var elev_layer := _map_loader.get_node_or_null("ElevationLayer") as CanvasItem
+	var target_alphas: Vector2 = _overlay_alphas_for_mode(_overlay_mode)
+	if cover_layer == null and elev_layer == null:
+		return
+
+	if cover_layer != null:
+		cover_layer.visible = true
+	if elev_layer != null:
+		elev_layer.visible = true
+
+	var tween: Tween = create_tween()
+	tween.set_parallel(true)
+	tween.set_trans(Tween.TRANS_SINE)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	if cover_layer != null:
+		tween.tween_property(
+			cover_layer,
+			"self_modulate:a",
+			target_alphas.x,
+			OVERLAY_TRANSITION_SECONDS
+		)
+	if elev_layer != null:
+		tween.tween_property(
+			elev_layer,
+			"self_modulate:a",
+			target_alphas.y,
+			OVERLAY_TRANSITION_SECONDS
+		)
+	_overlay_tween = tween
+	tween.finished.connect(func() -> void:
+		if _overlay_tween != tween:
+			return
+		_overlay_tween = null
+		_set_overlay_layer_state(cover_layer, target_alphas.x)
+		_set_overlay_layer_state(elev_layer, target_alphas.y)
+	)
+
+
+## Returns cover and elevation modulation targets for one map mode.
+func _overlay_alphas_for_mode(mode: OverlayMode) -> Vector2:
+	match mode:
 		OverlayMode.POLITICAL:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = false
+			return Vector2(POLITICAL_COVER_ALPHA, POLITICAL_ELEVATION_ALPHA)
 		OverlayMode.ELEVATION:
-			if cover_layer:  cover_layer.visible = false
-			if elev_layer:   elev_layer.visible = true
+			return Vector2(0.0, 1.0)
 		OverlayMode.COVER:
-			if cover_layer:  cover_layer.visible = true
-			if elev_layer:   elev_layer.visible = false
+			return Vector2(1.0, 0.0)
+	return Vector2.ZERO
+
+
+## Applies visibility and whole-mesh opacity without touching overlay geometry.
+func _set_overlay_layer_state(layer: CanvasItem, alpha: float) -> void:
+	if layer == null:
+		return
+	layer.visible = not is_zero_approx(alpha)
+	layer.self_modulate = Color(1.0, 1.0, 1.0, alpha)
+
+
+## Stops an in-flight crossfade while retaining its current mesh opacity values.
+func _kill_overlay_tween() -> void:
+	if _overlay_tween == null:
+		return
+	if _overlay_tween.is_valid():
+		_overlay_tween.kill()
+	_overlay_tween = null
