@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki Reconcile"
+  short_description: "Reconcile wiki, design sources, and completed plans"
+  default_prompt: "Use $wiki-reconcile after the completed change to update affected wiki notes, authoritative checklists, links, and the temporary task plan."
