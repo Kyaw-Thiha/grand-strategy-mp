@@ -4,6 +4,8 @@ extends Node
 ## Loads a selected map, wires display/input systems, and keeps debug fixtures
 ## out of the production scene through overridable hooks.
 
+const VisionRenderLayers := preload("res://src/systems/map/vision_render_layers.gd")
+
 var _nation_definitions_by_id: Dictionary = {}
 
 @onready var _map_loader: Node = $MapLoader
@@ -25,6 +27,11 @@ var _chat_input_focused: bool = false
 
 
 func _ready() -> void:
+	VisionRenderLayers.configure_world_marker_layer(_division_layer)
+	VisionRenderLayers.configure_world_marker_layer(_air_wing_layer)
+	var naval_marker_layer: Node2D = get_node_or_null("NavalContactMarkerSystem") as Node2D
+	if naval_marker_layer != null:
+		VisionRenderLayers.configure_world_marker_layer(naval_marker_layer)
 	_pause_menu.set_restore_clear_color(RenderingServer.get_default_clear_color())
 	RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0))
 	_camera_system.setup(_camera, _map_loader)

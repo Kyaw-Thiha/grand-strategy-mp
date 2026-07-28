@@ -192,10 +192,16 @@ func _draw() -> void:
 	var half_w := RECT_W * 0.5
 	var half_h := RECT_H * 0.5
 
-	# Scouting soft field — outermost, very faint filled disc, drawn first (behind everything)
-	draw_circle(Vector2.ZERO, scouting_radius_px,    Color(1.0, 1.0, 1.0, 0.06))
-	# Observation soft field — inner filled disc; overlaps center to create a gradient effect
-	draw_circle(Vector2.ZERO, observation_radius_px, Color(1.0, 1.0, 1.0, 0.18))
+	# Ranges are selection affordances, not permanent illumination.
+	if is_selected:
+		draw_arc(
+			Vector2.ZERO, scouting_radius_px, 0.0, TAU, 64,
+			Color(0.72, 0.82, 0.92, 0.28), 1.0
+		)
+		draw_arc(
+			Vector2.ZERO, observation_radius_px, 0.0, TAU, 64,
+			Color(0.92, 0.96, 1.0, 0.42), 1.5
+		)
 
 	# Engagement circle — color and weight reflect combat state
 	match combat_state:

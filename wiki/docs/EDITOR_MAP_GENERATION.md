@@ -59,6 +59,10 @@ ProvinceNode
 
 The generator also adds city marker dots, port marker dots, province metadata, and overlay feature metadata.
 
+Generated visual CanvasItems require no per-item fog material or light mask. Runtime
+cartography stays below the combined fog overlay as a layer-order contract; collision
+shapes and non-drawing anchors remain unaffected.
+
 Generated collision is separated from the visual province tree:
 
 ```text
@@ -97,6 +101,8 @@ The generated `.scn` scene is now used by runtime map loading.
 - `MapLoader` still reads `map_data.json`, `terrain_lookup.json`, and `waypoints.json` for metadata, adjacency, projection, camera focus, pathfinding, and UI data.
 - Missing optional visual layers are skipped with warnings.
 - Missing or invalid `map_data.json` stops generation.
+- Binary `.scn` serialization is not guaranteed to be byte-identical across repeated
+  generations; validate the loaded scene structure and behavior rather than file hashes.
 
 ---
 

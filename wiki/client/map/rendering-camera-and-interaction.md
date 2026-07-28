@@ -10,6 +10,10 @@ Map presentation lets players read national control and terrain, move around the
 
 Political mode reads the current province owner through the scene-provided data source. Cover and elevation presentation comes from layers already present in the generated map scene. A province capture refreshes the affected fill and rebuilt boundaries after `GameState` has received the server result.
 
+Map cartography and runtime nation labels render below the combined visibility fog.
+World-space division, route, combat, aircraft, and naval marker roots render above it.
+This draw-order boundary keeps markers readable without per-item lighting materials.
+
 ## Province interaction
 
 `MapInteraction`, implemented by `client/src/systems/map/map_interaction.gd`, connects to the generated `Area2D` click regions after the map loads. It reports hover, left-click selection, right-click intent, and selection clearing; it does not change province ownership or resolve an order.
@@ -35,4 +39,3 @@ Opening full-screen division, tactical, bombing, or air-combat panels also disab
 - [[client/ui/hud-panels-and-input|HUD Panels and Input]]
 - [[client/military/divisions-and-selection|Divisions and Selection]]
 - [[client/air/wings-missions-and-movement|Wings, Missions, and Movement]]
-
