@@ -472,21 +472,22 @@ FILE: src/systems/map/map_renderer.gd
 
 ```
 MODULE: MapInteraction
-PURPOSE: Handles all mouse and touch input on the map. Detects province clicks and
-         hovers, manages selection state. Emits signals for other systems to act on.
+PURPOSE: Detects province hover and left-click selection. Emits signals for other
+         systems to act on.
 OWNS: Currently selected province_id, currently hovered province_id.
 EXPOSES:
   signals:
     province_clicked(province_id: String)
     province_hovered(province_id: String)
-    province_right_clicked(province_id: String)
     selection_cleared()
   methods:
-    get_selected_province() -> String
-    disable_input()
-    enable_input()
+    get_hovered_province_id() -> String
+    deselect()
+    set_player_input_enabled(enabled: bool)
 CONSUMES:
-  signals: (none)
+  signals:
+    EventBus.pause_menu_blocking_changed
+    EventBus.chat_input_focus_changed
   reads: MapLoader.get_all_province_ids() for click detection
 FORBIDDEN FROM: game logic, rendering, writing GameState
 AUTOLOAD: no
@@ -499,20 +500,29 @@ FILE: src/systems/map/map_interaction.gd
 
 ```
 MODULE: CameraSystem
-PURPOSE: Owns the 2D map camera. Pan, zoom, zoom limits, smooth movement, edge scroll.
-OWNS: Camera2D node, current zoom level, current pan position.
+PURPOSE: Owns the 2D map camera. Pan, zoom, zoom limits, smooth keyboard movement,
+         and right-button drag gesture classification.
+OWNS: Camera2D node, current zoom level, current pan position, active drag gesture.
 EXPOSES:
-  signals: (none)
+  signals:
+    zoom_changed(level: float)
+    right_click_requested(screen_position: Vector2, shift_pressed: bool)
   methods:
     pan_to_province(province_id: String)
     pan_to_position(position: Vector2)
     set_zoom(level: float)
-    get_zoom() -> float
-    enable_edge_scroll(enabled: bool)
+    set_player_input_enabled(enabled: bool)
 CONSUMES:
-  signals: (none — input driven internally)
-  reads: MapLoader.get_province_node(id) for pan_to_province()
-FORBIDDEN FROM: game state, rendering, input other than camera controls
+  signals:
+    EventBus.pause_menu_blocking_changed
+    EventBus.chat_input_focus_changed
+    EventBus.ui_pointer_blocking_changed
+    EventBus.ui_text_input_focus_changed
+  reads:
+    MapLoader.get_map_bounds()
+    MapLoader.get_province_focus_position(id)
+    MapLoader.get_province_node(id)
+FORBIDDEN FROM: game state, rendering, resolving gameplay right-click actions
 AUTOLOAD: no
 FILE: src/systems/map/camera_system.gd
 ```

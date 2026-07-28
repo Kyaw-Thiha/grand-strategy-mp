@@ -4,7 +4,6 @@ extends Node
 
 signal province_clicked(province_id: String)
 signal province_hovered(province_id: String)
-signal province_right_clicked(province_id: String)
 signal selection_cleared()
 
 var _map_loader: Node = null
@@ -74,9 +73,6 @@ func _on_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int, p
 	if mb.button_index == MOUSE_BUTTON_LEFT:
 		_selected_id = pid
 		province_clicked.emit(pid)
-	elif mb.button_index == MOUSE_BUTTON_RIGHT:
-		province_right_clicked.emit(pid)
-		get_viewport().set_input_as_handled()
 
 
 ## Enables or disables player-driven province hover and click interaction.

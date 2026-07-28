@@ -1,20 +1,16 @@
 extends Node
 ## Owns the Camera2D. Nothing else touches zoom or pan.
 ## WASD movement with acceleration ramp and instant stop on key release.
-## Smooth rounded-edge scroll with WASD priority.
+## Right-button drag panning with click/drag arbitration for map commands.
 ## Smooth zoom via lerp for both scroll wheel and Ctrl++/Ctrl+-.
 
 signal zoom_changed(level: float)
+signal right_click_requested(screen_position: Vector2, shift_pressed: bool)
 
-const BASE_SPEED     := 600.0
-const MAX_SPEED      := 3000.0
-const ACCELERATION   := 1000.0
-const EDGE_SCROLL_DETECTION_BAND := 180.0
-const EDGE_SCROLL_STRENGTH_BAND := 120.0
-const EDGE_MIN_SPEED := 180.0
-const EDGE_MAX_SPEED := 1400.0
-const EDGE_SPEED_CURVE := 1.35
-const EDGE_CORNER_RADIUS := 180.0
+const BASE_SPEED     := 350.0
+const MAX_SPEED      := 900.0
+const ACCELERATION   := 600.0
+const RIGHT_DRAG_THRESHOLD_PX := 8.0
 const ZOOM_STEP      := 0.15
 const ZOOM_KB_STEP   := 0.25
 const ZOOM_SPEED     := 8.0
@@ -25,7 +21,6 @@ const NATION_LABEL_ZOOM_THRESHOLD := 0.6
 var _camera: Camera2D = null
 var _move_speed: float = 0.0
 var _target_zoom: float = 1.0
-var _edge_scroll_enabled: bool = true
 var _player_input_enabled: bool = true
 var _pause_input_blocked: bool = false
 var _chat_input_blocked: bool = false
@@ -35,6 +30,12 @@ var _map_loader: Node = null
 var _label_region_active: bool = false  # true when zoom < threshold
 var _map_bounds: Rect2 = Rect2()
 var _bounds_ready: bool = false
+var _right_drag_tracking: bool = false
+var _right_drag_active: bool = false
+var _right_drag_start_screen: Vector2 = Vector2.ZERO
+var _zoom_anchor_active: bool = false
+var _zoom_anchor_screen: Vector2 = Vector2.ZERO
+var _zoom_anchor_world: Vector2 = Vector2.ZERO
 
 
 func setup(camera: Camera2D, map_loader: Node) -> void:
@@ -60,12 +61,73 @@ func _process(delta: float) -> void:
 			_map_bounds = b
 			_bounds_ready = true
 	_handle_movement(delta)
-	_camera.zoom = _camera.zoom.lerp(Vector2(_target_zoom, _target_zoom), ZOOM_SPEED * delta)
+	var next_zoom: float = lerpf(
+		_camera.zoom.x,
+		_target_zoom,
+		minf(ZOOM_SPEED * delta, 1.0)
+	)
+	if is_equal_approx(next_zoom, _target_zoom):
+		next_zoom = _target_zoom
+	if _zoom_anchor_active:
+		_apply_cursor_anchored_zoom(next_zoom)
+	else:
+		_camera.zoom = Vector2(next_zoom, next_zoom)
 	_clamp_position()
+	if next_zoom == _target_zoom:
+		_reset_zoom_anchor()
 	var now_in_label_region: bool = _camera.zoom.x < NATION_LABEL_ZOOM_THRESHOLD
 	if now_in_label_region != _label_region_active:
 		_label_region_active = now_in_label_region
 		zoom_changed.emit(_camera.zoom.x)
+
+
+## Captures right-button map gestures before province and unit input can act on them.
+## A release below the drag threshold is forwarded as a gameplay right-click request.
+## Parameters:
+## - event: raw viewport mouse input.
+## Returns: nothing.
+func _input(event: InputEvent) -> void:
+	if _camera == null:
+		return
+
+	if event is InputEventMouseButton:
+		var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+		if mouse_button.button_index != MOUSE_BUTTON_RIGHT:
+			return
+
+		if mouse_button.pressed:
+			if not _player_input_enabled or _ui_pointer_blocking:
+				return
+			_right_drag_tracking = true
+			_right_drag_active = false
+			_right_drag_start_screen = mouse_button.position
+			get_viewport().set_input_as_handled()
+			return
+
+		if not _right_drag_tracking:
+			return
+
+		var completed_drag: bool = _right_drag_active
+		_reset_right_drag()
+		get_viewport().set_input_as_handled()
+		if not completed_drag and _player_input_enabled:
+			right_click_requested.emit(mouse_button.position, mouse_button.shift_pressed)
+		return
+
+	if event is InputEventMouseMotion and _right_drag_tracking:
+		var mouse_motion: InputEventMouseMotion = event as InputEventMouseMotion
+		if (
+			not _right_drag_active
+			and _right_drag_start_screen.distance_to(mouse_motion.position)
+				>= RIGHT_DRAG_THRESHOLD_PX
+		):
+			_right_drag_active = true
+
+		if _right_drag_active:
+			_reset_zoom_anchor()
+			_camera.position -= mouse_motion.relative / _camera.zoom.x
+			_clamp_position()
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -78,17 +140,33 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_target_zoom = clampf(_target_zoom + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM)
+				var next_target_zoom: float = clampf(
+					_target_zoom + ZOOM_STEP,
+					MIN_ZOOM,
+					MAX_ZOOM
+				)
+				if next_target_zoom != _target_zoom:
+					_capture_zoom_anchor(mb.position)
+					_target_zoom = next_target_zoom
 			elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_target_zoom = clampf(_target_zoom - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM)
+				var next_target_zoom: float = clampf(
+					_target_zoom - ZOOM_STEP,
+					MIN_ZOOM,
+					MAX_ZOOM
+				)
+				if next_target_zoom != _target_zoom:
+					_capture_zoom_anchor(mb.position)
+					_target_zoom = next_target_zoom
 
 	if event is InputEventKey:
 		var ke: InputEventKey = event as InputEventKey
 		if ke.pressed and ke.ctrl_pressed:
 			if ke.keycode == KEY_EQUAL or ke.keycode == KEY_KP_ADD:
+				_reset_zoom_anchor()
 				_target_zoom = clampf(_target_zoom + ZOOM_KB_STEP, MIN_ZOOM, MAX_ZOOM)
 				get_viewport().set_input_as_handled()
 			elif ke.keycode == KEY_MINUS or ke.keycode == KEY_KP_SUBTRACT:
+				_reset_zoom_anchor()
 				_target_zoom = clampf(_target_zoom - ZOOM_KB_STEP, MIN_ZOOM, MAX_ZOOM)
 				get_viewport().set_input_as_handled()
 
@@ -107,26 +185,25 @@ func pan_to_province(province_id: String) -> void:
 
 func pan_to_position(pos: Vector2) -> void:
 	if _camera:
+		_reset_zoom_anchor()
 		_camera.position = pos
 		_clamp_position()
 
 
 func set_zoom(level: float) -> void:
+	_reset_zoom_anchor()
 	_target_zoom = clampf(level, MIN_ZOOM, MAX_ZOOM)
-
-
-func enable_edge_scroll(enabled: bool) -> void:
-	_edge_scroll_enabled = enabled
 
 
 ## Enables or disables player-driven camera controls without stopping camera updates.
 ## Parameters:
-## - enabled: true when player keyboard, wheel, and edge scroll input should move the camera.
+## - enabled: true when player keyboard, wheel, and right-drag input should move the camera.
 ## Returns: nothing.
 func set_player_input_enabled(enabled: bool) -> void:
 	_player_input_enabled = enabled
 	if not enabled:
 		_move_speed = 0.0
+		_reset_right_drag()
 
 
 # ── internal ──────────────────────────────────────────────────────────────────
@@ -150,6 +227,7 @@ func _handle_movement(delta: float) -> void:
 	var wasd_active: bool = wasd_dir != Vector2.ZERO
 
 	if wasd_active:
+		_reset_zoom_anchor()
 		if _move_speed == 0.0:
 			_move_speed = BASE_SPEED
 		_move_speed = move_toward(_move_speed, MAX_SPEED, ACCELERATION * delta)
@@ -159,117 +237,50 @@ func _handle_movement(delta: float) -> void:
 
 	_move_speed = 0.0
 
-	if _edge_scroll_enabled and not _ui_pointer_blocking:
-		var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
-		var viewport_size: Vector2 = _camera.get_viewport().get_visible_rect().size
-		var edge_velocity: Vector2 = _get_edge_scroll_velocity(mouse, viewport_size)
 
-		if edge_velocity != Vector2.ZERO:
-			_camera.position += edge_velocity * delta / _camera.zoom.x
-			_clamp_position()
+## Clears right-button gesture state without emitting a gameplay click.
+## Parameters: none.
+## Returns: nothing.
+func _reset_right_drag() -> void:
+	_right_drag_tracking = false
+	_right_drag_active = false
+	_right_drag_start_screen = Vector2.ZERO
 
 
-## Computes smooth camera edge-scroll velocity for a viewport-space mouse position.
+## Captures the world point beneath a mouse-wheel event for the smooth zoom animation.
 ## Parameters:
-## - viewport_mouse: mouse position in viewport coordinates.
-## - viewport_size: visible viewport size in pixels.
-## Returns: world-space pixels per second before zoom scaling.
-func _get_edge_scroll_velocity(viewport_mouse: Vector2, viewport_size: Vector2) -> Vector2:
-	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
-		return Vector2.ZERO
-
-	var rounded_corner_vector: Vector2 = _get_rounded_corner_scroll_vector(viewport_mouse, viewport_size)
-	var scroll_vector: Vector2 = rounded_corner_vector
-	if scroll_vector == Vector2.ZERO:
-		scroll_vector = Vector2(
-			_get_axis_edge_strength(viewport_mouse.x, viewport_size.x),
-			_get_axis_edge_strength(viewport_mouse.y, viewport_size.y)
-		)
-
-	var scroll_strength: float = clampf(scroll_vector.length(), 0.0, 1.0)
-	if scroll_strength <= 0.0:
-		return Vector2.ZERO
-
-	var scroll_speed: float = lerpf(EDGE_MIN_SPEED, EDGE_MAX_SPEED, scroll_strength)
-	return scroll_vector.normalized() * scroll_speed
+## - screen_position: cursor position in viewport coordinates.
+## Returns: nothing.
+func _capture_zoom_anchor(screen_position: Vector2) -> void:
+	var viewport_rect: Rect2 = get_viewport().get_visible_rect()
+	var viewport_center: Vector2 = viewport_rect.position + viewport_rect.size * 0.5
+	_zoom_anchor_screen = screen_position
+	_zoom_anchor_world = (
+		_camera.position
+		+ (screen_position - viewport_center) / _camera.zoom.x
+	)
+	_zoom_anchor_active = true
 
 
-## Returns signed smooth edge strength for one viewport axis.
+## Applies one smooth zoom step while preserving the captured cursor anchor.
 ## Parameters:
-## - mouse_axis: mouse coordinate on the axis.
-## - viewport_axis_size: viewport size on the axis.
-## Returns: -1.0 to 1.0, where sign is scroll direction.
-func _get_axis_edge_strength(mouse_axis: float, viewport_axis_size: float) -> float:
-	var detection_band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, viewport_axis_size * 0.5)
-	if detection_band_size <= 0.0:
-		return 0.0
-	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, detection_band_size)
-
-	if mouse_axis < detection_band_size:
-		var left_strength: float = clampf(
-			(detection_band_size - mouse_axis) / strength_band_size,
-			0.0,
-			1.0
-		)
-		return -pow(left_strength, EDGE_SPEED_CURVE)
-	if mouse_axis > viewport_axis_size - detection_band_size:
-		var right_strength: float = clampf(
-			(mouse_axis - (viewport_axis_size - detection_band_size)) / strength_band_size,
-			0.0,
-			1.0
-		)
-		return pow(right_strength, EDGE_SPEED_CURVE)
-	return 0.0
+## - zoom_level: uniform zoom level for this frame.
+## Returns: nothing.
+func _apply_cursor_anchored_zoom(zoom_level: float) -> void:
+	var viewport_rect: Rect2 = get_viewport().get_visible_rect()
+	var viewport_center: Vector2 = viewport_rect.position + viewport_rect.size * 0.5
+	var anchor_offset: Vector2 = (_zoom_anchor_screen - viewport_center) / zoom_level
+	_camera.zoom = Vector2(zoom_level, zoom_level)
+	_camera.position = _zoom_anchor_world - anchor_offset
 
 
-## Returns a diagonal scroll vector when the mouse leaves the rounded safe corner.
-## Parameters:
-## - mouse: mouse position in viewport coordinates.
-## - viewport_size: visible viewport size in pixels.
-## Returns: signed vector whose length is the corner scroll strength.
-func _get_rounded_corner_scroll_vector(mouse: Vector2, viewport_size: Vector2) -> Vector2:
-	var band_size: float = minf(EDGE_SCROLL_DETECTION_BAND, minf(viewport_size.x, viewport_size.y) * 0.5)
-	var strength_band_size: float = minf(EDGE_SCROLL_STRENGTH_BAND, band_size)
-	var radius: float = minf(EDGE_CORNER_RADIUS, minf(viewport_size.x, viewport_size.y) * 0.5 - band_size)
-	if band_size <= 0.0 or strength_band_size <= 0.0 or radius <= 0.0:
-		return Vector2.ZERO
-
-	var corner_centers: Array[Vector2] = [
-		Vector2(band_size + radius, band_size + radius),
-		Vector2(viewport_size.x - band_size - radius, band_size + radius),
-		Vector2(band_size + radius, viewport_size.y - band_size - radius),
-		Vector2(viewport_size.x - band_size - radius, viewport_size.y - band_size - radius),
-	]
-
-	for corner_center: Vector2 in corner_centers:
-		var from_corner_center: Vector2 = mouse - corner_center
-		var outward_sign: Vector2 = Vector2(
-			signf(corner_center.x - viewport_size.x * 0.5),
-			signf(corner_center.y - viewport_size.y * 0.5)
-		)
-		var is_in_corner_quadrant: bool = (
-			from_corner_center.x * outward_sign.x > 0.0
-			and from_corner_center.y * outward_sign.y > 0.0
-		)
-		if not is_in_corner_quadrant:
-			continue
-
-		var distance_from_corner_center: float = from_corner_center.length()
-		if distance_from_corner_center <= radius:
-			continue
-
-		var viewport_corner: Vector2 = Vector2(
-			0.0 if corner_center.x < viewport_size.x * 0.5 else viewport_size.x,
-			0.0 if corner_center.y < viewport_size.y * 0.5 else viewport_size.y
-		)
-		var corner_strength: float = clampf(
-			(distance_from_corner_center - radius) / strength_band_size,
-			0.0,
-			1.0
-		)
-		return from_corner_center.normalized() * pow(corner_strength, EDGE_SPEED_CURVE)
-
-	return Vector2.ZERO
+## Clears any mouse-wheel zoom anchor without changing the target zoom.
+## Parameters: none.
+## Returns: nothing.
+func _reset_zoom_anchor() -> void:
+	_zoom_anchor_active = false
+	_zoom_anchor_screen = Vector2.ZERO
+	_zoom_anchor_world = Vector2.ZERO
 
 
 func _clamp_position() -> void:

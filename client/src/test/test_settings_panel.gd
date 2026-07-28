@@ -42,7 +42,6 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_check(_has_label_text(settings_panel, "Fullscreen"), "Display page has fullscreen option")
 	_check(_has_label_text(settings_panel, "UI Scale"), "Display page has UI scale option")
-	_check(_has_label_text(settings_panel, "Camera Edge Scroll"), "Display page has edge scroll option")
 
 	var advanced_button: Button = _find_button_text(settings_panel, "ADVANCED")
 	if advanced_button != null:

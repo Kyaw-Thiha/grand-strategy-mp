@@ -132,7 +132,7 @@ visual foundation everything else sits on — want it done early.
 - [x] `MapLoader` — parse `map_data.json`, instantiate Polygon2D nodes, build province registry
 - [x] `MapRenderer` — colour provinces by owner (hardcoded test palette, no server state yet)
 - [x] `MapInteraction` — click detection, hover highlight, province_clicked signal
-- [x] `CameraSystem` — pan, zoom, zoom limits, edge scroll
+- [x] `CameraSystem` — right-drag and keyboard pan, zoom, and zoom limits
 
 ### Verification gate
 Launch Godot → map renders → can click provinces → camera pans and zooms smoothly.
