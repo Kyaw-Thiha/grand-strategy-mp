@@ -10,7 +10,7 @@ The production match scene gives players the map, armies, air wings, HUD, pause 
 
 ## Shared map setup
 
-`client/src/game/map_scene.gd` provides the common map loading, input routing, HUD setup, province selection, air-wing right-click handling, and player-nation camera focus used by both map compositions. `client/src/game/game_scene.gd` uses the server-selected `GameState.map_id` and contains no fixture hook.
+`client/src/game/map_scene.gd` provides the common map loading, input routing, HUD setup, province selection, right-click camera-versus-order arbitration, and player-nation camera focus used by both map compositions. Stationary right-click releases retain air-before-military command priority, while right drags are consumed as camera movement. `client/src/game/game_scene.gd` uses the server-selected `GameState.map_id` and contains no fixture hook.
 
 The scene returns to the lobby with an error if the game has no map ID. It does not guess a default map, because showing a different geography from the active match would make player orders misleading.
 

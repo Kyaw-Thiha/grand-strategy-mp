@@ -36,6 +36,7 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0))
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
+	_camera_system.right_click_requested.connect(_on_camera_right_click_requested)
 	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
@@ -72,6 +73,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		if (
+			event is InputEventMouseButton
+			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT
+		):
+			return
 		var event_position: Vector2
 		if event is InputEventMouseButton:
 			event_position = (event as InputEventMouseButton).position
@@ -127,7 +133,6 @@ func _on_map_loaded(province_count: int) -> void:
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)
 	_map_interaction.province_clicked.connect(_on_province_clicked)
-	_map_interaction.province_right_clicked.connect(_on_province_right_clicked)
 	EventBus.division_selected.connect(func(_id: String) -> void:
 		_map_interaction.deselect()
 		_map_renderer.clear_highlights()
@@ -222,21 +227,54 @@ func _on_province_clicked(province_id: String) -> void:
 		EventBus.province_selected.emit(province_id)
 
 
-func _on_province_right_clicked(province_id: String) -> void:
-	if _air_wing_system == null or _map_loader == null:
+## Routes a stationary right-button gesture to gameplay systems after camera arbitration.
+## Parameters:
+## - screen_position: release position in viewport coordinates.
+## - shift_pressed: modifier state captured on release.
+## Returns: nothing.
+func _on_camera_right_click_requested(
+	screen_position: Vector2,
+	shift_pressed: bool
+) -> void:
+	if _air_wing_system == null or _military_system == null:
 		return
 
-	var world_pos: Vector2 = _map_loader.get_province_focus_position(province_id)
-	if world_pos == Vector2.INF:
-		var province_node: Node2D = _map_loader.get_province_node(province_id)
-		if province_node == null:
-			return
-		world_pos = province_node.position
+	var world_position: Vector2 = (
+		get_viewport().get_canvas_transform().affine_inverse() * screen_position
+	)
+	var hovered_province_id: String = _map_interaction.get_hovered_province_id()
 
 	var right_click: InputEventMouseButton = InputEventMouseButton.new()
 	right_click.button_index = MOUSE_BUTTON_RIGHT
 	right_click.pressed = true
-	_air_wing_system.handle_mouse_input(right_click, world_pos, province_id)
+	right_click.position = screen_position
+	right_click.shift_pressed = shift_pressed
+
+	_dispatch_gameplay_right_click(
+		right_click,
+		world_position,
+		hovered_province_id
+	)
+
+
+## Dispatches a classified gameplay right-click using air-before-military priority.
+## Parameters:
+## - right_click: synthesized pressed event expected by gameplay systems.
+## - world_position: release position transformed into map coordinates.
+## - hovered_province_id: province currently under the pointer, if any.
+## Returns: nothing.
+func _dispatch_gameplay_right_click(
+	right_click: InputEventMouseButton,
+	world_position: Vector2,
+	hovered_province_id: String
+) -> void:
+	if _air_wing_system.handle_mouse_input(
+		right_click,
+		world_position,
+		hovered_province_id
+	):
+		return
+	_military_system.handle_mouse_input(right_click, world_position)
 
 
 class _RuntimeProvinceDataSource:

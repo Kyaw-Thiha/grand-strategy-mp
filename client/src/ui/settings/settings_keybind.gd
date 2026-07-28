@@ -27,7 +27,6 @@ var _sfx_volume: float = 80.0
 var _music_volume: float = 70.0
 var _ui_scale: float = 100.0
 var _fullscreen_enabled: bool = false
-var _edge_scroll_enabled: bool = true
 var _vim_mode_enabled: bool = false
 
 
@@ -284,9 +283,6 @@ func _build_display_page() -> void:
 	_page_content.add_child(_create_slider_row("UI Scale", _ui_scale, func(value: float) -> void:
 		_ui_scale = value
 	, 75.0, 125.0, "%d%%"))
-	_page_content.add_child(_create_toggle_row("Camera Edge Scroll", _edge_scroll_enabled, func(enabled: bool) -> void:
-		_edge_scroll_enabled = enabled
-	))
 
 	var hint: Label = Label.new()
 	hint.text = "Display options are interactive placeholders for now."

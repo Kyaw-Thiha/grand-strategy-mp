@@ -702,6 +702,9 @@ requiring a tooltip lookup.
 | Key | Action |
 |---|---|
 | W A S D | Pan camera |
+| Right mouse drag | Pan camera by grabbing the map |
+| Mouse wheel up | Zoom in toward the cursor |
+| Mouse wheel down | Zoom out from the cursor |
 | Ctrl +/− | Zoom in/out |
 | F1–F8 | Jump to camera bookmark |
 | Ctrl + F1–F8 | Set camera bookmark at current position/zoom |
