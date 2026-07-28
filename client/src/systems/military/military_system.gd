@@ -1507,8 +1507,10 @@ func _spawn_radar_ping(pos: Vector2) -> void:
 
 
 func _on_division_appeared(division_id: String) -> void:
+	_air_revealed_divisions[division_id] = true
 	_on_division_added(division_id)
 	var icon: Node2D = _icons.get(division_id) as Node2D
+	icon.visible = true
 	if is_instance_valid(icon) and icon.has_method("reveal"):
 		icon.reveal()
 
@@ -1516,10 +1518,12 @@ func _on_division_appeared(division_id: String) -> void:
 func _on_division_vanishing(division_id: String) -> void:
 	var icon: Node2D = _icons.get(division_id) as Node2D
 	if not is_instance_valid(icon) or not icon.has_method("conceal"):
+		_air_revealed_divisions.erase(division_id)
 		_do_division_removal(division_id)
 		return
 	var finished: Signal = icon.conceal()
 	await finished
+	_air_revealed_divisions.erase(division_id)
 	_do_division_removal(division_id)
 
 

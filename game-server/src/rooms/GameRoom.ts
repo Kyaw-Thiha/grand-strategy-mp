@@ -1419,8 +1419,38 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       }
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
       this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
-      this.airWingLifecycleSystem.tick(this.state, this.tickCount,
-        (type, msg) => this.broadcast(type, msg));
+
+      this.airDetectionSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
+      );
+
+      this.serverVisibilitySystem.tick(
+        this.state,
+        this.airDetectionSystem,
+        (nationId) => this.getAllianceFor(nationId),
+        (sessionId, type, msg) => {
+          const client = this.clients.find(c => c.sessionId === sessionId);
+          client?.send(type, msg);
+        },
+        (sessionId) => {
+          const p = this.state.players.get(sessionId);
+          if (!p) return null;
+          return this.getNationForPlayer(p.userId)?.nation_id ?? null;
+        },
+        this.clients,
+      );
+
+      const wingBroadcast = (type: string, msg: any) => {
+        if (type === "AIR_WING_UPDATES") {
+          this.broadcastFilteredAirWingUpdates(msg);
+        } else {
+          this.broadcast(type, msg);
+        }
+      };
+      this.airWingLifecycleSystem.tick(this.state, this.tickCount, wingBroadcast);
 
       // Wings set to RTB by the lifecycle tick (fuel-out, auto-resolve) get their paths
       // here. pathfinder.tick() hasn't run yet, so we evaluate one tick ahead via
@@ -1428,10 +1458,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this._assignRtbPaths(true);
 
       this.airDubinsPathfinder.tick(this.state, TICK_MS, this.airSpatialBucket, this.airWingLifecycleSystem,
-        (type, msg) => this.broadcast(type, msg));
+        wingBroadcast);
 
       this.airCombatSystem.tick(this.state, this.airWingLifecycleSystem,
-        (type, msg) => this.broadcast(type, msg));
+        wingBroadcast);
 
       // Wings set to RTB by the combat system get their paths in the same tick.
       // pathfinder.tick() has already run, so wing.position_lng/lat is current.
@@ -1530,29 +1560,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
         (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
-      );
-
-      this.airDetectionSystem.tick(
-        this.state,
-        this.airWingLifecycleSystem,
-        (type, msg) => this.broadcast(type, msg),
-        (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
-      );
-
-      this.serverVisibilitySystem.tick(
-        this.state,
-        this.airDetectionSystem,
-        (nationId) => this.getAllianceFor(nationId),
-        (sessionId, type, msg) => {
-          const client = this.clients.find(c => c.sessionId === sessionId);
-          client?.send(type, msg);
-        },
-        (sessionId) => {
-          const p = this.state.players.get(sessionId);
-          if (!p) return null;
-          return this.getNationForPlayer(p.userId)?.nation_id ?? null;
-        },
-        this.clients,
       );
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
