@@ -73,7 +73,7 @@ def _validate_note_shapes(markdown_files: list[Path]) -> list[str]:
             if "\n# Wiki\n" not in text or "\n# Related Notes\n" not in text:
                 errors.append(f"{_relative(path)}: index requires # Wiki and # Related Notes")
             continue
-        if WIKI_ROOT / "docs" in path.parents or WIKI_ROOT / "plans" in path.parents:
+        if WIKI_ROOT / "docs" in path.parents or path.stem.endswith("-plan"):
             continue
         details_pos = text.find("\n# Details\n")
         related_pos = text.find("\n# Related Notes\n")
@@ -90,6 +90,7 @@ def _validate_legacy_paths(markdown_files: list[Path]) -> list[str]:
     patterns = {
         "old-docs/": re.compile(r"old-docs/"),
         "wiki/sources": re.compile(r"wiki/sources"),
+        "dedicated wiki plans/": re.compile(r"wiki/plans"),
         "root docs/": re.compile(r"(?<!wiki/)(?<!\[\[)docs/"),
         "root plans/": re.compile(r"(?<!wiki/)(?<!\[\[)plans/"),
         "old ingest skill": re.compile(r"skills/ingest"),

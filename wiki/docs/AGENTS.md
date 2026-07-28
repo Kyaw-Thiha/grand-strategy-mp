@@ -20,5 +20,5 @@ requirements, roadmap state, and completion tracking.
 - Keep implementation detail in these sources when it is a required design contract; put
   fast current-code orientation and source anchors in the ordinary component wiki notes.
 
-Do not create implementation plans here. Active plans belong in `wiki/plans/` and are
-deleted after completion.
+Do not create implementation plans here. Colocate an active `<task>-plan.md` with the
+ordinary component notes that own the work, and delete it after completion.

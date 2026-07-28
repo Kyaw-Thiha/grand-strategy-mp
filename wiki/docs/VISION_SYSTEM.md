@@ -65,7 +65,8 @@ Implement a first-pass client-side vision system for the Godot game.
 
 Before implementation:
 
-- Create a plan in `wiki/plans/vision-system.md`.
+- Create `wiki/client/vision/vision-system-plan.md` and list it in
+  `wiki/client/vision/index.md` while work is active.
 - Keep the plan phase-based and decision-complete.
 - Do not mutate `GameState`.
 - Do not add server logic yet.

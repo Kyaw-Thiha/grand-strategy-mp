@@ -11,8 +11,9 @@ unrelated user changes, and use the documentation hierarchy below instead of ass
   roadmap state, and completion checkboxes.
 - Component notes elsewhere in `wiki/` summarize the current implementation for fast LLM
   context and link to the source files that own it.
-- `wiki/plans/` holds temporary implementation plans. Completed plans are reconciled into
-  durable documentation and deleted, not archived.
+- Temporary implementation plans are colocated with the component notes they affect and
+  named `<task>-plan.md`. Completed plans are reconciled into durable documentation and
+  deleted, not archived.
 
 When sources disagree, follow `wiki/docs/`. Treat contradicting implementation as a defect
 or an explicit unresolved mismatch; do not rewrite a confirmed design merely to match drift.
@@ -30,17 +31,19 @@ Load context economically:
 5. Do not preload the full wiki or unrelated design documents and plans.
 
 Read and follow `wiki/AGENTS.md` whenever working on documentation. More specific agent
-files under `wiki/docs/` and `wiki/plans/` apply to those areas.
+files within the relevant wiki component apply to that area.
 
 ## Workflow
 
 1. Propose and agree on a plan before implementation.
-2. Save the agreed plan as `wiki/plans/<task>.md`.
+2. Save the agreed plan as `<task>-plan.md` in the narrowest wiki component that owns the
+   work, and add it to that component's `index.md` while active.
 3. Execute it phase by phase and run the smallest relevant verification.
 4. Reconcile affected component notes and authoritative source checkboxes after the final
    implementation. Correct any material, confidently verified mismatch discovered during
    the task unless the user explicitly requested read-only work.
-5. Delete the completed plan after its durable information has been incorporated.
+5. Delete the completed plan and remove its index entry after its durable information has
+   been incorporated.
 
 Do not edit an accurate note merely to record that it was reviewed. Reconcile once against
 the final verified state rather than after every intermediate edit.

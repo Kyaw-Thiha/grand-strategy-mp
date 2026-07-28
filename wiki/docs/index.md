@@ -33,4 +33,3 @@ designed feature; ordinary wiki notes provide the faster view of current code.
 # Related Notes
 
 - [[index|Grand Strategy Multiplayer Wiki]]
-- [[plans/index|Active Implementation Plans]]

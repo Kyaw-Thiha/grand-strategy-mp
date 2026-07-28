@@ -21,8 +21,8 @@ Run this workflow once after final implementation and relevant verification:
 5. Mark authoritative source checkboxes complete only when implementation and verification
    support them. Do not alter confirmed design to accommodate accidental code drift.
 6. Repair affected parent indexes and incoming or outgoing links.
-7. Delete the completed file from `wiki/plans/` after all durable information has been
-   reconciled, then update `wiki/plans/index.md`.
+7. Delete the completed colocated `<task>-plan.md` after all durable information has been
+   reconciled, then remove it from its component `index.md`.
 8. Run `python3 scripts/check-wiki.py`.
 
 In the final handoff, report component notes and source documents created, updated, or

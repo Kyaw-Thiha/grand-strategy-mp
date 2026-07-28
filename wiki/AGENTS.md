@@ -21,9 +21,16 @@ context without loading the full source documents or codebase.
 
 ### Temporary plans
 
-`wiki/plans/` contains decision-complete plans for active work. Follow
-`wiki/plans/AGENTS.md`. Delete a completed plan after its durable facts have been reconciled
-into source documents and implementation notes.
+Colocate each decision-complete active plan with the ordinary component notes that own most
+of its implementation, name it `<task>-plan.md`, and list it in that folder's `index.md`.
+For cross-component work, use the narrowest shared component and link the other affected
+notes. Do not put temporary plans in `wiki/docs/`; those files are durable authoritative
+sources. Delete a completed plan and its index entry after its durable facts have been
+reconciled into source documents and implementation notes.
+
+An active plan must link the authoritative sources and component notes that govern it,
+state verification and documentation-reconciliation requirements, and remain subordinate
+to `wiki/docs/`.
 
 ## Required Reconciliation
 
@@ -120,6 +127,6 @@ correctly.
 
 ## Completion Report
 
-Report notes and source documents created, updated, moved, or removed; plan deletion; link
-repairs; checklist changes; and any unresolved design/implementation mismatch. Do not create
-a persistent ingestion log.
+Report notes and source documents created, updated, moved, or removed; colocated plan
+deletion; link repairs; checklist changes; and any unresolved design/implementation
+mismatch. Do not create a persistent ingestion log.

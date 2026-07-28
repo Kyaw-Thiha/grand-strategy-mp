@@ -8,7 +8,6 @@ the current code first, with future work and implementation gaps labelled explic
 # Wiki
 
 - [[docs/index|Authoritative Design Sources]] — confirmed designs, implementation requirements, roadmap state, and completion checklists.
-- [[plans/index|Active Implementation Plans]] — temporary plans for work currently in progress.
 - [[api-server/index|API Server]] — account and game-independent backend data, lobby coordination, and trusted persistence calls.
 - [[game-server/index|Game Server]] — authoritative multiplayer rooms, live game state, and simulation resolution.
 - [[client/index|Client]] — Godot presentation, input, local UI state, and the read-only mirror of live game state.
