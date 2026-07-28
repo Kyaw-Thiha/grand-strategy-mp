@@ -157,6 +157,12 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)
+		"DIVISION_APPEARED":
+			GameState._apply_division_appeared(data)
+		"DIVISION_VANISHED":
+			EventBus.division_vanishing.emit(data.get("division_id", ""))
+		"AIR_WING_VANISHED":
+			EventBus.air_wing_vanishing.emit(data.get("wing_id", ""))
 
 		"AIR_COMBAT_STARTED":
 			EventBus.air_combat_started.emit(data)

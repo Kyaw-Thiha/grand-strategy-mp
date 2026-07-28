@@ -67,6 +67,7 @@ func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -
 	EventBus.air_wing_added.connect(_on_air_wing_added)
 	EventBus.air_wing_updated.connect(_on_air_wing_updated)
 	EventBus.air_wing_removed.connect(_on_air_wing_removed)
+	EventBus.air_wing_vanishing.connect(_on_air_wing_vanishing)
 	if not EventBus.air_wing_path.is_connected(_on_air_wing_path):
 		EventBus.air_wing_path.connect(_on_air_wing_path)
 	if not EventBus.air_wing_detected.is_connected(_on_air_wing_detected):
@@ -153,6 +154,9 @@ func _on_air_wing_added(wing_id: String) -> void:
 	_icons[wing_id] = icon
 	_refresh_wing_icon_position(wing_id)
 	_update_icon_visibility(wing_id)
+	var is_enemy: bool = data.get("nation_id", "") != GameState.get_my_nation_id()
+	if is_enemy and icon.has_method("reveal"):
+		icon.reveal()
 
 
 func _on_air_wing_updated(wing_id: String) -> void:
@@ -214,6 +218,21 @@ func _on_air_wing_removed(wing_id: String) -> void:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
 		_update_ghost()
+
+
+func _on_air_wing_vanishing(wing_id: String) -> void:
+	var icon: Node2D = _icons.get(wing_id) as Node2D
+	if not is_instance_valid(icon) or not icon.has_method("conceal"):
+		_do_wing_removal(wing_id)
+		return
+	var finished: Signal = icon.conceal()
+	await finished
+	_do_wing_removal(wing_id)
+
+
+func _do_wing_removal(wing_id: String) -> void:
+	GameState.air_wings.erase(wing_id)
+	EventBus.air_wing_removed.emit(wing_id)
 
 
 func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_id: String = "") -> bool:
@@ -805,6 +824,8 @@ func cleanup() -> void:
 		EventBus.air_wing_updated.disconnect(_on_air_wing_updated)
 	if EventBus.air_wing_removed.is_connected(_on_air_wing_removed):
 		EventBus.air_wing_removed.disconnect(_on_air_wing_removed)
+	if EventBus.air_wing_vanishing.is_connected(_on_air_wing_vanishing):
+		EventBus.air_wing_vanishing.disconnect(_on_air_wing_vanishing)
 	if EventBus.air_wing_path.is_connected(_on_air_wing_path):
 		EventBus.air_wing_path.disconnect(_on_air_wing_path)
 	if EventBus.air_wing_detected.is_connected(_on_air_wing_detected):

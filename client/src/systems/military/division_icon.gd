@@ -307,3 +307,17 @@ func _draw() -> void:
 		draw_line(Vector2(0, arrow_y), Vector2(0, arrow_y + 6), arrow_color, 1.5)
 		draw_line(Vector2(-2, arrow_y + 4), Vector2(0, arrow_y + 7), arrow_color, 1.5)
 		draw_line(Vector2(2, arrow_y + 4), Vector2(0, arrow_y + 7), arrow_color, 1.5)
+
+
+func reveal() -> void:
+	modulate.a = 0.0
+	scale = Vector2(0.8, 0.8)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(self, "modulate:a", 1.0, 0.3).set_ease(Tween.EASE_OUT)
+	tw.tween_property(self, "scale", Vector2.ONE, 0.3).set_ease(Tween.EASE_OUT)
+
+
+func conceal() -> Signal:
+	var tw := create_tween()
+	tw.tween_property(self, "modulate:a", 0.0, 0.4)
+	return tw.finished

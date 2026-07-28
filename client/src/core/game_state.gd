@@ -98,6 +98,19 @@ func _apply_division_updates(data: Dictionary) -> void:
 		EventBus.division_updated.emit(div_id)
 
 
+func _apply_division_appeared(data: Dictionary) -> void:
+	var div_id: String = data.get("division_id", "")
+	if div_id.is_empty():
+		return
+	if divisions.has(div_id):
+		for key: String in data:
+			divisions[div_id][key] = data[key]
+		EventBus.division_updated.emit(div_id)
+		return
+	divisions[div_id] = data.duplicate()
+	EventBus.division_appeared.emit(div_id)
+
+
 ## Called by SessionManager when server sends UNIT_DESTROYED.
 ## Sets combat_state to "destroyed" immediately, then removes the division
 ## from GameState after a 1.5s delay so the client can display a brief

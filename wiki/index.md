@@ -13,4 +13,14 @@ the current code first, with future work and implementation gaps labelled explic
 - [[client/index|Client]] — Godot presentation, input, local UI state, and the read-only mirror of live game state.
 - [[map/index|Map Production]] — geographic source data, validation, and generated map assets.
 
+# Future Works
+
+Features designed but deferred pending missing mechanics. Each note captures locked-in
+design decisions so the feature can be implemented correctly when its dependencies land.
+
+- [[future-works/air-fleet-relocate|RELOCATE_FLEET]] — Air fleet relocation to a new front; deferred until airbase levels (economy buildings) are implemented.
+- [[future-works/air-fleet-command|Air Fleet Command]] — Named theater groupings for batch-assigning missions to air wings; deferred pending multi-select UI design.
+- [[future-works/multi-select-ui|Multi-Unit Selection UI]] — Reusable box-select + batch-action panel for air wings, divisions, flotillas; prerequisite for Air Fleet design decision.
+- [[future-works/binary-schema-sync|Binary Schema Sync]] — Migrate from custom JSON broadcasts to Colyseus binary schema + StateView AOI; deferred until Phase 14 (Economy Integration) is complete so all major schema classes exist before migrating once.
+
 # Related Notes

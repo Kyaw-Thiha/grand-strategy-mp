@@ -20,7 +20,22 @@ This lighting is presentation. It does not remove data from `GameState` or decid
 
 `DIVISION_REVEALED` and `DIVISION_HIDDEN` become `EventBus` signals consumed by `MilitarySystem`. Province capture and lobby-state updates also trigger vision refreshes.
 
+**Current.** `DIVISION_APPEARED` and `DIVISION_VANISHED` are per-nation events sent by `ServerVisibilitySystem` when a division enters or leaves a player's visible set (fog-of-war boundary crossing). `AIR_WING_VANISHED` is the wing equivalent — distinct from `AIR_WING_DESTROYED` (permanent destruction vs. temporary visibility loss).
+
 Air wings use a separate detection path: enemy wing icons appear only while airborne and detected through state or `WING_DETECTED`, then disappear after `WING_LOST_DETECTION`.
+
+## Fog-of-war animations
+
+**Current.** When a unit enters or leaves the player's visible set, the client plays a brief animation:
+
+- `DivisionIcon.reveal()` and `AirWingIcon.reveal()`: scale from 0.8× to 1.0× with a 0.3s fade-in (`modulate.a` 0→1, `Tween.EASE_OUT`).
+- `DivisionIcon.conceal()` and `AirWingIcon.conceal()`: 0.4s fade-out returning a `Signal` so the caller can `await` completion before removing the icon from GameState.
+
+These animations replace instant icon appearance/disappearance with a smooth fog-emerge and fade-away effect.
+
+## Detection ring VFX
+
+**Current.** `detection_ring.gd` (`client/src/systems/military/detection_ring.gd`) renders a short-lived cyan expanding ring (0.6s, radius 0→30px, alpha 1→0) at a detected unit's position. It is instantiated via `_spawn_radar_ping()` in `MilitarySystem` when `division_revealed` fires — the signal handler was renamed to `_on_division_revealed_with_ping` to layer the VFX on top of the existing reveal logic.
 
 ## Air detection status
 
@@ -28,7 +43,7 @@ Air wings use a separate detection path: enemy wing icons appear only while airb
 
 ## Information boundary
 
-Current client vision derives some presentation from the data already present in `GameState`. The game server must remain responsible for deciding which sensitive enemy information is sent to each player; darkness alone is not a security boundary.
+**Current.** `ServerVisibilitySystem` enforces the information boundary on the server: each connected client receives only the division and wing data their nation is permitted to see. Own and allied units are always included; idle enemy wings at base are never sent; airborne enemy units only flow through when inside detection coverage or over an owned province. The client fog-of-war and reveal animations are visual polish on top of this server-side filter, not a replacement for it.
 
 # Related Notes
 

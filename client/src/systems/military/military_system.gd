@@ -143,8 +143,10 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.stack_rotated.connect(_on_stack_rotated)
 	EventBus.stack_dissolved.connect(_on_stack_dissolved)
 	EventBus.vision_visibility_changed.connect(_on_vision_visibility_changed)
-	EventBus.division_revealed.connect(_on_division_revealed)
+	EventBus.division_revealed.connect(_on_division_revealed_with_ping)
 	EventBus.division_hidden.connect(_on_division_hidden)
+	EventBus.division_appeared.connect(_on_division_appeared)
+	EventBus.division_vanishing.connect(_on_division_vanishing)
 	EventBus.reposition_mode_requested.connect(_enter_reposition_mode)
 	EventBus.combat_started.connect(_on_combat_started_banner)
 	EventBus.combat_resolved.connect(_on_combat_resolved_banner)
@@ -1488,6 +1490,46 @@ func _on_division_revealed(division_id: String) -> void:
 func _on_division_hidden(division_id: String) -> void:
 	_air_revealed_divisions.erase(division_id)
 	_update_division_visibility(division_id)
+
+
+func _on_division_revealed_with_ping(division_id: String) -> void:
+	_on_division_revealed(division_id)
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if is_instance_valid(icon):
+		_spawn_radar_ping(icon.position)
+
+
+func _spawn_radar_ping(pos: Vector2) -> void:
+	var ring := Node2D.new()
+	ring.position = pos
+	_icon_layer.add_child(ring)
+	ring.set_script(load("res://src/systems/military/detection_ring.gd"))
+
+
+func _on_division_appeared(division_id: String) -> void:
+	_air_revealed_divisions[division_id] = true
+	_on_division_added(division_id)
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	icon.visible = true
+	if is_instance_valid(icon) and icon.has_method("reveal"):
+		icon.reveal()
+
+
+func _on_division_vanishing(division_id: String) -> void:
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if not is_instance_valid(icon) or not icon.has_method("conceal"):
+		_air_revealed_divisions.erase(division_id)
+		_do_division_removal(division_id)
+		return
+	var finished: Signal = icon.conceal()
+	await finished
+	_air_revealed_divisions.erase(division_id)
+	_do_division_removal(division_id)
+
+
+func _do_division_removal(division_id: String) -> void:
+	GameState.divisions.erase(division_id)
+	EventBus.division_removed.emit(division_id)
 
 
 func _update_division_visibility(division_id: String) -> void:
