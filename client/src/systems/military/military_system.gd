@@ -186,8 +186,8 @@ func _process(delta: float) -> void:
 			if icon.position.distance_to(target) > 0.5:
 				icon.position = icon.position.lerp(target, clampf(LERP_SPEED * delta, 0.0, 1.0))
 		if _is_own_unit(div_id) and _vision_system != null \
-				and _vision_system.has_method("update_division_light_position"):
-			_vision_system.update_division_light_position(div_id, icon.position)
+				and _vision_system.has_method("update_division_mask_position"):
+			_vision_system.update_division_mask_position(div_id, icon.position)
 		_update_division_visibility(div_id)
 
 	# Live ghost refresh while building a shift chain with a moving unit

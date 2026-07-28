@@ -15,6 +15,11 @@ The current client uses two kinds of generated input:
 
 `MapLoader.load_map()` reads `map_data.json`, `terrain_lookup.json`, and `waypoints.json`, then instances the matching generated scene. It indexes province nodes and click areas so rendering, input, vision, and military systems can address them by province ID.
 
+Generated visual CanvasItems need no per-item vision material. Runtime layer ordering
+places cartography below the combined fog polygon and gameplay markers above it. The generator's binary
+`ResourceSaver` output is not currently byte-deterministic across otherwise identical runs,
+so verification checks scene behavior and structure rather than binary hashes.
+
 **Current:** map geometry is already generated into `client/scenes/map/western_europe_6.scn`, but static map data is not fully baked into one Godot artifact. The broader optimization that decides which remaining JSON data should become generated Godot resources is still pending.
 
 ## Static and changing data
@@ -27,7 +32,7 @@ Province ownership can change during play. The production map data source combin
 
 `MapLoader` is the client boundary that converts longitude and latitude to the 4096×3000 Godot map canvas and back. Military and air systems use that service rather than maintaining separate projections.
 
-The waypoint graph is currently a large JSON file loaded before `map_loaded` is emitted. `MilitarySystem` builds its pathfinder from that graph. Generated scene loading, JSON parsing, province indexing, border reconstruction, visibility lights, and pathfinding are performance-sensitive areas; documentation of the current implementation does not imply that their pending optimization has been completed.
+The waypoint graph is currently a large JSON file loaded before `map_loaded` is emitted. `MilitarySystem` builds its pathfinder from that graph. Generated scene loading, JSON parsing, province indexing, border reconstruction, visibility-mask composition, and pathfinding are performance-sensitive areas; documentation of the current implementation does not imply that their pending optimization has been completed.
 
 ## Failure behavior
 
@@ -40,4 +45,3 @@ Loading fails when required map JSON is invalid, the generated `.scn` is absent 
 - [[client/map/match-scene-composition|Production Match Scene]]
 - [[client/military/movement-and-pathfinding|Movement and Pathfinding]]
 - [[game-server/maps-and-starting-state|Maps and Starting State]]
-

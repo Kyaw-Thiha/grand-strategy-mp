@@ -42,21 +42,21 @@ Current map state:
 
 Design direction:
 
-The visibility system should be data-driven underneath, with `PointLight2D` used only as a visual presentation layer.
-
-Do not let `PointLight2D` decide gameplay visibility. Lights should be generated from visibility data, not used as the source of truth.
+The visibility system is data-driven underneath and uses one combined render texture only
+as its presentation layer. Rendering never decides gameplay visibility.
 
 The intended look:
 
 - The whole map is dark by default.
-- Friendly-owned land and friendly units create soft visible areas.
-- `PointLight2D` should give the reveal a softer, more atmospheric edge.
+- Locally owned and allied land is fully visible to its exact province boundaries.
+- Local-player units create soft radial visible areas; allied units do not share unit vision.
+- The combined mask gives reveal sources a soft atmospheric edge without additive lighting.
 - The visibility data should remain inspectable and replaceable later with server-provided vision.
 
 Why:
 
 - Data-driven visibility can later become server authoritative.
-- Visual lights can be tuned or replaced without changing gameplay rules.
+- Mask presentation can be tuned or replaced without changing gameplay rules.
 - This avoids tying fog-of-war correctness to rendering brightness.
 
 # INSTRUCTION
@@ -74,7 +74,8 @@ Before implementation:
 
 ## Goal
 
-Add a `VisionSystem` that computes local player visibility from current client data, then renders that visibility with a dark map treatment plus `PointLight2D` reveal sources.
+Add a `VisionSystem` that computes local player visibility from current client data, then
+renders that visibility through a dark map treatment and one combined visibility mask.
 
 For this first pass, preserve gameplay behavior:
 
@@ -121,8 +122,12 @@ Use client-side approximate visibility only.
 Visible provinces:
 
 - A province is visible if its current owner/nation matches `GameState.get_my_nation_id()`.
-- If `GameState.provinces` does not yet have runtime ownership for the province, fall back to `MapLoader.get_province_data(province_id).get("nation_id", "")`.
+- A province is visible if its owner has an `"alliance"` relation from the local nation.
+- Resolve runtime ownership from `owner_id`, then `nation_id`; if neither exists, fall back
+  to `MapLoader.get_province_data(province_id).get("nation_id", "")`.
 - A province is visible if it is inside reveal radius of one of the local player's divisions.
+- Previously observed territory is not remembered. It returns to full fog as soon as no
+  current territory or unit source reveals it.
 
 Friendly divisions:
 
@@ -134,12 +139,14 @@ Friendly divisions:
 - Project the division position with `MapLoader.project_lng_lat(...)`.
 - Use `observation_radius` as a visual radius if practical. If the value is too small for map-scale rendering, add a clearly named multiplier constant in `VisionSystem`, such as `UNIT_VISION_RADIUS_MULTIPLIER`.
 
-Friendly-owned land reveal:
+Friendly-territory reveal:
 
-- Start simple.
-- For each visible owned province, reveal around its fill centroid or city/focus position.
-- Prefer `MapLoader.get_province_focus_position(province_id)` when it returns a valid position.
-- Fall back to the province fill centroid when focus position is unavailable.
+- Render every generated `Fill` and `FillPartXX` polygon for locally owned and allied
+  provinces at full visibility.
+- Do not use a city-, focus-, or centroid-centred radial reveal for territory.
+- Preserve full visibility through the province boundary, then apply a subtle
+  ten-world-pixel outward feather.
+- Allied divisions do not add radial reveal; only local-player divisions do.
 
 Visible data structure:
 
@@ -160,6 +167,7 @@ Refresh triggers:
   - `division_updated`
   - `division_removed`
   - `province_captured`
+  - `relation_changed`
   - `lobby_state_updated`
 - Keep signal handlers small and call `refresh_visibility()`.
 
@@ -171,18 +179,20 @@ Use a structure like:
 
 ```text
 VisionSystem
-├─ DarknessLayer
-│  └─ CanvasModulate or ColorRect/Polygon2D overlay
-└─ VisionLightLayer
-   ├─ PointLight2D
-   ├─ PointLight2D
-   └─ ...
+├─ OceanBackground
+├─ VisibilityMaskViewport
+│  └─ VisibilitySources
+└─ CombinedVisibilityFog
 ```
 
-Use whichever Godot 4.7 2D lighting approach is most reliable:
+The mask viewport renders exact friendly-territory polygons and normalized local-division
+radial stamps in separate texture channels, updating only when source state changes. A
+world-space multiplicative polygon samples that texture above cartography and below
+gameplay marker roots.
 
-- Prefer `CanvasModulate` plus `PointLight2D` if it works with the existing map CanvasItems.
-- If `CanvasModulate` darkens UI/HUD, place it in world space under the map scene rather than under a HUD `CanvasLayer`.
+- Combine province and unit channels with a bounded maximum; overlapping sources never
+  brighten normal map color.
+- Keep fog and mask nodes in world space so camera pan, zoom, and input coordinates remain unchanged.
 - Do not darken UI panels.
 - Do not make collision shapes visible.
 
@@ -190,30 +200,37 @@ Required visual behavior:
 
 - Political map should still be readable in visible areas.
 - Hidden/unseen areas should be very dark, not fully impossible to orient around unless that is necessary.
-- Lights should have soft falloff.
-- Owned provinces should produce broader, calmer reveal.
+- Province interiors should be uniformly visible with no brightness gradient or circular
+  glow; only their narrow outward boundary is feathered.
 - Units should produce tighter, brighter reveal.
+- Cartography and labels render below the fog polygon. Divisions, routes, combat
+  indicators, aircraft, and naval contacts render above it; their data-driven visibility
+  rules decide whether they appear.
+- Moving units update existing keyed stamps. Static province polygons rebuild only after
+  ownership, alliance, or full visibility refreshes.
+- Division scouting and observation ranges are selected-only outlines, never filled discs.
 
 Recommended constants:
 
 ```gdscript
-const DARKNESS_COLOR: Color = Color(0.02, 0.025, 0.035, 1.0)
-const OWNED_PROVINCE_LIGHT_ENERGY: float = 0.55
-const UNIT_LIGHT_ENERGY: float = 0.85
-const OWNED_PROVINCE_LIGHT_RADIUS: float = 180.0
+const DARKNESS_COLOR: Color = Color(0.34, 0.36, 0.42, 1.0)
+const UNIT_REVEAL_STRENGTH: float = 1.0
+const PROVINCE_FEATHER_WIDTH_WORLD: float = 10.0
 const UNIT_VISION_RADIUS_MULTIPLIER: float = 1.0
-const MIN_UNIT_LIGHT_RADIUS: float = 90.0
-const MAX_DYNAMIC_LIGHTS: int = 128
+const MIN_UNIT_REVEAL_RADIUS: float = 90.0
+const MAX_VISIBILITY_SOURCES: int = 128
+const MAX_MASK_DIMENSION: int = 2048
 ```
 
 Tune these after a visual smoke test.
 
 Performance guardrails:
 
-- Do not create unbounded lights if later maps have many provinces/units.
-- Pool or rebuild lights simply for V1, but cap total lights with `MAX_DYNAMIC_LIGHTS`.
-- Prefer visible owned-province lights first, then friendly unit lights, or document the chosen order.
-- If too many province lights are expensive, group owned-province reveal by nation components later. Do not implement that optimization unless needed for V1 stability.
+- Render all eligible province fill parts so visibility correctness is never source-cap
+  dependent; rebuild this static geometry only when territory relationships change.
+- Cap dynamic local-division stamps with `MAX_VISIBILITY_SOURCES`.
+- Cap mask texture resolution by its longest dimension.
+- Request a viewport update only when a stamp is added, removed, moved, or resized.
 
 ## Data Versus Rendering Boundary
 
@@ -221,7 +238,7 @@ Performance guardrails:
 
 - Current local visible province set.
 - Fog/darkness visual nodes.
-- PointLight2D reveal nodes.
+- Combined visibility mask, exact friendly-territory polygons, and local-unit reveal stamps.
 - Query method `is_province_visible(...)`.
 
 `MapRenderer` still owns:
@@ -258,13 +275,11 @@ Do not add visible in-game instructional text.
 Run these checks:
 
 ```bash
-HOME=/tmp XDG_CONFIG_HOME=/tmp/godot-config XDG_DATA_HOME=/tmp/godot-data \
-godot --headless --path client --check-only --script res://src/systems/map/vision_system.gd
+godot --headless --path client res://tests/test_vision_render_boundary.tscn
 ```
 
 ```bash
-HOME=/tmp XDG_CONFIG_HOME=/tmp/godot-config XDG_DATA_HOME=/tmp/godot-data \
-godot --headless --path client --scene res://scenes/debug/map_debug.tscn --quit
+godot --headless --path client res://scenes/debug/map_debug.tscn --quit
 ```
 
 Manual Godot verification:
@@ -272,7 +287,7 @@ Manual Godot verification:
 - Run `res://scenes/debug/map_debug.tscn`.
 - Confirm the map is dark by default.
 - Confirm selected/local nation land is visible.
-- Confirm local debug divisions create visible light around their positions.
+- Confirm local debug divisions create soft circular visibility around their positions.
 - Confirm political/elevation/cover buttons still switch overlays.
 - Confirm province hover/click still works.
 - Confirm military unit selection and movement input still works.
@@ -288,8 +303,11 @@ Expected existing warnings:
 
 - `VisionSystem` exists and is wired into the debug map scene.
 - The map has a dark default presentation.
-- Friendly-owned land and friendly divisions create soft visible regions.
-- `PointLight2D` is used only as visual output from data-driven visibility.
+- Locally owned and allied land is uniformly visible across exact province polygons with a
+  narrow outward feather.
+- Only local-player divisions create soft radial visible regions.
+- Territory returns immediately to full fog when ownership, alliance, or unit coverage ends.
+- Vision rendering contains no `PointLight2D`; overlapping mask sources stay normalized.
 - `VisionSystem.is_province_visible(province_id)` returns the current local visibility result.
 - No client code mutates `GameState`.
 - Existing map renderer, interaction, camera, and military behavior remains functional.
