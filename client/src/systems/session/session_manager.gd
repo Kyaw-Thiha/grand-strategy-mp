@@ -170,3 +170,11 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 				"Target out of range — no staging airbase available.", "warning")
 		"AIR_BOMBING_RESULT":
 			EventBus.air_bombing_result.emit(data)
+		"AIR_BOMBING_PROVINCE_RESULT":
+			EventBus.air_bombing_province_result.emit(data)
+		"PROVINCE_AA_FIRED":
+			EventBus.province_aa_fired.emit(data)
+		"CONTACT_MARKER_EXPIRED":
+			EventBus.naval_contact_marker_expired.emit(data)
+		"NAVAL_CONTACT_UPDATES":
+			GameState._apply_naval_contact_updates(data)

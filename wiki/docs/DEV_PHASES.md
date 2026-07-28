@@ -1417,15 +1417,22 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       (Branch E: combat targeting via `_findEscortTargets`; E-patch: Dubins path mirroring
       in `airDubinsPathfinder.tick()`); engagement trigger is "enemy currently attacking my
       assigned bomber," not nearest-enemy; auto-follows bomber home on RTB/destruction
-- [ ] Strategic bombing sub-missions — Logistics (road/supply-hub throughput, N ticks),
-      Area (population/infrastructure), Industry (`industry` scalar — already flagged
-      "Affected by bombing" in MAP_DATA_CONTRACT.md), Oil (extraction output, N ticks);
-      all four available to Strategic bomber and Tactical bomber
+- [ ] Strategic bombing sub-missions fully affect their intended province systems:
+      - [x] Area reduces population and infrastructure.
+      - [x] Industry reduces the province `industry` scalar.
+      - [x] Oil applies the time-limited `oil_bombed_until_ms` disruption state.
+      - [ ] Logistics reduces road/supply-hub throughput for N ticks. The current handler
+            recognizes the mission and returns the wing after its run but applies no
+            logistics effect.
+      All four mission commands are available to Strategic and Tactical bombers.
 - [ ] Recon — extends detection/observation coverage; non-persistent, lapses when the wing
       leaves the area
-- [ ] Naval bomber missions — Trade interdiction (feeds existing cargo-sinking-event
-      machinery), Anti-submarine, Anti-ship (highest-value-first auto-priority, reusing the
-      carrier Strike preset's existing rule)
+- [ ] Naval bomber missions resolve against Phase 13 naval state:
+      - [x] Port Strike damages a province's `naval_base_level`.
+      - [x] Trade Interdiction, Anti-submarine, and Anti-ship handlers, marker targeting,
+            hit/miss events, and the flotilla-provider seam exist.
+      - [ ] Trade Interdiction feeds cargo-sinking machinery; Anti-submarine and Anti-ship
+            resolve against real flotillas with highest-value-first priority.
 
 ### Colyseus — damage patterns
 - [ ] Dive bomber — single-cell, recon-weighted (perk: fixed priority list / multi-target)
@@ -1454,10 +1461,12 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
 - [x] Airbase congestion — soft recovery penalty for IDLE wings at the same airbase:
       `congestionFactor = 1/(1 + excess×0.15)` where `excess = max(0, wingsAtBase - 3)`;
       applied to fuel and readiness recovery rates; never fully stops recovery
-- [ ] Naval bomber fuzzy-contact-marker system — randomized-radius, time-boxed target marker
-      per detected contact; precision/duration scale with detection source (maritime patrol
-      tight + continuous, triangulated sinking-event wide + short); strike only resolves if
-      the wing physically reaches the marker before expiry
+- [ ] Naval bomber fuzzy-contact-marker system is connected to real naval detection:
+      - [x] Marker schema, three quality presets, expiry/refresh behavior, nation-filtered
+            events, mission targeting, and client rendering are implemented.
+      - [ ] Maritime patrol, cargo-sinking, and flotilla-scout systems create or refresh
+            markers from real detected contacts. Until Phase 13, markers are seeded only by
+            development/test handlers.
 
 ### Colyseus — detection and AA (three distinct layers)
 - [x] Air detection reuses land's observation-radius model (binary, continuous) — not
@@ -1465,9 +1474,11 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       observation radius all contribute; per-type `observation_deg` from stat table
 - [ ] Radar building — area air detection + naval detection boost; siting independent of
       city point (like supply hub); functional effect only, full building design deferred
-- [ ] Province fixed AA (new) — full damage on city-point missions (Area/Industry/Oil);
-      distance-decayed (reuse existing non-linear distance-penalty curve shape) on
-      Logistics/Tactical bombing; light/heavy altitude split retained
+- [ ] Province fixed AA covers every required bombing path:
+      - [x] Per-province AA strength, one damage check for Area/Industry/Oil runs, and the
+            low/high-altitude damage split are implemented.
+      - [ ] Authored province AA data, distance-decayed Logistics/Tactical-bombing fire, and
+            its building-management path remain to be implemented.
 - [ ] Flotilla pooled AA (new, in Phase 13's naval scope but consumed here) — summed across
       AA-capable ships in target flotilla, cruiser-weighted, gated by Active/Held Back
       posture, single check per attack run

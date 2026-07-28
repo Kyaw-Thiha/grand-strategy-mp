@@ -32,6 +32,10 @@ Map interaction, camera movement, military input, chat, pause, and `HUDManager` 
 
 Panel changes require manual checks for dock/center placement, overlay dimming, previous-panel restoration, Escape and Tab behavior, shortcuts, selection changes, pointer blocking, text focus, and layout at supported window sizes. Headless scenes can check logic but not visual overlap, animation, readability, or input feel.
 
+## Known Limitations
+
+- **Clicking outside a full-center panel does not close it.** The overlay click handler (`game_hud.gd:_on_overlay_clicked`) is wired to `overlay_dim.gui_input` and correctly identifies outside-clicks, but the interaction between the overlay, the CenterPanelAnchor, and the CanvasLayer prevents the signal chain from reaching the handler reliably. This affects all `FULL_CENTER` panels: tactical combat, bombing detail, air-combat detail, and strategic bombing detail. Players can close these panels via the **✕** button or the **Escape** key.
+
 # Related Notes
 
 - [[client/ui/index|Client User Interface]]

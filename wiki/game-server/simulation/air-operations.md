@@ -42,6 +42,92 @@ The air-combat system finds hostile candidates, deconflicts pairings, applies su
 
 Tactical-bombing wings loitering near an engagement or targeted division select tactical cells through aircraft-specific bombing patterns. The bombing system applies HP and suppression damage to those cells and the affected division, then reports the strike to the relevant players.
 
+## Strategic bombing
+
+Strategic bombers (STRATEGIC_BOMBER and TACTICAL_BOMBER) on AREA, INDUSTRY, OIL, or LOGISTICS missions damage province-level scalars instead of the tactical grid. `AirStrategicBombingSystem` (`game-server/src/systems/air_strategic_bombing_system.ts`) runs each tick after the tactical bombing system. It filters for LOITER wings with strategic missions, resolves their target province, applies the mission-specific damage, and transitions the wing to RTB.
+
+**Current:** four mission types:
+- **AREA** — reduces `population` and `infrastructure` on the target province.
+- **INDUSTRY** — reduces `industry` on the target province.
+- **OIL** — sets `oil_bombed_until_ms` to `Date.now() + OIL_DEBUFF_DURATION_MS` (2 minutes by default).
+- **LOGISTICS** — no-op stub that still calls `resolveWingBombed` to RTB the wing.
+
+Damage per plane per run uses `PROVINCE_BOMBING_STATS` in `air_bombing_stats.ts`. The damage formula is `planes × combat_readiness × DAMAGE_SCALE`. Province scalars never go below 0. The system broadcasts `AIR_BOMBING_PROVINCE_RESULT` to the attacker and defender nation and `PROVINCE_AA_FIRED` to all clients.
+
+## Province fixed AA
+
+`ProvinceAaSystem` (`game-server/src/systems/air_province_aa_system.ts`) checks fixed AA once per bombing run. AA strength per province is set via `setProvinceAaStrength()` (used by the `SET_PROVINCE_AA` test handler). Damage formula:
+
+```
+floor(strength × wingCount × altitudeMult × AA_DAMAGE_COEFFICIENT)
+```
+
+Low-altitude aircraft (`cas_plane`, `dive_bomber`, `fighter`, `naval_bomber`) take 1.5× damage; high-altitude aircraft take 1.0×. The system runs inside `AirStrategicBombingSystem.tick()` before province damage is applied. When AA destroys the entire wing, the bombing run is skipped. `PROVINCE_AA_FIRED` is broadcast to all clients (flak is visible to all players).
+
+## Naval Bomber Missions
+
+**Current (Branch H).** Naval bombers (`NAVAL_BOMBER` aircraft type) operate over sea zones rather than the land tactical grid. All naval missions are gated by naval fog-of-war: a bomber needs a contact marker to have a target. `AirNavalBomberSystem` (`game-server/src/systems/air_naval_bomber_system.ts`) runs each tick after the strategic bombing system. It maintains marker lifetimes, resolves port strikes, and forwards anti-ship/anti-sub/trade interdiction missions as Phase 13-ready stubs.
+
+### Naval Contact Marker system
+
+The fuzzy contact marker is the mechanism that bridges naval fog-of-war and air strike targeting. A detected enemy flotilla position generates a marker — a randomized-radius position valid for a limited window — rather than exposing the flotilla's exact coordinates. A naval bomber must physically reach the marker before it expires; if not, the strike whiffs.
+
+`NavalContactMarkerState` schema fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `marker_id` | string | Unique ID |
+| `nation_id` | string | Owning nation (only they see it) |
+| `quality` | enum | `MARITIME_PATROL`, `CARGO_SINKING`, `FLOTILLA_SCOUT` |
+| `position_lng/lat` | number | Randomized contact position |
+| `radius_deg` | number | Uncertainty radius (derived from quality) |
+| `expires_at_ms` | number | Absolute expiry timestamp |
+| `is_refreshable` | boolean | True for MARITIME_PATROL — expiry resets while patrol wing is on-station |
+
+Quality tier defaults (playtesting-bound):
+
+| Quality | radius_deg | duration_ms | refreshable |
+|---|---|---|---|
+| `MARITIME_PATROL` | 0.15 | 60 000 | true |
+| `CARGO_SINKING` | 0.8 | 20 000 | false |
+| `FLOTILLA_SCOUT` | 0.4 | 40 000 | false |
+
+The server expiry tick removes markers past `expires_at_ms` and broadcasts `CONTACT_MARKER_EXPIRED`. A `CREATE_NAVAL_CONTACT` handler exists for test harness seeding. Phase 13 wires three real callers: maritime patrol wing tick, cargo sinking event, and flotilla scouting tick.
+
+### Mission stubs and interfaces
+
+**Current.** Anti-ship, Anti-submarine, and Trade interdiction handlers exist with the correct event payload shape but produce no game effect until Phase 13 supplies real flotilla data. Trade interdiction calls `resolveWingBombed` immediately — Phase 13's cargo system will intercept the tick. Anti-ship and anti-sub check `state.naval_contact_markers` for the target marker and broadcast `NAVAL_BOMBER_STRIKE_HIT` or `NAVAL_BOMBER_STRIKE_MISSED` accordingly.
+
+### Port strike
+
+Port strike is **fully implemented in Branch H**. A naval bomber targeting a coastal province degrades `naval_base_level` on `ProvinceState` (field added in Branch H; default 0). No province fixed AA fires on port strike (unlike strategic bombing). In Phase 13, the same strike also resolves HP damage against docked ships, reduced proportionally by `naval_base_level`.
+
+### Splash damage perk
+
+**Current.** `perk_splash = true` on `AirWingState` routes the naval bomber strike through an `IFlotillaProvider` interface: primary target takes full damage, 15% splashes across remaining flotilla members. The interface is defined and the math guard is implemented in Branch H; `StubFlotillaProvider` returns an empty member list until Phase 13 injects a real implementation. No air code changes needed in Phase 13.
+
+### Phase 13 seams
+
+| Stub in Branch H | Phase 13 wires |
+|---|---|
+| `getFlotillaMembers()` returns `[]` | Real flotilla composition from `FlotillaState` |
+| `refreshContact()` is defined but uncalled | Maritime patrol wing tick calls it |
+| Trade interdiction fires event, no consumer | Phase 13 cargo system subscribes |
+| Anti-ship targets mock highest-value contact | Real ship priority from `FlotillaState` |
+| Anti-sub targets no real contacts | Real submarine detection from Phase 13 |
+
+### Visual checks (Branch H)
+
+| Check | Action | Expected |
+|---|---|---|
+| Marker appears | Seed `MARITIME_PATROL` via `CREATE_NAVAL_CONTACT` | Translucent circle on own-nation client |
+| Radius matches quality | Seed all three tiers side-by-side | `CARGO_SINKING` ~5× wider than `MARITIME_PATROL` |
+| Marker fades and expires | Seed `CARGO_SINKING`, watch 20 s | Alpha fades; circle disappears; `CONTACT_MARKER_EXPIRED` fires |
+| Enemy blindness | Two clients; seed for nation A | Nation B sees nothing |
+| Port strike hit | Naval bomber reaches coastal province in time | Province panel: `naval_base_level` reduced; no flak burst |
+| Port strike miss | Seed marker, let it expire, bomber arrives late | Bomber RTBs; no province effect; `NAVAL_BOMBER_STRIKE_MISSED` |
+| Strike event fires | Bomber reaches marker before expiry | `NAVAL_BOMBER_STRIKE_HIT` fires; wing RTBs |
+
 # Related Notes
 
 - [[game-server/simulation/index|Simulation]]

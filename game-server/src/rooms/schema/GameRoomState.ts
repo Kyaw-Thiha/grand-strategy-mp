@@ -1,5 +1,6 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 import { AirWingState } from "./AirWingState.js";
+import { NavalContactMarkerState } from "./NavalContactMarkerState.js";
 
 export class GridCellState extends Schema {
   @type("string")  unit_type: string      = "";
@@ -34,6 +35,11 @@ export class NationState extends Schema {
 export class ProvinceState extends Schema {
   @type("string") province_id: string = "";
   @type("string") owner_id: string = "";
+  @type("number") industry:            number = 50;
+  @type("number") population:          number = 50;
+  @type("number") infrastructure:      number = 50;
+  @type("number") oil_bombed_until_ms: number = 0;
+  @type("number") naval_base_level: number = 0;
 }
 
 // ── Phase 4: Division (replaces skeleton UnitState) ───────────────────────────
@@ -95,4 +101,6 @@ export class GameRoomState extends Schema {
   @type({ map: RelationState }) relations  = new MapSchema<RelationState>();
   @type({ map: ProposalState }) proposals  = new MapSchema<ProposalState>();
   @type({ map: AirWingState })  air_wings  = new MapSchema<AirWingState>();
+  @type({ map: NavalContactMarkerState })
+  naval_contact_markers = new MapSchema<NavalContactMarkerState>();
 }

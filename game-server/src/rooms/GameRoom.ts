@@ -6,6 +6,7 @@ import { dirname, join } from "path";
 import { getCachedFile } from "../data/map_cache.js";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES, serializeWing } from "./schema/AirWingState.js";
+import { NavalContactMarkerState, serializeNavalContactMarker } from "./schema/NavalContactMarkerState.js";
 import { getMapNationIds } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
@@ -18,6 +19,10 @@ import { AirDetectionSystem } from "../systems/air_detection_system.js";
 import { DubinsPathfinder, registerManualTarget } from "../systems/air_dubins_pathfinder.js";
 import { AirCombatSystem } from "../systems/air_combat_system.js";
 import { AirBombingSystem } from "../systems/air_bombing_system.js";
+import { AirStrategicBombingSystem } from "../systems/air_strategic_bombing_system.js";
+import { AirNavalBomberSystem }      from "../systems/air_naval_bomber_system.js";
+import { ProvinceAaSystem }          from "../systems/air_province_aa_system.js";
+import { QUALITY_DEFAULTS }           from "../data/naval_contact_quality.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
@@ -83,6 +88,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airDubinsPathfinder = new DubinsPathfinder();
   private airCombatSystem = new AirCombatSystem();
   private airBombingSystem = new AirBombingSystem();
+  private provinceAaSystem           = new ProvinceAaSystem();
+  private airStrategicBombingSystem!: AirStrategicBombingSystem;
+  private airNavalBomberSystem       = new AirNavalBomberSystem();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -438,6 +446,34 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.state.air_wings.set(msg.wing_id, wing);
         this.broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
       });
+
+      this.onMessage("CREATE_NAVAL_CONTACT", (_client, msg: {
+        marker_id:    string;
+        nation_id:    string;
+        quality:      string;
+        position_lng: number;
+        position_lat: number;
+      }) => {
+        const defaults = QUALITY_DEFAULTS[msg.quality];
+        if (!defaults) return;
+        const marker = new NavalContactMarkerState();
+        marker.marker_id     = msg.marker_id;
+        marker.nation_id     = msg.nation_id;
+        marker.quality       = msg.quality;
+        marker.position_lng  = msg.position_lng;
+        marker.position_lat  = msg.position_lat;
+        marker.radius_deg    = defaults.radius_deg;
+        marker.expires_at_ms = Date.now() + defaults.duration_ms;
+        marker.is_refreshable = defaults.is_refreshable;
+        this.state.naval_contact_markers.set(msg.marker_id, marker);
+        for (const c of this.clients) {
+          const p = this.state.players.get(c.sessionId);
+          if (!p) continue;
+          const n = this.getNationForPlayer(p.userId);
+          if (!n || n.nation_id !== msg.nation_id) continue;
+          c.send("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] });
+        }
+      });
     }
     if (process.env.NODE_ENV === "test") {
       this.onMessage("SPAWN_DIVISION", (_client, msg: {
@@ -672,6 +708,43 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           position_lat:       msg.position_lat,
           defender_grid:      msg.defender_grid,
         });
+      });
+
+      this.onMessage("SET_PROVINCE_OWNER", (_client, msg: { province_id: string; owner_id: string }) => {
+        const prov = this.state.provinces.get(msg.province_id);
+        if (prov) prov.owner_id = msg.owner_id;
+      });
+
+      this.onMessage("SET_PROVINCE_AA", (_client, msg: { province_id: string; strength: number }) => {
+        this.provinceAaSystem.setProvinceAaStrength(msg.province_id, msg.strength);
+      });
+
+      this.onMessage("CREATE_NAVAL_CONTACT", (_client, msg: {
+        marker_id:    string;
+        nation_id:    string;
+        quality:      string;
+        position_lng: number;
+        position_lat: number;
+      }) => {
+        const defaults = QUALITY_DEFAULTS[msg.quality];
+        if (!defaults) return;
+        const marker = new NavalContactMarkerState();
+        marker.marker_id     = msg.marker_id;
+        marker.nation_id     = msg.nation_id;
+        marker.quality       = msg.quality;
+        marker.position_lng  = msg.position_lng;
+        marker.position_lat  = msg.position_lat;
+        marker.radius_deg    = defaults.radius_deg;
+        marker.expires_at_ms = Date.now() + defaults.duration_ms;
+        marker.is_refreshable = defaults.is_refreshable;
+        this.state.naval_contact_markers.set(msg.marker_id, marker);
+        for (const c of this.clients) {
+          const p = this.state.players.get(c.sessionId);
+          if (!p) continue;
+          const n = this.getNationForPlayer(p.userId);
+          if (!n || n.nation_id !== msg.nation_id) continue;
+          c.send("NAVAL_CONTACT_UPDATES", { markers: [serializeNavalContactMarker(marker)] });
+        }
       });
     }
 
@@ -1114,6 +1187,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.supplySystem.loadMapData(this.state.map_id);
     this.frontlineSystem.loadMapData(this.state.map_id);
     this._initProvinces(this.state.map_id);
+    this.airStrategicBombingSystem = new AirStrategicBombingSystem(
+      this._provinceCityPositionLookup,
+    );
     this._initRelations();
     this.broadcastRelations();
 
@@ -1403,6 +1479,37 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.state,
         this.airWingLifecycleSystem,
         this.combatSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => {
+          for (const c of this.clients) {
+            const p = this.state.players.get(c.sessionId);
+            if (!p) continue;
+            const n = this.getNationForPlayer(p.userId);
+            if (!n || n.nation_id !== nationId) continue;
+            c.send(type, msg);
+          }
+        },
+      );
+
+      this.airStrategicBombingSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
+        this.provinceAaSystem,
+        (type, msg) => this.broadcast(type, msg),
+        (type, msg, nationId) => {
+          for (const c of this.clients) {
+            const p = this.state.players.get(c.sessionId);
+            if (!p) continue;
+            const n = this.getNationForPlayer(p.userId);
+            if (!n || n.nation_id !== nationId) continue;
+            c.send(type, msg);
+          }
+        },
+      );
+
+      this.airNavalBomberSystem.tick(
+        this.state,
+        this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
         (type, msg, nationId) => {
           for (const c of this.clients) {
@@ -2009,12 +2116,25 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const __dir = dirname(fileURLToPath(import.meta.url));
     const dataPath = join(__dir, "../..", "..", "client", "assets", "data", mapId, "map_data.json");
     try {
-      const raw = getCachedFile<{ provinces: Array<{ province_id: string; nation_id: string; city_position?: [number, number] }> }>(dataPath);
+      const raw = getCachedFile<{
+        provinces: Array<{
+          province_id:     string;
+          nation_id:       string;
+          city_position?:  [number, number];
+          population?:     number;
+          industry?:       number;
+          infrastructure?: number;
+          resources?:      { oil?: number };
+        }>;
+      }>(dataPath);
       for (const p of raw.provinces ?? []) {
         if (!p.province_id) continue;
         const slot = new ProvinceState();
         slot.province_id = p.province_id;
         slot.owner_id    = p.nation_id ?? "";
+        if (p.population     !== undefined) slot.population     = p.population;
+        if (p.industry       !== undefined) slot.industry       = p.industry;
+        if (p.infrastructure !== undefined) slot.infrastructure = p.infrastructure;
         this.state.provinces.set(p.province_id, slot);
         if (p.city_position && p.city_position.length >= 2) {
           this._provinceCityPositionLookup.set(p.province_id, {

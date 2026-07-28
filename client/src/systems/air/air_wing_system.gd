@@ -53,6 +53,7 @@ var _last_synced_gen_id: Dictionary = {}
 var _detected_wings: Dictionary = {}
 var _bombing_indicators: Dictionary = {}    # province_id → BombingRunIndicator
 var _air_combat_indicators: Dictionary = {} # bucket_key → AirCombatBanner node
+var _strategic_bombing_banners: Dictionary = {} # bucket_key → AirCombatBanner
 var _bucket_slot_counts: Dictionary    = {} # bucket_key → int (all indicator types)
 
 
@@ -76,6 +77,8 @@ func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -
 	EventBus.air_combat_ended.connect(_on_air_combat_ended)
 	if not EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
 		EventBus.air_bombing_result.connect(_on_air_bombing_result)
+	EventBus.province_aa_fired.connect(_on_province_aa_fired)
+	EventBus.air_bombing_province_result.connect(_on_air_bombing_province_result)
 	if _pending_route_overlay == null:
 		_pending_route_overlay = MoveOrderOverlay.new()
 		_icon_layer.add_child(_pending_route_overlay)
@@ -301,6 +304,15 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 	const BANNER_HIT_R: float = 20.0
 	for banner_key in _air_combat_indicators:
 		var banner = _air_combat_indicators[banner_key]
+		if not is_instance_valid(banner):
+			continue
+		if world_pos.distance_to(banner.position) <= BANNER_HIT_R:
+			banner.on_clicked()
+			return true
+
+	# Check strategic bombing banners
+	for banner_key in _strategic_bombing_banners:
+		var banner = _strategic_bombing_banners[banner_key]
 		if not is_instance_valid(banner):
 			continue
 		if world_pos.distance_to(banner.position) <= BANNER_HIT_R:
@@ -536,6 +548,72 @@ func _on_air_bombing_result(data: Dictionary) -> void:
 		_bombing_indicators[province_id].add_run(run)
 
 
+func _on_province_aa_fired(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var pdata: Dictionary = _map_loader.get_province_data(province_id)
+	if pdata.is_empty():
+		return
+	var city_pos: Array = pdata.get("city_position", [])
+	if city_pos.size() < 2:
+		return
+	var screen_pos: Vector2 = _map_loader.project_lng_lat(
+		float(city_pos[0]), float(city_pos[1]))
+	_spawn_flak_burst(screen_pos)
+
+
+func _spawn_flak_burst(pos: Vector2) -> void:
+	var burst := Node2D.new()
+	burst.position = pos
+	_icon_layer.add_child(burst)
+	var script := GDScript.new()
+	script.source_code = """
+extends Node2D
+var _alpha := 1.0
+func _draw():
+	draw_circle(Vector2.ZERO, 14.0, Color(1.0, 0.75, 0.2, _alpha))
+	draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 20, Color(0.9, 0.4, 0.1, _alpha), 2.0)
+"""
+	burst.set_script(script)
+	var tween := create_tween()
+	tween.tween_method(func(a: float):
+		if is_instance_valid(burst):
+			burst.set("_alpha", a)
+			burst.queue_redraw()
+	, 1.0, 0.0, 0.6)
+	tween.tween_callback(burst.queue_free)
+
+
+func _on_air_bombing_province_result(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var pdata: Dictionary = _map_loader.get_province_data(province_id)
+	if pdata.is_empty():
+		return
+	var city_pos: Array = pdata.get("city_position", [])
+	if city_pos.size() < 2:
+		return
+	var lng := float(city_pos[0])
+	var lat := float(city_pos[1])
+	var screen_pos: Vector2 = _map_loader.project_lng_lat(lng, lat)
+	var key := _bucket_key(lng, lat)
+
+	if not _strategic_bombing_banners.has(key) or \
+	   not is_instance_valid(_strategic_bombing_banners[key]):
+		var banner: Node2D = preload("res://src/systems/air/air_combat_banner.gd").new()
+		_icon_layer.add_child(banner)
+		banner.setup_with_data(
+			screen_pos, screen_pos,
+			"strategic",
+			GameState.get_my_nation_id(),
+			data.get("attacker_nation_id", ""),
+			data.get("defender_nation_id", ""),
+			data,
+		)
+		banner.tree_exited.connect(func(): _strategic_bombing_banners.erase(key))
+		_strategic_bombing_banners[key] = banner
+	else:
+		_strategic_bombing_banners[key].add_combat(data)
+
+
 func _sync_detection_overlay(wing_id: String) -> void:
 	pass  # Deferred: detection overlay follows icon during TRANSIT
 
@@ -735,6 +813,10 @@ func cleanup() -> void:
 		EventBus.air_wing_detection_lost.disconnect(_on_air_wing_detection_lost)
 	if EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
 		EventBus.air_bombing_result.disconnect(_on_air_bombing_result)
+	if EventBus.province_aa_fired.is_connected(_on_province_aa_fired):
+		EventBus.province_aa_fired.disconnect(_on_province_aa_fired)
+	if EventBus.air_bombing_province_result.is_connected(_on_air_bombing_province_result):
+		EventBus.air_bombing_province_result.disconnect(_on_air_bombing_province_result)
 	if _pending_route_overlay != null:
 		_pending_route_overlay.free()
 		_pending_route_overlay = null
@@ -753,7 +835,11 @@ func cleanup() -> void:
 	for banner in _air_combat_indicators.values():
 		if is_instance_valid(banner):
 			banner.queue_free()
+	for banner in _strategic_bombing_banners.values():
+		if is_instance_valid(banner):
+			banner.queue_free()
 	_air_combat_indicators.clear()
+	_strategic_bombing_banners.clear()
 	_bucket_slot_counts.clear()
 
 

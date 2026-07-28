@@ -99,3 +99,12 @@ signal bombing_detail_open_requested(data: Dictionary)
 signal bombing_detail_closed()
 signal air_combat_detail_open_requested(data: Dictionary)
 signal air_combat_detail_closed()
+signal air_bombing_province_result(data: Dictionary)
+signal province_aa_fired(data: Dictionary)
+signal strategic_bombing_detail_open_requested(data: Dictionary)
+signal strategic_bombing_detail_closed()
+
+# ── Naval ──────────────────────────────────────────────────────────────────────
+
+signal naval_contact_marker_added(data: Dictionary)
+signal naval_contact_marker_expired(data: Dictionary)
