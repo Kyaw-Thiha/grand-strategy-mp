@@ -1,8 +1,7 @@
 # Grand Strategy Multiplayer — Architecture Reference
 
-> Authoritative architecture source. Read it when work changes repository structure,
-> service boundaries, authentication, persistence, or cross-component behavior.
-> Last updated: June 2026.
+> Internal reference. Feed this file to Claude Code at the start of every coding session.
+> Last updated: July 2026.
 
 ---
 
@@ -42,7 +41,7 @@ Session-based RTS grand strategy multiplayer. HoI4 depth, evening-friendly sessi
 | Framework | Hono + Bun (TypeScript) |
 | Hosting | Railway (same project as Colyseus, separate service) |
 | ORM | Drizzle ORM |
-| Role | Steam auth bridge, REST API for persistent data, internal Colyseus↔Supabase bridge, lobby management |
+| Role | Steam auth bridge, REST API for persistent data, internal Colyseus↔Supabase bridge |
 
 ### Persistence
 | Concern | Technology |
@@ -67,8 +66,7 @@ Godot client
 
 Hono (Railway)
   ├── Drizzle ORM ────────→ Supabase Postgres  — writes via service_role key
-  ├── Steam Web API ──────→ api.steampowered.com — ticket verification
-  └── LobbyStore ─────────→ In-memory           — active lobby state (not persisted)
+  └── Steam Web API ──────→ api.steampowered.com — ticket verification
 
 Colyseus (Railway)
   └── Internal HTTP ──────→ Hono /internal/*   — load templates on start, write results on end
@@ -191,16 +189,29 @@ These rules must never be violated. When in doubt, check here first.
 
 ## Monetisation Model
 
-| Tier | What you get | Price |
-|---|---|---|
-| Free | Join public games, random nation | $0 |
-| Host pass | Host games, private lobbies, nation pick | ~$10–15 one-time |
-| Map DLCs | New theatres, time periods | TBD — free players can join hosted DLC games |
-| Cosmetic bundles | Unit skins, nation themes — no gameplay impact | TBD |
-| Cosmetic resale | Player-to-player with dev profit share | Market-priced |
+> Full design, rationale, and market research behind this table now lives in
+> `RETENTION_MONETIZATION.md`. Feed that file to Claude Code alongside this one for any
+> work touching lobby, shop, ladder, or profile systems.
+
+| Tier | What you get | Price | Model |
+|---|---|---|---|
+| Free | Join public games, random nation, full complete game | $0 | — |
+| Host Pass | Create private/open lobbies, deliberate nation choice for everyone in the lobby, any nation | ~$10–15 | One-time |
+| Nation Packs | Deliberate-choice + themed cosmetics for regional/minor nation bundles | TBD | One-time |
+| Major Nation Cosmetics | Pure cosmetic skins for core-roster majors (access already free/pass-covered) | TBD | One-time |
+| Ladder Season Pass | Cosmetic-only track unlocked via ladder rank each season | TBD | One-time per season |
+| Cosmetic Marketplace | Player-to-player resale + community-created skins, revenue share to creators | Market-priced | Per-transaction |
+
+**No subscription tier** — see `RETENTION_MONETIZATION.md` for rationale.
 
 **Core principle:** Free players must have a complete, fair gameplay experience.
-Paid features are about control and expression, never about advantage.
+Paid features are about control and expression, never about advantage. Full nation
+choice inside a paid lobby is never further restricted by nation tier — restricting
+access within a feature already paid for would read as a hidden second paywall.
+
+**Lobby types:** Public Matchmaking, Private Lobby, and Open Lobby (invite-based but
+publicly joinable to backfill open seats). See `RETENTION_MONETIZATION.md` for full
+detail — Open Lobby is the direct answer to the discoverability/dead-lobby risk.
 
 ---
 
@@ -212,8 +223,9 @@ When starting a Claude Code session, provide:
 1. This file (ARCHITECTURE.md)
 2. MODULES.md (for the relevant module)
 3. DATA_CONTRACTS.md (if touching network or persistence)
-4. The specific MODULE.md for the system being worked on
-5. The .gd file(s) being modified
+4. RETENTION_MONETIZATION.md (if touching lobby, shop, ladder, or profile systems)
+5. The specific MODULE.md for the system being worked on
+6. The .gd file(s) being modified
 ```
 
 This gives the AI complete context without requiring it to infer dependencies.

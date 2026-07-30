@@ -2,7 +2,9 @@
 
 > Defines all data shapes flowing between Godot, Hono, Colyseus, and Supabase.
 > Feed this to Claude Code when working on networking, persistence, or API routes.
-> Last updated: May 2026.
+> See also `RETENTION_MONETIZATION.md` for the design rationale behind the lobby,
+> shop, ladder, and War Room shapes below.
+> Last updated: July 2026.
 
 Items marked `[TBD]` have a defined envelope but values that depend on game design decisions
 not yet finalised (unit types, resource types, tech categories). The contract holds — only
@@ -337,12 +339,34 @@ POST /shop/list
 
 ```
 POST /lobby/create
-  Body:     { map_id: string, max_players: number, private: boolean }
+  Body:     {
+              map_id:         string,
+              max_players:    number,
+              visibility:     "private" | "open",   // "private" = invite-only, not listed
+                                                     // "open" = invite-only + publicly listed,
+                                                     //          backfilled by matchmaking
+              reserved_seats: number                // seats held for invite-link joiners;
+                                                     // only relevant when visibility = "open".
+                                                     // ignored (defaults to max_players) when private.
+            }
   Response: { room_id: string, join_code: string }
-  Notes:    Requires has_host_pass: true. Validated server-side.
+  Notes:    Requires has_host_pass: true. Validated server-side. Deliberate nation choice
+            (any nation) applies to all invite-link joiners regardless of visibility.
+            Public joiners filling open seats in an "open" lobby get random nation
+            (or the current Featured Nation — see /lobby/featured-nation) same as
+            public matchmaking.
 
 GET  /lobby/public
   Response: LobbyListing[]
+  Notes:    Returns "open" visibility lobbies with unfilled public seats, plus
+            system-generated public matchmaking rooms. Matchmaker should prefer
+            backfilling existing open lobbies over spinning up new rooms.
+
+GET  /lobby/featured-nation
+  Response: { nation_id: string, rotation_ends_at: string }   // ISO 8601
+  Notes:    Current rotating nation any public/random-join player may deliberately
+            pick instead of receiving a random draw. Rotates weekly/bi-weekly
+            (config-driven, no game logic changes required per rotation).
 ```
 
 ### Response Type Definitions
@@ -383,19 +407,49 @@ interface DivisionTemplate {
 interface ShopItem {
   item_id:     string
   name:        string
-  type:        string             // "unit_skin" | "nation_theme" | ...
-  price_cents: number
-  owned:       boolean
-  metadata:    Record<string, unknown>  // preview url, skin paths, etc
+  // "unit_skin" | "nation_theme" | "nation_pack" | "major_cosmetic" | "season_cosmetic"
+  // nation_pack: bundles deliberate-choice framing (access itself is already free inside
+  // any paid lobby — see RETENTION_MONETIZATION.md) with a themed regional cosmetic set.
+  type:              string
+  price_cents:       number
+  owned:             boolean
+  creator_id:        string | null   // null = first-party; set = community-created (Marketplace)
+  creator_share_pct: number | null   // fixed, publicly-stated split — never reduced post-hoc
+  metadata:          Record<string, unknown>  // preview url, skin paths, nation_ids covered, etc
 }
 
 interface LobbyListing {
-  room_id:       string
-  map_id:        string
-  host_name:     string
-  player_count:  number
-  max_players:   number
-  nations_taken: string[]         // nation_ids already claimed
+  room_id:         string
+  map_id:          string
+  host_name:       string
+  visibility:      "open" | "public_matchmaking"   // private lobbies never appear here
+  player_count:    number
+  max_players:     number
+  reserved_seats:  number          // invite-link-only seats (0 for public_matchmaking)
+  nations_taken:   string[]        // nation_ids already claimed
+}
+
+interface WarRoom {
+  war_room_id:  string
+  owner_id:     string             // creator/admin account
+  name:         string
+  emblem_id:    string | null      // cosmetic slot, optional
+  member_ids:   string[]
+  created_at:   string
+  session_history: Array<{
+    game_id:    string
+    map_id:     string
+    played_at:  string
+    results:    Record<string, unknown>   // condensed per-member outcome, mirrors PlayerResult
+  }>
+}
+
+interface LadderSeasonStanding {
+  season_id:          string
+  player_id:          string
+  performance_score:  number    // relative to starting position, NOT raw win/loss
+  rank_tier:          string    // e.g. "bronze" | "silver" | ... — segmented, not global-only
+  season_points:      number
 }
 ```
 
@@ -442,12 +496,42 @@ export const cosmetics = pgTable("cosmetics", {
 })
 
 export const shop_items = pgTable("shop_items", {
-  id:          text("id").primaryKey(),          // human-readable slug e.g. "german_panzer_skin"
-  name:        text("name").notNull(),
-  type:        text("type").notNull(),            // "unit_skin" | "nation_theme" | ...
-  price_cents: integer("price_cents").notNull(),
-  active:      boolean("active").default(true),
-  metadata:    jsonb("metadata"),                 // skin paths, preview url, etc
+  id:                text("id").primaryKey(),      // human-readable slug e.g. "german_panzer_skin"
+  name:              text("name").notNull(),
+  type:              text("type").notNull(),        // "unit_skin" | "nation_theme" |
+                                                     // "nation_pack" | "major_cosmetic" |
+                                                     // "season_cosmetic"
+  price_cents:       integer("price_cents").notNull(),
+  active:            boolean("active").default(true),
+  creator_id:        uuid("creator_id").references(() => players.id),  // null = first-party
+  creator_share_pct: integer("creator_share_pct"),  // fixed at listing time, never reduced
+  metadata:          jsonb("metadata"),             // skin paths, preview url, nation_ids, etc
+})
+
+export const war_rooms = pgTable("war_rooms", {
+  id:         uuid("id").primaryKey().defaultRandom(),
+  owner_id:   uuid("owner_id").references(() => players.id).notNull(),
+  name:       text("name").notNull(),
+  emblem_id:  text("emblem_id"),                    // shop_items.id, nullable
+  created_at: timestamp("created_at").defaultNow(),
+})
+
+export const war_room_members = pgTable("war_room_members", {
+  war_room_id: uuid("war_room_id").references(() => war_rooms.id).notNull(),
+  player_id:   uuid("player_id").references(() => players.id).notNull(),
+  joined_at:   timestamp("joined_at").defaultNow(),
+})
+
+export const ladder_standings = pgTable("ladder_standings", {
+  id:                uuid("id").primaryKey().defaultRandom(),
+  season_id:         text("season_id").notNull(),   // e.g. "2026-S4"
+  player_id:         uuid("player_id").references(() => players.id).notNull(),
+  performance_score: integer("performance_score").default(0),  // relative to starting
+                                                                 // position — see
+                                                                 // RETENTION_MONETIZATION.md
+  rank_tier:         text("rank_tier"),
+  season_points:     integer("season_points").default(0),
+  updated_at:        timestamp("updated_at").defaultNow(),
 })
 
 export const game_sessions = pgTable("game_sessions", {
@@ -487,6 +571,21 @@ CREATE POLICY "own templates" ON division_templates
 
 -- cosmetics: own rows only
 CREATE POLICY "own cosmetics" ON cosmetics
+  FOR SELECT USING (player_id = (
+    SELECT id FROM players WHERE steam_id = current_setting('request.jwt.claims')::json->>'steam_id'
+  ));
+
+-- war_rooms: readable by members only
+CREATE POLICY "member war rooms" ON war_rooms
+  FOR SELECT USING (id IN (
+    SELECT war_room_id FROM war_room_members WHERE player_id = (
+      SELECT id FROM players WHERE steam_id = current_setting('request.jwt.claims')::json->>'steam_id'
+    )
+  ));
+
+-- ladder_standings: own row for detail, public leaderboard view is a separate
+-- read-only materialised view exposing only display_name + rank_tier + season_points
+CREATE POLICY "own standing" ON ladder_standings
   FOR SELECT USING (player_id = (
     SELECT id FROM players WHERE steam_id = current_setting('request.jwt.claims')::json->>'steam_id'
   ));
