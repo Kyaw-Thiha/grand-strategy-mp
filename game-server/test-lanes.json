@@ -24,7 +24,8 @@
         "test/12h-naval-bomber.test.ts",
         "test/12j-server-visibility-aoi.test.ts",
         "test/12k-escort-auto-assign.test.ts",
-        "test/12k-wing-management.test.ts"
+        "test/12k-wing-management.test.ts",
+        "test/12l-border-adjacency.test.ts"
       ]
     },
     "tactical": {

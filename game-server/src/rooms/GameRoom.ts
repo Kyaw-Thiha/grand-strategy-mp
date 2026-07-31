@@ -16,6 +16,7 @@ import { FrontlineSystem } from "../systems/frontline_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
+import { buildProvinceNeighbors } from "../systems/air_mission_targeting.js";
 import { DubinsPathfinder, registerManualTarget } from "../systems/air_dubins_pathfinder.js";
 import { AirCombatSystem } from "../systems/air_combat_system.js";
 import { AirBombingSystem } from "../systems/air_bombing_system.js";
@@ -2210,6 +2211,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           infrastructure?: number;
           resources?:      { oil?: number };
         }>;
+        adjacency?: Array<{ from_province: string; to_province: string }>;
       }>(dataPath);
       for (const p of raw.provinces ?? []) {
         if (!p.province_id) continue;
@@ -2227,6 +2229,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           });
         }
       }
+      this.state.provinceNeighbors = buildProvinceNeighbors(raw.adjacency ?? []);
       console.log(`[GameRoom] initialized ${this.state.provinces.size} provinces`);
     } catch {
       console.warn(`[GameRoom] could not load map_data.json for province init`);
