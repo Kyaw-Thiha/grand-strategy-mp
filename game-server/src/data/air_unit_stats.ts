@@ -1,15 +1,16 @@
 export interface AirUnitStats {
-  attack_vs_air:       number;
-  defense_vs_air:      number;
-  observation_deg:     number;
-  min_turn_radius_deg: number;
+  attack_vs_air:        number;
+  defense_vs_air:       number;
+  observation_deg:      number;
+  min_turn_radius_deg:  number;
+  attack_vs_air_perked?: number;
 }
 
 const STAT_TABLE: Record<string, AirUnitStats> = {
   fighter:          { attack_vs_air: 0.25, defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.30 },
   heavy_fighter:    { attack_vs_air: 0.22, defense_vs_air: 0.05, observation_deg: 0.25, min_turn_radius_deg: 0.50 },
-  cas_plane:        { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.30 },
-  dive_bomber:      { attack_vs_air: 0.0,  defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.40 },
+  cas_plane:        { attack_vs_air: 0.05, defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.30, attack_vs_air_perked: 0.15 },
+  dive_bomber:      { attack_vs_air: 0.05, defense_vs_air: 0.03, observation_deg: 0.05, min_turn_radius_deg: 0.40, attack_vs_air_perked: 0.15 },
   tactical_bomber:  { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05, min_turn_radius_deg: 0.50 },
   strategic_bomber: { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05, min_turn_radius_deg: 0.65 },
   naval_bomber:     { attack_vs_air: 0.0,  defense_vs_air: 0.02, observation_deg: 0.05, min_turn_radius_deg: 0.40 },

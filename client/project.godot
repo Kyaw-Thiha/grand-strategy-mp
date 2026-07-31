@@ -32,6 +32,7 @@ DiplomacySystem="*res://src/systems/diplomacy/diplomacy_system.gd"
 SceneManager="*res://src/core/scene_manager.gd"
 KeybindManager="*res://src/core/keybind_manager.gd"
 DivisionTemplateStore="*res://src/core/division_template_store.gd"
+AirWingTypeStore="*res://src/core/air_wing_type_store.gd"
 
 [display]
 

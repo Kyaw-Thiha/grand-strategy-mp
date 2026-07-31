@@ -17,6 +17,7 @@ export type AirUnitType = typeof AIR_UNIT_TYPES[keyof typeof AIR_UNIT_TYPES];
 // ── Mission identifiers ───────────────────────────────────────────────────────
 
 export const MISSION_TYPES = {
+  IDLE:                 "idle",
   TACTICAL_BOMBING:    "tactical_bombing",
   INTERCEPTION:        "interception",
   AIR_SUPERIORITY:     "air_superiority",
@@ -77,7 +78,7 @@ export class AirWingState extends Schema {
 
   // Lifecycle and mission state
   @type("string") lifecycle_state: string = WING_LIFECYCLE.IDLE;
-  @type("string") mission: string = MISSION_TYPES.INTERCEPTION;
+  @type("string") mission: string = MISSION_TYPES.IDLE;
 
   // Target wing or province ID for the current mission (empty = no target)
   @type("string") target_id: string = "";
@@ -117,6 +118,7 @@ export class AirWingState extends Schema {
   @type("boolean") perk_extended_range: boolean = false;
   @type("boolean") perk_precision_bombing: boolean = false;
   @type("boolean") perk_splash:           boolean = false;
+  @type("boolean") perk_air_combat:       boolean = false;
 }
 
 // ── Event payload interfaces (emitted via room broadcast) ─────────────────────
@@ -194,6 +196,8 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     perk_strafing:            wing.perk_strafing,
     perk_extended_range:      wing.perk_extended_range,
     perk_precision_bombing:   wing.perk_precision_bombing,
+    perk_splash:              wing.perk_splash,
+    perk_air_combat:          wing.perk_air_combat,
   };
 }
 

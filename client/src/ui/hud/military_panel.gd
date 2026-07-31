@@ -19,8 +19,13 @@ func _ready() -> void:
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
 	_setup_tab_buttons()
 	_inject_land_header()
+	_inject_air_header()
 	_refresh_template_list()
+	_refresh_air_list()
 	DivisionTemplateStore.templates_changed.connect(func() -> void: _refresh_template_list())
+	EventBus.air_wing_added.connect(func(_id: String) -> void: _refresh_air_list())
+	EventBus.air_wing_updated.connect(func(_id: String) -> void: _refresh_air_list())
+	EventBus.air_wing_removed.connect(func(_id: String) -> void: _refresh_air_list())
 
 	# DISABLED: re-enable when active-division list is restored
 	# EventBus.division_added.connect(func(_id: String) -> void: _refresh_land_list())
@@ -174,6 +179,72 @@ static func _derive_division_type(cells: Array) -> String:
 	if inf >= 5:
 		return "Infantry Division"
 	return "Mixed"
+
+
+# ── Air tab ────────────────────────────────────────────────────────────────
+
+func _inject_air_header() -> void:
+	var hbox: HBoxContainer = get_node_or_null(
+		_CONTENT_PATH + "/TabBar/Air/HeaderAir/HBoxAir") as HBoxContainer
+	if hbox == null:
+		return
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	hbox.add_child(spacer)
+	var add_btn := Button.new()
+	add_btn.text = "+"
+	add_btn.custom_minimum_size = Vector2(28, 28)
+	add_btn.tooltip_text = "Spawn new air wing"
+	add_btn.pressed.connect(func() -> void:
+		EventBus.air_wing_spawn_open_requested.emit("")
+	)
+	hbox.add_child(add_btn)
+
+
+func _refresh_air_list() -> void:
+	var list_container: VBoxContainer = get_node_or_null(
+		_CONTENT_PATH + "/TabBar/Air/ScrollAir/ListContainerAir") as VBoxContainer
+	if list_container == null:
+		return
+	for child: Node in list_container.get_children():
+		list_container.remove_child(child)
+		child.queue_free()
+
+	var my_nation: String = GameState.get_my_nation_id()
+	var by_airbase: Dictionary = {}
+	for wing_data: Dictionary in GameState.get_air_wings_for_nation(my_nation):
+		var base_id: String = wing_data.get("home_airbase_province_id", "")
+		if not by_airbase.has(base_id):
+			by_airbase[base_id] = []
+		by_airbase[base_id].append(wing_data)
+
+	var sorted_bases: Array = by_airbase.keys()
+	sorted_bases.sort()
+	for base_id: String in sorted_bases:
+		var group_lbl := Label.new()
+		group_lbl.text = base_id
+		group_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.2, 1))
+		group_lbl.add_theme_font_size_override("font_size", 11)
+		list_container.add_child(group_lbl)
+		for wing_data: Dictionary in by_airbase[base_id]:
+			list_container.add_child(_make_air_wing_item(wing_data))
+
+
+func _make_air_wing_item(wing_data: Dictionary) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size.y = 40
+	btn.size_flags_horizontal = 3
+	var wing_id: String = wing_data.get("wing_id", "")
+	var readiness: float = float(wing_data.get("combat_readiness", 1.0))
+	btn.text = "%s x%d   %.0f%%" % [
+		wing_data.get("aircraft_type", "").to_upper(),
+		int(wing_data.get("count", 0)),
+		readiness * 100.0,
+	]
+	btn.pressed.connect(func() -> void:
+		EventBus.air_wing_selected.emit(wing_id)
+	)
+	return btn
 
 
 # ── DISABLED: original active-division list ───────────────────────────────

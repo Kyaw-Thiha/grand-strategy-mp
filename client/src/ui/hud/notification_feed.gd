@@ -400,6 +400,8 @@ func _get_type_color(notification_type: String) -> Color:
 			return Color(0.86, 0.36, 0.18, 1.0)
 		"diplomacy":
 			return Color(0.48, 0.31, 0.69, 1.0)
+		"air":
+			return Color(0.35, 0.55, 0.85, 1.0)
 		_:
 			return Color(0.96, 0.78, 0.38, 1.0)
 
@@ -420,6 +422,8 @@ func _get_type_title(notification_type: String) -> String:
 			return "COMBAT"
 		"diplomacy":
 			return "DIPLOMACY"
+		"air":
+			return "AIR OPS"
 		_:
 			return "NOTICE"
 

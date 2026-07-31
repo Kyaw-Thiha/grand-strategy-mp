@@ -111,3 +111,61 @@ text = "Target: none"
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "Base: —"
+
+[node name="ActionsBlock" type="VBoxContainer" parent="Margin/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(200, 0)
+theme_override_constants/separation = 4
+
+[node name="MissionRow" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]
+layout_mode = 2
+
+[node name="MissionOptionButton" type="OptionButton" parent="Margin/HBox/ActionsBlock/MissionRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "—"
+
+[node name="EscortRow" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]
+visible = false
+layout_mode = 2
+
+[node name="EscortTargetLabel" type="Label" parent="Margin/HBox/ActionsBlock/EscortRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "Escort target: none yet"
+
+[node name="BtnPickTarget" type="Button" parent="Margin/HBox/ActionsBlock/EscortRow"]
+layout_mode = 2
+text = "Pick Target"
+
+[node name="SizeRow" type="HBoxContainer" parent="Margin/HBox/ActionsBlock"]
+layout_mode = 2
+
+[node name="BtnSizeMinus" type="Button" parent="Margin/HBox/ActionsBlock/SizeRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "−10"
+
+[node name="SizeValueLabel" type="Label" parent="Margin/HBox/ActionsBlock/SizeRow"]
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+text = "0"
+
+[node name="BtnSizePlus" type="Button" parent="Margin/HBox/ActionsBlock/SizeRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "+10"
+
+[node name="MoveHintLabel" type="Label" parent="Margin/HBox/ActionsBlock"]
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+text = "Right-click map to move/redeploy"
+
+[node name="BtnRetreat" type="Button" parent="Margin/HBox/ActionsBlock"]
+layout_mode = 2
+text = "Retreat"

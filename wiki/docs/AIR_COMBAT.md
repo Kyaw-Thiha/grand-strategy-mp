@@ -129,17 +129,11 @@ the intended lever for skilled play: a player can send an obvious threat toward 
 pull enemy interceptors there, then commit the real strike through the gap. Default
 behaviour needs no player input; reading and exploiting it is the skill ceiling.
 
-**Interception targeting priority:** an Interception wing prefers bomber-class targets
-(Strategic Bomber, Tactical Bomber, CAS Plane, Dive Bomber) — wings whose primary purpose
-is hitting the ground. If no bomber-class target is detected, it will engage whatever enemy
-is present. This lets interceptors behave sensibly in mixed engagements without needing
-manual retasking.
-
-**Air Superiority targeting priority:** an Air Superiority wing prefers fighter-class targets
-(Fighter, Heavy Fighter) — wings whose primary purpose is air-to-air combat. If no
-fighter-class target is detected, it will engage whatever enemy is present. Fighter and Heavy
-Fighter are distinct unit types with different performance envelopes and separate research
-perk trees; Air Superiority treats both as equal-priority fighter-class targets.
+**Interception and Air Superiority targeting priority** are full tiered search chains, not a
+single preference — see "Mission Auto-Targeting & Patrol Priority" below for every mission's
+complete chain, the shared crowd-balancing and border-adjacency mechanisms behind the patrol
+fallback tiers, and the per-tick responsiveness/hysteresis rule that governs when a wing
+switches targets.
 
 **Chasing a moving target:** once a target is spotted, an interceptor generates a pursuit
 path (lead pursuit, a standard missile-guidance technique) toward the target's current or
@@ -325,10 +319,15 @@ friendlies, each claims its highest-scoring **still-unclaimed** enemy contact, r
 from the pool. If attackers outnumber targets, overflow doubles up on the highest-value
 remaining target rather than sitting idle. Cheap (O(n log n)), no new infrastructure.
 
-**Auto-target weighting** (for Tactical bombing / CAS-style ground attack with no manually
-selected target): utility score = `base_priority(target_type, mission) × distance_falloff(from
-base) + noise_floor`. The noise floor matters for the same reason the old detection formula
-kept a 5% minimum — a purely greedy nearest-target algorithm is predictable and gameable.
+**Auto-target weighting** (for any mission's auto-search with no manually selected target):
+utility score = `distance_falloff(from current wing position) − CROWD_WEIGHT × claims(target)
++ noise_floor`. The noise floor matters for the same reason the old detection formula kept a
+5% minimum — a purely greedy nearest-target algorithm is predictable and gameable. The crowd
+term is what generalizes deconfliction beyond same-tick attack-range ties: it spreads wings
+across distinct targets even while several are still inbound/in-transit, not just once they
+arrive. See "Mission Auto-Targeting & Patrol Priority" below for the full shared mechanism
+(distance is measured from the wing's own current position, not its home airbase) and how
+every mission's tiered search consumes it.
 
 ---
 
@@ -595,6 +594,115 @@ contact-report strikes sometimes found empty ocean.
 
 **Port strike** — targets ships in port; anchored ships have no zone-based or pooled-AA
 defence, fully exposed. Naval base level reduces damage to docked ships (existing rule).
+
+---
+
+## Mission Auto-Targeting & Patrol Priority
+
+Every mission needs a wing to behave sensibly with zero further clicks, per this document's
+Design Philosophy — this section defines the tiered search chain each mission runs, and the
+shared mechanisms behind the patrol fallback tiers every chain eventually reaches.
+
+### Shared mechanisms
+
+**Border-adjacency.** "Near the border with nation X" is real polygon-derived province
+adjacency (which province physically touches which), not a distance-threshold approximation
+— the map pipeline already computes this. Evaluated from **the searching wing's own nation**,
+not the province's owner, so a wing based at an allied airbase correctly treats "my ally
+borders the enemy" or "my ally borders a neutral" as a valid border case, since wings can be
+stationed at allied airbases.
+
+**Visibility.** "Visible enemy" reuses Detection & Visibility above unchanged — radar
+buildings, friendly wings, and land divisions' observation radii all already feed the same
+per-nation detection aggregation; this section adds no new detection source, only a
+diplomacy-aware (war-stance) query over that existing aggregation.
+
+**Crowd-balancing.** Every tier's candidate search is scored with the Combat Resolution
+section's auto-target weighting formula (distance from the wing's current position, penalized
+by how many other wings already claim that same target or patrol point) so multiple wings
+spread across distinct targets/patrol points by default rather than piling onto one.
+
+**Patrol movement.** "Patrol near/ahead of X" is not continuous formation-following — a wing
+picks a patrol center point and orbits it (the existing Loiter mechanic), re-picking the
+center as the underlying situation changes. This is intentionally an approximation of
+"following," not true pursuit pathfinding.
+
+**Responsiveness and hysteresis.** A wing without an active higher-tier target re-runs its
+full search every tick, so it reacts within one tick of a new contact becoming visible — no
+separate event system needed, since detection itself already recomputes every tick. To avoid
+flip-flopping between near-equal candidates, a wing only abandons its current target/patrol
+choice for a **strictly higher-priority tier** result, or when its current choice becomes
+invalid (destroyed, no longer visible, or claimed away by a higher-priority wing). Within the
+same tier it keeps its current pick.
+
+**Reaching the final "stay at base" tier** does not change the wing's `mission` — it simply
+remains `Idle` at its airbase, per Wing Lifecycle above, and the per-tick search
+auto-launches it the moment a valid target or patrol condition appears, with no player input.
+
+### Per-mission chains
+
+**Interception**
+1. Visible enemy strategic/tactical bombers
+2. Visible enemy CAS/dive bombers
+3. Visible enemy fighters/heavy fighters (any remaining visible enemy air wing)
+4. Patrol over friendly land or naval units near a war- or neutral-stance border (own or
+   allied nation's border), least-claimed first — **naval units are not yet implementable**
+   (see note below the chains)
+5. Patrol over own cities, nearest to home airbase first, least-claimed first
+6. Duplicate onto an already-patrolled friendly unit/city if none of the above exist
+7. Stay at base if nothing above exists at all
+
+**Air Superiority** — the mirrored priority, same fallback shape:
+1. Visible enemy fighters/heavy fighters
+2. Visible enemy CAS/dive bombers
+3. Visible enemy strategic/tactical bombers
+4. Patrol over friendly land and naval units near a war-stance border, least-claimed first
+   — **naval units are not yet implementable** (see note below the chains)
+5. Patrol over friendly land and naval units near a neutral-stance border, least-claimed
+   first — same naval caveat
+6. Patrol spread across own cities if no enemy or neutral border exists at all (e.g. a nation
+   fully surrounded by allies)
+7. Stay at base if nothing above exists
+
+**Tactical Bombing**
+1. Visible enemy land units, scored by distance from the wing's current position plus the
+   crowd term
+2. Patrol over/near friendly land units close to a war-stance border (covering an advancing
+   column), within the wing's max range from its home airbase
+3. Stay at base if no such units exist within range
+
+**Strategic Bombing (Logistics / Area / Industry / Oil)**
+1. Visible enemy targets appropriate to the sub-mission (road segment, city point), scored
+   by distance from the wing's current position plus the crowd term
+2. Stay at base if no such targets exist (e.g. at peace)
+
+**Naval Missions (Trade Interdiction / Anti-Submarine / Anti-Ship / Port Strike)**
+Same shape as Tactical Bombing, applied to naval contacts under the existing fog-of-war
+contact-marker rules above — unaffected by this section otherwise.
+
+**Recon**
+1. Escort-follow any visible friendly strategic or tactical bomber wing not already
+   accompanied by another recon wing (direct following, not a border-patrol orbit)
+2. Patrol ahead of a friendly land unit inside or near enemy territory, to give it forward
+   vision
+3. Patrol near a war-stance border generally (vision-only, no unit to lead)
+4. Patrol near a neutral-stance border
+5. Stay at base if none of the above exist
+
+**Escort** needs no change here — its assignment logic is defined in full under "Command
+Layer — Air Fleets" below and already matches this section's shared crowd-balancing intent
+(round-robin spread by escort count).
+
+**Known gap — no friendly naval unit state exists yet.** Interception and Air Superiority's
+patrol-fallback tiers are written above as covering "friendly land or naval units," matching
+the original design intent, but there is currently no schema representing a positioned,
+controllable friendly flotilla anywhere in the game-server — only `NavalContactMarkerState`,
+a per-nation fog-of-war contact blip for *enemy* detection, not a friendly unit list. This is
+the same underlying gap already tracked in `DEV_PHASES.md`'s Phase 12 checklist (naval bomber
+missions stubbed pending Phase 13 flotilla state), but it also blocks half of these two
+patrol-fallback tiers specifically, which isn't the same claim as "naval bomber missions
+don't resolve yet." Until Phase 13 adds real flotilla state, implementations of this section
+should patrol over friendly **land** units only at these tiers; revisit once flotillas exist.
 
 ---
 

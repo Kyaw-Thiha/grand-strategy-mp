@@ -228,16 +228,84 @@ export class AirWingLifecycleSystem {
   assignMission(wingId: string, mission: string, targetId: string, state: GameRoomState): boolean {
     const wing = state.air_wings.get(wingId);
     if (!wing) return false;
-    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED) return false;
+    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED && mission !== MISSION_TYPES.IDLE) return false;
 
     wing.mission    = mission;
     wing.target_id  = targetId;
+
+    if (mission === MISSION_TYPES.IDLE) {
+      const ls = wing.lifecycle_state;
+      if (ls === WING_LIFECYCLE.TRANSIT
+       || ls === WING_LIFECYCLE.LOITER
+       || ls === WING_LIFECYCLE.ENGAGED) {
+        wing.lifecycle_state = WING_LIFECYCLE.RTB;
+        this._engagementTicks.delete(wingId);
+        this._loiterTicks.delete(wingId);
+        this._pendingRedeployTarget.delete(wingId);
+      }
+      return true;
+    }
+
     if (wing.lifecycle_state === WING_LIFECYCLE.IDLE
      || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
       wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
       this._loiterTicks.delete(wingId);
     }
     return true;
+  }
+
+  // ── Escort auto-assignment ─────────────────────────────────────────────────
+
+  private static readonly HEAVY_FIGHTER_PRIMARY = new Set(["strategic_bomber", "tactical_bomber"]);
+  private static readonly HEAVY_FIGHTER_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
+  private static readonly FIGHTER_PRIMARY = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
+  private static readonly FIGHTER_FALLBACK = new Set(["strategic_bomber", "tactical_bomber"]);
+
+  autoAssignEscort(wingId: string, state: GameRoomState): void {
+    const wing = state.air_wings.get(wingId);
+    if (!wing) return;
+
+    const isHeavy = wing.aircraft_type === "heavy_fighter";
+    const primary  = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_PRIMARY  : AirWingLifecycleSystem.FIGHTER_PRIMARY;
+    const fallback = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_FALLBACK : AirWingLifecycleSystem.FIGHTER_FALLBACK;
+
+    const eligibleStates = new Set([WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER]);
+
+    const escortCounts = new Map<string, number>();
+    for (const w of state.air_wings.values()) {
+      if (w.mission === MISSION_TYPES.ESCORT && w.target_id !== "") {
+        escortCounts.set(w.target_id, (escortCounts.get(w.target_id) ?? 0) + 1);
+      }
+    }
+
+    const pickFrom = (typeSet: Set<string>): string => {
+      let best = "";
+      let bestCount = Infinity;
+      for (const w of state.air_wings.values()) {
+        if (w.nation_id !== wing.nation_id) continue;
+        if (!typeSet.has(w.aircraft_type)) continue;
+        if (!eligibleStates.has(w.lifecycle_state as WING_LIFECYCLE)) continue;
+        const count = escortCounts.get(w.wing_id) ?? 0;
+        if (count < bestCount) {
+          bestCount = count;
+          best = w.wing_id;
+        }
+      }
+      return best;
+    };
+
+    let target = pickFrom(primary);
+    if (target === "") target = pickFrom(fallback);
+
+    if (target === "") {
+      if (!isHeavy) {
+        wing.mission = MISSION_TYPES.AIR_SUPERIORITY;
+      }
+      wing.target_id = "";
+      return;
+    }
+
+    wing.target_id = target;
   }
 
   triggerContact(wingId: string, targetWingId: string, state: GameRoomState): void {
@@ -288,6 +356,13 @@ export class AirWingLifecycleSystem {
     const wing = state.air_wings.get(wingId);
     if (!wing) return;
 
+    const orphanedEscorts: string[] = [];
+    for (const w of state.air_wings.values()) {
+      if (w.mission === MISSION_TYPES.ESCORT && w.target_id === wingId) {
+        orphanedEscorts.push(w.wing_id);
+      }
+    }
+
     const nationId = wing.nation_id;
     state.air_wings.delete(wingId);
 
@@ -300,6 +375,10 @@ export class AirWingLifecycleSystem {
     this._pendingMissionAfterRedeploy.delete(wingId);
     this._pendingTransitAfterRedeploy.delete(wingId);
     this._statusFuel.delete(wingId);
+
+    for (const escortId of orphanedEscorts) {
+      this.autoAssignEscort(escortId, state);
+    }
 
     broadcast(messageType, {
       wing_id: wingId,
@@ -316,7 +395,8 @@ export class AirWingLifecycleSystem {
       case "strafing":          wing.perk_strafing          = value; return true;
       case "extended_range":    wing.perk_extended_range    = value; return true;
       case "precision_bombing": wing.perk_precision_bombing = value; return true;
-      case "splash":           wing.perk_splash           = value; return true;
+      case "splash":            wing.perk_splash            = value; return true;
+      case "air_combat":        wing.perk_air_combat        = value; return true;
       default: return false;
     }
   }

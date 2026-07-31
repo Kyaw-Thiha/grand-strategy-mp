@@ -28,6 +28,12 @@ The lifecycle system evaluates this live room data; the client only renders the 
 
 ## Missions, bases, and staging
 
+`MISSION_TYPES` defines 14 mission identifiers including a new `IDLE` mission. The `assignMission()` function has an early-exception for `IDLE` that skips the `TRANSIT` state transition, letting a wing stay grounded. The `CREATE_WING` handler spawns new wings at a province airbase with `mission = IDLE` and `lifecycle_state = IDLE`; province coordinates are resolved via `_provinceCityPositionLookup`. `ADJUST_WING_SIZE` lets players change wing count with a ±delta clamped to zero.
+
+`autoAssignEscort()` provides round-robin escort pairing: heavy fighters prioritize strategic/tactical bombers, fighters prioritize CAS/dive/naval bombers. Only airborne (`TRANSIT`/`ENGAGED`/`LOITER`) friendly bombers are candidate targets. Orphaned escorts (when their assigned bomber is disbanded) re-run auto-assignment automatically.
+
+Wings carry a `perk_air_combat` field, set via `SET_WING_PERK`. When enabled, the combat system reads `attack_vs_air_perked` from the stat table (currently only `cas_plane`/`dive_bomber` have a perked override of 0.15, vs base 0.05) instead of the base `attack_vs_air`, making the perk a pure damage-effectiveness multiplier. `serializeWing()` now includes all six perk fields including the previously-missing `perk_splash`.
+
 Players can assign missions, move a wing, order it home, redeploy it to an owned or allied province, disband it, and toggle existing wing perks. Out-of-range movement can queue a return first or select a nearer friendly staging base. A captured hostile airbase likewise triggers redeployment or disbanding.
 
 Mission identifiers include interception, air superiority, escort, tactical bombing, reconnaissance, logistics, and several future strategic/naval missions. **Current:** implementation is most developed for interception/air superiority movement and tactical bombing; the full mission list is not a promise that each mission resolves gameplay effects.
