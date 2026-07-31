@@ -1,5 +1,6 @@
 import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import type { MissionType } from "../rooms/schema/AirWingState.js";
 
 // ── Module-level mutable constants — mutated ONLY by exported test helpers ───
 
@@ -48,7 +49,7 @@ const GROUND_ATTACK_MISSIONS = new Set(["area", "tactical_bombing"]);
 // Every mission this branch adds auto-targeting/patrol behavior to — all of MISSION_TYPES
 // except IDLE (handled separately) and ESCORT (has its own already-correct auto-assignment
 // system and must stay excluded from the generic auto-targeted search).
-const AUTO_TARGETED_MISSIONS = new Set([
+const AUTO_TARGETED_MISSIONS: Set<MissionType> = new Set([
   MISSION_TYPES.INTERCEPTION,
   MISSION_TYPES.AIR_SUPERIORITY,
   MISSION_TYPES.TACTICAL_BOMBING,
@@ -173,7 +174,7 @@ export class AirWingLifecycleSystem {
           break;
         }
         case WING_LIFECYCLE.LOITER: {
-          const isPatrolMission = AUTO_TARGETED_MISSIONS.has(wing.mission as any);
+          const isPatrolMission = AUTO_TARGETED_MISSIONS.has(wing.mission as MissionType);
           // Auto-targeted wings re-sortie when the targeting system commits a new target
           if (isPatrolMission && wing.target_id !== "") {
             wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;

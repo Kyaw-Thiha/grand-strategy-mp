@@ -139,7 +139,20 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.REFUEL);
   });
 
-  it("assigning a non-IDLE mission to an IDLE wing still transitions to TRANSIT", async () => {
+  it("assigning a non-IDLE mission with a target to an IDLE wing still transitions to TRANSIT", async () => {
+    const { client, room } = await joinRoom();
+    const wid = await spawnWing(client, room);
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: wid, mission: MISSION_TYPES.AIR_SUPERIORITY, target_id: "some_target_id" });
+    await room.waitForNextPatch();
+
+    const wing = room.state.air_wings.get(wid);
+    assert.ok(wing);
+    assert.strictEqual(wing.mission, MISSION_TYPES.AIR_SUPERIORITY);
+    assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+  });
+
+  it("assigning a non-IDLE mission with an empty target to an IDLE wing stays IDLE (Branch L)", async () => {
     const { client, room } = await joinRoom();
     const wid = await spawnWing(client, room);
 
@@ -149,7 +162,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     const wing = room.state.air_wings.get(wid);
     assert.ok(wing);
     assert.strictEqual(wing.mission, MISSION_TYPES.AIR_SUPERIORITY);
-    assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.IDLE);
   });
 
   // ── Perk: air_combat ─────────────────────────────────────────────────────
