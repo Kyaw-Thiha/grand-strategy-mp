@@ -43,3 +43,44 @@ export function isBorderingStance(
   }
   return false;
 }
+
+const CROWD_WEIGHT = 0.15;   // placeholder — playtesting-tunable, see AIR_COMBAT.md Open Questions
+
+function euclidDeg(lng1: number, lat1: number, lng2: number, lat2: number): number {
+  return Math.sqrt((lng1 - lng2) ** 2 + (lat1 - lat2) ** 2);
+}
+
+export function scoreCandidate(distDeg: number, claimCount: number): number {
+  const distanceFalloff = 1 / (1 + distDeg);
+  return distanceFalloff - CROWD_WEIGHT * claimCount;
+}
+
+/** Counts live wings currently assigned (by mission+target_id) to each target_id. */
+export function buildClaimsRegistry(state: GameRoomState): Map<string, number> {
+  const claims = new Map<string, number>();
+  for (const wing of state.air_wings.values()) {
+    if (!wing.target_id) continue;
+    claims.set(wing.target_id, (claims.get(wing.target_id) ?? 0) + 1);
+  }
+  return claims;
+}
+
+/** Picks the highest-scoring candidate id from a list of {id, lng, lat}. Ties broken by id string. */
+function pickBest<T extends { id: string; lng: number; lat: number }>(
+  candidates: T[],
+  fromLng: number,
+  fromLat: number,
+  claims: Map<string, number>,
+): T | null {
+  let best: T | null = null;
+  let bestScore = -Infinity;
+  for (const c of candidates) {
+    const dist = euclidDeg(fromLng, fromLat, c.lng, c.lat);
+    const score = scoreCandidate(dist, claims.get(c.id) ?? 0);
+    if (score > bestScore || (score === bestScore && (!best || c.id < best.id))) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
