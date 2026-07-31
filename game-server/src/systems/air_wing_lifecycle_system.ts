@@ -45,6 +45,24 @@ const GROUND_ATTACK_LOITER_MAX_TICKS = 5;
 const _groundAttackLoiterCount = new Map<string, number>();
 const GROUND_ATTACK_MISSIONS = new Set(["area", "tactical_bombing"]);
 
+// Every mission this branch adds auto-targeting/patrol behavior to — all of MISSION_TYPES
+// except IDLE (handled separately) and ESCORT (has its own already-correct auto-assignment
+// system and must stay excluded from the generic auto-targeted search).
+const AUTO_TARGETED_MISSIONS = new Set([
+  MISSION_TYPES.INTERCEPTION,
+  MISSION_TYPES.AIR_SUPERIORITY,
+  MISSION_TYPES.TACTICAL_BOMBING,
+  MISSION_TYPES.AREA,
+  MISSION_TYPES.INDUSTRY,
+  MISSION_TYPES.OIL,
+  MISSION_TYPES.LOGISTICS,
+  MISSION_TYPES.RECON,
+  MISSION_TYPES.TRADE_INTERDICTION,
+  MISSION_TYPES.ANTI_SUBMARINE,
+  MISSION_TYPES.ANTI_SHIP,
+  MISSION_TYPES.PORT_STRIKE,
+]);
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -155,9 +173,8 @@ export class AirWingLifecycleSystem {
           break;
         }
         case WING_LIFECYCLE.LOITER: {
-          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
-                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
-          // Patrol wings re-sortie when a new interception target is assigned
+          const isPatrolMission = AUTO_TARGETED_MISSIONS.has(wing.mission as any);
+          // Auto-targeted wings re-sortie when the targeting system commits a new target
           if (isPatrolMission && wing.target_id !== "") {
             wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
             this._loiterTicks.delete(wingId);
@@ -246,8 +263,8 @@ export class AirWingLifecycleSystem {
       return true;
     }
 
-    if (wing.lifecycle_state === WING_LIFECYCLE.IDLE
-     || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
+    if (targetId !== "" && (wing.lifecycle_state === WING_LIFECYCLE.IDLE
+     || wing.lifecycle_state === WING_LIFECYCLE.LOITER)) {
       wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
       this._loiterTicks.delete(wingId);
     }
@@ -449,6 +466,10 @@ export class AirWingLifecycleSystem {
 
   getEngagementTarget(wingId: string): string | null {
     return this._lastEngagedTarget.get(wingId) ?? null;
+  }
+
+  resetLoiterTicks(wingId: string): void {
+    this._loiterTicks.delete(wingId);
   }
 
   startWeaponCooldown(wingId: string, state: GameRoomState): void {

@@ -504,4 +504,54 @@ describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
     assert.ok(wing.position_lng !== 10.0,
       `interceptor should have moved from start toward target; got lng=${wing.position_lng}`);
   });
+
+  // ── Test Group 10: assignMission with empty target_id ────────────────────
+
+  describe("lane:air-combat | assignMission with empty target_id", () => {
+    it("does NOT force TRANSIT when targetId is empty — wing stays IDLE for auto-search to pick up", async () => {
+      const { client, room } = await joinRoom();
+      await spawnWing(client, room, { lifecycle_state: WING_LIFECYCLE.IDLE });
+
+      client.send("ASSIGN_WING_MISSION", {
+        wing_id:   "wing-1",
+        mission:   MISSION_TYPES.TACTICAL_BOMBING,
+        target_id: "",
+      });
+      await room.waitForNextPatch();
+
+      const wing = room.state.air_wings.get("wing-1");
+      assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.IDLE,
+        "wing must stay IDLE when assigned a mission with no target");
+      assert.strictEqual(wing.mission, MISSION_TYPES.TACTICAL_BOMBING,
+        "mission must still be recorded even with empty target_id");
+    });
+
+    it("DOES transition IDLE to TRANSIT when targetId is non-empty (unchanged existing behavior)", async () => {
+      const { client, room } = await joinRoom();
+      await spawnWing(client, room, { lifecycle_state: WING_LIFECYCLE.IDLE });
+
+      client.send("ASSIGN_WING_MISSION", {
+        wing_id:   "wing-1",
+        mission:   MISSION_TYPES.TACTICAL_BOMBING,
+        target_id: "some_division_id",
+      });
+      await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
+
+      const wing = room.state.air_wings.get("wing-1");
+      assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    });
+
+    it("LOITER wing with a non-air-superiority/interception mission relaunches to TRANSIT when target_id is set externally", async () => {
+      const { client, room } = await joinRoom();
+      await spawnWing(client, room, { mission: MISSION_TYPES.TACTICAL_BOMBING });
+      client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.LOITER });
+      await room.waitForNextPatch();
+
+      client.send("SET_WING_TARGET", { wing_id: "wing-1", target_id: "some_id" });
+      await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
+
+      const wing = room.state.air_wings.get("wing-1");
+      assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    });
+  });
 });
