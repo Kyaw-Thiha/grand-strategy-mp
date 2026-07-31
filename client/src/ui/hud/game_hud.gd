@@ -164,6 +164,36 @@ func _ready() -> void:
 				_map_interaction.set_player_input_enabled(true)
 		)
 
+	# Air Wing Escort Picker — popup, shown from friendly air wing panel
+	var escort_picker := PanelContainer.new()
+	escort_picker.set_script(load("res://src/ui/hud/air_wing_escort_picker_panel.gd"))
+	escort_picker.visible = false
+	escort_picker.anchors_preset = Control.PRESET_CENTER
+	add_child(escort_picker)
+	EventBus.air_wing_escort_picker_open_requested.connect(func(wing_id: String) -> void:
+		escort_picker.open_for_wing(wing_id)
+		escort_picker.visible = true
+	)
+	if escort_picker.has_signal("close_requested"):
+		escort_picker.connect("close_requested", func() -> void:
+			escort_picker.visible = false
+		)
+
+	# Air Wing Spawn Panel — popup, opened from military panel "+" button
+	var spawn_panel := PanelContainer.new()
+	spawn_panel.set_script(load("res://src/ui/hud/air_wing_spawn_panel.gd"))
+	spawn_panel.visible = false
+	spawn_panel.anchors_preset = Control.PRESET_CENTER
+	add_child(spawn_panel)
+	EventBus.air_wing_spawn_open_requested.connect(func(_province_id: String) -> void:
+		spawn_panel.open_spawn_modal()
+		spawn_panel.visible = true
+	)
+	if spawn_panel.has_signal("close_requested"):
+		spawn_panel.connect("close_requested", func() -> void:
+			spawn_panel.visible = false
+		)
+
 	# Division Template Viewer — full-center, opened from mini-comp grid click
 	_division_template_viewer_panel = _DivisionTemplateViewerScene.instantiate()
 	add_child(_division_template_viewer_panel)

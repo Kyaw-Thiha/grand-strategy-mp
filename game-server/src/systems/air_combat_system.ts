@@ -127,9 +127,12 @@ export class AirCombatSystem {
     state: GameRoomState, lifecycleSystem: AirWingLifecycleSystem,
   ): void {
     const stats = getAirUnitStats(attacker.aircraft_type);
-    let baseValue = attacker.weapon_ready ? stats.attack_vs_air : stats.defense_vs_air;
-    if (isSurprise && attacker.weapon_ready && stats.attack_vs_air > 0) {
-      baseValue = stats.attack_vs_air * SURPRISE_MULTIPLIER;
+    const effectiveAttackVsAir = (attacker.perk_air_combat && stats.attack_vs_air_perked !== undefined)
+      ? stats.attack_vs_air_perked
+      : stats.attack_vs_air;
+    let baseValue = attacker.weapon_ready ? effectiveAttackVsAir : stats.defense_vs_air;
+    if (isSurprise && attacker.weapon_ready && effectiveAttackVsAir > 0) {
+      baseValue = effectiveAttackVsAir * SURPRISE_MULTIPLIER;
     }
     const densityBonus = Math.min(target.count / FORMATION_DENSITY_CAP, 1.0) * MAX_FORMATION_BONUS;
     const raw = baseValue * attackerCountSnapshot * attackerReadinessSnapshot * attacker.status_weapons;
@@ -137,12 +140,12 @@ export class AirCombatSystem {
     target.count = Math.max(0, target.count - damage);
     target.status_instruments = Math.max(0, target.status_instruments - INSTRUMENTS_DECAY_PER_HIT);
 
-    if (attacker.weapon_ready && stats.attack_vs_air > 0 && target.count > 0) {
+    if (attacker.weapon_ready && effectiveAttackVsAir > 0 && target.count > 0) {
       target.status_fuel = +(target.status_fuel * 1.5).toFixed(4);
       lifecycleSystem.applyLandingDecay(attacker.wing_id, state);
     }
 
-    if (stats.attack_vs_air > 0) {
+    if (effectiveAttackVsAir > 0) {
       attacker.combat_readiness = Math.max(0, attacker.combat_readiness - READINESS_COMBAT_SPIKE_AIR);
       target.combat_readiness   = Math.max(0, target.combat_readiness   - READINESS_COMBAT_SPIKE_AIR);
     }

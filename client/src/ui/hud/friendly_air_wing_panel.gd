@@ -1,5 +1,4 @@
 extends PanelContainer
-## Bottom selection bar panel — shows stats for selected friendly air wing.
 
 var _wing_id_label: Label
 var _aircraft_type_label: Label
@@ -12,6 +11,15 @@ var _readiness_pct: Label
 var _weapon_label: Label
 var _target_label: Label
 var _airbase_label: Label
+
+var _mission_option: OptionButton
+var _escort_row: HBoxContainer
+var _escort_target_label: Label
+var _btn_pick_target: Button
+var _size_value_label: Label
+var _btn_size_minus: Button
+var _btn_size_plus: Button
+var _btn_retreat: Button
 
 var _current_wing_id: String = ""
 
@@ -37,6 +45,15 @@ func _ready() -> void:
 	_target_label      = get_node_or_null("Margin/HBox/TargetBlock/TargetLabel")
 	_airbase_label     = get_node_or_null("Margin/HBox/TargetBlock/AirbaseLabel")
 
+	_mission_option      = get_node_or_null("Margin/HBox/ActionsBlock/MissionRow/MissionOptionButton")
+	_escort_row           = get_node_or_null("Margin/HBox/ActionsBlock/EscortRow")
+	_escort_target_label  = get_node_or_null("Margin/HBox/ActionsBlock/EscortRow/EscortTargetLabel")
+	_btn_pick_target       = get_node_or_null("Margin/HBox/ActionsBlock/EscortRow/BtnPickTarget")
+	_size_value_label      = get_node_or_null("Margin/HBox/ActionsBlock/SizeRow/SizeValueLabel")
+	_btn_size_minus        = get_node_or_null("Margin/HBox/ActionsBlock/SizeRow/BtnSizeMinus")
+	_btn_size_plus         = get_node_or_null("Margin/HBox/ActionsBlock/SizeRow/BtnSizePlus")
+	_btn_retreat           = get_node_or_null("Margin/HBox/ActionsBlock/BtnRetreat")
+
 	var readiness_block: Node = get_node_or_null("Margin/HBox/ReadinessBlock")
 	if readiness_block and _readiness_bar:
 		_fuel_bar = ProgressBar.new()
@@ -59,6 +76,87 @@ func _ready() -> void:
 func populate(wing_id: String, data: Dictionary) -> void:
 	_current_wing_id = wing_id
 	_refresh_stats(data)
+	_refresh_mission_dropdown(data)
+	_refresh_escort_row(data)
+	_refresh_size_row(data)
+	var ls: String = data.get("lifecycle_state", "idle")
+	if _btn_retreat != null:
+		_btn_retreat.visible = ls in ["transit", "engaged", "loiter"]
+	_rewire_buttons(wing_id)
+
+
+func _rewire_buttons(wing_id: String) -> void:
+	for btn: Button in [_btn_retreat, _btn_pick_target, _btn_size_minus, _btn_size_plus]:
+		if btn == null:
+			continue
+		if btn.pressed.get_connections().size() > 0:
+			for conn: Dictionary in btn.pressed.get_connections():
+				btn.pressed.disconnect(conn["callable"])
+
+	if _btn_retreat != null:
+		_btn_retreat.pressed.connect(func() -> void:
+			CommandQueue.submit("RETREAT_WING", { "wing_id": wing_id })
+		)
+	if _btn_pick_target != null:
+		_btn_pick_target.pressed.connect(func() -> void:
+			EventBus.air_wing_escort_picker_open_requested.emit(wing_id)
+		)
+	if _btn_size_minus != null:
+		_btn_size_minus.pressed.connect(func() -> void:
+			CommandQueue.submit("ADJUST_WING_SIZE", { "wing_id": wing_id, "delta": -10 })
+		)
+	if _btn_size_plus != null:
+		_btn_size_plus.pressed.connect(func() -> void:
+			CommandQueue.submit("ADJUST_WING_SIZE", { "wing_id": wing_id, "delta": 10 })
+		)
+
+	if _mission_option != null:
+		if _mission_option.item_selected.is_connected(_on_mission_selected):
+			_mission_option.item_selected.disconnect(_on_mission_selected)
+		_mission_option.item_selected.connect(_on_mission_selected)
+
+
+func _on_mission_selected(index: int) -> void:
+	if _mission_option == null or _current_wing_id.is_empty():
+		return
+	var mission: String = _mission_option.get_item_metadata(index)
+	CommandQueue.submit("ASSIGN_WING_MISSION", {
+		"wing_id": _current_wing_id,
+		"mission": mission,
+		"target_id": "",
+	})
+
+
+func _refresh_mission_dropdown(data: Dictionary) -> void:
+	if _mission_option == null:
+		return
+	var aircraft_type: String = data.get("aircraft_type", "")
+	var eligible: Array = AirWingConstants.get_eligible_missions(aircraft_type, data)
+	_mission_option.clear()
+	var current_mission: String = data.get("mission", "")
+	var select_index := 0
+	for i: int in range(eligible.size()):
+		var m: String = eligible[i]
+		_mission_option.add_item(AirWingConstants.mission_label(m), i)
+		_mission_option.set_item_metadata(i, m)
+		if m == current_mission:
+			select_index = i
+	_mission_option.select(select_index)
+
+
+func _refresh_escort_row(data: Dictionary) -> void:
+	if _escort_row == null:
+		return
+	var mission: String = data.get("mission", "")
+	_escort_row.visible = mission == AirWingConstants.MISSION_ESCORT
+	if _escort_target_label != null:
+		var target_id: String = data.get("target_id", "")
+		_escort_target_label.text = "Escort target: " + (target_id if not target_id.is_empty() else "none yet")
+
+
+func _refresh_size_row(data: Dictionary) -> void:
+	if _size_value_label != null:
+		_size_value_label.text = str(int(data.get("count", 0)))
 
 
 func _refresh_stats(data: Dictionary) -> void:
@@ -120,3 +218,6 @@ func _on_air_wing_updated(wing_id: String) -> void:
 		var data: Dictionary = GameState.get_air_wing(wing_id)
 		if not data.is_empty():
 			_refresh_stats(data)
+			_refresh_mission_dropdown(data)
+			_refresh_escort_row(data)
+			_refresh_size_row(data)

@@ -12,9 +12,9 @@ The server-reported `CHAT_MESSAGE` becomes `EventBus.chat_message_received`, whi
 
 ## Timed notifications
 
-`NotificationFeed` listens for `EventBus.notification_requested`. It creates short-lived cards with type-specific colors for default, research, warning, error, combat, and diplomacy messages. Visible cards are capped and old non-interactive notices are removed first.
+`NotificationFeed` listens for `EventBus.notification_requested`. It creates short-lived cards with type-specific colors for default, research, warning, error, combat, diplomacy, and air messages. Visible cards are capped and old non-interactive notices are removed first.
 
-Examples include rejected movement, server errors, air-wing staging/return notices, and local research completion.
+Examples include rejected movement, server errors, air-wing staging/return notices, air combat starts, wing destructions, and local research completion. The `"air"` type renders with a sky-blue accent (`Color(0.35, 0.55, 0.85, 1.0)`) and the title "AIR OPS".
 
 ## Interactive diplomacy notifications
 

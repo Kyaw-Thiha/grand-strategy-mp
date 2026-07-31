@@ -8,7 +8,11 @@ Air wings let players follow aircraft on the map, inspect fuel and readiness, re
 
 `AirWingSystem`, implemented by `client/src/systems/air/air_wing_system.gd`, creates an `AirWingIcon` for each wing in `GameState`. Icons display nation color, aircraft type, count, fuel, readiness, lifecycle state, and selection.
 
-Selecting a wing emits `EventBus.air_wing_selected`, which opens the friendly air-wing panel. That panel shows current mission, target, home airbase, fuel, readiness, weapon state, and lifecycle values from the mirror.
+Selecting a wing emits `EventBus.air_wing_selected`, which opens the friendly air-wing panel. That panel shows current mission, target, home airbase, fuel, readiness, weapon state, and lifecycle values from the mirror. The panel now includes an `ActionsBlock` with interactive controls: a filtered mission dropdown (per aircraft type, with perk-gated missions hidden client-side), a wing size ±10 stepper (`ADJUST_WING_SIZE`), a Retreat button (airborne-only), and a non-interactive Move hint label. An escort target row with a "Pick Target" button appears when the mission is escort, opening the escort picker popup for manual pairing.
+
+A new `IDLE` mission lets a wing be told to stay grounded. Setting Escort without an explicit target triggers the server's `autoAssignEscort()` which pairs escorts with eligible airborne bombers using round-robin load balancing. If the escorted bomber is destroyed, the orphaned escort re-runs auto-assignment to find a new bomber.
+
+New wings are spawned via the Military panel's Air tab "+" button, which opens a spawn modal to pick aircraft type and count (default 10, ±10 stepper). Wings spawn at the nation's capital province via `CREATE_WING`.
 
 ## Right-click actions
 

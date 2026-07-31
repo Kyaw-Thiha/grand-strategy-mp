@@ -22,7 +22,9 @@
         "test/12g-strategic-bombing.test.ts",
         "test/12h-manual-targeting.test.ts",
         "test/12h-naval-bomber.test.ts",
-        "test/12j-server-visibility-aoi.test.ts"
+        "test/12j-server-visibility-aoi.test.ts",
+        "test/12k-escort-auto-assign.test.ts",
+        "test/12k-wing-management.test.ts"
       ]
     },
     "tactical": {

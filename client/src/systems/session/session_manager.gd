@@ -152,11 +152,12 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"AIR_WING_STAGING":
 			EventBus.notification_requested.emit(
 				"Wing out of range — auto-staging to closer airbase before executing order.",
-				"info"
+				"air"
 			)
 
 		"AIR_WING_DESTROYED":
 			GameState._apply_air_wing_destroyed(data)
+			EventBus.notification_requested.emit("Air wing lost", "air")
 		"DIVISION_APPEARED":
 			GameState._apply_division_appeared(data)
 		"DIVISION_VANISHED":
@@ -166,11 +167,12 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 
 		"AIR_COMBAT_STARTED":
 			EventBus.air_combat_started.emit(data)
+			EventBus.notification_requested.emit("Air combat engaged", "air")
 		"AIR_COMBAT_ENDED":
 			EventBus.air_combat_ended.emit(data)
 		"AIR_WING_RTB_QUEUED":
 			EventBus.notification_requested.emit(
-				"Wing returning to base — will proceed to target after refuelling.", "info")
+				"Wing returning to base — will proceed to target after refuelling.", "air")
 		"AIR_WING_MOVE_REJECTED":
 			EventBus.notification_requested.emit(
 				"Target out of range — no staging airbase available.", "warning")

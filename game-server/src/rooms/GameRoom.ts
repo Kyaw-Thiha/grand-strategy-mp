@@ -189,12 +189,20 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const wing = this.state.air_wings.get(msg.wing_id);
       if (!wing || wing.nation_id !== nation.nation_id) return;
 
-      const didChange = this.airWingLifecycleSystem.assignMission(
-        msg.wing_id,
-        msg.mission,
-        msg.target_id,
-        this.state
-      );
+      const isAutoEscort = msg.mission === MISSION_TYPES.ESCORT && (!msg.target_id || msg.target_id === "");
+      let didChange: boolean;
+      if (isAutoEscort) {
+        this.airWingLifecycleSystem.assignMission(msg.wing_id, msg.mission, "", this.state);
+        this.airWingLifecycleSystem.autoAssignEscort(msg.wing_id, this.state);
+        didChange = true;
+      } else {
+        didChange = this.airWingLifecycleSystem.assignMission(
+          msg.wing_id,
+          msg.mission,
+          msg.target_id,
+          this.state
+        );
+      }
       if (!didChange) return;
       const updated = this.state.air_wings.get(msg.wing_id);
       if (updated) this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
@@ -418,6 +426,55 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (!didChange) return;
       const updated = this.state.air_wings.get(msg.wing_id);
       if (updated) this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
+    });
+
+    this.onMessage("ADJUST_WING_SIZE", (client, msg: {
+      wing_id: string;
+      delta: number;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const wing = this.state.air_wings.get(msg.wing_id);
+      if (!wing || wing.nation_id !== nation.nation_id) return;
+
+      wing.count = Math.max(0, wing.count + msg.delta);
+      this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
+    });
+
+    this.onMessage("CREATE_WING", (client, msg: {
+      wing_id: string;
+      aircraft_type: string;
+      count: number;
+      home_airbase_province_id: string;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const province = this.state.provinces.get(msg.home_airbase_province_id);
+      if (!province || province.owner_id !== nation.nation_id) return;
+
+      const wing = new AirWingState();
+      wing.wing_id                  = msg.wing_id;
+      wing.nation_id                = nation.nation_id;
+      wing.aircraft_type            = msg.aircraft_type;
+      wing.count                    = Math.max(0, msg.count);
+      wing.home_airbase_province_id = msg.home_airbase_province_id;
+      wing.lifecycle_state          = WING_LIFECYCLE.IDLE;
+      wing.mission                  = MISSION_TYPES.IDLE;
+
+      const pos = this._provinceCityPositionLookup.get(msg.home_airbase_province_id);
+      if (pos) {
+        wing.position_lng = pos.lng;
+        wing.position_lat = pos.lat;
+      }
+
+      this.state.air_wings.set(msg.wing_id, wing);
+      this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
     });
 
     if (process.env.DEV_MODE === "true") {
@@ -1297,7 +1354,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       wing.position_lat             = spawn.lat;
       wing.heading_deg              = spawn.heading_deg ?? 0;
       wing.lifecycle_state          = (spawn.lifecycle_state as WING_LIFECYCLE) ?? WING_LIFECYCLE.IDLE;
-      wing.mission                  = spawn.mission ?? "interception";
+      wing.mission                  = spawn.mission ?? MISSION_TYPES.IDLE;
       wing.target_id                = "";
       wing.home_airbase_province_id = spawn.home_airbase_province_id;
       wing.weapon_ready             = true;

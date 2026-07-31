@@ -16,11 +16,11 @@ The shared map scene injects the active map, military, province-interaction, air
 
 Current side drawers cover research, economy, military, and diplomacy. Full-center panels cover the research tree, division builder, division template viewer, tactical combat, bombing detail, and air-combat detail.
 
-Economy content, military air/naval tabs, the dedicated stack panel, and several profile elements contain explicit placeholder or later-phase behavior. Their visible presence does not mean those game systems are complete.
+Economy content, military naval tab, the dedicated stack panel, and several profile elements contain explicit placeholder or later-phase behavior. The military Air tab now has a real wing list grouped by airbase, with a spawn button for new wings. Their visible presence does not mean those game systems are complete.
 
 ## Selection panels
 
-Province, friendly/enemy division, and friendly air-wing panels populate from `GameState` after `EventBus` selection signals. Buttons emit local intent or submit named commands through the owning system and `CommandQueue`; panels do not edit the mirror.
+Province, friendly/enemy division, and friendly air-wing panels populate from `GameState` after `EventBus` selection signals. The air-wing panel includes an `ActionsBlock` with a filtered mission dropdown, size ±10 stepper, Retreat button, escort target row, and a "Pick Target" button that opens the escort picker popup. The Air tab "+" button opens a new-wing spawn modal. Panels emit local intent or submit named commands through `CommandQueue`; panels do not edit the mirror.
 
 ## Input ownership
 

@@ -1433,6 +1433,13 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
             hit/miss events, and the flotilla-provider seam exist.
       - [ ] Trade Interdiction feeds cargo-sinking machinery; Anti-submarine and Anti-ship
             resolve against real flotillas with highest-value-first priority.
+- [ ] Interception/Air Superiority patrol-fallback tiers cover friendly naval units, not
+      just land units (`AIR_COMBAT.md`'s Mission Auto-Targeting & Patrol Priority section):
+      blocked on the same missing flotilla schema as the naval bomber items above — there is
+      no positioned, controllable friendly-flotilla state to query yet, only
+      `NavalContactMarkerState` (an enemy-detection contact blip). Discovered during Branch
+      L (`feat/air-mission-ai`) planning; land-only patrol fallback shipped in that branch
+      as a scope cut, not an oversight. Revisit once Phase 13 adds real flotilla state.
 
 ### Colyseus — damage patterns
 - [ ] Dive bomber — single-cell, recon-weighted (perk: fixed priority list / multi-target)
@@ -1507,10 +1514,12 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       combatants, attack-range ring on selected wings (Branch E)
 - [ ] Wing stacking at strategic zoom — wings based at the same airfield collapse to one
       icon until selected/zoomed, mirroring land's road-column stacking
-- [ ] Air combat notification integration — air superiority lost, wing driven off/RTB,
-      strike resolved toasts
-- [ ] Nation preset air wing templates (aircraft type + count, historically flavoured)
-- [ ] Air Fleet panel UI
+- [x] Air combat notification integration — air superiority lost, wing driven off/RTB,
+      strike resolved toasts (Branch K-ui: new "air" notification type, AIR OPS toasts for
+      staging, destruction, combat start, and RTB-queued events)
+- [ ] Nation preset air wing templates — deliberately dropped (template concept removed; new wings
+      use a plain `{aircraft_type, count}` payload on `CREATE_WING`, no `AirWingTemplate` system)
+- [ ] Air Fleet panel UI — deferred (Branch I stays deferred pending multi-select UI design)
 
 ### Verification gate
 Launch a Tactical-bombing wing at a province with active land combat → tactical grid takes

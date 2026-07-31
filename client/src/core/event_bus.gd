@@ -108,6 +108,9 @@ signal province_aa_fired(data: Dictionary)
 signal strategic_bombing_detail_open_requested(data: Dictionary)
 signal strategic_bombing_detail_closed()
 
+signal air_wing_escort_picker_open_requested(wing_id: String)
+signal air_wing_spawn_open_requested(province_id: String)  ## province_id param reserved for future province picker
+
 # ── Naval ──────────────────────────────────────────────────────────────────────
 
 signal naval_contact_marker_added(data: Dictionary)
