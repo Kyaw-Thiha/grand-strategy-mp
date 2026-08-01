@@ -594,13 +594,14 @@ function pickEscortBomber(
   for (const w of state.air_wings.values()) {
     if (w.nation_id !== nationId) continue;
     if (!typeSet.has(w.aircraft_type)) continue;
-    // Airborne tier: TRANSIT/ENGAGED/LOITER exactly. Idle tier: IDLE exactly — NOT simply
-    // "anything that isn't airborne," which would wrongly admit RTB/REFUEL/RELOCATE wings
-    // (mid-flight-home or grounded-for-maintenance, not a real "hasn't launched yet" idle
-    // bomber) as eligible fallback candidates.
+    // Airborne tier: TRANSIT/ENGAGED/LOITER exactly. Idle tier: IDLE or REFUEL — grounded
+    // bombers, whether never-launched or refueling between missions, are both escortable.
+    // NOT simply "anything that isn't airborne," which would wrongly admit RTB/RELOCATE wings
+    // (actively transiting somewhere, not a real "available on the ground" bomber) as
+    // eligible fallback candidates.
     const eligible = requireAirborne
       ? ESCORT_AIRBORNE_STATES.has(w.lifecycle_state as WING_LIFECYCLE)
-      : w.lifecycle_state === WING_LIFECYCLE.IDLE;
+      : w.lifecycle_state === WING_LIFECYCLE.IDLE || w.lifecycle_state === WING_LIFECYCLE.REFUEL;
     if (!eligible) continue;
     const count = escortCounts.get(w.wing_id) ?? 0;
     if (count < bestCount) { bestCount = count; best = w.wing_id; }
@@ -621,6 +622,10 @@ export function resolveEscortTargets(
   wing: AirWingState,
   state: GameRoomState,
   escortCounts: Map<string, number>,
+  provinceNeighbors: Map<string, string[]>,
+  claims: Map<string, number>,
+  resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
   const isHeavy = wing.aircraft_type === "heavy_fighter";
@@ -636,7 +641,12 @@ export function resolveEscortTargets(
   target = pickEscortBomber(nationId, fallback, false, state, escortCounts);
   if (target) return { tier: 4, targetId: target };
 
-  return null;
+  // Tiers 5-7: no eligible bomber of any kind, airborne or grounded — patrol near friendly
+  // territory instead of sitting idle or permanently abandoning Escort (there's no automatic
+  // way back into Escort once the mission changes). Re-checked every tick via the same
+  // hysteresis rule as every other mission, so the escort snaps back to a real bomber the
+  // instant one becomes eligible again.
+  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, 5, cache);
 }
 
 // ── Step 5: Main tick() entry point ─────────────────────────────────────────────
@@ -748,7 +758,8 @@ export class AirMissionTargetingSystem {
 
       let result: TierResult | null;
       if (isEscort) {
-        result = resolveEscortTargets(wing, state, escortCounts);
+        result = resolveEscortTargets(
+          wing, state, escortCounts, provinceNeighbors, claims, resolvePosition, cache);
       } else {
         // C2: exclude the wing's own claim on its own current target from the crowd count
         // while resolving FOR this wing — otherwise every wing re-evaluating its own
@@ -772,14 +783,6 @@ export class AirMissionTargetingSystem {
           wing.target_id = "";
           this._wingTier.delete(wing.wing_id);
         }
-        // Escort tail behavior (mirrors the retired autoAssignEscort()'s design): a
-        // non-heavy fighter with zero eligible bombers of any kind — airborne or idle —
-        // reverts to Air Superiority rather than sitting with nothing to do forever. Heavy
-        // fighters just keep waiting for a bomber to escort.
-        if (isEscort && wing.aircraft_type !== "heavy_fighter" && wing.mission !== MISSION_TYPES.AIR_SUPERIORITY) {
-          wing.mission = MISSION_TYPES.AIR_SUPERIORITY;
-          changed.push(wing.wing_id);
-        }
         continue;
       }
 
@@ -795,20 +798,30 @@ export class AirMissionTargetingSystem {
       if (!shouldCommit) continue;
       if (result.targetId === wing.target_id && result.tier === previousTier) continue; // already on it, no-op
 
-      if (isEscort) {
-        // Escort does not compute a Dubins path at all — air_dubins_pathfinder.ts's own
-        // per-tick sync continuously mirrors the escort's path_gen_id/path_elapsed_ms to
-        // whatever its assigned bomber is currently doing ("Sync escort wings" block).
-        // Only the target and the lifecycle transition that makes the escort eligible for
-        // that sync are needed here.
+      if (isEscort && state.air_wings.has(result.targetId)) {
+        // Committing to a bomber: Escort does not compute a Dubins path at all —
+        // air_dubins_pathfinder.ts's own per-tick sync continuously mirrors the escort's
+        // path_gen_id/path_elapsed_ms (and underlying path) to whatever its assigned bomber
+        // is currently doing ("Sync escort wings" block). Only the target and the lifecycle
+        // transition that makes the escort eligible for that sync are needed here. A patrol
+        // target (tier 5-7, a friendly division/city rather than a bomber wing) falls through
+        // to the normal Dubins path computation below instead, same as every other mission.
         const previousTargetId = wing.target_id;
         wing.target_id = result.targetId;
         this._wingTier.set(wing.wing_id, { tier: result.tier, mission: wing.mission });
         escortCounts.set(result.targetId, (escortCounts.get(result.targetId) ?? 0) + 1);
         if (previousTargetId !== "" && previousTargetId !== result.targetId) {
-          const vacated = (escortCounts.get(previousTargetId) ?? 1) - 1;
-          if (vacated > 0) escortCounts.set(previousTargetId, vacated);
-          else escortCounts.delete(previousTargetId);
+          if (escortCounts.has(previousTargetId)) {
+            const vacated = (escortCounts.get(previousTargetId) ?? 1) - 1;
+            if (vacated > 0) escortCounts.set(previousTargetId, vacated);
+            else escortCounts.delete(previousTargetId);
+          } else if (claims.has(previousTargetId)) {
+            // Previous target was a patrol claim (division/city), not a bomber — vacate
+            // there instead so patrol-target crowding scores don't leak stale claims.
+            const vacatedCount = (claims.get(previousTargetId) ?? 1) - 1;
+            if (vacatedCount > 0) claims.set(previousTargetId, vacatedCount);
+            else claims.delete(previousTargetId);
+          }
         }
         if (wing.lifecycle_state === WING_LIFECYCLE.IDLE || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
           wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
@@ -816,6 +829,15 @@ export class AirMissionTargetingSystem {
         }
         changed.push(wing.wing_id);
         continue;
+      }
+
+      if (isEscort) {
+        const previousTargetId = wing.target_id;
+        if (previousTargetId !== "" && previousTargetId !== result.targetId) {
+          const vacated = (escortCounts.get(previousTargetId) ?? 1) - 1;
+          if (vacated > 0) escortCounts.set(previousTargetId, vacated);
+          else escortCounts.delete(previousTargetId);
+        }
       }
 
       const targetPos = resolvePosition(result.targetId);

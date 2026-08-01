@@ -152,6 +152,13 @@ func _on_air_wing_added(wing_id: String) -> void:
 	icon.setup(data, color, passive_px, _recon_radius_px, _combat_radius_px, is_own)
 	_icon_layer.add_child(icon)
 	_icons[wing_id] = icon
+	# Reappearing after a fog-of-war hide/show cycle re-adds the wing as "new," but its
+	# interpolation cache (_wing_path_by_id etc.) was wiped on removal — without replaying the
+	# cached path here, _process() has nothing to interpolate and the icon snaps to each raw
+	# position update instead of moving smoothly, same as the late-join hydration in setup().
+	var cached_path: Dictionary = GameState.air_wing_paths.get(wing_id, {})
+	if not cached_path.is_empty():
+		_on_air_wing_path(cached_path)
 	_refresh_wing_icon_position(wing_id)
 	_update_icon_visibility(wing_id)
 	var is_enemy: bool = data.get("nation_id", "") != GameState.get_my_nation_id()

@@ -467,6 +467,12 @@ export class DubinsPathfinder {
       if (!bomber || !bomber.path_gen_id) continue;
       escort.path_gen_id     = bomber.path_gen_id;
       escort.path_elapsed_ms = bomber.path_elapsed_ms;
+      // Mirror the bomber's actual path geometry too — without this, the escort's
+      // path_gen_id/path_elapsed_ms look right but the position-advance loop above (which
+      // only moves wings present in `_activePaths`, populated exclusively via storePath())
+      // never has an entry for the escort, so it never physically moves.
+      const bomberPath = this._activePaths.get(bomber.wing_id);
+      if (bomberPath) this.storePath(escort.wing_id, bomberPath);
     }
 
     spatialBucket.clear();

@@ -196,6 +196,8 @@ export class AirBombingSystem {
       if (!batchByProvince.has(key)) {
         batchByProvince.set(key, {
           province_id:        engagement.engagement_id,
+          position_lng:       engagement.position_lng,
+          position_lat:       engagement.position_lat,
           attacker_nation_id: engagement.attacker_nation_id,
           defender_nation_id: engagement.defender_nation_id,
           runs: [],

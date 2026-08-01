@@ -302,6 +302,11 @@ describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
     });
 
     assert.ok(result !== null, "AIR_BOMBING_RESULT must fire when tactical bomber is over active engagement");
+    assert.ok(
+      typeof result.position_lng === "number" && typeof result.position_lat === "number"
+        && !(result.position_lng === 0 && result.position_lat === 0),
+      "broadcast batch must include the engagement's real position so the client can render a combat icon",
+    );
   });
 
   it("tactical bomber hits the frontmost row of the engagement's defender grid", async () => {
