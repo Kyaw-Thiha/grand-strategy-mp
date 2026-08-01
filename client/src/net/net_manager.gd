@@ -78,6 +78,7 @@ func disconnect_from_room() -> void:
 	if _connected:
 		_socket.close()
 		_connected = false
+		GameState.reset_session_state()
 		disconnected.emit()
 
 

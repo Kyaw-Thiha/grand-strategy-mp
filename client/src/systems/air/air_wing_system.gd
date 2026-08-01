@@ -95,7 +95,7 @@ func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -
 		_on_air_wing_added(wing_id)
 		var cached_path: Dictionary = GameState.air_wing_paths.get(wing_id, {})
 		if not cached_path.is_empty():
-			_on_air_wing_path(cached_path)
+			_on_air_wing_path(cached_path, true)
 	_update_ghost()
 
 
@@ -164,7 +164,7 @@ func _on_air_wing_added(wing_id: String) -> void:
 	# position update instead of moving smoothly, same as the late-join hydration in setup().
 	var cached_path: Dictionary = GameState.air_wing_paths.get(wing_id, {})
 	if not cached_path.is_empty():
-		_on_air_wing_path(cached_path)
+		_on_air_wing_path(cached_path, true)
 	_update_icon_visibility(wing_id)
 	var is_enemy: bool = data.get("nation_id", "") != GameState.get_my_nation_id()
 	if is_enemy and icon.has_method("reveal"):
@@ -416,7 +416,7 @@ func _update_range_overlay() -> void:
 	_range_overlay.show_for_wing(wing_pos.x, wing_pos.y, fuel, nation_color)
 
 
-func _on_air_wing_path(path_data: Dictionary) -> void:
+func _on_air_wing_path(path_data: Dictionary, is_replay: bool = false) -> void:
 	var wing_id: String = path_data.get("wing_id", "")
 	var path_gen_id: String = path_data.get("path_gen_id", "")
 	if wing_id.is_empty():
@@ -433,13 +433,23 @@ func _on_air_wing_path(path_data: Dictionary) -> void:
 				_wing_reconcile_from[wing_id] = icon.position
 				_wing_reconcile_ms[wing_id]   = 0.0
 			_last_synced_gen_id[wing_id] = path_gen_id
-			const MAX_PRE_ADVANCE_MS := 500.0
-			var path_ts: float = float(path_data.get("timestamp_ms", 0.0))
-			var pre_advance: float = 0.0
-			if path_ts > 0.0:
-				var now_ms: float = Time.get_unix_time_from_system() * 1000.0
-				pre_advance = clampf(now_ms - path_ts, 0.0, MAX_PRE_ADVANCE_MS)
-			_wing_total_elapsed_ms[wing_id] = pre_advance
+			if is_replay:
+				# Replaying a cached payload (reappear/late-join), not a fresh broadcast —
+				# path_data.timestamp_ms is when the server ORIGINALLY sent this path and can
+				# be arbitrarily stale, so a wall-clock pre-advance would compute a position
+				# near the start of the leg instead of where the wing actually is now. Use the
+				# wing's live server-reported elapsed time instead, same source
+				# _on_air_wing_updated() already uses.
+				var live_data: Dictionary = GameState.get_air_wing(wing_id)
+				_wing_total_elapsed_ms[wing_id] = float(live_data.get("path_elapsed_ms", 0.0))
+			else:
+				const MAX_PRE_ADVANCE_MS := 500.0
+				var path_ts: float = float(path_data.get("timestamp_ms", 0.0))
+				var pre_advance: float = 0.0
+				if path_ts > 0.0:
+					var now_ms: float = Time.get_unix_time_from_system() * 1000.0
+					pre_advance = clampf(now_ms - path_ts, 0.0, MAX_PRE_ADVANCE_MS)
+				_wing_total_elapsed_ms[wing_id] = pre_advance
 	if wing_id == _selected_wing_id:
 		_update_ghost()
 
