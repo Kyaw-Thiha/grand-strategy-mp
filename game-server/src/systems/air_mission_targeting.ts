@@ -452,6 +452,10 @@ export class AirMissionTargetingSystem {
   ): void {
     if (!_targetingEnabled) return;
 
+    for (const wingId of this._wingTier.keys()) {
+      if (!state.air_wings.has(wingId)) this._wingTier.delete(wingId);
+    }
+
     const claims = buildClaimsRegistry(state);
     const reconCounts = buildReconEscortCounts(state);
     const provinceNeighbors = state.provinceNeighbors;
