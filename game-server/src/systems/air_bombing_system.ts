@@ -60,6 +60,18 @@ export class AirBombingSystem {
         const targetDiv = wing.target_id ? state.divisions.get(wing.target_id) : undefined;
         if (!targetDiv) continue;
 
+        // Guard against friendly fire. Before Branch L (feat/air-mission-ai), target_id on a
+        // Tactical Bombing wing was only ever set by a manual right-click on a confirmed
+        // enemy division (the client only allows right-clicking enemies), so this check was
+        // never needed. AirMissionTargetingSystem's patrol-fallback tier can now set
+        // target_id to a FRIENDLY division (to cover/patrol near it, not attack it) — the
+        // engagement branch above already has an equivalent guard
+        // (`engagement.defender_nation_id === wing.nation_id`); this fallback branch needs
+        // the same protection.
+        const rel = state.relations.get(`${wing.nation_id}|${targetDiv.nation_id}`)
+          ?? state.relations.get(`${targetDiv.nation_id}|${wing.nation_id}`);
+        if ((rel?.stance ?? "neutral") !== "war") continue;
+
         const dist = euclidDeg(wing.position_lng, wing.position_lat,
                                targetDiv.position_lng, targetDiv.position_lat);
         if (dist > BOMBING_RANGE_DEG) continue;

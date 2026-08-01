@@ -175,13 +175,16 @@ export class AirWingLifecycleSystem {
         }
         case WING_LIFECYCLE.LOITER: {
           const isPatrolMission = AUTO_TARGETED_MISSIONS.has(wing.mission as MissionType);
-          // Auto-targeted wings re-sortie when the targeting system commits a new target
-          if (isPatrolMission && wing.target_id !== "") {
-            wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-            this._loiterTicks.delete(wingId);
-            didChange = true;
-            break;
-          }
+          // NOTE: there used to be a "relaunch to TRANSIT whenever target_id is non-empty
+          // while LOITER" check here. It is intentionally removed: AirMissionTargetingSystem
+          // already flips LOITER/IDLE -> TRANSIT itself, synchronously, the moment it commits
+          // a new/changed target (and assignMission()'s manual-reassignment path does the
+          // same). By the time this switch statement runs on a later tick, any wing whose
+          // target genuinely changed is therefore already TRANSIT, not LOITER — this check
+          // could only ever misfire on a wing that legitimately arrived at its target and is
+          // supposed to stay LOITER with target_id still set (so AirBombingSystem etc., which
+          // run later in the tick, can act on it), bouncing it back to TRANSIT before those
+          // systems ever saw it as LOITER and it never actually settled long enough to act.
           // Ground-attack specific loiter timeout (shorter than generic MAX_LOITER_TICKS)
           if (GROUND_ATTACK_MISSIONS.has(wing.mission)) {
             const gaCount = (_groundAttackLoiterCount.get(wingId) ?? 0) + 1;
@@ -287,7 +290,12 @@ export class AirWingLifecycleSystem {
     const primary  = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_PRIMARY  : AirWingLifecycleSystem.FIGHTER_PRIMARY;
     const fallback = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_FALLBACK : AirWingLifecycleSystem.FIGHTER_FALLBACK;
 
-    const eligibleStates = new Set([WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER]);
+    // IDLE included so a fighter can be assigned Escort before either wing has launched
+    // (revised design — was originally airborne-only, excluding an idle bomber even if it
+    // was the obvious intended pairing).
+    const eligibleStates = new Set([
+      WING_LIFECYCLE.IDLE, WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER,
+    ]);
 
     const escortCounts = new Map<string, number>();
     for (const w of state.air_wings.values()) {
@@ -299,13 +307,21 @@ export class AirWingLifecycleSystem {
     const pickFrom = (typeSet: Set<string>): string => {
       let best = "";
       let bestCount = Infinity;
+      let bestIsIdle = true;
       for (const w of state.air_wings.values()) {
         if (w.nation_id !== wing.nation_id) continue;
         if (!typeSet.has(w.aircraft_type)) continue;
         if (!eligibleStates.has(w.lifecycle_state as WING_LIFECYCLE)) continue;
         const count = escortCounts.get(w.wing_id) ?? 0;
-        if (count < bestCount) {
+        const isIdle = w.lifecycle_state === WING_LIFECYCLE.IDLE;
+        // Prefer an already-airborne bomber over an idle one at equal escort count — an
+        // idle bomber is only picked when no airborne candidate is available at all,
+        // preserving the pre-existing airborne-only behavior as the common case now that
+        // idle bombers are additionally eligible (not co-equal).
+        const better = count < bestCount || (count === bestCount && bestIsIdle && !isIdle);
+        if (better) {
           bestCount = count;
+          bestIsIdle = isIdle;
           best = w.wing_id;
         }
       }

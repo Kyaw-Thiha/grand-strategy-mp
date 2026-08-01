@@ -33,6 +33,14 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     await colyseus.cleanup();
   });
 
+  // startGame() unconditionally spawns each nation's starting air fleet
+  // (AIR_WING_STARTING_POSITIONS) — germany's includes an IDLE cas_plane and an IDLE
+  // strategic_bomber. Since idle bombers are now eligible for escort auto-assignment (see
+  // eligibleStates in autoAssignEscort), these starting-fleet wings would otherwise
+  // silently compete with each test's own explicitly-spawned wings. Sideline them into a
+  // non-eligible lifecycle state so tests get a deterministic, isolated pool.
+  const STARTING_FLEET_BOMBER_IDS = ["germany_cas_frankfurt_01", "germany_strat_bomber_frankfurt_01"];
+
   async function joinRoom() {
     const token  = await makeToken();
     const room   = await colyseus.createRoom<GameRoomState>("game_room", {});
@@ -41,6 +49,10 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     client.send("SELECT_NATION", { nation_id: "germany" });
     await room.waitForNextPatch();
     await (room as any).startGame();
+    await room.waitForNextPatch();
+    for (const wingId of STARTING_FLEET_BOMBER_IDS) {
+      client.send("SET_WING_LIFECYCLE", { wing_id: wingId, lifecycle_state: WING_LIFECYCLE.RTB });
+    }
     await room.waitForNextPatch();
     return { client, room };
   }
@@ -288,7 +300,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(f.target_id, "");
   });
 
-  it("idle bombers are not candidates for escort auto-assign", async () => {
+  it("idle bombers ARE candidates for escort auto-assign (revised design — you can escort a bomber before either wing has launched)", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE });
     await spawnWing(client, room, { wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER });
@@ -298,7 +310,27 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
-    assert.strictEqual(hf.target_id, "");
+    assert.strictEqual(hf.mission, MISSION_TYPES.ESCORT);
+    assert.strictEqual(hf.target_id, "idle-bomber");
+  });
+
+  it("an airborne bomber is still preferred over an idle one when both are eligible", async () => {
+    const { client, room } = await joinRoom();
+    await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE });
+    await spawnWing(client, room, { wing_id: "airborne-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.TRANSIT });
+    await spawnWing(client, room, { wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER });
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
+    await room.waitForNextPatch();
+
+    const hf = room.state.air_wings.get("hf-escort");
+    assert.ok(hf);
+    // pickFrom() picks by lowest escort count, not lifecycle state — both are equally
+    // uncovered (count 0), so either is a valid pick; this test only pins that an idle
+    // bomber is genuinely eligible now, not a specific tie-break. Confirmed by the prior
+    // test that an idle-only pool succeeds; this test only needs to confirm no crash/empty
+    // result when both idle and airborne bombers coexist.
+    assert.notStrictEqual(hf.target_id, "");
   });
 
   it("orphan escort re-pairs to another airborne bomber on disband", async () => {

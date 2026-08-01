@@ -412,4 +412,67 @@ describe("lane:air-combat | 12f — AirBombingSystem integration", function () {
     await tick(room);
     assert.strictEqual(bombingFired, false, "wing too far from engagement must not trigger bombing");
   });
+
+  // ── Fallback direct-division-bombing path: friendly-fire guard ──────────────────────
+
+  it("tactical bomber's fallback direct-division-bombing does NOT damage a friendly division", async () => {
+    const { client, room } = await joinRoom();
+
+    client.send("SPAWN_DIVISION", {
+      division_id: "friendly-div", nation_id: "germany",
+      position_lng: 10.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+
+    await spawnWing(client, room, {
+      wing_id: "tac-bomber", nation_id: "germany",
+      aircraft_type: AIR_UNIT_TYPES.TACTICAL_BOMBER,
+      count: 10, lifecycle_state: WING_LIFECYCLE.LOITER,
+      position_lng: 10.0, position_lat: 50.0,
+    });
+    client.send("SET_WING_TARGET", { wing_id: "tac-bomber", target_id: "friendly-div" });
+    await room.waitForNextPatch();
+
+    let bombingFired = false;
+    client.onMessage("AIR_BOMBING_RESULT", () => { bombingFired = true; });
+
+    const divBefore = (room.state as any).divisions.get("friendly-div").hp;
+    await tick(room);
+    const divAfter = (room.state as any).divisions.get("friendly-div").hp;
+
+    assert.strictEqual(bombingFired, false,
+      "must not fire AIR_BOMBING_RESULT against a friendly division via the fallback path");
+    assert.strictEqual(divAfter, divBefore,
+      "friendly division must take no damage from the fallback direct-division-bombing path");
+  });
+
+  it("tactical bomber's fallback direct-division-bombing DOES damage an enemy division", async () => {
+    const { client, room } = await joinRoom();
+
+    client.send("SET_RELATION", { nation_a: "germany", nation_b: "france", stance: "war" });
+    await room.waitForNextPatch();
+
+    client.send("SPAWN_DIVISION", {
+      division_id: "enemy-div", nation_id: "france",
+      position_lng: 10.0, position_lat: 50.0,
+    });
+    await room.waitForNextPatch();
+
+    await spawnWing(client, room, {
+      wing_id: "tac-bomber", nation_id: "germany",
+      aircraft_type: AIR_UNIT_TYPES.TACTICAL_BOMBER,
+      count: 10, lifecycle_state: WING_LIFECYCLE.LOITER,
+      position_lng: 10.0, position_lat: 50.0,
+    });
+    client.send("SET_WING_TARGET", { wing_id: "tac-bomber", target_id: "enemy-div" });
+    await room.waitForNextPatch();
+
+    let bombingFired = false;
+    client.onMessage("AIR_BOMBING_RESULT", () => { bombingFired = true; });
+
+    await tick(room);
+
+    assert.strictEqual(bombingFired, true,
+      "must still fire AIR_BOMBING_RESULT against a genuine enemy division via the fallback path");
+  });
 });

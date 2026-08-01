@@ -257,7 +257,17 @@ describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
     assert.strictEqual(wing.target_id, "", "same-target LOITER path must clear stale target_id after resolve");
   });
 
-  it("multi-sortie wing in LOITER: target assigned → transitions to TRANSIT", async () => {
+  it("multi-sortie wing in LOITER: target_id alone does NOT force a relaunch (Branch L)", async () => {
+    // Prior to Branch L (feat/air-mission-ai), a bare test-only SET_WING_TARGET while
+    // LOITER used to auto-relaunch the wing to TRANSIT. That mechanism was removed: it is
+    // now AirMissionTargetingSystem's job (and assignMission()'s, for manual reassignment)
+    // to synchronously flip LOITER/IDLE -> TRANSIT whenever a real code path commits a new
+    // target — no production path sets target_id alone without also handling the
+    // transition. Keeping the old auto-relaunch-on-any-target_id-write behavior actively
+    // broke ground-attack missions: a wing that legitimately ARRIVED at LOITER with a
+    // still-set target_id (e.g. a tactical bomber that just reached its bombing target)
+    // would get bounced straight back to TRANSIT before AirBombingSystem (which runs later
+    // in the tick) ever saw it as LOITER, so it could never actually settle and act.
     const { client, room } = await joinRoom();
     await spawnWing(client, room);
     client.send("SET_WING_PERK", { wing_id: "wing-1", perk: "multi_sortie", value: true });
@@ -266,8 +276,11 @@ describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
     await room.waitForNextPatch();
 
     client.send("SET_WING_TARGET", { wing_id: "wing-1", target_id: "new-target-wing" });
-    await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
-    assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    await room.waitForNextPatch();
+    (room as any).gameTick();
+    await room.waitForNextPatch();
+
+    assert.strictEqual(room.state.air_wings.get("wing-1").lifecycle_state, WING_LIFECYCLE.LOITER);
   });
 
   it("multi-sortie wing in LOITER: MAX_LOITER_TICKS elapsed with no target → RTB", async () => {
@@ -541,17 +554,24 @@ describe("lane:air-combat | 12b — Air Wing Lifecycle", function () {
       assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
     });
 
-    it("LOITER wing with a non-air-superiority/interception mission relaunches to TRANSIT when target_id is set externally", async () => {
+    it("LOITER wing with a non-air-superiority/interception mission stays LOITER when target_id is set externally (revised, Branch L)", async () => {
+      // Superseded: see "multi-sortie wing in LOITER: target_id alone does NOT force a
+      // relaunch (Branch L)" above for the full rationale. A bare target_id write is no
+      // longer sufficient to relaunch a LOITER wing — that caused ground-attack missions
+      // (this test's own TACTICAL_BOMBING case) to bounce out of LOITER before
+      // AirBombingSystem ever got to act on them.
       const { client, room } = await joinRoom();
       await spawnWing(client, room, { mission: MISSION_TYPES.TACTICAL_BOMBING });
       client.send("SET_WING_LIFECYCLE", { wing_id: "wing-1", lifecycle_state: WING_LIFECYCLE.LOITER });
       await room.waitForNextPatch();
 
       client.send("SET_WING_TARGET", { wing_id: "wing-1", target_id: "some_id" });
-      await waitForWingState(room, "wing-1", WING_LIFECYCLE.TRANSIT);
+      await room.waitForNextPatch();
+      (room as any).gameTick();
+      await room.waitForNextPatch();
 
       const wing = room.state.air_wings.get("wing-1");
-      assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+      assert.strictEqual(wing.lifecycle_state, WING_LIFECYCLE.LOITER);
     });
   });
 });
