@@ -56,8 +56,15 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     await room.waitForNextPatch();
     await (room as any).startGame();
     await room.waitForNextPatch();
+    // RELOCATE (not RTB) — RTB is now a valid Escort airborne-tier state (Branch L follow-up:
+    // escorts must follow their bomber home), so neutralizing the starting fleet with RTB no
+    // longer keeps them out of every test's escort-candidate search the way it used to. A
+    // lifecycle-only RELOCATE with no redeploy target set never gets a path assigned (see
+    // GameRoom.ts's "RELOCATE path loop", gated on getPendingRedeployTarget) and isn't
+    // matched by any Escort tier (idle tier wants IDLE/REFUEL, airborne tier wants
+    // TRANSIT/ENGAGED/LOITER/RTB) — so it stays a real dead end for these tests.
     for (const wingId of STARTING_FLEET_BOMBER_IDS) {
-      client.send("SET_WING_LIFECYCLE", { wing_id: wingId, lifecycle_state: WING_LIFECYCLE.RTB });
+      client.send("SET_WING_LIFECYCLE", { wing_id: wingId, lifecycle_state: WING_LIFECYCLE.RELOCATE });
     }
     await room.waitForNextPatch();
     return { client, room };
@@ -374,7 +381,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "refuel-bomber");
   });
 
-  it("an RTB bomber does NOT count as idle-tier eligible for escort (still transiting home, not grounded)", async () => {
+  it("an RTB bomber counts as airborne-tier eligible for escort (follow it home, don't wait for it to land)", async () => {
     const { client, room } = await joinRoom();
     await spawnWing(client, room, {
       wing_id: "rtb-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER,
@@ -386,7 +393,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     await room.waitForNextPatch();
     await tickRoom(room);
 
-    assert.notStrictEqual(room.state.air_wings.get("hf-escort")?.target_id, "rtb-bomber");
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "rtb-bomber");
   });
 
   it("an airborne bomber is ALWAYS preferred over an idle one, even a closer/less-crowded idle one", async () => {
@@ -529,5 +536,67 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     const moved = Math.abs(escortAfterMoving.position_lng - startLng) > 1e-9
       || Math.abs(escortAfterMoving.position_lat - startLat) > 1e-9;
     assert.ok(moved, "escort must physically move while escorting an airborne bomber, not stay frozen at base");
+  });
+
+  it("escort follows its bomber through RTB and lands with it, instead of looping into LOITER at base", async () => {
+    const { client, room } = await joinRoom();
+    // Spawned at the home airbase itself so the RTB leg is ~0 length and completes within a
+    // couple of ticks — keeps the test fast without needing to fast-forward a real transit.
+    const homePos = { position_lng: 13.385771, position_lat: 52.483566 };
+    const bomberId = await spawnWing(client, room, {
+      wing_id: "bomber-rtb-follow", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT, mission: MISSION_TYPES.IDLE, ...homePos,
+    });
+    await spawnWing(client, room, {
+      wing_id: "hf-escort-rtb", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER, ...homePos,
+    });
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort-rtb", mission: MISSION_TYPES.ESCORT, target_id: "" });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+    assert.strictEqual(room.state.air_wings.get("hf-escort-rtb")?.target_id, bomberId,
+      "precondition: escort must have committed to the bomber first");
+
+    client.send("SET_WING_LIFECYCLE", { wing_id: bomberId, lifecycle_state: WING_LIFECYCLE.RTB });
+    await room.waitForNextPatch();
+
+    let sawEscortRtb = false;
+    for (let i = 0; i < 8; i++) {
+      await tickRoom(room);
+      const escort = room.state.air_wings.get("hf-escort-rtb");
+      assert.ok(escort);
+      assert.notStrictEqual(escort.lifecycle_state, WING_LIFECYCLE.LOITER,
+        "escort must never loop into a LOITER over the base while its bomber lands");
+      if (escort.lifecycle_state === WING_LIFECYCLE.RTB) { sawEscortRtb = true; break; }
+    }
+    assert.ok(sawEscortRtb, "escort must transition to RTB itself once its bomber lands/is landing");
+  });
+
+  it("escort lands and refuels with its bomber, then auto-recommits once retargetable again", async () => {
+    const { client, room } = await joinRoom();
+    const homePos = { position_lng: 13.385771, position_lat: 52.483566 };
+    const bomberId = await spawnWing(client, room, {
+      wing_id: "bomber-relaunch", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT, mission: MISSION_TYPES.IDLE, ...homePos,
+    });
+    await spawnWing(client, room, {
+      wing_id: "hf-escort-relaunch", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER, ...homePos,
+    });
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort-relaunch", mission: MISSION_TYPES.ESCORT, target_id: "" });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+
+    client.send("SET_WING_LIFECYCLE", { wing_id: bomberId, lifecycle_state: WING_LIFECYCLE.RTB });
+    await room.waitForNextPatch();
+
+    // Run enough ticks for both wings to land, refuel back to IDLE, and re-commit.
+    await tickRoom(room, 20);
+
+    const escort = room.state.air_wings.get("hf-escort-relaunch");
+    assert.ok(escort);
+    assert.strictEqual(escort.mission, MISSION_TYPES.ESCORT, "must still be on Escort, not some other mission");
+    assert.notStrictEqual(escort.lifecycle_state, WING_LIFECYCLE.LOITER,
+      "must never be stuck looping in a LOITER over the base");
   });
 });

@@ -549,6 +549,22 @@ export class DubinsPathfinder {
         continue;
       }
 
+      // An escort's path is a literal alias of its bomber's, so it lands here in the same
+      // tick the bomber's RTB path completes. Follow the bomber home for real instead of
+      // looping into a LOITER over the airbase — reading the bomber's live state (rather
+      // than assuming processing order) makes this correct whichever wing this loop reaches
+      // first in a given tick.
+      if (wing.mission === MISSION_TYPES.ESCORT) {
+        const bomber = state.air_wings.get(wing.target_id);
+        if (!bomber || bomber.lifecycle_state === WING_LIFECYCLE.RTB
+            || bomber.lifecycle_state === WING_LIFECYCLE.REFUEL) {
+          wing.lifecycle_state = WING_LIFECYCLE.RTB;
+          this.clearPath(wing.wing_id);
+          broadcast("AIR_WING_UPDATES", { wings: [serializeWing(wing)] });
+          continue;
+        }
+      }
+
       wing.lifecycle_state = WING_LIFECYCLE.LOITER;
       const loiterPath = this.computeLoiterArc(
         { lng: wing.position_lng, lat: wing.position_lat },

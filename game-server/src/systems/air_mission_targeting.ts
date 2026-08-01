@@ -566,7 +566,9 @@ export function resolveReconTargets(
 // pick WHICH bomber to escort; AirMissionTargetingSystem.tick() special-cases Escort's
 // commit step to skip path computation entirely (see below).
 
-const ESCORT_AIRBORNE_STATES = new Set([WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER]);
+const ESCORT_AIRBORNE_STATES = new Set([
+  WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER, WING_LIFECYCLE.RTB,
+]);
 const HEAVY_FIGHTER_ESCORT_PRIMARY  = new Set(["strategic_bomber", "tactical_bomber"]);
 const HEAVY_FIGHTER_ESCORT_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
 const FIGHTER_ESCORT_PRIMARY  = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
