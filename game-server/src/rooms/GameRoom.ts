@@ -16,7 +16,7 @@ import { FrontlineSystem } from "../systems/frontline_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
-import { buildProvinceNeighbors } from "../systems/air_mission_targeting.js";
+import { buildProvinceNeighbors, AirMissionTargetingSystem } from "../systems/air_mission_targeting.js";
 import { DubinsPathfinder, registerManualTarget } from "../systems/air_dubins_pathfinder.js";
 import { AirCombatSystem } from "../systems/air_combat_system.js";
 import { AirBombingSystem } from "../systems/air_bombing_system.js";
@@ -89,6 +89,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
   private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
+  private airMissionTargetingSystem = new AirMissionTargetingSystem();
   private airCombatSystem = new AirCombatSystem();
   private airBombingSystem = new AirBombingSystem();
   private provinceAaSystem           = new ProvinceAaSystem();
@@ -1510,6 +1511,20 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       };
       this.airWingLifecycleSystem.tick(this.state, this.tickCount, wingBroadcast);
 
+      // Auto-targeting: resolves each retargetable wing's mission-specific tier chain and
+      // commits a new target/path per the hysteresis rule (see AIR_COMBAT.md). Runs after
+      // the lifecycle tick (so LOITER/IDLE transitions from this tick are visible) and before
+      // the RTB/Dubins ticks below (so a freshly committed TRANSIT wing gets its path advanced
+      // this same tick).
+      this.airMissionTargetingSystem.tick(
+        this.state,
+        this.airDetectionSystem,
+        this.airWingLifecycleSystem,
+        this.airDubinsPathfinder,
+        (id) => this._resolveTargetPosition(id),
+        wingBroadcast,
+      );
+
       // Wings set to RTB by the lifecycle tick (fuel-out, auto-resolve) get their paths
       // here. pathfinder.tick() hasn't run yet, so we evaluate one tick ahead via
       // path_elapsed_ms + TICK_MS to minimise the position gap at RTB start.
@@ -2244,6 +2259,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const targetDiv = this.state.divisions.get(targetId);
     if (targetDiv) {
       return { lng: targetDiv.position_lng, lat: targetDiv.position_lat };
+    }
+    const targetMarker = this.state.naval_contact_markers.get(targetId);
+    if (targetMarker) {
+      return { lng: targetMarker.position_lng, lat: targetMarker.position_lat };
     }
     return this._provinceCityPositionLookup.get(targetId) ?? null;
   }

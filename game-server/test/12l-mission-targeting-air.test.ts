@@ -1,5 +1,10 @@
 import assert from "assert";
-import { describe, it } from "mocha";
+import { describe, it, before, after, beforeEach } from "mocha";
+import { ColyseusTestServer, boot } from "@colyseus/testing";
+import { Encoder } from "@colyseus/schema";
+import { SignJWT } from "jose";
+import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import {
   scoreCandidate,
   buildClaimsRegistry,
@@ -7,9 +12,17 @@ import {
   anyVisibleEnemyWing,
   resolveInterceptionTargets,
   resolveAirSuperiorityTargets,
+  setAirMissionTargetingEnabledForTesting,
 } from "../src/systems/air_mission_targeting.js";
 import { GameRoomState, RelationState, ProvinceState } from "../src/rooms/schema/GameRoomState.js";
-import { AirWingState, MISSION_TYPES } from "../src/rooms/schema/AirWingState.js";
+import { AirWingState, MISSION_TYPES, WING_LIFECYCLE } from "../src/rooms/schema/AirWingState.js";
+import {
+  setPassiveWingRadiusForTesting,
+  setReconWingRadiusForTesting,
+  setKmPerDegForTesting,
+} from "../src/systems/air_detection_system.js";
+import { setEngagementRangeForTesting } from "../src/systems/air_dubins_pathfinder.js";
+import { setAttackRangeForTesting } from "../src/systems/air_combat_system.js";
 
 function setRelation(state: GameRoomState, a: string, b: string, stance: string): void {
   const rel = new RelationState();
@@ -182,5 +195,261 @@ describe("lane:air-combat | Air Superiority tier chain", () => {
 
     const result = resolveAirSuperiorityTargets(wing, state, new Map(), ALL_DETECTED, new Map(), makeResolvePosition({}));
     assert.deepStrictEqual(result, { tier: 3, targetId: "de_bomber" });
+  });
+});
+
+// ── Step 5: AirMissionTargetingSystem end-to-end (full room integration) ──────────
+
+const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
+const jwtSecret = new TextEncoder().encode(JWT_SECRET);
+
+async function makeToken(sub = "test-user") {
+  return new SignJWT({ sub, steam_id: "dev_steam", has_host_pass: true })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("24h")
+    .sign(jwtSecret);
+}
+
+describe("lane:air-combat | AirMissionTargetingSystem end-to-end", function () {
+  let colyseus: ColyseusTestServer<typeof appConfig>;
+  let previousDevMode: string | undefined;
+
+  before(async () => {
+    previousDevMode = process.env.DEV_MODE;
+    process.env.DEV_MODE = "true";
+    Encoder.BUFFER_SIZE = 256 * 1024;
+    setPassiveWingRadiusForTesting(0.5);
+    setReconWingRadiusForTesting(2.0);
+    setKmPerDegForTesting(100.0);
+    setEngagementRangeForTesting(0); // must not trigger combat before targeting/paths assert
+    setAttackRangeForTesting(0);     // ditto for AirCombatSystem's own separate attack range
+    // AirMissionTargetingSystem defaults OFF under NODE_ENV=test (every other test suite in
+    // this repo predates it and manually assigns target_ids that would otherwise get
+    // silently overwritten by real patrol-fallback data) — turn it on for this describe
+    // block specifically, since it's the one exercising the system end-to-end.
+    setAirMissionTargetingEnabledForTesting(true);
+    colyseus = await boot(appConfig, getTestPort());
+  });
+
+  after(async () => {
+    if (previousDevMode === undefined) delete process.env.DEV_MODE;
+    else process.env.DEV_MODE = previousDevMode;
+    setPassiveWingRadiusForTesting(0.1);
+    setReconWingRadiusForTesting(1.0);
+    setKmPerDegForTesting(111.32);
+    setEngagementRangeForTesting(0.3);
+    setAttackRangeForTesting(0.3);
+    setAirMissionTargetingEnabledForTesting(false);
+    await colyseus.shutdown();
+  });
+
+  beforeEach(async () => {
+    await colyseus.cleanup();
+  });
+
+  async function joinRoom() {
+    process.env.DEV_MODE = "true";
+    const token = await makeToken();
+    const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus.connectTo(room, { token });
+    await room.waitForNextPatch();
+    client.send("SELECT_NATION", { nation_id: "germany" });
+    await room.waitForNextPatch();
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    return { client, room };
+  }
+
+  function setNationRelation(room: any, nationA: string, nationB: string, stance: string): void {
+    const relation = room.state.relations.get(`${nationA}|${nationB}`)
+      ?? room.state.relations.get(`${nationB}|${nationA}`);
+    assert.ok(relation, `missing relation ${nationA}|${nationB}`);
+    relation.stance = stance;
+  }
+
+  function getRoomWing(room: any, wingId: string): any {
+    const wing = room.state.air_wings.get(wingId);
+    assert.ok(wing, `missing wing ${wingId}`);
+    return wing;
+  }
+
+  function spawnWing(client: any, msg: {
+    wing_id: string;
+    nation_id: string;
+    aircraft_type?: string;
+    position_lng?: number;
+    position_lat?: number;
+    lifecycle_state?: string;
+    mission?: string;
+    target_id?: string;
+    home_airbase_province_id?: string;
+  }): void {
+    client.send("SPAWN_WING", msg);
+  }
+
+  async function tickRoom(room: any): Promise<void> {
+    (room as any).gameTick();
+    await room.waitForNextPatch();
+  }
+
+  /**
+   * Radar-based detection covering the whole test area — passive wing/division detection
+   * would require the detecting nation to already have an airborne wing or a division near
+   * the target, which these tests don't set up (the wing under test starts IDLE/LOITER, not
+   * airborne). A wide radar keeps detection independent of that and focuses each test on the
+   * targeting system itself.
+   */
+  function setWideRadar(room: any, nationId: string): void {
+    (room as any).airDetectionSystem.setRadarEntry(`${nationId}_test_radar`, {
+      position_lng: 15, position_lat: 50, radius_deg: 20, nation_id: nationId,
+    });
+  }
+
+  it("an idle interception wing with a visible enemy bomber launches toward it and gets a path", async () => {
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    setWideRadar(room, "germany");
+
+    spawnWing(client, {
+      wing_id: "de_int_1", nation_id: "germany", aircraft_type: "fighter",
+      position_lng: 10, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.INTERCEPTION,
+    });
+    spawnWing(client, {
+      wing_id: "fr_bomber_1", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.3, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+
+    const pathEvents: any[] = [];
+    client.onMessage("AIR_WING_PATH", (msg: any) => pathEvents.push(msg));
+
+    // First tick lets detection populate is_detected; second tick lets the targeting
+    // system react to it (both systems already run within a single gameTick(), but two
+    // ticks removes any doubt about ordering/timing for this end-to-end assertion).
+    await tickRoom(room);
+    await tickRoom(room);
+
+    const interceptor = getRoomWing(room, "de_int_1");
+    assert.strictEqual(interceptor.target_id, "fr_bomber_1");
+    assert.strictEqual(interceptor.lifecycle_state, WING_LIFECYCLE.TRANSIT);
+    assert.ok(pathEvents.some(e => e.wing_id === "de_int_1"),
+      "expected an AIR_WING_PATH broadcast for the interceptor");
+  });
+
+  it("a freshly-committing interceptor prefers the less-claimed bomber; an already-committed one does not swap (hysteresis)", async () => {
+    // NOTE: the naive "both interceptors converge then spread apart" framing is wrong per
+    // AIR_COMBAT.md's hysteresis rule ("within the same tier it keeps its current pick") —
+    // an interceptor already committed to a valid tier-1 target never swaps to a different,
+    // merely-less-crowded tier-1 target. The only way two interceptors legitimately end up
+    // on different bombers is if one of them commits for the FIRST time (never targeted
+    // anything before) after the second bomber already exists — crowd-balance only steers
+    // a fresh decision, never a reassignment away from a currently-valid target.
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    setWideRadar(room, "germany");
+
+    spawnWing(client, {
+      wing_id: "de_int_1", nation_id: "germany", aircraft_type: "fighter",
+      position_lng: 10, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.INTERCEPTION,
+    });
+    spawnWing(client, {
+      wing_id: "fr_bomber_a", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.3, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+    await tickRoom(room);
+    assert.strictEqual(getRoomWing(room, "de_int_1").target_id, "fr_bomber_a",
+      "precondition: interceptor 1 must commit to bomber A first");
+
+    // Now bring in a second interceptor (never committed before) and a second bomber that
+    // is far closer to interceptor 2 than bomber A is, and uncrowded.
+    spawnWing(client, {
+      wing_id: "de_int_2", nation_id: "germany", aircraft_type: "fighter",
+      position_lng: 20, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.INTERCEPTION,
+    });
+    spawnWing(client, {
+      wing_id: "fr_bomber_b", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 20.3, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+    await tickRoom(room);
+
+    assert.strictEqual(getRoomWing(room, "de_int_1").target_id, "fr_bomber_a",
+      "already-committed interceptor 1 must NOT swap targets (hysteresis)");
+    assert.strictEqual(getRoomWing(room, "de_int_2").target_id, "fr_bomber_b",
+      "freshly-committing interceptor 2 should pick the closer, uncrowded bomber");
+  });
+
+  it("hysteresis: a wing does not abandon its tier-1 target for another same-tier target", async () => {
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    setWideRadar(room, "germany");
+
+    spawnWing(client, {
+      wing_id: "de_int_1", nation_id: "germany", aircraft_type: "fighter",
+      position_lng: 10, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.INTERCEPTION,
+    });
+    spawnWing(client, {
+      wing_id: "fr_bomber_a", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.3, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+    await tickRoom(room);
+    assert.strictEqual(getRoomWing(room, "de_int_1").target_id, "fr_bomber_a",
+      "precondition: interceptor must commit to bomber A first");
+
+    // Bomber B: closer to the interceptor than A, and uncrowded — a strictly better score
+    // under scoreCandidate, but still only tier 1, same as A.
+    spawnWing(client, {
+      wing_id: "fr_bomber_b", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.05, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+
+    assert.strictEqual(getRoomWing(room, "de_int_1").target_id, "fr_bomber_a",
+      "wing must keep its current tier-1 pick despite a closer, uncrowded same-tier candidate");
+  });
+
+  it("responsiveness: a patrolling wing with only a border-patrol target switches to a newly-visible enemy bomber within one tick", async () => {
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    setWideRadar(room, "germany");
+
+    const interceptor = getRoomWing(room, "germany_wing_01");
+    interceptor.mission = MISSION_TYPES.INTERCEPTION;
+    interceptor.lifecycle_state = WING_LIFECYCLE.LOITER;
+    interceptor.position_lng = 10;
+    interceptor.position_lat = 50;
+    // Simulate an existing lower-tier (patrol-fallback) target — any real, still-existing
+    // entity works here since only the mission/lifecycle_state combination matters for this
+    // assertion, not the exact tier number the wing arrived at it through.
+    interceptor.target_id = "we6_germany_06";
+
+    spawnWing(client, {
+      wing_id: "fr_bomber_1", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.3, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+
+    await tickRoom(room);
+
+    const updated = getRoomWing(room, "germany_wing_01");
+    assert.strictEqual(updated.target_id, "fr_bomber_1",
+      "expected the wing to switch from its patrol target to the newly-visible bomber within one tick");
+    assert.strictEqual(updated.lifecycle_state, WING_LIFECYCLE.TRANSIT);
   });
 });

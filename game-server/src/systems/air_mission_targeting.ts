@@ -1,5 +1,8 @@
 import { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
-import { AirWingState, MISSION_TYPES } from "../rooms/schema/AirWingState.js";
+import { AirWingState, MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import { getAirUnitStats } from "../data/air_unit_stats.js";
+import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
+import type { DubinsPathfinder } from "./air_dubins_pathfinder.js";
 
 export function buildProvinceNeighbors(
   adjacency: Array<{ from_province: string; to_province: string }>,
@@ -397,4 +400,155 @@ export function resolveReconTargets(
   // war-border patrol, then neutral-border patrol. Reuses the same friendlyDivisionsNearBorder
   // + resolvePatrolFallback machinery as Interception/Air Superiority.
   return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 2);
+}
+
+// ── Step 5: Main tick() entry point ─────────────────────────────────────────────
+
+type BroadcastFn = (type: string, msg: unknown) => void;
+type DetectionQueries = {
+  getWingDetectedByNations(wingId: string): Set<string>;
+  getVisibleDivisionsForNation(nationId: string): Set<string>;
+};
+type ResolvePositionFn = (id: string) => { lng: number; lat: number } | null;
+
+const RETARGETABLE_STATES = new Set([WING_LIFECYCLE.IDLE, WING_LIFECYCLE.LOITER, WING_LIFECYCLE.TRANSIT]);
+
+// Defaults to ON for real games (NODE_ENV !== "test") and OFF under the test runner. Every
+// pre-existing test suite in this repo predates AirMissionTargetingSystem and spawns wings
+// with manually-assigned (often nonexistent) target_ids on AUTO_TARGETED_MISSIONS — under
+// real map data, this system's patrol-fallback tiers virtually always find *some* target, so
+// leaving it on by default under NODE_ENV=test would silently overwrite those manually-set
+// targets across dozens of unrelated, already-reviewed test files the moment this system's
+// tick() is wired into GameRoom's live loop. Tests that specifically exercise this system
+// (see test/12l-mission-targeting-air.test.ts's end-to-end describe block) opt back in via
+// setAirMissionTargetingEnabledForTesting(true) in their own before()/after() hooks.
+let _targetingEnabled = process.env.NODE_ENV !== "test";
+
+export function setAirMissionTargetingEnabledForTesting(v: boolean): void {
+  _targetingEnabled = v;
+}
+
+/**
+ * Drives per-tick auto-targeting for every non-idle, non-escort air wing: builds the shared
+ * claims/recon-escort registries once, resolves each retargetable wing's mission-specific
+ * tier chain, and — subject to the hysteresis rule (only commit on an invalidated target or
+ * a strictly better tier) — commits a new target, kicks IDLE/LOITER wings into TRANSIT, and
+ * generates + broadcasts a fresh Dubins path. See AIR_COMBAT.md "Responsiveness and
+ * hysteresis" for the design rule this enforces.
+ */
+export class AirMissionTargetingSystem {
+  // Tracks the last-committed tier per wing_id so a wing already on a valid tier-N target is
+  // never bumped to a different, merely-less-crowded tier-N target — only a strictly better
+  // tier, or an invalidated current target, triggers a reassignment.
+  private _wingTier: Map<string, number> = new Map();
+
+  tick(
+    state: GameRoomState,
+    detectionSystem: DetectionQueries,
+    lifecycleSystem: AirWingLifecycleSystem,
+    pathfinder: DubinsPathfinder,
+    resolvePosition: ResolvePositionFn,
+    broadcast: BroadcastFn,
+  ): void {
+    if (!_targetingEnabled) return;
+
+    const claims = buildClaimsRegistry(state);
+    const reconCounts = buildReconEscortCounts(state);
+    const provinceNeighbors = state.provinceNeighbors;
+    const changed: string[] = [];
+
+    for (const wing of state.air_wings.values()) {
+      if (wing.mission === MISSION_TYPES.IDLE || wing.mission === MISSION_TYPES.ESCORT) continue;
+      if (!RETARGETABLE_STATES.has(wing.lifecycle_state as WING_LIFECYCLE)) continue;
+
+      const result = this._resolveForMission(
+        wing, state, provinceNeighbors, detectionSystem, claims, reconCounts, resolvePosition);
+      if (!result) continue;
+
+      const currentTargetStillValid = wing.target_id !== "" && this._targetStillValid(wing.target_id, state);
+      const previousTier = this._wingTier.get(wing.wing_id) ?? Infinity;
+
+      const shouldCommit =
+        !currentTargetStillValid ||
+        result.tier < previousTier ||
+        (result.tier === previousTier && result.targetId === wing.target_id);
+
+      if (!shouldCommit) continue;
+      if (result.targetId === wing.target_id && result.tier === previousTier) continue; // already on it, no-op
+
+      const targetPos = resolvePosition(result.targetId);
+      if (!targetPos) continue;
+
+      wing.target_id = result.targetId;
+      this._wingTier.set(wing.wing_id, result.tier);
+
+      if (wing.lifecycle_state === WING_LIFECYCLE.IDLE || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
+        wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+        lifecycleSystem.resetLoiterTicks(wing.wing_id);
+      }
+
+      const startHeading = (Math.atan2(
+        targetPos.lng - wing.position_lng,
+        targetPos.lat - wing.position_lat,
+      ) * 180 / Math.PI + 360) % 360;
+      const path = pathfinder.computeTransitPath(
+        { lng: wing.position_lng, lat: wing.position_lat },
+        startHeading,
+        targetPos,
+        getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
+      );
+      pathfinder.storePath(wing.wing_id, path);
+      wing.path_gen_id = path.path_gen_id;
+      wing.path_elapsed_ms = 0;
+      broadcast("AIR_WING_PATH", { wing_id: wing.wing_id, ...path });
+      changed.push(wing.wing_id);
+    }
+
+    if (changed.length > 0) {
+      broadcast("AIR_WING_UPDATES", { wings: changed.map(id => serializeWing(state.air_wings.get(id)!)) });
+    }
+  }
+
+  /** True if `targetId` still refers to a live, still-relevant target. */
+  private _targetStillValid(targetId: string, state: GameRoomState): boolean {
+    const asWing = state.air_wings.get(targetId);
+    if (asWing) return asWing.is_detected; // enemy wing target — still valid only if still detected
+    if (state.divisions.has(targetId)) return true;   // division/patrol target — always valid while it exists
+    if (state.provinces.has(targetId)) return true;   // province target — always valid while it exists
+    if (state.naval_contact_markers.has(targetId)) return true;
+    return false; // target no longer exists in any collection
+  }
+
+  private _resolveForMission(
+    wing: AirWingState,
+    state: GameRoomState,
+    provinceNeighbors: Map<string, string[]>,
+    detectionSystem: DetectionQueries,
+    claims: Map<string, number>,
+    reconCounts: Map<string, number>,
+    resolvePosition: ResolvePositionFn,
+  ): TierResult | null {
+    switch (wing.mission) {
+      case MISSION_TYPES.INTERCEPTION:
+        return resolveInterceptionTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+      case MISSION_TYPES.AIR_SUPERIORITY:
+        return resolveAirSuperiorityTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+      case MISSION_TYPES.TACTICAL_BOMBING:
+        return resolveTacticalBombingTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+      case MISSION_TYPES.AREA:
+      case MISSION_TYPES.INDUSTRY:
+      case MISSION_TYPES.OIL:
+      case MISSION_TYPES.LOGISTICS:
+        return resolveStrategicBombingTargets(wing, state, claims, resolvePosition);
+      case MISSION_TYPES.TRADE_INTERDICTION:
+      case MISSION_TYPES.ANTI_SUBMARINE:
+      case MISSION_TYPES.ANTI_SHIP:
+      case MISSION_TYPES.PORT_STRIKE:
+        return resolveNavalTargets(wing, state, claims);
+      case MISSION_TYPES.RECON:
+        return resolveReconTargets(wing, state, provinceNeighbors, claims, reconCounts, resolvePosition);
+      default:
+        return null;
+    }
+  }
 }
