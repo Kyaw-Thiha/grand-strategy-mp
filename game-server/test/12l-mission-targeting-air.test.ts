@@ -452,4 +452,48 @@ describe("lane:air-combat | AirMissionTargetingSystem end-to-end", function () {
       "expected the wing to switch from its patrol target to the newly-visible bomber within one tick");
     assert.strictEqual(updated.lifecycle_state, WING_LIFECYCLE.TRANSIT);
   });
+
+  it("a manually-assigned interception target (is_manual: true) is NOT overridden by auto-search, even when a closer/better-scoring enemy exists", async () => {
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    setWideRadar(room, "germany");
+
+    spawnWing(client, {
+      wing_id: "de_int_manual", nation_id: "germany", aircraft_type: "fighter",
+      position_lng: 10, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.IDLE,
+    });
+    // The player's manual pick: far away, so auto-search would never prefer it on its own.
+    spawnWing(client, {
+      wing_id: "fr_bomber_manual", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 15, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+
+    client.send("ASSIGN_WING_MISSION", {
+      wing_id: "de_int_manual",
+      mission: MISSION_TYPES.INTERCEPTION,
+      target_id: "fr_bomber_manual",
+      is_manual: true,
+    });
+    await room.waitForNextPatch();
+    assert.strictEqual(getRoomWing(room, "de_int_manual").target_id, "fr_bomber_manual",
+      "precondition: manual assignment must land");
+
+    // Spawn a closer, uncrowded enemy bomber that a fresh auto-search would strongly prefer.
+    spawnWing(client, {
+      wing_id: "fr_bomber_closer", nation_id: "france", aircraft_type: "strategic_bomber",
+      position_lng: 10.1, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT,
+    });
+    await room.waitForNextPatch();
+
+    await tickRoom(room);
+    await tickRoom(room);
+    await tickRoom(room);
+
+    assert.strictEqual(getRoomWing(room, "de_int_manual").target_id, "fr_bomber_manual",
+      "manually-assigned target must survive auto-search ticks even with a closer enemy available");
+  });
 });

@@ -227,6 +227,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (msg.is_manual && msg.target_id && msg.mission === MISSION_TYPES.INTERCEPTION) {
         registerManualTarget(msg.wing_id, msg.target_id);
       }
+
+      // Manual-target protection for AirMissionTargetingSystem (separate from the
+      // pathfinder's registerManualTarget above, which only feeds INTERCEPTION's
+      // lost-contact loiter logic): a manual right-click assignment (interception,
+      // tactical bombing, or industry bombing target selection) must not be silently
+      // overwritten by auto-search on the next tick. A non-manual assignment (e.g. the UI
+      // mission dropdown) hands control back to auto-search.
+      if (msg.is_manual && msg.target_id) {
+        this.airMissionTargetingSystem.registerManualTarget(msg.wing_id);
+      } else {
+        this.airMissionTargetingSystem.clearManualTarget(msg.wing_id);
+      }
     });
 
     this.onMessage("RETREAT_WING", (client, msg: { wing_id: string }) => {
@@ -1481,7 +1493,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this.airDetectionSystem.tick(
         this.state,
-        this.airWingLifecycleSystem,
         (type, msg) => this.broadcast(type, msg),
         (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );

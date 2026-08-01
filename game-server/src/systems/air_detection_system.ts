@@ -1,6 +1,5 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE, AirWingState } from "../rooms/schema/AirWingState.js";
-import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import { getObservationDeg, setPassiveObservationOverrideForTesting } from "../data/air_unit_stats.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
@@ -72,7 +71,6 @@ export class AirDetectionSystem {
 
   tick(
     state: GameRoomState,
-    lifecycleSystem: AirWingLifecycleSystem,
     broadcast: BroadcastFn,
     broadcastToNation: BroadcastToNationFn,
   ): void {
@@ -219,11 +217,5 @@ export class AirDetectionSystem {
         return true;
     }
     return false;
-  }
-
-  private _areNationsHostile(nationA: string, nationB: string, state: GameRoomState): boolean {
-    if (nationA === nationB) return false;
-    const rel = state.relations.get(`${nationA}|${nationB}`) ?? state.relations.get(`${nationB}|${nationA}`);
-    return (rel?.stance ?? "neutral") === "war";
   }
 }

@@ -85,6 +85,16 @@ private broadcastFilteredAirWingUpdates(msg: { wings: unknown[] }): void
 
 `game-server/test/12j-server-visibility-aoi.test.ts` covers 11 visibility scenarios: own-nation visibility, enemy hiding, land-to-land observation, province ownership reveal, vanish on range-out, alliance sharing, idle-wing hiding, airborne detection, wing vanish, and province ownership for wings.
 
+## Mission auto-targeting
+
+**Current.** `AirMissionTargetingSystem` (`game-server/src/systems/air_mission_targeting.ts`) drives per-tick target selection for every retargetable (`IDLE`/`LOITER`/`TRANSIT`) wing that isn't `IDLE`/`ESCORT`-missioned. It runs in `GameRoom.gameTick()` after `AirWingLifecycleSystem.tick()` (so this tick's LOITER/IDLE transitions are visible) and before the RTB/Dubins path ticks (so a freshly-committed TRANSIT wing gets its path advanced the same tick). See `AIR_COMBAT.md`'s "Mission Auto-Targeting & Patrol Priority" section for the authoritative per-mission tier chains, crowd-balancing formula, and hysteresis rule this module implements — this note only summarizes the implementation shape.
+
+- Each mission (Interception, Air Superiority, Tactical Bombing, Strategic Bombing sub-missions, Naval sub-missions, Recon) has its own exported tier-chain resolver function; `AirMissionTargetingSystem._resolveForMission` dispatches on `wing.mission`.
+- A `claims` registry (`buildClaimsRegistry`) and a per-tick `TickCache` (memoizing border-division and hostile-province scans per `(nationId[, stance])`) are built once per `tick()` call and threaded through every wing's resolution that tick, not rebuilt per wing.
+- Hysteresis: a wing only abandons its current target for a strictly better tier or when the current target becomes invalid (`_targetStillValid`); `_wingTier` tracks the last-committed tier alongside the mission it was computed under, since tier numbers aren't comparable across different missions' chains.
+- A wing under player-directed manual targeting (right-click interception/tactical-bombing/industry-bombing target selection, `ASSIGN_WING_MISSION`'s `is_manual` flag) is excluded from auto-search via `registerManualTarget`/`clearManualTarget` until its manual target becomes invalid — distinct from `air_dubins_pathfinder.ts`'s own `registerManualTarget`, which only feeds interception's lost-contact loiter behavior.
+- Defaults ON in real games, OFF under `NODE_ENV=test` (`setAirMissionTargetingEnabledForTesting`) — most existing test suites predate this system and manually assign `target_id`s that patrol-fallback would otherwise overwrite. `test/12l-mission-targeting-air.test.ts`'s end-to-end describe block opts back in to exercise it live.
+
 ## Ground attack
 
 Tactical-bombing wings loitering near an engagement or targeted division select tactical cells through aircraft-specific bombing patterns. The bombing system applies HP and suppression damage to those cells and the affected division, then reports the strike to the relevant players.
@@ -181,3 +191,4 @@ Port strike is **fully implemented in Branch H**. A naval bomber targeting a coa
 - [[game-server/game-state|Authoritative Game State]]
 - [[game-server/maps-and-starting-state|Maps and Starting State]]
 - [[game-server/simulation/ground-combat|Ground Combat and Supply]]
+- [[docs/AIR_COMBAT|Air Combat]] — authoritative design source for mission auto-targeting and patrol priority

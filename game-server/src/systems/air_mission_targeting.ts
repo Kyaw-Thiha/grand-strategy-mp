@@ -2,7 +2,16 @@ import { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
 import { AirWingState, MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
+import { FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "./air_wing_lifecycle_system.js";
 import type { DubinsPathfinder } from "./air_dubins_pathfinder.js";
+
+// Same fuel-derived max-range formula as GameRoom._findNearestFriendlyAirbaseToPoint —
+// duplicated here (not imported as a function) because that helper lives on GameRoom and
+// depends on room-instance state; only the underlying constants are shared.
+const WING_SPEED_DEG_PER_MS = 0.0002;
+function maxRangeDeg(): number {
+  return (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * WING_SPEED_DEG_PER_MS * 1000;
+}
 
 export function buildProvinceNeighbors(
   adjacency: Array<{ from_province: string; to_province: string }>,
@@ -49,14 +58,29 @@ export function isBorderingStance(
 }
 
 const CROWD_WEIGHT = 0.15;   // placeholder — playtesting-tunable, see AIR_COMBAT.md Open Questions
+// Small deterministic anti-gaming/anti-predictability term, per AIR_COMBAT.md's
+// `utility = distance_falloff - CROWD_WEIGHT * claims + noise_floor` formula. Hash-derived
+// (not Math.random()) so scoring stays reproducible for tests; kept an order of magnitude
+// below CROWD_WEIGHT so it only breaks ties, never dominates distance/crowd.
+const NOISE_WEIGHT = 0.01;
 
 function euclidDeg(lng1: number, lat1: number, lng2: number, lat2: number): number {
   return Math.sqrt((lng1 - lng2) ** 2 + (lat1 - lat2) ** 2);
 }
 
-export function scoreCandidate(distDeg: number, claimCount: number): number {
+/** Deterministic pseudo-random value in [0, 1) derived from a candidate id string. */
+function idNoise(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0) / 0xffffffff;
+}
+
+export function scoreCandidate(distDeg: number, claimCount: number, id?: string): number {
   const distanceFalloff = 1 / (1 + distDeg);
-  return distanceFalloff - CROWD_WEIGHT * claimCount;
+  const noiseFloor = id !== undefined ? NOISE_WEIGHT * idNoise(id) : 0;
+  return distanceFalloff - CROWD_WEIGHT * claimCount + noiseFloor;
 }
 
 /** Counts live wings currently assigned (by mission+target_id) to each target_id. */
@@ -80,7 +104,7 @@ function pickBest<T extends { id: string; lng: number; lat: number }>(
   let bestScore = -Infinity;
   for (const c of candidates) {
     const dist = euclidDeg(fromLng, fromLat, c.lng, c.lat);
-    const score = scoreCandidate(dist, claims.get(c.id) ?? 0);
+    const score = scoreCandidate(dist, claims.get(c.id) ?? 0, c.id);
     if (score > bestScore || (score === bestScore && (!best || c.id < best.id))) {
       bestScore = score;
       best = c;
@@ -177,6 +201,66 @@ export const BORDER_PROXIMITY_DEG = 1.5; // placeholder, see friendlyDivisionsNe
 
 export interface TierResult { tier: number; targetId: string; }
 
+/**
+ * Per-tick memoization cache for data that only depends on `(nationId[, stance])`, not on
+ * the individual wing being resolved — `friendlyDivisionsNearBorder` and the enemy-province
+ * candidate scan are both O(provinces) full scans that would otherwise re-run once per wing
+ * of the same nation every tick. Callers pass one `TickCache` instance per `tick()` call;
+ * individual resolver functions build their own scratch instance when called standalone
+ * (e.g. directly from tests), which disables cross-call memoization but changes no behavior.
+ */
+export interface TickCache {
+  borderDivs: Map<string, DivisionState[]>; // key: `${nationId}|${stance}`
+  ownProvinces: Map<string, Array<{ id: string; lng: number; lat: number }>>; // key: nationId
+  hostileProvinces: Map<string, Array<{ id: string; lng: number; lat: number }>>; // key: nationId
+}
+
+export function createTickCache(): TickCache {
+  return { borderDivs: new Map(), ownProvinces: new Map(), hostileProvinces: new Map() };
+}
+
+function getCachedBorderDivs(
+  cache: TickCache | undefined,
+  nationId: string,
+  stance: "war" | "neutral",
+  state: GameRoomState,
+  provinceNeighbors: Map<string, string[]>,
+  resolvePosition: (id: string) => { lng: number; lat: number } | null,
+): DivisionState[] {
+  if (!cache) return friendlyDivisionsNearBorder(nationId, stance, state, provinceNeighbors, resolvePosition);
+  const key = `${nationId}|${stance}`;
+  let cached = cache.borderDivs.get(key);
+  if (!cached) {
+    cached = friendlyDivisionsNearBorder(nationId, stance, state, provinceNeighbors, resolvePosition);
+    cache.borderDivs.set(key, cached);
+  }
+  return cached;
+}
+
+function getCachedOwnProvinces(
+  cache: TickCache | undefined,
+  nationId: string,
+  state: GameRoomState,
+  resolvePosition: (id: string) => { lng: number; lat: number } | null,
+): Array<{ id: string; lng: number; lat: number }> {
+  const compute = (): Array<{ id: string; lng: number; lat: number }> => {
+    const list: Array<{ id: string; lng: number; lat: number }> = [];
+    for (const [provinceId, province] of state.provinces) {
+      if (province.owner_id !== nationId) continue;
+      const pos = resolvePosition(provinceId);
+      if (pos) list.push({ id: provinceId, lng: pos.lng, lat: pos.lat });
+    }
+    return list;
+  };
+  if (!cache) return compute();
+  let cached = cache.ownProvinces.get(nationId);
+  if (!cached) {
+    cached = compute();
+    cache.ownProvinces.set(nationId, cached);
+  }
+  return cached;
+}
+
 /** Shared patrol fallback used by Interception, Air Superiority, and Recon. */
 export function resolvePatrolFallback(
   wing: AirWingState,
@@ -185,16 +269,17 @@ export function resolvePatrolFallback(
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
   startTier: number,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
 
-  const warBorderDivs = friendlyDivisionsNearBorder(nationId, "war", state, provinceNeighbors, resolvePosition);
+  const warBorderDivs = getCachedBorderDivs(cache, nationId, "war", state, provinceNeighbors, resolvePosition);
   const bestWar = pickBest(
     warBorderDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
     wing.position_lng, wing.position_lat, claims);
   if (bestWar) return { tier: startTier, targetId: bestWar.id };
 
-  const neutralBorderDivs = friendlyDivisionsNearBorder(nationId, "neutral", state, provinceNeighbors, resolvePosition);
+  const neutralBorderDivs = getCachedBorderDivs(cache, nationId, "neutral", state, provinceNeighbors, resolvePosition);
   const bestNeutral = pickBest(
     neutralBorderDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
     wing.position_lng, wing.position_lat, claims);
@@ -204,12 +289,7 @@ export function resolvePatrolFallback(
   // home airbase per the design doc, NOT from the wing's current position (this is the
   // one tier in this file that intentionally uses a different distance origin).
   const homePos = resolvePosition(wing.home_airbase_province_id);
-  const ownProvinces: Array<{ id: string; lng: number; lat: number }> = [];
-  for (const [provinceId, province] of state.provinces) {
-    if (province.owner_id !== nationId) continue;
-    const pos = resolvePosition(provinceId);
-    if (pos) ownProvinces.push({ id: provinceId, lng: pos.lng, lat: pos.lat });
-  }
+  const ownProvinces = getCachedOwnProvinces(cache, nationId, state, resolvePosition);
   if (ownProvinces.length > 0 && homePos) {
     const best = pickBest(ownProvinces, homePos.lng, homePos.lat, claims);
     if (best) return { tier: startTier + 2, targetId: best.id };
@@ -226,6 +306,7 @@ export function resolveInterceptionTargets(
   detectionSystem: { getWingDetectedByNations(wingId: string): Set<string> },
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
 
@@ -245,7 +326,7 @@ export function resolveInterceptionTargets(
   if (best3) return { tier: 3, targetId: best3.id };
 
   // Tiers 4-6: patrol fallback over friendly divisions/cities near a border, then own cities.
-  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 4);
+  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 4, cache);
 }
 
 /** Air Superiority mission tier chain (mirrors Interception with reversed air-to-air priority). */
@@ -256,6 +337,7 @@ export function resolveAirSuperiorityTargets(
   detectionSystem: { getWingDetectedByNations(wingId: string): Set<string> },
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
 
@@ -278,7 +360,7 @@ export function resolveAirSuperiorityTargets(
   // No separate "duplicate onto already-patrolled unit" tier — resolvePatrolFallback's
   // own-city tier already allows duplication for free, since pickBest never excludes
   // already-claimed candidates, only deprioritizes them via score.
-  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 4);
+  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 4, cache);
 }
 
 /** Tactical Bombing mission tier chain. */
@@ -289,6 +371,7 @@ export function resolveTacticalBombingTargets(
   detectionSystem: { getVisibleDivisionsForNation(nationId: string): Set<string> },
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
   const visibleDivIds = detectionSystem.getVisibleDivisionsForNation(nationId);
@@ -303,35 +386,92 @@ export function resolveTacticalBombingTargets(
   const best = pickBest(candidates, wing.position_lng, wing.position_lat, claims);
   if (best) return { tier: 1, targetId: best.id };
 
-  // Tier 2: patrol over friendly units near a war-stance border.
-  const warBorderDivs = friendlyDivisionsNearBorder(nationId, "war", state, provinceNeighbors, resolvePosition);
+  // Tier 2: patrol over friendly units near a war-stance border, within the wing's max range
+  // from its home airbase (AIR_COMBAT.md's Tactical Bombing tier 2 constraint) — same
+  // fuel-derived range formula as GameRoom._findNearestFriendlyAirbaseToPoint, measured from
+  // the home airbase to match that helper's framing.
+  const homePos = resolvePosition(wing.home_airbase_province_id);
+  const warBorderDivs = getCachedBorderDivs(cache, nationId, "war", state, provinceNeighbors, resolvePosition);
+  const inRangeDivs = homePos
+    ? warBorderDivs.filter(d =>
+        euclidDeg(homePos.lng, homePos.lat, d.position_lng, d.position_lat) <= maxRangeDeg())
+    : warBorderDivs;
   const bestPatrol = pickBest(
-    warBorderDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
+    inRangeDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
     wing.position_lng, wing.position_lat, claims);
   if (bestPatrol) return { tier: 2, targetId: bestPatrol.id };
 
   return null; // tier 3: stay at base
 }
 
+// Secondary, tiebreaker-scale bonus applied to INDUSTRY/AREA candidate scores based on the
+// province's `industry`/`population` scalar (both 0-100 in practice). Kept an order of
+// magnitude below the ~0-1 distance_falloff term so it nudges rather than dominates — see
+// AIR_COMBAT.md's Strategic Bombing section and this function's own comment for why OIL and
+// LOGISTICS are not weighted the same way (no populated province field for either).
+const SUB_MISSION_WEIGHT = 0.15;
+
 /**
  * Strategic Bombing mission tier chain (Area / Industry / Oil / Logistics). Targets enemy
  * provinces directly — this tier chain does not filter by visibility/detection, since
  * provinces are static, always-known geography, unlike wings/divisions.
+ *
+ * Sub-mission weighting: INDUSTRY and AREA add a small bonus for provinces with a higher
+ * `industry`/`population` scalar respectively (both populated from `map_data.json` today),
+ * on top of the shared distance/crowd score. OIL is intentionally NOT weighted by an oil
+ * output field — `map_data.json` carries a `resources.oil` value per province, but
+ * `_initProvinces` in GameRoom.ts never copies it onto `ProvinceState` (no such field
+ * exists on the schema; `oil_bombed_until_ms` is a bombing-effect timestamp, not extraction
+ * output), so there is no populated data to weight by. LOGISTICS stays distance-only per
+ * AIR_COMBAT.md (it targets road-segment throughput, not a province scalar).
  */
 export function resolveStrategicBombingTargets(
   wing: AirWingState,
   state: GameRoomState,
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
-  const candidates: Array<{ id: string; lng: number; lat: number }> = [];
-  for (const [provinceId, province] of state.provinces) {
-    if (!province.owner_id || !isHostile(nationId, province.owner_id, state)) continue;
-    const pos = resolvePosition(provinceId);
-    if (pos) candidates.push({ id: provinceId, lng: pos.lng, lat: pos.lat });
+
+  const compute = (): Array<{ id: string; lng: number; lat: number }> => {
+    const list: Array<{ id: string; lng: number; lat: number }> = [];
+    for (const [provinceId, province] of state.provinces) {
+      if (!province.owner_id || !isHostile(nationId, province.owner_id, state)) continue;
+      const pos = resolvePosition(provinceId);
+      if (pos) list.push({ id: provinceId, lng: pos.lng, lat: pos.lat });
+    }
+    return list;
+  };
+  let candidates: Array<{ id: string; lng: number; lat: number }>;
+  if (!cache) {
+    candidates = compute();
+  } else {
+    let cached = cache.hostileProvinces.get(nationId);
+    if (!cached) {
+      cached = compute();
+      cache.hostileProvinces.set(nationId, cached);
+    }
+    candidates = cached;
   }
-  const best = pickBest(candidates, wing.position_lng, wing.position_lat, claims);
+
+  let best: { id: string; lng: number; lat: number } | null = null;
+  let bestScore = -Infinity;
+  for (const c of candidates) {
+    const dist = Math.sqrt((wing.position_lng - c.lng) ** 2 + (wing.position_lat - c.lat) ** 2);
+    let score = scoreCandidate(dist, claims.get(c.id) ?? 0, c.id);
+    if (wing.mission === MISSION_TYPES.INDUSTRY || wing.mission === MISSION_TYPES.AREA) {
+      const province = state.provinces.get(c.id);
+      if (province) {
+        const scalar = wing.mission === MISSION_TYPES.INDUSTRY ? province.industry : province.population;
+        score += SUB_MISSION_WEIGHT * (scalar / 100);
+      }
+    }
+    if (score > bestScore || (score === bestScore && (!best || c.id < best.id))) {
+      bestScore = score;
+      best = c;
+    }
+  }
   if (best) return { tier: 1, targetId: best.id };
   return null; // tier 2: stay at base
 }
@@ -378,17 +518,20 @@ export function resolveReconTargets(
   claims: Map<string, number>,
   reconCounts: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
+  cache?: TickCache,
 ): TierResult | null {
   const nationId = wing.nation_id;
 
-  // Tier 1: escort-follow a friendly strategic/tactical bomber not already accompanied by
-  // another recon wing. "Not accompanied" is checked via reconCounts (a recon-mission-only
-  // counter), NOT the shared claims map — the shared claims map is keyed by target_id
-  // across all missions, and Escort's target_id is also a bomber wing_id, so it would
-  // incorrectly read an escorted-but-unrecon'd bomber as "already recon'd".
+  // Tier 1: escort-follow a visible friendly (own OR allied — matches AIR_COMBAT.md's
+  // "friendly" wording and every other friendly check in this file) strategic/tactical
+  // bomber not already accompanied by another recon wing. "Not accompanied" is checked via
+  // reconCounts (a recon-mission-only counter), NOT the shared claims map — the shared
+  // claims map is keyed by target_id across all missions, and Escort's target_id is also a
+  // bomber wing_id, so it would incorrectly read an escorted-but-unrecon'd bomber as
+  // "already recon'd".
   const candidateBombers: Array<{ id: string; lng: number; lat: number }> = [];
   for (const bomber of state.air_wings.values()) {
-    if (bomber.nation_id !== nationId) continue;
+    if (!isFriendly(nationId, bomber.nation_id, state)) continue;
     if (!RECON_ESCORT_BOMBER_TYPES.has(bomber.aircraft_type)) continue;
     if ((reconCounts.get(bomber.wing_id) ?? 0) > 0) continue; // already has a recon escort
     candidateBombers.push({ id: bomber.wing_id, lng: bomber.position_lng, lat: bomber.position_lat });
@@ -399,7 +542,7 @@ export function resolveReconTargets(
   // Tiers 2-4: patrol ahead of a friendly land unit in/near enemy territory, then general
   // war-border patrol, then neutral-border patrol. Reuses the same friendlyDivisionsNearBorder
   // + resolvePatrolFallback machinery as Interception/Air Superiority.
-  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 2);
+  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 2, cache);
 }
 
 // ── Step 5: Main tick() entry point ─────────────────────────────────────────────
@@ -437,10 +580,33 @@ export function setAirMissionTargetingEnabledForTesting(v: boolean): void {
  * hysteresis" for the design rule this enforces.
  */
 export class AirMissionTargetingSystem {
-  // Tracks the last-committed tier per wing_id so a wing already on a valid tier-N target is
-  // never bumped to a different, merely-less-crowded tier-N target — only a strictly better
+  // Tracks the last-committed tier per wing_id, alongside the mission it was computed under —
+  // tier numbers are only comparable within the same mission's tier chain (Recon tier 2 isn't
+  // Interception tier 2), so a mission change resets the comparison to "no prior commitment"
+  // rather than comparing across incompatible chains. A wing already on a valid tier-N target
+  // is never bumped to a different, merely-less-crowded tier-N target — only a strictly better
   // tier, or an invalidated current target, triggers a reassignment.
-  private _wingTier: Map<string, number> = new Map();
+  private _wingTier: Map<string, { tier: number; mission: string }> = new Map();
+
+  // Wing IDs currently under player-directed manual targeting (right-click interception,
+  // tactical bombing, or industry bombing target selection — see GameRoom.ts's
+  // ASSIGN_WING_MISSION handler). AIR_COMBAT.md scopes auto-targeting to "any mission's
+  // auto-search with NO manually selected target" — a wing in this set is left alone by
+  // tick() every tick until its manual target becomes invalid, at which point control is
+  // handed back to auto-search. Distinct from air_dubins_pathfinder.ts's own
+  // `registerManualTarget`, which only feeds INTERCEPTION's lost-contact loiter logic and
+  // has no concept of "don't auto-retarget this wing."
+  private _manuallyTargetedWings: Set<string> = new Set();
+
+  /** Marks `wingId` as player-directed — tick() will not auto-retarget it while still valid. */
+  registerManualTarget(wingId: string): void {
+    this._manuallyTargetedWings.add(wingId);
+  }
+
+  /** Hands `wingId` back to auto-search (e.g. a non-manual mission re-assignment). */
+  clearManualTarget(wingId: string): void {
+    this._manuallyTargetedWings.delete(wingId);
+  }
 
   tick(
     state: GameRoomState,
@@ -455,36 +621,88 @@ export class AirMissionTargetingSystem {
     for (const wingId of this._wingTier.keys()) {
       if (!state.air_wings.has(wingId)) this._wingTier.delete(wingId);
     }
+    for (const wingId of this._manuallyTargetedWings) {
+      if (!state.air_wings.has(wingId)) this._manuallyTargetedWings.delete(wingId);
+    }
 
     const claims = buildClaimsRegistry(state);
     const reconCounts = buildReconEscortCounts(state);
     const provinceNeighbors = state.provinceNeighbors;
+    const cache = createTickCache();
     const changed: string[] = [];
 
     for (const wing of state.air_wings.values()) {
       if (wing.mission === MISSION_TYPES.IDLE || wing.mission === MISSION_TYPES.ESCORT) continue;
       if (!RETARGETABLE_STATES.has(wing.lifecycle_state as WING_LIFECYCLE)) continue;
 
-      const result = this._resolveForMission(
-        wing, state, provinceNeighbors, detectionSystem, claims, reconCounts, resolvePosition);
-      if (!result) continue;
-
       const currentTargetStillValid = wing.target_id !== "" && this._targetStillValid(wing.target_id, state);
-      const previousTier = this._wingTier.get(wing.wing_id) ?? Infinity;
 
-      const shouldCommit =
-        !currentTargetStillValid ||
-        result.tier < previousTier ||
-        (result.tier === previousTier && result.targetId === wing.target_id);
+      // Manual-target protection (C1): a player-directed wing keeps its target untouched by
+      // auto-search for as long as that target stays valid. Once invalid, hand control back
+      // to auto-search — fall through to the normal resolution below.
+      if (this._manuallyTargetedWings.has(wing.wing_id)) {
+        if (currentTargetStillValid) continue;
+        this._manuallyTargetedWings.delete(wing.wing_id);
+      }
 
+      // C2: exclude the wing's own claim on its own current target from the crowd count
+      // while resolving FOR this wing — otherwise every wing re-evaluating its own current
+      // target is penalized by its own claim, biasing the search away from a target it
+      // should be allowed to keep. Scoped: decrement before resolving, restore immediately
+      // after, since `claims` is shared across all wings resolved this tick.
+      const ownTargetId = wing.target_id;
+      const ownClaimCount = ownTargetId !== "" ? claims.get(ownTargetId) : undefined;
+      if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount - 1);
+      const result = this._resolveForMission(
+        wing, state, provinceNeighbors, detectionSystem, claims, reconCounts, resolvePosition, cache);
+      if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount);
+
+      if (!result) {
+        // I5: invalidated target with no replacement found — clear it rather than leaving
+        // the wing flying at/toward a dead target forever. The lifecycle system's existing
+        // LOITER/RTB machinery takes over from here.
+        if (!currentTargetStillValid && wing.target_id !== "") {
+          wing.target_id = "";
+          this._wingTier.delete(wing.wing_id);
+        }
+        continue;
+      }
+
+      const wingTierEntry = this._wingTier.get(wing.wing_id);
+      const previousTier = (wingTierEntry && wingTierEntry.mission === wing.mission)
+        ? wingTierEntry.tier
+        : Infinity; // I4: no comparable prior commitment — either none, or a different mission's chain
+
+      // M11: the prior third disjunct here (`result.tier === previousTier && result.targetId
+      // === wing.target_id`) could only ever be followed immediately by the no-op guard
+      // below, so it never actually caused a commit — removed for readability.
+      const shouldCommit = !currentTargetStillValid || result.tier < previousTier;
       if (!shouldCommit) continue;
       if (result.targetId === wing.target_id && result.tier === previousTier) continue; // already on it, no-op
 
       const targetPos = resolvePosition(result.targetId);
-      if (!targetPos) continue;
+      if (!targetPos) {
+        // I5: same dead-target cleanup as the `!result` branch above.
+        if (!currentTargetStillValid && wing.target_id !== "") {
+          wing.target_id = "";
+          this._wingTier.delete(wing.wing_id);
+        }
+        continue;
+      }
 
+      const previousTargetId = wing.target_id;
       wing.target_id = result.targetId;
-      this._wingTier.set(wing.wing_id, result.tier);
+      this._wingTier.set(wing.wing_id, { tier: result.tier, mission: wing.mission });
+
+      // I3: keep `claims` live within this same tick as wings commit, so N wings launching
+      // the same tick against the same target pool spread out instead of all evaluating
+      // against a stale pre-tick snapshot and piling onto one contact.
+      claims.set(result.targetId, (claims.get(result.targetId) ?? 0) + 1);
+      if (previousTargetId !== "" && previousTargetId !== result.targetId) {
+        const vacatedCount = (claims.get(previousTargetId) ?? 1) - 1;
+        if (vacatedCount > 0) claims.set(previousTargetId, vacatedCount);
+        else claims.delete(previousTargetId);
+      }
 
       if (wing.lifecycle_state === WING_LIFECYCLE.IDLE || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
         wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
@@ -531,26 +749,27 @@ export class AirMissionTargetingSystem {
     claims: Map<string, number>,
     reconCounts: Map<string, number>,
     resolvePosition: ResolvePositionFn,
+    cache: TickCache,
   ): TierResult | null {
     switch (wing.mission) {
       case MISSION_TYPES.INTERCEPTION:
-        return resolveInterceptionTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+        return resolveInterceptionTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache);
       case MISSION_TYPES.AIR_SUPERIORITY:
-        return resolveAirSuperiorityTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+        return resolveAirSuperiorityTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache);
       case MISSION_TYPES.TACTICAL_BOMBING:
-        return resolveTacticalBombingTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition);
+        return resolveTacticalBombingTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache);
       case MISSION_TYPES.AREA:
       case MISSION_TYPES.INDUSTRY:
       case MISSION_TYPES.OIL:
       case MISSION_TYPES.LOGISTICS:
-        return resolveStrategicBombingTargets(wing, state, claims, resolvePosition);
+        return resolveStrategicBombingTargets(wing, state, claims, resolvePosition, cache);
       case MISSION_TYPES.TRADE_INTERDICTION:
       case MISSION_TYPES.ANTI_SUBMARINE:
       case MISSION_TYPES.ANTI_SHIP:
       case MISSION_TYPES.PORT_STRIKE:
         return resolveNavalTargets(wing, state, claims);
       case MISSION_TYPES.RECON:
-        return resolveReconTargets(wing, state, provinceNeighbors, claims, reconCounts, resolvePosition);
+        return resolveReconTargets(wing, state, provinceNeighbors, claims, reconCounts, resolvePosition, cache);
       default:
         return null;
     }
