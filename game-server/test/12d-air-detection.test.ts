@@ -287,68 +287,10 @@ describe("lane:air-combat | 12d — Air Detection System", function () {
     });
   });
 
-  describe("Detection gates interception pursuit", () => {
-    it("INTERCEPTION wing in LOITER transitions to TRANSIT when an enemy is detected", async () => {
-      const { room } = await joinRoom();
-      setRelation(room, "germany", "france", "war");
-      const interceptor = getWing(room, "germany_wing_01");
-      const enemyWing = getWing(room, "france_wing_01");
-      interceptor.lifecycle_state = WING_LIFECYCLE.LOITER;
-      interceptor.mission = MISSION_TYPES.INTERCEPTION;
-      interceptor.position_lng = 10;
-      interceptor.position_lat = 50;
-      enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      // 0.4 deg: outside attack range (0.3) so combat doesn't fire before detection,
-      // but inside passive detection radius (0.5) so the enemy is detected.
-      enemyWing.position_lng = 10.4;
-      enemyWing.position_lat = 50;
-      await tickRoom(room);
-      assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.TRANSIT);
-      assert.strictEqual(getWing(room, "germany_wing_01").target_id, "france_wing_01");
-    });
-
-    it("INTERCEPTION wing in LOITER stays LOITER when no enemy is detected", async () => {
-      const { room } = await joinRoom();
-      const interceptor = getWing(room, "germany_wing_01");
-      interceptor.lifecycle_state = WING_LIFECYCLE.LOITER;
-      interceptor.mission = MISSION_TYPES.INTERCEPTION;
-      await tickRoom(room);
-      assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.LOITER);
-    });
-
-    it("AIR_SUPERIORITY wing in LOITER also pursues on detection", async () => {
-      const { room } = await joinRoom();
-      setRelation(room, "germany", "france", "war");
-      const superiority = getWing(room, "germany_wing_01");
-      const enemyWing = getWing(room, "france_wing_01");
-      superiority.lifecycle_state = WING_LIFECYCLE.LOITER;
-      superiority.mission = MISSION_TYPES.AIR_SUPERIORITY;
-      superiority.position_lng = 10;
-      superiority.position_lat = 50;
-      enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      // 0.4 deg: outside attack range (0.3), inside passive radius (0.5)
-      enemyWing.position_lng = 10.4;
-      enemyWing.position_lat = 50;
-      await tickRoom(room);
-      assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.TRANSIT);
-    });
-
-    it("non-interception wing in LOITER does not pursue on detection", async () => {
-      const { room } = await joinRoom();
-      setRelation(room, "germany", "france", "war");
-      const bomber = getWing(room, "germany_wing_01");
-      const enemyWing = getWing(room, "france_wing_01");
-      bomber.lifecycle_state = WING_LIFECYCLE.LOITER;
-      bomber.mission = MISSION_TYPES.TACTICAL_BOMBING;
-      bomber.position_lng = 10;
-      bomber.position_lat = 50;
-      enemyWing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-      // 0.4 deg: outside attack range (0.3) so no combat fires; inside passive radius (0.5)
-      // so the detection system sees the enemy but the bomber should NOT pursue.
-      enemyWing.position_lng = 10.4;
-      enemyWing.position_lat = 50;
-      await tickRoom(room);
-      assert.strictEqual(getWing(room, "germany_wing_01").lifecycle_state, WING_LIFECYCLE.LOITER);
-    });
-  });
+  // "Detection gates interception pursuit" (formerly here) tested air_detection_system.ts's
+  // own interception-pursuit trigger, which Branch L (feat/air-mission-ai) superseded with
+  // AirMissionTargetingSystem's tiered, hysteresis-gated targeting — see
+  // air_mission_targeting.ts and test/12l-mission-targeting-air.test.ts's
+  // "AirMissionTargetingSystem end-to-end" describe block, which covers this same
+  // detection-triggers-pursuit behavior (and more) against the new system.
 });
