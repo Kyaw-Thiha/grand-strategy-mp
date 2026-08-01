@@ -6,6 +6,7 @@ import appConfig from "../src/app.config.js";
 import { getTestPort } from "./helpers.js";
 import type { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE, MISSION_TYPES, AIR_UNIT_TYPES, serializeWing } from "../src/rooms/schema/AirWingState.js";
+import { setAirMissionTargetingEnabledForTesting } from "../src/systems/air_mission_targeting.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 const jwtSecret = new TextEncoder().encode(JWT_SECRET);
@@ -22,10 +23,15 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
   before(async () => {
+    // Escort assignment is now resolved by AirMissionTargetingSystem's per-tick loop (like
+    // every other auto-targeted mission), not synchronously in the ASSIGN_WING_MISSION
+    // handler — this suite needs the live system enabled and a tick() after assignment.
+    setAirMissionTargetingEnabledForTesting(true);
     colyseus = await boot(appConfig, getTestPort());
   });
 
   after(async () => {
+    setAirMissionTargetingEnabledForTesting(false);
     await colyseus.shutdown();
   });
 
@@ -209,7 +215,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(serialized.perk_splash, true);
   });
 
-  // ── Escort auto-assignment ───────────────────────────────────────────────
+  // ── Escort auto-assignment (per-tick, tiered: airborne always beats idle) ───────
 
   it("heavy fighter ESCORT pairs with strategic bomber over CAS plane", async () => {
     const { client, room } = await joinRoom();
@@ -219,6 +225,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
@@ -233,6 +240,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
@@ -247,6 +255,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "fighter-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const f = room.state.air_wings.get("fighter-escort");
     assert.ok(f);
@@ -262,6 +271,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
       await spawnWing(client, room, { wing_id: id, aircraft_type: AIR_UNIT_TYPES.FIGHTER });
       client.send("ASSIGN_WING_MISSION", { wing_id: id, mission: MISSION_TYPES.ESCORT, target_id: "" });
       await room.waitForNextPatch();
+      await tickRoom(room);
     }
 
     const targets = new Set([
@@ -280,6 +290,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
@@ -293,6 +304,7 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "fighter-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const f = room.state.air_wings.get("fighter-escort");
     assert.ok(f);
@@ -300,13 +312,18 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(f.target_id, "");
   });
 
-  it("idle bombers ARE candidates for escort auto-assign (revised design — you can escort a bomber before either wing has launched)", async () => {
+  it("idle bombers ARE candidates for escort auto-assign when no airborne bomber exists at all", async () => {
     const { client, room } = await joinRoom();
-    await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE });
+    // mission: IDLE — a genuinely parked bomber with no assignment. Any AUTO_TARGETED_MISSIONS
+    // value (e.g. the spawnWing helper's default of INTERCEPTION) would self-launch via its
+    // own patrol-fallback tier within one tick, making it look "airborne" to Escort's tier
+    // check for the wrong reason.
+    await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.IDLE });
     await spawnWing(client, room, { wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER });
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
@@ -314,23 +331,67 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
     assert.strictEqual(hf.target_id, "idle-bomber");
   });
 
-  it("an airborne bomber is still preferred over an idle one when both are eligible", async () => {
+  it("an airborne bomber is ALWAYS preferred over an idle one, even a closer/less-crowded idle one", async () => {
+    // Regression test for the exact bug reported: escort was picking the closer idle
+    // bomber purely on distance/crowd score while ignoring a real airborne bomber. Tiering
+    // (airborne tier always resolves before idle tier is even considered) must make this
+    // impossible regardless of position or existing escort counts.
     const { client, room } = await joinRoom();
-    await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE });
-    await spawnWing(client, room, { wing_id: "airborne-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.TRANSIT });
+    await spawnWing(client, room, {
+      wing_id: "idle-bomber-close", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.IDLE,
+      position_lng: 8.68, position_lat: 50.06,
+    });
+    await spawnWing(client, room, {
+      wing_id: "airborne-bomber-far", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER,
+      lifecycle_state: WING_LIFECYCLE.TRANSIT, position_lng: 20.0, position_lat: 55.0,
+    });
+    await spawnWing(client, room, {
+      wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER,
+      position_lng: 8.68, position_lat: 50.06, // spawned right next to the idle bomber
+    });
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "airborne-bomber-far");
+  });
+
+  it("an escort committed to an idle bomber upgrades to an airborne one that appears later", async () => {
+    const { client, room } = await joinRoom();
+    await spawnWing(client, room, { wing_id: "idle-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.IDLE });
     await spawnWing(client, room, { wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER });
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "idle-bomber",
+      "precondition: escort must commit to the idle bomber first (no airborne one exists yet)");
 
-    const hf = room.state.air_wings.get("hf-escort");
-    assert.ok(hf);
-    // pickFrom() picks by lowest escort count, not lifecycle state — both are equally
-    // uncovered (count 0), so either is a valid pick; this test only pins that an idle
-    // bomber is genuinely eligible now, not a specific tie-break. Confirmed by the prior
-    // test that an idle-only pool succeeds; this test only needs to confirm no crash/empty
-    // result when both idle and airborne bombers coexist.
-    assert.notStrictEqual(hf.target_id, "");
+    await spawnWing(client, room, { wing_id: "airborne-bomber", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.TRANSIT });
+    await tickRoom(room);
+
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "airborne-bomber",
+      "escort must upgrade from its idle bomber to the newly-available airborne one");
+  });
+
+  it("hysteresis: an escort already on an airborne bomber does not swap to a different, less-crowded airborne bomber", async () => {
+    const { client, room } = await joinRoom();
+    await spawnWing(client, room, { wing_id: "bomber-a", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.TRANSIT });
+    await spawnWing(client, room, { wing_id: "hf-escort", aircraft_type: AIR_UNIT_TYPES.HEAVY_FIGHTER });
+
+    client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
+    await room.waitForNextPatch();
+    await tickRoom(room);
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "bomber-a");
+
+    // bomber-b is an equally-eligible, equally-uncovered airborne bomber — same tier as
+    // bomber-a, so hysteresis must keep the escort on its current pick.
+    await spawnWing(client, room, { wing_id: "bomber-b", aircraft_type: AIR_UNIT_TYPES.STRATEGIC_BOMBER, lifecycle_state: WING_LIFECYCLE.TRANSIT });
+    await tickRoom(room);
+
+    assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "bomber-a");
   });
 
   it("orphan escort re-pairs to another airborne bomber on disband", async () => {
@@ -341,10 +402,12 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
     assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "bomber-a");
 
     client.send("DISBAND_WING", { wing_id: "bomber-a" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     const hf = room.state.air_wings.get("hf-escort");
     assert.ok(hf);
@@ -358,10 +421,12 @@ describe("lane:air-combat | 12k — IDLE mission, perk_air_combat & escort auto-
 
     client.send("ASSIGN_WING_MISSION", { wing_id: "hf-escort", mission: MISSION_TYPES.ESCORT, target_id: "" });
     await room.waitForNextPatch();
+    await tickRoom(room);
     assert.strictEqual(room.state.air_wings.get("hf-escort")?.target_id, "bomber-x");
 
     client.send("DISBAND_WING", { wing_id: "bomber-x" });
     await room.waitForNextPatch();
+    await tickRoom(room);
 
     assert.strictEqual(room.state.air_wings.has("bomber-x"), false);
     for (const w of room.state.air_wings.values()) {

@@ -496,4 +496,50 @@ describe("lane:air-combat | AirMissionTargetingSystem end-to-end", function () {
     assert.strictEqual(getRoomWing(room, "de_int_manual").target_id, "fr_bomber_manual",
       "manually-assigned target must survive auto-search ticks even with a closer enemy available");
   });
+
+  it("Tactical Bombing finds an enemy division visible only via a friendly land unit's own observation radius (no nearby air wing/radar)", async () => {
+    // Regression test: resolveTacticalBombingTargets originally queried only
+    // AirDetectionSystem's air-only getVisibleDivisionsForNation, missing the broader
+    // visibility ServerVisibilitySystem already computes for the client — including a
+    // friendly land division's own observation radius. A player whose land unit is right
+    // next to (e.g. fighting) an enemy division obviously knows where that enemy is, with
+    // no air asset involved at all.
+    const { client, room } = await joinRoom();
+    setNationRelation(room, "germany", "france", "war");
+    // Deliberately NO radar and NO nearby air wing — the only detection source available is
+    // the friendly division's own observation_radius (default 100km ≈ 0.898 deg).
+
+    client.send("SPAWN_DIVISION", {
+      division_id: "de_div_frontline", nation_id: "germany",
+      position_lng: 10, position_lat: 50,
+    });
+    client.send("SPAWN_DIVISION", {
+      division_id: "fr_div_enemy", nation_id: "france",
+      position_lng: 10.3, position_lat: 50, // well within the default observation radius
+    });
+    await room.waitForNextPatch();
+
+    spawnWing(client, {
+      wing_id: "de_tacbomber_1", nation_id: "germany", aircraft_type: "tactical_bomber",
+      position_lng: 10, position_lat: 50,
+      lifecycle_state: WING_LIFECYCLE.IDLE, mission: MISSION_TYPES.TACTICAL_BOMBING,
+    });
+    await room.waitForNextPatch();
+
+    // Capture the commit event itself (AIR_WING_UPDATES carries the full serialized wing,
+    // including target_id, at the exact moment AirMissionTargetingSystem commits it) rather
+    // than polling final state after ticking — the enemy division here is close enough that
+    // under a slower/loaded test run the bomber can complete its whole
+    // fly-there/bomb/RTB cycle (which correctly clears target_id afterward) before a
+    // state-polling assertion would ever see the committed value.
+    const updateEvents: any[] = [];
+    client.onMessage("AIR_WING_UPDATES", (msg: any) => updateEvents.push(...msg.wings));
+
+    await tickRoom(room);
+    await tickRoom(room);
+
+    const committed = updateEvents.find(w => w.wing_id === "de_tacbomber_1" && w.target_id === "fr_div_enemy");
+    assert.ok(committed,
+      "expected the tactical bomber to find and commit to the enemy division via the friendly division's own observation radius");
+  });
 });

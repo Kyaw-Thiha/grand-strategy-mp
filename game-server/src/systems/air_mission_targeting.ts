@@ -372,15 +372,27 @@ export function resolveTacticalBombingTargets(
   claims: Map<string, number>,
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
   cache?: TickCache,
+  visibilitySystem?: { canNationSeeDivision(nationId: string, divisionId: string): boolean },
 ): TierResult | null {
   const nationId = wing.nation_id;
-  const visibleDivIds = detectionSystem.getVisibleDivisionsForNation(nationId);
 
+  // Prefer the broader visibility rules ServerVisibilitySystem already computes for the
+  // client (own province, alliance, and — critically — a friendly land division's own
+  // observation radius, e.g. a division actively fighting an enemy one) over
+  // AirDetectionSystem's narrower air-only query. A friendly land unit locked in combat
+  // with an enemy division obviously knows where that enemy is, independent of any nearby
+  // air asset; using the air-only query alone left Tactical Bombing unable to find a
+  // target the player could plainly see their own front line fighting.
+  // visibilitySystem is optional so direct-call unit tests (which construct state by hand
+  // without a full ServerVisibilitySystem) can still exercise this function against the
+  // narrower air-detection fallback.
   const candidates: Array<{ id: string; lng: number; lat: number }> = [];
-  for (const divId of visibleDivIds) {
-    const div = state.divisions.get(divId);
-    if (!div) continue;
+  for (const [divId, div] of state.divisions.entries()) {
     if (isFriendly(nationId, div.nation_id, state)) continue; // must be enemy
+    const visible = visibilitySystem
+      ? visibilitySystem.canNationSeeDivision(nationId, divId)
+      : detectionSystem.getVisibleDivisionsForNation(nationId).has(divId);
+    if (!visible) continue;
     candidates.push({ id: div.division_id, lng: div.position_lng, lat: div.position_lat });
   }
   const best = pickBest(candidates, wing.position_lng, wing.position_lat, claims);
@@ -545,6 +557,88 @@ export function resolveReconTargets(
   return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 2, cache);
 }
 
+// ── Escort tier chain ───────────────────────────────────────────────────────────
+//
+// Unlike every other mission, Escort's "target" is a FRIENDLY bomber wing, not an enemy —
+// and its movement is not a Dubins transit at all: air_dubins_pathfinder.ts already
+// continuously syncs an escort's path_gen_id/path_elapsed_ms to its assigned bomber's own,
+// every tick, whatever that bomber is doing. This tier chain therefore only ever needs to
+// pick WHICH bomber to escort; AirMissionTargetingSystem.tick() special-cases Escort's
+// commit step to skip path computation entirely (see below).
+
+const ESCORT_AIRBORNE_STATES = new Set([WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER]);
+const HEAVY_FIGHTER_ESCORT_PRIMARY  = new Set(["strategic_bomber", "tactical_bomber"]);
+const HEAVY_FIGHTER_ESCORT_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
+const FIGHTER_ESCORT_PRIMARY  = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
+const FIGHTER_ESCORT_FALLBACK = new Set(["strategic_bomber", "tactical_bomber"]);
+
+/** Counts live wings currently assigned (by ESCORT mission + target_id) to each bomber. */
+export function buildEscortCounts(state: GameRoomState): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const wing of state.air_wings.values()) {
+    if (wing.mission !== MISSION_TYPES.ESCORT || !wing.target_id) continue;
+    counts.set(wing.target_id, (counts.get(wing.target_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function pickEscortBomber(
+  nationId: string,
+  typeSet: Set<string>,
+  requireAirborne: boolean,
+  state: GameRoomState,
+  escortCounts: Map<string, number>,
+): string {
+  let best = "";
+  let bestCount = Infinity;
+  for (const w of state.air_wings.values()) {
+    if (w.nation_id !== nationId) continue;
+    if (!typeSet.has(w.aircraft_type)) continue;
+    // Airborne tier: TRANSIT/ENGAGED/LOITER exactly. Idle tier: IDLE exactly — NOT simply
+    // "anything that isn't airborne," which would wrongly admit RTB/REFUEL/RELOCATE wings
+    // (mid-flight-home or grounded-for-maintenance, not a real "hasn't launched yet" idle
+    // bomber) as eligible fallback candidates.
+    const eligible = requireAirborne
+      ? ESCORT_AIRBORNE_STATES.has(w.lifecycle_state as WING_LIFECYCLE)
+      : w.lifecycle_state === WING_LIFECYCLE.IDLE;
+    if (!eligible) continue;
+    const count = escortCounts.get(w.wing_id) ?? 0;
+    if (count < bestCount) { bestCount = count; best = w.wing_id; }
+  }
+  return best;
+}
+
+/**
+ * Tier 1/2: airborne bomber of the primary/fallback type for this fighter class. Tier 3/4:
+ * same type preference, but only among IDLE bombers — checked strictly after every airborne
+ * option, per the confirmed design ("prioritize bombers in the air; if none, check idle
+ * bombers"). Re-run every tick like every other mission's chain, so an escort already
+ * committed to an idle bomber upgrades the moment a real airborne bomber becomes available
+ * (subject to the same hysteresis rule as every other mission — a same-tier bomber, however
+ * less crowded, does not bump an already-committed escort).
+ */
+export function resolveEscortTargets(
+  wing: AirWingState,
+  state: GameRoomState,
+  escortCounts: Map<string, number>,
+): TierResult | null {
+  const nationId = wing.nation_id;
+  const isHeavy = wing.aircraft_type === "heavy_fighter";
+  const primary  = isHeavy ? HEAVY_FIGHTER_ESCORT_PRIMARY  : FIGHTER_ESCORT_PRIMARY;
+  const fallback = isHeavy ? HEAVY_FIGHTER_ESCORT_FALLBACK : FIGHTER_ESCORT_FALLBACK;
+
+  let target = pickEscortBomber(nationId, primary, true, state, escortCounts);
+  if (target) return { tier: 1, targetId: target };
+  target = pickEscortBomber(nationId, fallback, true, state, escortCounts);
+  if (target) return { tier: 2, targetId: target };
+  target = pickEscortBomber(nationId, primary, false, state, escortCounts);
+  if (target) return { tier: 3, targetId: target };
+  target = pickEscortBomber(nationId, fallback, false, state, escortCounts);
+  if (target) return { tier: 4, targetId: target };
+
+  return null;
+}
+
 // ── Step 5: Main tick() entry point ─────────────────────────────────────────────
 
 type BroadcastFn = (type: string, msg: unknown) => void;
@@ -553,6 +647,7 @@ type DetectionQueries = {
   getVisibleDivisionsForNation(nationId: string): Set<string>;
 };
 type ResolvePositionFn = (id: string) => { lng: number; lat: number } | null;
+type VisibilityQueries = { canNationSeeDivision(nationId: string, divisionId: string): boolean };
 
 const RETARGETABLE_STATES = new Set([WING_LIFECYCLE.IDLE, WING_LIFECYCLE.LOITER, WING_LIFECYCLE.TRANSIT]);
 
@@ -615,6 +710,7 @@ export class AirMissionTargetingSystem {
     pathfinder: DubinsPathfinder,
     resolvePosition: ResolvePositionFn,
     broadcast: BroadcastFn,
+    visibilitySystem?: VisibilityQueries,
   ): void {
     if (!_targetingEnabled) return;
 
@@ -627,35 +723,46 @@ export class AirMissionTargetingSystem {
 
     const claims = buildClaimsRegistry(state);
     const reconCounts = buildReconEscortCounts(state);
+    const escortCounts = buildEscortCounts(state);
     const provinceNeighbors = state.provinceNeighbors;
     const cache = createTickCache();
     const changed: string[] = [];
 
     for (const wing of state.air_wings.values()) {
-      if (wing.mission === MISSION_TYPES.IDLE || wing.mission === MISSION_TYPES.ESCORT) continue;
+      if (wing.mission === MISSION_TYPES.IDLE) continue;
       if (!RETARGETABLE_STATES.has(wing.lifecycle_state as WING_LIFECYCLE)) continue;
 
-      const currentTargetStillValid = wing.target_id !== "" && this._targetStillValid(wing.target_id, state);
+      const isEscort = wing.mission === MISSION_TYPES.ESCORT;
+      const currentTargetStillValid = wing.target_id !== ""
+        && this._targetStillValid(wing.target_id, state, wing.mission);
 
       // Manual-target protection (C1): a player-directed wing keeps its target untouched by
       // auto-search for as long as that target stays valid. Once invalid, hand control back
-      // to auto-search — fall through to the normal resolution below.
-      if (this._manuallyTargetedWings.has(wing.wing_id)) {
+      // to auto-search — fall through to the normal resolution below. Escort has no manual
+      // right-click flow (no client entry point sets is_manual for it), so this never
+      // applies to it in practice, but the check is harmless either way.
+      if (!isEscort && this._manuallyTargetedWings.has(wing.wing_id)) {
         if (currentTargetStillValid) continue;
         this._manuallyTargetedWings.delete(wing.wing_id);
       }
 
-      // C2: exclude the wing's own claim on its own current target from the crowd count
-      // while resolving FOR this wing — otherwise every wing re-evaluating its own current
-      // target is penalized by its own claim, biasing the search away from a target it
-      // should be allowed to keep. Scoped: decrement before resolving, restore immediately
-      // after, since `claims` is shared across all wings resolved this tick.
-      const ownTargetId = wing.target_id;
-      const ownClaimCount = ownTargetId !== "" ? claims.get(ownTargetId) : undefined;
-      if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount - 1);
-      const result = this._resolveForMission(
-        wing, state, provinceNeighbors, detectionSystem, claims, reconCounts, resolvePosition, cache);
-      if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount);
+      let result: TierResult | null;
+      if (isEscort) {
+        result = resolveEscortTargets(wing, state, escortCounts);
+      } else {
+        // C2: exclude the wing's own claim on its own current target from the crowd count
+        // while resolving FOR this wing — otherwise every wing re-evaluating its own
+        // current target is penalized by its own claim, biasing the search away from a
+        // target it should be allowed to keep. Scoped: decrement before resolving, restore
+        // immediately after, since `claims` is shared across all wings resolved this tick.
+        const ownTargetId = wing.target_id;
+        const ownClaimCount = ownTargetId !== "" ? claims.get(ownTargetId) : undefined;
+        if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount - 1);
+        result = this._resolveForMission(
+          wing, state, provinceNeighbors, detectionSystem, claims, reconCounts, resolvePosition,
+          cache, visibilitySystem);
+        if (ownTargetId !== "" && ownClaimCount) claims.set(ownTargetId, ownClaimCount);
+      }
 
       if (!result) {
         // I5: invalidated target with no replacement found — clear it rather than leaving
@@ -664,6 +771,14 @@ export class AirMissionTargetingSystem {
         if (!currentTargetStillValid && wing.target_id !== "") {
           wing.target_id = "";
           this._wingTier.delete(wing.wing_id);
+        }
+        // Escort tail behavior (mirrors the retired autoAssignEscort()'s design): a
+        // non-heavy fighter with zero eligible bombers of any kind — airborne or idle —
+        // reverts to Air Superiority rather than sitting with nothing to do forever. Heavy
+        // fighters just keep waiting for a bomber to escort.
+        if (isEscort && wing.aircraft_type !== "heavy_fighter" && wing.mission !== MISSION_TYPES.AIR_SUPERIORITY) {
+          wing.mission = MISSION_TYPES.AIR_SUPERIORITY;
+          changed.push(wing.wing_id);
         }
         continue;
       }
@@ -679,6 +794,29 @@ export class AirMissionTargetingSystem {
       const shouldCommit = !currentTargetStillValid || result.tier < previousTier;
       if (!shouldCommit) continue;
       if (result.targetId === wing.target_id && result.tier === previousTier) continue; // already on it, no-op
+
+      if (isEscort) {
+        // Escort does not compute a Dubins path at all — air_dubins_pathfinder.ts's own
+        // per-tick sync continuously mirrors the escort's path_gen_id/path_elapsed_ms to
+        // whatever its assigned bomber is currently doing ("Sync escort wings" block).
+        // Only the target and the lifecycle transition that makes the escort eligible for
+        // that sync are needed here.
+        const previousTargetId = wing.target_id;
+        wing.target_id = result.targetId;
+        this._wingTier.set(wing.wing_id, { tier: result.tier, mission: wing.mission });
+        escortCounts.set(result.targetId, (escortCounts.get(result.targetId) ?? 0) + 1);
+        if (previousTargetId !== "" && previousTargetId !== result.targetId) {
+          const vacated = (escortCounts.get(previousTargetId) ?? 1) - 1;
+          if (vacated > 0) escortCounts.set(previousTargetId, vacated);
+          else escortCounts.delete(previousTargetId);
+        }
+        if (wing.lifecycle_state === WING_LIFECYCLE.IDLE || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
+          wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
+          lifecycleSystem.resetLoiterTicks(wing.wing_id);
+        }
+        changed.push(wing.wing_id);
+        continue;
+      }
 
       const targetPos = resolvePosition(result.targetId);
       if (!targetPos) {
@@ -732,9 +870,17 @@ export class AirMissionTargetingSystem {
   }
 
   /** True if `targetId` still refers to a live, still-relevant target. */
-  private _targetStillValid(targetId: string, state: GameRoomState): boolean {
+  private _targetStillValid(targetId: string, state: GameRoomState, mission: string): boolean {
     const asWing = state.air_wings.get(targetId);
-    if (asWing) return asWing.is_detected; // enemy wing target — still valid only if still detected
+    if (asWing) {
+      // Only Interception/Air Superiority target an ENEMY wing, where "no longer detected"
+      // genuinely means "lost contact, find something else." Escort and Recon's
+      // escort-a-bomber tier target a FRIENDLY wing — is_detected there reflects whether an
+      // ENEMY nation currently sees it, which has nothing to do with whether the
+      // escort/recon assignment is still meaningful.
+      const pursuingEnemyWing = mission === MISSION_TYPES.INTERCEPTION || mission === MISSION_TYPES.AIR_SUPERIORITY;
+      return pursuingEnemyWing ? asWing.is_detected : true;
+    }
     if (state.divisions.has(targetId)) return true;   // division/patrol target — always valid while it exists
     if (state.provinces.has(targetId)) return true;   // province target — always valid while it exists
     if (state.naval_contact_markers.has(targetId)) return true;
@@ -750,6 +896,7 @@ export class AirMissionTargetingSystem {
     reconCounts: Map<string, number>,
     resolvePosition: ResolvePositionFn,
     cache: TickCache,
+    visibilitySystem?: VisibilityQueries,
   ): TierResult | null {
     switch (wing.mission) {
       case MISSION_TYPES.INTERCEPTION:
@@ -757,7 +904,8 @@ export class AirMissionTargetingSystem {
       case MISSION_TYPES.AIR_SUPERIORITY:
         return resolveAirSuperiorityTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache);
       case MISSION_TYPES.TACTICAL_BOMBING:
-        return resolveTacticalBombingTargets(wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache);
+        return resolveTacticalBombingTargets(
+          wing, state, provinceNeighbors, detectionSystem, claims, resolvePosition, cache, visibilitySystem);
       case MISSION_TYPES.AREA:
       case MISSION_TYPES.INDUSTRY:
       case MISSION_TYPES.OIL:

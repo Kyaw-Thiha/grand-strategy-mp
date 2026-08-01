@@ -191,20 +191,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const wing = this.state.air_wings.get(msg.wing_id);
       if (!wing || wing.nation_id !== nation.nation_id) return;
 
-      const isAutoEscort = msg.mission === MISSION_TYPES.ESCORT && (!msg.target_id || msg.target_id === "");
-      let didChange: boolean;
-      if (isAutoEscort) {
-        this.airWingLifecycleSystem.assignMission(msg.wing_id, msg.mission, "", this.state);
-        this.airWingLifecycleSystem.autoAssignEscort(msg.wing_id, this.state);
-        didChange = true;
-      } else {
-        didChange = this.airWingLifecycleSystem.assignMission(
-          msg.wing_id,
-          msg.mission,
-          msg.target_id,
-          this.state
-        );
-      }
+      // Auto-Escort (empty target_id) is no longer resolved synchronously here — like every
+      // other auto-targeted mission, assignMission() with an empty target leaves the wing
+      // IDLE and AirMissionTargetingSystem's per-tick loop (resolveEscortTargets) picks a
+      // bomber on the next tick, with the same continuous re-evaluation and hysteresis every
+      // other mission gets (airborne bombers strictly preferred over idle ones, upgrading
+      // automatically if a real airborne bomber later appears).
+      const didChange = this.airWingLifecycleSystem.assignMission(
+        msg.wing_id,
+        msg.mission,
+        msg.target_id,
+        this.state
+      );
       if (!didChange) return;
       const updated = this.state.air_wings.get(msg.wing_id);
       if (updated) this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(updated)] });
@@ -1534,6 +1532,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.airDubinsPathfinder,
         (id) => this._resolveTargetPosition(id),
         wingBroadcast,
+        this.serverVisibilitySystem,
       );
 
       // Wings set to RTB by the lifecycle tick (fuel-out, auto-resolve) get their paths

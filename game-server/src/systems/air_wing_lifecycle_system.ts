@@ -275,72 +275,16 @@ export class AirWingLifecycleSystem {
     return true;
   }
 
-  // ── Escort auto-assignment ─────────────────────────────────────────────────
-
-  private static readonly HEAVY_FIGHTER_PRIMARY = new Set(["strategic_bomber", "tactical_bomber"]);
-  private static readonly HEAVY_FIGHTER_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
-  private static readonly FIGHTER_PRIMARY = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
-  private static readonly FIGHTER_FALLBACK = new Set(["strategic_bomber", "tactical_bomber"]);
-
-  autoAssignEscort(wingId: string, state: GameRoomState): void {
-    const wing = state.air_wings.get(wingId);
-    if (!wing) return;
-
-    const isHeavy = wing.aircraft_type === "heavy_fighter";
-    const primary  = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_PRIMARY  : AirWingLifecycleSystem.FIGHTER_PRIMARY;
-    const fallback = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_FALLBACK : AirWingLifecycleSystem.FIGHTER_FALLBACK;
-
-    // IDLE included so a fighter can be assigned Escort before either wing has launched
-    // (revised design — was originally airborne-only, excluding an idle bomber even if it
-    // was the obvious intended pairing).
-    const eligibleStates = new Set([
-      WING_LIFECYCLE.IDLE, WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER,
-    ]);
-
-    const escortCounts = new Map<string, number>();
-    for (const w of state.air_wings.values()) {
-      if (w.mission === MISSION_TYPES.ESCORT && w.target_id !== "") {
-        escortCounts.set(w.target_id, (escortCounts.get(w.target_id) ?? 0) + 1);
-      }
-    }
-
-    const pickFrom = (typeSet: Set<string>): string => {
-      let best = "";
-      let bestCount = Infinity;
-      let bestIsIdle = true;
-      for (const w of state.air_wings.values()) {
-        if (w.nation_id !== wing.nation_id) continue;
-        if (!typeSet.has(w.aircraft_type)) continue;
-        if (!eligibleStates.has(w.lifecycle_state as WING_LIFECYCLE)) continue;
-        const count = escortCounts.get(w.wing_id) ?? 0;
-        const isIdle = w.lifecycle_state === WING_LIFECYCLE.IDLE;
-        // Prefer an already-airborne bomber over an idle one at equal escort count — an
-        // idle bomber is only picked when no airborne candidate is available at all,
-        // preserving the pre-existing airborne-only behavior as the common case now that
-        // idle bombers are additionally eligible (not co-equal).
-        const better = count < bestCount || (count === bestCount && bestIsIdle && !isIdle);
-        if (better) {
-          bestCount = count;
-          bestIsIdle = isIdle;
-          best = w.wing_id;
-        }
-      }
-      return best;
-    };
-
-    let target = pickFrom(primary);
-    if (target === "") target = pickFrom(fallback);
-
-    if (target === "") {
-      if (!isHeavy) {
-        wing.mission = MISSION_TYPES.AIR_SUPERIORITY;
-      }
-      wing.target_id = "";
-      return;
-    }
-
-    wing.target_id = target;
-  }
+  // Escort auto-assignment: previously a one-shot autoAssignEscort() called only at initial
+  // assignment and at orphan-reassignment-on-disband. Retired in favor of driving Escort
+  // through AirMissionTargetingSystem's per-tick loop like every other mission
+  // (resolveEscortTargets/buildEscortCounts in air_mission_targeting.ts) — this gives Escort
+  // the same continuous re-evaluation, hysteresis, and airborne-strictly-preferred-over-idle
+  // tiering as every other mission gets, instead of a one-time snapshot decision. Orphan
+  // reassignment now falls out for free: an orphaned escort's target_id stops resolving to a
+  // live wing, AirMissionTargetingSystem's existing invalidated-target handling clears it,
+  // and the very next tick's search finds a new bomber — no special-cased disbandWing() call
+  // needed.
 
   triggerContact(wingId: string, targetWingId: string, state: GameRoomState): void {
     const wing = state.air_wings.get(wingId);
@@ -390,13 +334,6 @@ export class AirWingLifecycleSystem {
     const wing = state.air_wings.get(wingId);
     if (!wing) return;
 
-    const orphanedEscorts: string[] = [];
-    for (const w of state.air_wings.values()) {
-      if (w.mission === MISSION_TYPES.ESCORT && w.target_id === wingId) {
-        orphanedEscorts.push(w.wing_id);
-      }
-    }
-
     const nationId = wing.nation_id;
     state.air_wings.delete(wingId);
 
@@ -410,9 +347,11 @@ export class AirWingLifecycleSystem {
     this._pendingTransitAfterRedeploy.delete(wingId);
     this._statusFuel.delete(wingId);
 
-    for (const escortId of orphanedEscorts) {
-      this.autoAssignEscort(escortId, state);
-    }
+    // Orphaned escorts (wings targeting wingId) are NOT reassigned here — deleting the
+    // targeted wing from state.air_wings above already makes AirMissionTargetingSystem's
+    // invalidated-target check fail on the escort's next tick, which clears its target_id
+    // and lets the normal per-tick search reassign it, exactly like every other mission's
+    // target invalidation. No special-cased reassignment needed.
 
     broadcast(messageType, {
       wing_id: wingId,
