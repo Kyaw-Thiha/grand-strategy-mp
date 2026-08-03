@@ -76,7 +76,7 @@ var _route_overlays: Dictionary = {}   # div_id → MoveOrderOverlay node
 var _path_thread: Thread = null
 var _path_pending: bool = false
 var _path_gen: int = 0
-var _pending_auto_submit: bool = false      # true during the 1.2s non-shift flash window
+var _pending_auto_submit: bool = false      # true during the 0.2s non-shift flash window
 var _submit_on_thread_complete: bool = false # submit chain as soon as current thread finishes
 var _shift_chain_started: bool = false      # true once the user has made at least one shift-click
 
@@ -234,7 +234,7 @@ func handle_input(event: InputEvent) -> void:
 
 	match key.physical_keycode:
 		KEY_SHIFT:
-			# Shift pressed during the 1.2s non-shift transition window → promote to chain.
+			# Shift pressed during the non-shift transition window promotes the route to a chain.
 			if _pending_auto_submit and _move_mode and not _pending_milestones.is_empty():
 				_pending_auto_submit = false
 				_shift_chain_started = true
@@ -650,7 +650,7 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 	else:
 		_update_ghost()
 		_pending_auto_submit = true
-		get_tree().create_timer(1.2).timeout.connect(func() -> void:
+		get_tree().create_timer(0.2).timeout.connect(func() -> void:
 			if _pending_auto_submit and _move_mode:
 				_pending_auto_submit = false
 				_submit_pending()
