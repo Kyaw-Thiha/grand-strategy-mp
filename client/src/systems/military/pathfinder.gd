@@ -23,10 +23,21 @@ const SYNTHETIC_GOAL_ID := "_synthetic_goal"
 const MAX_SPLINE_DEV_DEG: float = 0.0067
 const SPLINE_SUBDIVISIONS: int = 8
 const MAX_FALLBACK_CANDIDATES := 5
+## Roughly 5 km per cell at Western European latitudes. The query expands across
+## cells until its distance bound proves the nearest result is exact.
+const SPATIAL_CELL_SIZE_DEG := 0.05
 
 var _nodes: Dictionary = {}
 var _adjacency: Dictionary = {}
 var _road_nodes: Dictionary = {}
+var _spatial_cells: Dictionary = {}
+var _road_spatial_cells: Dictionary = {}
+var _spatial_min_cell: Vector2i = Vector2i.ZERO
+var _spatial_max_cell: Vector2i = Vector2i.ZERO
+var _road_spatial_min_cell: Vector2i = Vector2i.ZERO
+var _road_spatial_max_cell: Vector2i = Vector2i.ZERO
+var _has_spatial_cells: bool = false
+var _has_road_spatial_cells: bool = false
 var _built: bool = false
 var _cluster_of: Dictionary = {}       # node_id -> leaf_cluster_id
 var _abstract_edges: Dictionary = {}   # cluster_id -> Array of {from, to, cost}
@@ -35,9 +46,14 @@ var _clusters_loaded: bool = false
 
 
 func build(wp_graph: Dictionary) -> void:
+	_built = false
 	_nodes.clear()
 	_adjacency.clear()
 	_road_nodes.clear()
+	_spatial_cells.clear()
+	_road_spatial_cells.clear()
+	_has_spatial_cells = false
+	_has_road_spatial_cells = false
 
 	for node: Dictionary in wp_graph.get("nodes", []) as Array:
 		var id: String = node["id"]
@@ -82,12 +98,189 @@ func build(wp_graph: Dictionary) -> void:
 				"river_penalty": river_penalty, "on_road": both_on_road
 			})
 
+	_build_spatial_indexes()
 	_built = true
 	print("[Pathfinder] built graph: %d nodes" % _nodes.size())
 
 
 func is_built() -> bool:
 	return _built
+
+
+## Builds immutable geographic indexes for original graph nodes. Runtime
+## synthetic and spline nodes deliberately remain outside nearest-node queries.
+func _build_spatial_indexes() -> void:
+	for node_id: String in _nodes:
+		var node: Dictionary = _nodes[node_id]
+		var cell: Vector2i = _spatial_cell_for(float(node["lng"]), float(node["lat"]))
+		_add_to_spatial_cell(_spatial_cells, cell, node_id)
+		if not _has_spatial_cells:
+			_spatial_min_cell = cell
+			_spatial_max_cell = cell
+			_has_spatial_cells = true
+		else:
+			_spatial_min_cell = Vector2i(mini(_spatial_min_cell.x, cell.x), mini(_spatial_min_cell.y, cell.y))
+			_spatial_max_cell = Vector2i(maxi(_spatial_max_cell.x, cell.x), maxi(_spatial_max_cell.y, cell.y))
+
+		if not _road_nodes.has(node_id):
+			continue
+		_add_to_spatial_cell(_road_spatial_cells, cell, node_id)
+		if not _has_road_spatial_cells:
+			_road_spatial_min_cell = cell
+			_road_spatial_max_cell = cell
+			_has_road_spatial_cells = true
+		else:
+			_road_spatial_min_cell = Vector2i(mini(_road_spatial_min_cell.x, cell.x), mini(_road_spatial_min_cell.y, cell.y))
+			_road_spatial_max_cell = Vector2i(maxi(_road_spatial_max_cell.x, cell.x), maxi(_road_spatial_max_cell.y, cell.y))
+
+
+func _spatial_cell_for(lng: float, lat: float) -> Vector2i:
+	return Vector2i(floori(lng / SPATIAL_CELL_SIZE_DEG), floori(lat / SPATIAL_CELL_SIZE_DEG))
+
+
+func _add_to_spatial_cell(index: Dictionary, cell: Vector2i, node_id: String) -> void:
+	var cell_nodes: Array = index.get(cell, [])
+	cell_nodes.append(node_id)
+	index[cell] = cell_nodes
+
+
+## Returns the exact nearest node IDs in deterministic distance/ID order.
+## Neutral filtering is applied while candidates are selected so excluded cells
+## cannot cause the distance-bound search to terminate early.
+func _find_nearest_ids(lng: float, lat: float, count: int,
+		player_nation_id: String = "", relations: Dictionary = {},
+		road_only: bool = false) -> Array[String]:
+	var result: Array[String] = []
+	if count <= 0:
+		return result
+
+	var index: Dictionary = _road_spatial_cells if road_only else _spatial_cells
+	var has_cells: bool = _has_road_spatial_cells if road_only else _has_spatial_cells
+	if not has_cells:
+		return result
+	var min_cell: Vector2i = _road_spatial_min_cell if road_only else _spatial_min_cell
+	var max_cell: Vector2i = _road_spatial_max_cell if road_only else _spatial_max_cell
+	var query_cell: Vector2i = _spatial_cell_for(lng, lat)
+	var center := Vector2i(
+		clampi(query_cell.x, min_cell.x, max_cell.x),
+		clampi(query_cell.y, min_cell.y, max_cell.y))
+	var candidates: Array = []
+	var max_ring: int = maxi(
+		maxi(center.x - min_cell.x, max_cell.x - center.x),
+		maxi(center.y - min_cell.y, max_cell.y - center.y))
+
+	for ring: int in range(max_ring + 1):
+		_scan_spatial_ring(index, center, ring, lng, lat, count,
+			player_nation_id, relations, candidates)
+		if candidates.size() < count:
+			continue
+		var scanned_min := Vector2i(maxi(min_cell.x, center.x - ring), maxi(min_cell.y, center.y - ring))
+		var scanned_max := Vector2i(mini(max_cell.x, center.x + ring), mini(max_cell.y, center.y + ring))
+		var unsearched_sq: float = _nearest_unsearched_cell_distance_sq(
+			lng, lat, min_cell, max_cell, scanned_min, scanned_max)
+		if float(candidates[-1][0]) < unsearched_sq:
+			break
+
+	for candidate: Array in candidates:
+		result.append(str(candidate[1]))
+	return result
+
+
+## Scans one square cell ring and retains only the nearest requested candidates.
+func _scan_spatial_ring(index: Dictionary, center: Vector2i, ring: int,
+		lng: float, lat: float, count: int, player_nation_id: String,
+		relations: Dictionary, candidates: Array) -> void:
+	if ring == 0:
+		_scan_spatial_cell(index, center, lng, lat, count, player_nation_id, relations, candidates)
+		return
+	var min_x: int = center.x - ring
+	var max_x: int = center.x + ring
+	var min_y: int = center.y - ring
+	var max_y: int = center.y + ring
+	for cell_x: int in range(min_x, max_x + 1):
+		_scan_spatial_cell(index, Vector2i(cell_x, min_y), lng, lat, count,
+			player_nation_id, relations, candidates)
+		_scan_spatial_cell(index, Vector2i(cell_x, max_y), lng, lat, count,
+			player_nation_id, relations, candidates)
+	for cell_y: int in range(min_y + 1, max_y):
+		_scan_spatial_cell(index, Vector2i(min_x, cell_y), lng, lat, count,
+			player_nation_id, relations, candidates)
+		_scan_spatial_cell(index, Vector2i(max_x, cell_y), lng, lat, count,
+			player_nation_id, relations, candidates)
+
+
+func _scan_spatial_cell(index: Dictionary, cell: Vector2i, lng: float, lat: float,
+		count: int, player_nation_id: String, relations: Dictionary,
+		candidates: Array) -> void:
+	for node_id_value: Variant in index.get(cell, []):
+		var node_id := str(node_id_value)
+		if not player_nation_id.is_empty() and _is_neutral_for(node_id, player_nation_id, relations):
+			continue
+		var node: Dictionary = _nodes[node_id]
+		var dx: float = float(node["lng"]) - lng
+		var dy: float = float(node["lat"]) - lat
+		candidates.append([dx * dx + dy * dy, node_id])
+		candidates.sort_custom(_spatial_candidate_less)
+		if candidates.size() > count:
+			candidates.pop_back()
+
+
+func _spatial_candidate_less(a: Array, b: Array) -> bool:
+	if float(a[0]) == float(b[0]):
+		return str(a[1]) < str(b[1])
+	return float(a[0]) < float(b[0])
+
+
+## Computes a lower distance bound to every cell outside the searched rectangle.
+func _nearest_unsearched_cell_distance_sq(lng: float, lat: float,
+		all_min: Vector2i, all_max: Vector2i,
+		scanned_min: Vector2i, scanned_max: Vector2i) -> float:
+	var best_sq := INF
+	if scanned_min.x > all_min.x:
+		best_sq = minf(best_sq, _distance_sq_to_cell_rect(lng, lat,
+			all_min, Vector2i(scanned_min.x - 1, all_max.y)))
+	if scanned_max.x < all_max.x:
+		best_sq = minf(best_sq, _distance_sq_to_cell_rect(lng, lat,
+			Vector2i(scanned_max.x + 1, all_min.y), all_max))
+	if scanned_min.y > all_min.y:
+		best_sq = minf(best_sq, _distance_sq_to_cell_rect(lng, lat,
+			Vector2i(scanned_min.x, all_min.y), Vector2i(scanned_max.x, scanned_min.y - 1)))
+	if scanned_max.y < all_max.y:
+		best_sq = minf(best_sq, _distance_sq_to_cell_rect(lng, lat,
+			Vector2i(scanned_min.x, scanned_max.y + 1), Vector2i(scanned_max.x, all_max.y)))
+	return best_sq
+
+
+func _distance_sq_to_cell_rect(lng: float, lat: float,
+		min_cell: Vector2i, max_cell: Vector2i) -> float:
+	var min_lng: float = float(min_cell.x) * SPATIAL_CELL_SIZE_DEG
+	var max_lng: float = float(max_cell.x + 1) * SPATIAL_CELL_SIZE_DEG
+	var min_lat: float = float(min_cell.y) * SPATIAL_CELL_SIZE_DEG
+	var max_lat: float = float(max_cell.y + 1) * SPATIAL_CELL_SIZE_DEG
+	var dx: float = maxf(maxf(min_lng - lng, lng - max_lng), 0.0)
+	var dy: float = maxf(maxf(min_lat - lat, lat - max_lat), 0.0)
+	return dx * dx + dy * dy
+
+
+## Returns indexed road nodes inside a geographic rectangle.
+func _road_nodes_in_rect(min_lng: float, min_lat: float,
+		max_lng: float, max_lat: float) -> Array[String]:
+	var result: Array[String] = []
+	if not _has_road_spatial_cells:
+		return result
+	var min_cell: Vector2i = _spatial_cell_for(min_lng, min_lat)
+	var max_cell: Vector2i = _spatial_cell_for(max_lng, max_lat)
+	for cell_x: int in range(min_cell.x, max_cell.x + 1):
+		for cell_y: int in range(min_cell.y, max_cell.y + 1):
+			for node_id_value: Variant in _road_spatial_cells.get(Vector2i(cell_x, cell_y), []):
+				var node_id := str(node_id_value)
+				var node: Dictionary = _nodes[node_id]
+				var node_lng: float = float(node["lng"])
+				var node_lat: float = float(node["lat"])
+				if node_lng >= min_lng and node_lng <= max_lng \
+						and node_lat >= min_lat and node_lat <= max_lat:
+					result.append(node_id)
+	return result
 
 
 func build_clusters(cluster_data: Dictionary) -> void:
@@ -139,20 +332,9 @@ func _insert_synthetic_goal(goal_lng: float, goal_lat: float,
 	}
 	_adjacency[SYNTHETIC_GOAL_ID] = []
 	var K := 8
-	var non_neutral: Array = []
-	for nid in _nodes:
-		if nid == SYNTHETIC_GOAL_ID or str(nid).begins_with("_spline"):
-			continue
-		var n: Dictionary = _nodes[nid]
-		var ddx := float(n["lng"]) - goal_lng
-		var ddy := float(n["lat"]) - goal_lat
-		var sq := ddx*ddx + ddy*ddy
-		if player_nation_id.is_empty() or not _is_neutral_for(str(nid), player_nation_id, relations):
-			non_neutral.append([sq, nid])
-	non_neutral.sort()
-	var to_connect: Array = non_neutral.slice(0, min(K, non_neutral.size()))
-	for entry: Array in to_connect:
-		var nb_id: String = entry[1]
+	var to_connect: Array[String] = _find_nearest_ids(
+		goal_lng, goal_lat, K, player_nation_id, relations)
+	for nb_id: String in to_connect:
 		var nb: Dictionary = _nodes[nb_id]
 		var ddx := float(nb["lng"]) - goal_lng
 		var ddy := float(nb["lat"]) - goal_lat
@@ -180,35 +362,21 @@ func _remove_synthetic_goal() -> void:
 	_adjacency.erase(SYNTHETIC_GOAL_ID)
 
 
-## Returns the nearest waypoint ID to (lng, lat). O(n) — call only on user clicks.
+## Returns the nearest original waypoint ID to (lng, lat).
 func find_nearest(lng: float, lat: float) -> String:
-	var best_id := ""
-	var best_sq := INF
-	for id: String in _nodes:
-		var n: Dictionary = _nodes[id]
-		var dx := float(n["lng"]) - lng
-		var dy := float(n["lat"]) - lat
-		var sq := dx * dx + dy * dy
-		if sq < best_sq:
-			best_sq = sq
-			best_id = id
-	return best_id
+	var nearest: Array[String] = _find_nearest_ids(lng, lat, 1)
+	return "" if nearest.is_empty() else nearest[0]
 
 
 ## Returns distance in degrees from (lng, lat) to the nearest road node.
-## O(n road_nodes) — call on the main thread before spawning a path thread.
 func nearest_road_node_distance(lng: float, lat: float) -> float:
-	var best_sq := INF
-	for rid: String in _road_nodes:
-		var rn: Dictionary = _nodes.get(rid, {})
-		if rn.is_empty():
-			continue
-		var dx := float(rn["lng"]) - lng
-		var dy := float(rn["lat"]) - lat
-		var sq := dx * dx + dy * dy
-		if sq < best_sq:
-			best_sq = sq
-	return sqrt(best_sq)
+	var nearest: Array[String] = _find_nearest_ids(lng, lat, 1, "", {}, true)
+	if nearest.is_empty():
+		return INF
+	var node: Dictionary = _nodes[nearest[0]]
+	var dx: float = float(node["lng"]) - lng
+	var dy: float = float(node["lat"]) - lat
+	return sqrt(dx * dx + dy * dy)
 
 
 ## Returns true if a significant road passes within ~300m of the line from_id→to_id.
@@ -229,14 +397,11 @@ func road_crosses_segment(from_id: String, to_id: String) -> bool:
 	var max_lng := maxf(alng, blng) + ROAD_PROXIMITY_DEG
 	var min_lat := minf(alat, blat) - ROAD_PROXIMITY_DEG
 	var max_lat := maxf(alat, blat) + ROAD_PROXIMITY_DEG
-	var nearby: Array = []
-	for rid: String in _road_nodes:
-		var rn: Dictionary = _nodes.get(rid, {})
-		if rn.is_empty():
-			continue
+	var nearby: Array[Vector2] = []
+	for rid: String in _road_nodes_in_rect(min_lng, min_lat, max_lng, max_lat):
+		var rn: Dictionary = _nodes[rid]
 		var rlng := float(rn["lng"]); var rlat := float(rn["lat"])
-		if rlng >= min_lng and rlng <= max_lng and rlat >= min_lat and rlat <= max_lat:
-			nearby.append(Vector2(rlng, rlat))
+		nearby.append(Vector2(rlng, rlat))
 	if nearby.is_empty():
 		return false
 
@@ -320,17 +485,9 @@ func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
 		movement_profile: Dictionary,
 		player_nation_id: String = "",
 		relations: Dictionary = {}) -> String:
-	var candidates: Array = []
-	for node_id: String in _nodes:
-		if node_id == SYNTHETIC_GOAL_ID:
-			continue
-		var n: Dictionary = _nodes[node_id]
-		var dx: float = float(n["lng"]) - near_lng
-		var dy: float = float(n["lat"]) - near_lat
-		candidates.append([dx * dx + dy * dy, node_id])
-	candidates.sort_custom(func(a, b): return a[0] < b[0])
-	for i in range(min(MAX_FALLBACK_CANDIDATES, candidates.size())):
-		var candidate_id: String = candidates[i][1]
+	var candidates: Array[String] = _find_nearest_ids(
+		near_lng, near_lat, MAX_FALLBACK_CANDIDATES)
+	for candidate_id: String in candidates:
 		if candidate_id == from_id:
 			continue
 		var result: Dictionary = find_path(from_id, candidate_id, movement_profile, 1.0,
@@ -365,19 +522,13 @@ func _find_nearest_road_node(from_id: String) -> String:
 		return ""
 	var flng: float = float(from_node["lng"])
 	var flat: float = float(from_node["lat"])
-	var best_id := ""
-	var best_sq := ROAD_SEARCH_RADIUS_SQ
-	for rid: String in _road_nodes:
-		var rn: Dictionary = _nodes.get(rid, {})
-		if rn.is_empty():
-			continue
-		var dx := float(rn["lng"]) - flng
-		var dy := float(rn["lat"]) - flat
-		var sq := dx * dx + dy * dy
-		if sq < best_sq:
-			best_sq = sq
-			best_id = rid
-	return best_id
+	var nearest: Array[String] = _find_nearest_ids(flng, flat, 1, "", {}, true)
+	if nearest.is_empty():
+		return ""
+	var node: Dictionary = _nodes[nearest[0]]
+	var dx: float = float(node["lng"]) - flng
+	var dy: float = float(node["lat"]) - flat
+	return nearest[0] if dx * dx + dy * dy < ROAD_SEARCH_RADIUS_SQ else ""
 
 
 ## Bidirectional A*. Runs forward from from_id and backward from to_id,
