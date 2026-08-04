@@ -115,7 +115,7 @@ not make it significantly harder — it just ensures one migration instead of tw
 
 ## Further Context
 
-- `old-docs/DEV_PHASES.md` → Phase 16 `NetworkScalingSystem` entry
+- `docs/DEV_PHASES.md` → Phase 16 `NetworkScalingSystem` entry
 - `game-server/src/rooms/schema/GameRoomState.ts` — all schema class definitions
 - `client/src/net/net_manager.gd` — packet handler with the `# Phase 4+` comment
 - Branch J (`feat/air-networking-aoi`) — implements `ServerVisibilitySystem` with manual

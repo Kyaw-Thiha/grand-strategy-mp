@@ -11,5 +11,5 @@ assets used by the client and game server.
 
 - [[client/map/index|Client Map]]
 - [[game-server/maps-and-starting-state|Maps and Starting State]]
-- [[docs/MAP_PRODUCTION_DOCS|Map Production Design]]
-- [[docs/MAP_DATA_CONTRACT|Map Data Contract]]
+- [Map Production Design](../../docs/MAP_PRODUCTION_DOCS.md)
+- [Map Data Contract](../../docs/MAP_DATA_CONTRACT.md)

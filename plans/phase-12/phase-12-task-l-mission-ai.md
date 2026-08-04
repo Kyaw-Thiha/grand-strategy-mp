@@ -5,7 +5,7 @@
 Branch K-ui (`feat/air-client-ui`) shipped the UI for assigning missions to air wings, but
 most missions have no real auto-targeting behind them. This branch adds a full tiered
 auto-targeting and patrol system for every mission, per the design now recorded in
-`wiki/docs/AIR_COMBAT.md`'s "Mission Auto-Targeting & Patrol Priority" section (read that
+`docs/AIR_COMBAT.md`'s "Mission Auto-Targeting & Patrol Priority" section (read that
 section before starting — it is the authoritative source for every tier order and constant
 name used below; this plan is the execution detail behind it).
 
@@ -16,7 +16,7 @@ name used below; this plan is the execution detail behind it).
 - Tactical Bombing, Area/Industry/Oil/Logistics, all four naval missions, and Recon have
   **zero** auto-targeting — `target_id` is only ever set by a client message today.
 - Escort auto-assignment is already fully correct (`air_wing_lifecycle_system.ts:264-309`)
-  and matches `wiki/docs/AIR_COMBAT.md`'s Escort spread logic exactly. **Do not touch
+  and matches `docs/AIR_COMBAT.md`'s Escort spread logic exactly. **Do not touch
   Escort in this branch** beyond what Step 2's `isAutoTargetedMission` rename requires
   (Escort must stay excluded from the new generic search).
 - Real province-adjacency data (159 edges, 89 provinces) already exists in
@@ -953,7 +953,7 @@ have Interception's "duplicate onto an already-patrolled unit" tier, because
 `resolvePatrolFallback`'s own-city tier already allows duplication implicitly once claim
 counts stop mattering (see 4e — the "duplicate allowed" tier is realized by simply not
 filtering out already-claimed candidates in the final own-city tier, not by a separate
-explicit tier). Confirm this matches `wiki/docs/AIR_COMBAT.md`'s current text for both
+explicit tier). Confirm this matches `docs/AIR_COMBAT.md`'s current text for both
 missions before implementing — the two chains are similar but not identical in tier count.
 
 ### 4d. Position-resolution threading
@@ -1594,4 +1594,4 @@ All must pass before this branch is considered done.
 | Strategic Bombing's target search should check detection/visibility like every other mission | **Needs confirmation, not a safe assumption** — this plan targets provinces without a detection check (matching existing manual-targeting precedent from Branch H), but flag this back if it turns out to be wrong rather than silently diverging from the rest of the file's pattern. |
 | `resolvePatrolFallback`'s own-city tier needs an explicit "duplicate allowed" tier per the design doc's wording | **Not needed** — `pickBest` never excludes claimed candidates, only deprioritizes them via score; a non-empty candidate list always returns a result regardless of existing claims, which already IS the duplicate-allowed behavior. Adding a separate explicit tier for this would be redundant dead code. |
 | Tactical Bombing's "within max range from home airbase" constraint on its border-patrol fallback tier is implemented in this plan | **Not implemented as written** — Step 4f's tier 2 does not filter by wing range/fuel. If this constraint is required before merging, it needs an explicit fuel-based range check added to `resolveTacticalBombingTargets`'s tier 2, using the same `min_turn_radius_deg`/fuel-derived max-range math already used in `GameRoom._findNearestFriendlyAirbaseToPoint` (`maxRange = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * 0.0002 * 1000`) as a reference — not copied verbatim here because this plan does not thread fuel-decay constants into `air_mission_targeting.ts`. Flag this gap explicitly rather than silently shipping an unbounded-range patrol tier. |
-| `CROWD_WEIGHT = 0.15` and `BORDER_PROXIMITY_DEG = 1.5` are final balanced values | **Wrong** — both are placeholders explicitly flagged for playtesting, consistent with every other constant in `wiki/docs/AIR_COMBAT.md`'s Open Questions section. Do not treat them as tuned. |
+| `CROWD_WEIGHT = 0.15` and `BORDER_PROXIMITY_DEG = 1.5` are final balanced values | **Wrong** — both are placeholders explicitly flagged for playtesting, consistent with every other constant in `docs/AIR_COMBAT.md`'s Open Questions section. Do not treat them as tuned. |

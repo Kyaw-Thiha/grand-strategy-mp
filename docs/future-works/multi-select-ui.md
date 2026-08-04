@@ -1,7 +1,7 @@
 ---
 tags: [future-work, ui, air-combat, land-combat, naval-combat]
 status: deferred
-blocks: [[air-fleet-command]]
+blocks: [Air Fleet Command](air-fleet-command.md)
 ---
 
 # Multi-Unit Selection UI

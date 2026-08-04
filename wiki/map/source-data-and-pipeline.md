@@ -42,6 +42,6 @@ owns geographic data; the client generator owns Godot-native scene composition.
 - [[map/index|Map Production]]
 - [[client/map/map-data-and-loading|Map Data and Loading]]
 - [[game-server/maps-and-starting-state|Maps and Starting State]]
-- [[docs/MAP_PRODUCTION_DOCS|Map Production Design]]
-- [[docs/MAP_DATA_CONTRACT|Map Data Contract]]
-- [[docs/EDITOR_MAP_GENERATION|Editor Map Generation]]
+- [Map Production Design](../../docs/MAP_PRODUCTION_DOCS.md)
+- [Map Data Contract](../../docs/MAP_DATA_CONTRACT.md)
+- [Editor Map Generation](../../docs/EDITOR_MAP_GENERATION.md)

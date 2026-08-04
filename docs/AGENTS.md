@@ -1,7 +1,7 @@
-# Authoritative Design Source Guide
+# Maintained Documentation Guide
 
-Files in this directory are the source of truth for intended game behavior, implementation
-requirements, roadmap state, and completion tracking.
+`docs/` is the maintained source of truth for intended game behavior, implementation
+requirements, roadmap state, technical contracts, and completion tracking.
 
 ## Rules
 
@@ -16,9 +16,9 @@ requirements, roadmap state, and completion tracking.
 - Reopen or correct a checkbox when repository evidence proves the recorded state is wrong.
 - Preserve meaningful design rationale, constraints, cross-system relationships, and
   acceptance criteria.
-- Use vault-relative links such as `[[docs/AIR_COMBAT|Air Combat Design]]`.
-- Keep implementation detail in these sources when it is a required design contract; put
-  fast current-code orientation and source anchors in the ordinary component wiki notes.
+- Use relative Markdown links such as `[Air Combat Design](AIR_COMBAT.md)`.
+- Keep implementation detail when it is a required design contract. Keep implementation
+  anchors selective and verify referenced paths and symbols.
 
-Do not create implementation plans here. Colocate an active `<task>-plan.md` with the
-ordinary component notes that own the work, and delete it after completion.
+Do not create temporary implementation plans here. Use the repository's `plans/` tree when
+a persistent plan is explicitly required.

@@ -187,7 +187,7 @@ Launch Godot → map renders → can click provinces → camera pans and zooms s
 ### Testing
 - [x] `scripts/e2e-session-loop.sh` + `game-server/test/session-loop.e2e.ts` — 11-step bot
       E2E test
-- [x] `wiki/docs/LOCAL_TESTING.md` — two-instance Godot testing guide with debugging gotchas
+- [x] `docs/LOCAL_TESTING.md` — two-instance Godot testing guide with debugging gotchas
 
 ### Verification gate
 Player A creates lobby → bot joins → both pick nations → start → bot sends a VOTE_SPEED →
@@ -196,7 +196,7 @@ game ends cleanly → results posted to Hono.
 > **Phase 3 completed 2026-06-02.** E2E bot test passes all 11 steps
 > (`bash scripts/e2e-session-loop.sh`). Two Godot instances verified in local play: login →
 > create lobby → join by code → select nations → ready up → start → both transition to game
-> scene. See `wiki/docs/LOCAL_TESTING.md` for setup instructions and a record of debugging gotchas
+> scene. See `docs/LOCAL_TESTING.md` for setup instructions and a record of debugging gotchas
 > (Colyseus 0.17 protocol, GDScript lambda closures, `.tscn` unique_name_in_owner syntax).
 
 ---
@@ -231,11 +231,11 @@ Unit tests for movement profile computation and A* path validity.
       cluster, pre-compute and cache optimal path cost between every pair of border nodes
       (nodes connecting to a neighbouring cluster); output an abstract graph (one node per
       border crossing) alongside the existing `waypoints.json`, not replacing it; see
-      `wiki/docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
+      `docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
       behaviour. Client-side HPA* routing is code-complete but the synthetic goal bypass
       (to_cluster is always empty for right-click moves) means only non-synthetic targets
       (group moves) use HPA* acceleration currently
-- See `wiki/docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
+- See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
 - [x] Division spawning at game start (from starting positions config per nation)
@@ -398,12 +398,12 @@ Unit tests for movement profile computation and A* path validity.
       graph; movement profile applied at query time per selected division
 - [x] Pathfinding uses **two-phase routing** (bidirectional A*): off-road purity pre-check;
       road entry pre-check (nearest road within 0.015°²/~1.5km → route to road then
-      road-only to goal); full graph fallback (see `wiki/docs/PATHFINDING.md` — Two-Phase Routing)
+      road-only to goal); full graph fallback (see `docs/PATHFINDING.md` — Two-Phase Routing)
 - [x] **String-pulling post-processor** applied to raw A* output — greedy forward skip
-      to furthest passable node within 0.05°²/~5km (see `wiki/docs/PATHFINDING.md` — String-Pulling)
+      to furthest passable node within 0.05°²/~5km (see `docs/PATHFINDING.md` — String-Pulling)
 - [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
       check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
-      depth (see `wiki/docs/PATHFINDING.md` — Shift-Move Road Avoidance)
+      depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
 - [x] Hierarchical query added on top of the existing two-phase routing above: cheap
       abstract-graph search across clusters first, identifying which clusters the route
       crosses; full two-phase A* (unchanged) runs only within those clusters, always at
@@ -415,9 +415,9 @@ Unit tests for movement profile computation and A* path validity.
       waypoint list, client-side, before handing to dead reckoning; deviation from the
       original straight-line polyline clamped to ~750m so the curve cannot cut across
       terrain the route deliberately avoided; falls back to a straight segment if the
-      clamp would be exceeded (see `wiki/docs/PATHFINDING.md` — Path Smoothing)
+      clamp would be exceeded (see `docs/PATHFINDING.md` — Path Smoothing)
 - [x] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
-      edges; server validates path (see `wiki/docs/PATHFINDING.md` — Core A*)
+      edges; server validates path (see `docs/PATHFINDING.md` — Core A*)
 - [x] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display,
       meeting battle icon (purple border + inward arrows), stack count badge, dead reckoning
       movement, ghost overlay, multi-waypoint chain building, drag-box selection
@@ -446,12 +446,12 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Movement rendering uses **dead reckoning** — client drives animation locally
       using the pre-validated waypoint list and terrain speed; no waiting for server
       per-waypoint acknowledgements. Server broadcasts `consumed_waypoint_ids` each tick;
-      client trims local DR order via suffix-match (see `wiki/docs/PATHFINDING.md` — Dead Reckoning).
+      client trims local DR order via suffix-match (see `docs/PATHFINDING.md` — Dead Reckoning).
       Last-mile DR advances frame-by-frame toward the exact click position with weighted
       speed averaging between last waypoint and destination terrain. Server correction via
       `DIVISION_UPDATES` patches with suffix-match divergence detection.
       Dead reckoning implementation in `client/src/systems/military/military_system.gd`;
-      see `wiki/docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
+      see `docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
 - [x] Move order UX:
@@ -1185,7 +1185,7 @@ against) and for standing trade routes (needs a second nation to negotiate with)
 - [ ] `BuildingUI` — per-building detail view showing current level, active perks, and the
       building's own perk tree (adjacency web rendering shared with the unit-research panel's
       tree-rendering component where the underlying shape matches — see
-      `wiki/docs/UI_UX_DESIGN.md` for the shared adjacency-web widget)
+      `docs/UI_UX_DESIGN.md` for the shared adjacency-web widget)
 - [ ] `MarketUI` — spot market order book (post buy/sell, view standing orders, see fills);
       separate `TradeRouteUI` for establishing/viewing standing routes, distinct panel since
       barter (resource-for-resource) only applies here, not on the spot market
@@ -1884,7 +1884,7 @@ Full contracts written when implementation begins. Prioritise based on playteste
 | `AchievementSystem` | `[LATER]` | Steam achievement unlocks from game events |
 | `AIPlayerSystem` | `[LATER]` | Server-side AI for unfilled nation slots (Colyseus module) |
 | `LobbyTimerSystem` | `[LATER]` | Auto-start lobby after configurable countdown. Requires `AIPlayerSystem`. |
-| `NetworkScalingSystem` | `[LATER]` | Binary schema sync + StateView AOI. The server already mutates `@type()`-decorated schema objects at runtime — Colyseus generates binary deltas but the client discards them (see `# Phase 4+` in `net_manager.gd`). Migration: (1) write a GDScript `@colyseus/schema` binary decoder for packets 14/15 in `net_manager.gd`; (2) rewrite `session_manager.gd` + `game_state.gd` from JSON message handlers to schema `listen()`/`onAdd`/`onRemove` callbacks; (3) assign `client.view = new StateView()` per client and wire `ServerVisibilitySystem` to call `client.view.add(entity)`/`remove(entity)` instead of the manual `broadcastToNationSet()` filtering introduced in Branch J. Covers all entity types: divisions, air wings, ships. `@filter`/`@filterChildren` were removed in Colyseus 0.16 — StateView is the replacement. **Do after Phase 14 (Economy Integration)** so all major schema classes (divisions, wings, ships, economy buildings on ProvinceState) are stable before migrating once. See `wiki/future-works/binary-schema-sync.md` for full design notes. |
+| `NetworkScalingSystem` | `[LATER]` | Binary schema sync + StateView AOI. The server already mutates `@type()`-decorated schema objects at runtime — Colyseus generates binary deltas but the client discards them (see `# Phase 4+` in `net_manager.gd`). Migration: (1) write a GDScript `@colyseus/schema` binary decoder for packets 14/15 in `net_manager.gd`; (2) rewrite `session_manager.gd` + `game_state.gd` from JSON message handlers to schema `listen()`/`onAdd`/`onRemove` callbacks; (3) assign `client.view = new StateView()` per client and wire `ServerVisibilitySystem` to call `client.view.add(entity)`/`remove(entity)` instead of the manual `broadcastToNationSet()` filtering introduced in Branch J. Covers all entity types: divisions, air wings, ships. `@filter`/`@filterChildren` were removed in Colyseus 0.16 — StateView is the replacement. **Do after Phase 14 (Economy Integration)** so all major schema classes (divisions, wings, ships, economy buildings on ProvinceState) are stable before migrating once. See `docs/future-works/binary-schema-sync.md` for full design notes. |
 | `AmphbiousSystem` | `[LATER]` | Shore bombardment and amphibious assault. Requires Phase 13 naval complete. |
 | `MineWarfareSystem` | `[LATER]` | Minelayer and minesweeper ship classes. Sea zone denial via minefield placement. Requires Phase 13 naval complete. |
 | `MidgetSubmarineSystem` | `[LATER]` | Harbour-penetration submarine variant. Requires naval-land integration design. |

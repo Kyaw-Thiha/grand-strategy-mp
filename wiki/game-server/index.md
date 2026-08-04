@@ -17,7 +17,7 @@ Its state is temporary. A room exists for one session, and the server reports th
 # Related Notes
 
 - [[api-server/index|API Server]]
-- [[docs/ARCHITECTURE|Architecture]]
-- [[docs/MODULES|Module Contracts]]
-- [[docs/DATA_CONTRACTS|Data Contracts]]
-- [[docs/DEV_PHASES|Development Phases]]
+- [Architecture](../../docs/ARCHITECTURE.md)
+- [Module Contracts](../../docs/MODULES.md)
+- [Data Contracts](../../docs/DATA_CONTRACTS.md)
+- [Development Phases](../../docs/DEV_PHASES.md)

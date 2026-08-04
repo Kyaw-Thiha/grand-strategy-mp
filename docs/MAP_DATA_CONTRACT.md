@@ -1,7 +1,7 @@
 # Grand Strategy Multiplayer — Map Data Contract
 
 > Defines all map layers, data schemas, authoring workflow (QGIS), pipeline, and Godot import.
-> Authoritative map contract. Read it with [[docs/ARCHITECTURE|Architecture]] when work
+> Authoritative map contract. Read it with [Architecture](ARCHITECTURE.md) when work
 > changes map source data, generation, runtime loading, rendering, or simulation consumers.
 > Last updated: May 2026.
 

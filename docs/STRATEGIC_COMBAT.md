@@ -117,7 +117,7 @@ Recomputed whenever the template is saved — same trigger as the movement profi
 ### Pathfinding Architecture
 
 Client-side bidirectional A* over a two-level unified graph. Server validates the submitted
-path. Full implementation reference: `wiki/docs/PATHFINDING.md`.
+path. Full implementation reference: `docs/PATHFINDING.md`.
 
 **Level 1 — Road graph:** Road network from `roads.geojson`. Road edges have a fixed low
 cost (0.05/deg); road_level governs animation speed, not pathfinding cost. All division
@@ -571,6 +571,16 @@ it simply has a queued destination it will head to after the fight.
 6. **Escape:** cancel move mode, clear all pending waypoints, division deselected
 7. **Right-click any waypoint** in an existing chain: deletes that waypoint; subsequent
    waypoints reorder automatically; division continues on updated path
+
+### Move Order Feedback
+
+Every successfully routed player move destination receives brief client-side confirmation.
+Four targeting brackets snap inward, then a bright center point emits two expanding rings
+that fade within approximately 0.6 seconds. The effect uses a lightened version of the
+division's nation color, remains a consistent screen size across camera zoom levels, and does
+not replace the persistent route or waypoint rendering. Group movement emits one effect at
+the clicked group center; shift-move chains emit one at each successfully added waypoint.
+Clicks for which no route can be found emit no confirmation.
 
 ### Move Trigger: Click, Not Drag
 

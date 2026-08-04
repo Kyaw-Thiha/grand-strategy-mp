@@ -72,5 +72,5 @@ or a dedicated air-fleet-improvements branch.
 
 ## Further Context
 
-- Full design doc: `old-docs/AIR_COMBAT.md` → "Command Layer — Air Fleets → Fleet Relocation"
+- Full design doc: `docs/AIR_COMBAT.md` → "Command Layer — Air Fleets → Fleet Relocation"
 - Branch I spec: `plans/phase-12/phase-12-air-combat.md` → Branch I section

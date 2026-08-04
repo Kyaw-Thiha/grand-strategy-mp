@@ -4,10 +4,10 @@ You are working in `grand-strategy-mp`, a Godot 4.7 multiplayer grand-strategy g
 
 Read these first:
 
-- `wiki/docs/GAME_CONTEXT.md`
-- `wiki/docs/MODULES.md`
-- `wiki/docs/EDITOR_MAP_GENERATION.md`
-- `wiki/docs/UI_UX_DESIGN.md`
+- `docs/GAME_CONTEXT.md`
+- `docs/MODULES.md`
+- `docs/EDITOR_MAP_GENERATION.md`
+- `docs/UI_UX_DESIGN.md`
 
 Important architecture rules:
 
@@ -65,8 +65,8 @@ Implement a first-pass client-side vision system for the Godot game.
 
 Before implementation:
 
-- Create `wiki/client/vision/vision-system-plan.md` and list it in
-  `wiki/client/vision/index.md` while work is active.
+- Create `plans/vision-system-plan.md` while work is active and delete it after the durable
+  design and implementation state have been reconciled here.
 - Keep the plan phase-based and decision-complete.
 - Do not mutate `GameState`.
 - Do not add server logic yet.
@@ -258,7 +258,7 @@ Because generated map scenes can now carry extra nodes, decide whether the visio
 
 For V1, prefer runtime-created `VisionSystem` child layers so iteration does not require regenerating `western_europe_6.scn`.
 
-Only modify `map-generator.gd` if a stable empty layer in generated scenes is clearly useful. If you add one, document it in `wiki/docs/EDITOR_MAP_GENERATION.md`.
+Only modify `map-generator.gd` if a stable empty layer in generated scenes is clearly useful. If you add one, document it in `docs/EDITOR_MAP_GENERATION.md`.
 
 ## Debug Requirements
 

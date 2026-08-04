@@ -1,7 +1,7 @@
 ---
 tags: [future-work, air-combat, phase-12, ui]
 status: deferred
-dependency: multi-select-ui design (see [[multi-select-ui]])
+dependency: multi-select-ui design (see [Multi-Select UI](multi-select-ui.md))
 ---
 
 # Air Fleet Command (Branch I)
@@ -44,9 +44,9 @@ If players need stable named groupings they return to repeatedly: fleet is the r
 **Planned handlers:** `CREATE_AIR_FLEET`, `DISBAND_AIR_FLEET`, `ASSIGN_WINGS_TO_FLEET`, `SET_FLEET_MISSION`  
 **Planned system:** `AirFleetCommandSystem`
 
-**RELOCATE_FLEET** is a separate deferred feature — see [[air-fleet-relocate]].
+**RELOCATE_FLEET** is a separate deferred feature — see [Air Fleet Relocation](air-fleet-relocate.md).
 
 ## Further Context
 
-- `old-docs/AIR_COMBAT.md` → "Command Layer — Air Fleets"
+- `docs/AIR_COMBAT.md` → "Command Layer — Air Fleets"
 - `plans/phase-12/phase-12-air-combat.md` → Branch I section

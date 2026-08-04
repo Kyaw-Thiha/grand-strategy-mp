@@ -5,6 +5,7 @@ extends Node
 const DIVISION_ICON_SCENE := preload("res://scenes/systems/military/division_icon.tscn")
 const ENGAGEMENT_BANNER_SCENE := preload("res://scenes/systems/military/engagement_banner.tscn")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
+const MoveDestinationEffectScript := preload("res://src/systems/military/move_destination_effect.gd")
 const Pathfinder := preload("res://src/systems/military/pathfinder.gd")
 
 const NATION_COLORS: Dictionary = {
@@ -508,6 +509,9 @@ func _on_direct_move_ready(path: Array, division_id: String, target_lng: float, 
 			wpid = goal_id
 		path_to_submit.append(wpid)
 	_submit_move_order_for_division(division_id, path_to_submit, Vector2(target_lng, target_lat))
+	_spawn_move_destination_effect(
+			_map_loader.project_lng_lat(target_lng, target_lat),
+			division_id)
 
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
@@ -588,6 +592,7 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		_clear_pending()
 		return
 
+	var submitted_any_order: bool = false
 	for index: int in moving_division_ids.size():
 		var division_id: String = moving_division_ids[index]
 		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
@@ -610,6 +615,12 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		for waypoint_id: Variant in path:
 			path_to_submit.append(str(waypoint_id))
 		_submit_move_order_for_division(division_id, path_to_submit)
+		submitted_any_order = true
+
+	if submitted_any_order:
+		_spawn_move_destination_effect(
+				_map_loader.project_lng_lat(target_lng, target_lat),
+				moving_division_ids[0])
 
 	_clear_pending()
 
@@ -635,6 +646,13 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 
 	var was_empty := _pending_chain.is_empty()
 	_append_segment_to_chain(segment, goal_id)
+	var destination_node: Dictionary = _pathfinder.get_node(goal_id)
+	if not destination_node.is_empty():
+		_spawn_move_destination_effect(
+				_map_loader.project_lng_lat(
+						float(destination_node.get("lng", 0.0)),
+						float(destination_node.get("lat", 0.0))),
+				division_id_snapshot)
 	if was_empty:
 		_pending_chain_origin_deg = _dr_pos_deg.get(_selected_division_id, Vector2.ZERO)
 		_chain_last_refresh_time = Time.get_ticks_msec() / 1000.0
@@ -1016,6 +1034,19 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array, final_
 		icon_node.set_moving(true)
 
 	_update_division_route(div_id)
+
+
+## Spawns immediate client-only confirmation at a successfully routed move destination.
+func _spawn_move_destination_effect(world_position: Vector2, division_id: String) -> void:
+	if _icon_layer == null:
+		return
+	var division_data: Dictionary = GameState.get_division(division_id)
+	var nation_id: String = division_data.get("nation_id", "")
+	var nation_color: Color = NATION_COLORS.get(nation_id, NEUTRAL_COLOR)
+	var effect: MoveDestinationEffect = MoveDestinationEffectScript.new()
+	effect.setup(world_position, nation_color)
+	effect.z_index = 20
+	_icon_layer.add_child(effect)
 
 
 func _submit_reposition_order(div_id: String, target_lng: float, target_lat: float) -> void:

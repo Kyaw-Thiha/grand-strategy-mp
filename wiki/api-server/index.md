@@ -69,6 +69,6 @@ The API server may authorize access to a game, but the game server remains autho
 
 # Related Notes
 
-- [[docs/ARCHITECTURE|Architecture]]
-- [[docs/DATA_CONTRACTS|Data Contracts]]
+- [Architecture](../../docs/ARCHITECTURE.md)
+- [Data Contracts](../../docs/DATA_CONTRACTS.md)
 - [[game-server/index|Game Server]]
