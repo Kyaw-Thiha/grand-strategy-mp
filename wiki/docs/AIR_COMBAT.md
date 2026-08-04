@@ -1,10 +1,9 @@
 # Grand Strategy Multiplayer — Air Combat Design
 
 > Confirmed design decisions for the air combat layer.
-> Last updated: July 2026 — combat resolution corrected to a per-engagement lethality/
-> surprise model (not per-tick attrition), wing sub-status system added, wing size and
-> airbase capacity mechanics added. See Combat Resolution, Wing Sub-Status System, Wing Size
-> & Formation Density, and Airbase Capacity sections for what's new in this pass.
+> Last updated: August 2026 — mission auto-targeting & patrol priority implemented in
+> Branch L (`feat/air-mission-ai`), concrete tuning values from implementation added to
+> relevant sections, resolved open questions moved to their own subsection.
 > **This is a full replacement of the previous province-assigned, round-resolved air combat
 > design.** Air wings are now individually selectable, real-time, pathfinding units — closer
 > to naval flotillas than to the old abstracted model. See "Relationship to Other Combat
@@ -407,7 +406,10 @@ killer by mid-1944) rather than one size simply winning.
 **The same two-sided pressure applies to wing size here:**
 - **Bigger wings get a saturating Defense-value bonus** (mutual covering fire) —
   increasing, but with diminishing marginal benefit past a certain size, so it plateaus
-  rather than rewarding infinite stacking.
+  rather than rewarding infinite stacking. **Current implementation:** `defense_bonus =
+  min(count / 36, 1.0) × 0.4` applied as `1 / (1 + defense_bonus)` saturation on
+  incoming damage — a 36-plane wing takes ~28.6% less air-to-air damage than a
+  singleton.
 - **Bigger wings take more AA damage** (both province fixed AA and flotilla pooled AA scale
   up somewhat with wing size — a denser formation is a better flak target). Roughly linear,
   no saturation expected.
@@ -424,11 +426,14 @@ once both threats (fighters and flak) mattered simultaneously.
 
 Airbase capacity is **soft, not a hard wing-slot cap**: more wings stationed at one base
 means each wing's fuel and readiness recovery rate while `Idle` gets marginally slower,
-representing shared ground crew and maintenance bandwidth. This is continuous pressure, never
-a wall — it rewards building more airbases without making a single base feel like it hit a
-ceiling, and it's the same shape as manpower recruitment in `RESOURCE_ECONOMY.md`
-(**progressively more expensive, never hard-blocked**), just applied to ground-crew bandwidth
-instead of manpower.
+representing shared ground crew and maintenance bandwidth. **Current implementation:**
+`congestion_factor = 1 / (1 + max(0, wingsAtBase - 3) × 0.15)` — the first 3 wings at a
+base recover at full rate; each additional wing beyond that multiplies recovery speed by a
+progressively smaller factor (6 wings = 0.69×, never reaches zero). This is continuous
+pressure, never a wall — it rewards building more airbases without making a single base feel
+like it hit a ceiling, and it's the same shape as manpower recruitment in
+`RESOURCE_ECONOMY.md` (**progressively more expensive, never hard-blocked**), just applied
+to ground-crew bandwidth instead of manpower.
 
 This stacks cleanly with Wing Size & Formation Density above without the two fighting each
 other: size pressure discourages one mega-wing; base-congestion pressure discourages
@@ -599,6 +604,12 @@ defence, fully exposed. Naval base level reduces damage to docked ships (existin
 
 ## Mission Auto-Targeting & Patrol Priority
 
+> **Implemented August 2026 in Branch L** (`feat/air-mission-ai`). See
+> `AirMissionTargetingSystem` in `game-server/src/systems/air_mission_targeting.ts` for the
+> authoritative implementation. This section's design remains the specification the code was
+> built against; the implementation note at [[game-server/simulation/air-operations|Air
+> Operations]] summarizes the resulting code architecture.
+
 Every mission needs a wing to behave sensibly with zero further clicks, per this document's
 Design Philosophy — this section defines the tiered search chain each mission runs, and the
 shared mechanisms behind the patrol fallback tiers every chain eventually reaches.
@@ -607,10 +618,18 @@ shared mechanisms behind the patrol fallback tiers every chain eventually reache
 
 **Border-adjacency.** "Near the border with nation X" is real polygon-derived province
 adjacency (which province physically touches which), not a distance-threshold approximation
-— the map pipeline already computes this. Evaluated from **the searching wing's own nation**,
-not the province's owner, so a wing based at an allied airbase correctly treats "my ally
-borders the enemy" or "my ally borders a neutral" as a valid border case, since wings can be
-stationed at allied airbases.
+— the map pipeline already computes this, for province-to-province checks. Evaluated from
+**the searching wing's own nation**, not the province's owner, so a wing based at an allied
+airbase correctly treats "my ally borders the enemy" or "my ally borders a neutral" as a
+valid border case, since wings can be stationed at allied airbases.
+
+A friendly land division has no province ID of its own (only a raw position), so "is this
+division near a border of stance X" cannot reuse the polygon adjacency check directly and
+falls back to a distance-threshold approximation instead: a division qualifies if it's within
+`BORDER_PROXIMITY_DEG` of a province that itself borders a stance-X neighbor, **or** if it's
+physically nearer to stance-X-owned territory than to friendly-owned territory (so a division
+that has advanced, or was placed, several provinces deep into hostile land still qualifies —
+not just one that's sitting right at the front line).
 
 **Visibility.** "Visible enemy" reuses Detection & Visibility above unchanged — radar
 buildings, friendly wings, and land divisions' observation radii all already feed the same
@@ -801,28 +820,71 @@ the build:
 
 ## Open Questions (To Be Resolved in Playtesting)
 
-- Fuel decay rate while airborne and its RTB threshold (current: 0.065/tick, threshold 0.10)
-- Fuel recovery rate at base (current: 0.20/tick, ~5 ticks to full)
-- Combat readiness decay rate while airborne (current: 0.015/tick, much slower than fuel)
-- Combat readiness floor (never zero; current: 0.15) and recovery rate (current: 0.04/tick)
-- Multi-sortie loiter/cooldown duration (target: 10–20s)
+### Resolved in implementation (August 2026)
+
+These values were set during Phase 12 implementation and are now in the codebase.
+They remain subject to playtesting recalibration but are no longer open design questions.
+
+- **Fuel decay** — transit: 0.012/tick, loiter: 0.008/tick; RTB threshold: 0.10; recovery:
+  0.20/tick (~5 ticks to full). Source: `air_wing_lifecycle_system.ts` constants.
+- **Combat readiness decay** — 0.003/tick (dev value, slow for testing); floor: 0.15;
+  recovery: 0.04/tick. Source: `air_wing_lifecycle_system.ts`.
+- **Formation density defence bonus** — saturating mitigation `1 / (1 + densityBonus)` where
+  `densityBonus = min(count / 36, 1.0) × 0.4`; cap 36 planes, max bonus 0.4 (~28.6% less
+  air-to-air damage at full size). Source: `air_unit_stats.ts`.
+- **Airbase recovery congestion** — `congestionFactor = 1 / (1 + max(0, wingsAtBase - 3)
+  × 0.15)`; first 3 wings at a base recover at full rate, each additional wing reduces
+  recovery multiplicatively (e.g. 6 wings = 0.69×). Source: `air_wing_lifecycle_system.ts`.
+- **Naval bomber splash-damage** — 15% splashes to other flotilla members (`SPLASH_PERCENT`).
+  Source: `air_naval_bomber_system.ts`.
+- **Oil debuff duration** — 120 seconds (`OIL_DEBUFF_DURATION_MS`).
+  Source: `air_bombing_stats.ts`.
+- **Port strike damage per plane** — 0.1 naval base levels (`PORT_STRIKE_NAVAL_BASE_
+  DAMAGE_PER_PLANE`). Source: `air_bombing_stats.ts`.
+- **Contact marker quality presets** — MARITIME_PATROL: 0.15° radius, 60s duration,
+  refreshable; CARGO_SINKING: 0.8° radius, 20s duration; FLOTILLA_SCOUT: 0.4° radius,
+  40s duration. Source: `air_naval_bomber_system.ts`.
+- **AA damage coefficient** — 0.05 per unit of province AA strength; low-altitude types
+  (CAS, dive bomber, fighter, naval bomber) take 1.5× damage. Source: `air_province_aa_
+  system.ts`.
+- **Observation range values per aircraft type** — Recon Plane: 1.0°, Heavy Fighter: 0.25°,
+  all others: 0.05°. Source: `air_unit_stats.ts` STAT_TABLE.
+- **Turn radii and speed** — Fighter: 0.30° turn / 0.00024°/ms; Heavy Fighter: 0.50° /
+  0.00021; CAS/Dive/Naval Bomber: 0.30–0.40° / 0.00018; Tactical/Strategic Bomber:
+  0.50–0.65° / 0.00016–0.00019; Recon: 0.30° / 0.00019. Source: `air_unit_stats.ts`.
+- **Attack/Defense values** — Fighter: 0.25 atk / 0.03 def; Heavy Fighter: 0.22 / 0.05;
+  CAS/Dive Bomber: 0.05 / 0.03 (0.15 perked); Tactical/Strategic/Naval Bomber: 0.0 / 0.02;
+  Recon: 0.0 / 0.01. Source: `air_unit_stats.ts`.
+- **Division-to-border proximity threshold** — `BORDER_PROXIMITY_DEG = 4.0`, tuned against
+  `western_europe_6`'s real province-city-marker spacing (median ~2.8°, mean ~3.0°, max
+  ~8.4° between adjacent provinces) so it reliably captures a division near the front line
+  at real map scale. A division deep inside stance-X territory (well beyond this radius from
+  the nearest bordering province) still qualifies via the separate "physically nearer to
+  stance-X territory than to friendly territory" rule described in the Border-adjacency
+  mechanism above. Source: `air_mission_targeting.ts`.
+
+### Still open (to be resolved in playtesting)
+
+- Fuel decay transit value (0.012/tick current dev setting) — may need adjustment for
+  plausible operational ranges on the Western Europe 6 map
+- Readiness decay per tick (0.003/tick current dev setting) — intentionally slow for
+  testing; real value should make long sorties carry a meaningful combat penalty
+- Multi-sortie loiter/cooldown duration (target: 10–20s; current MAX_LOITER_TICKS: 15)
+- Weapon-ready/reload cooldown ticks (current: 3)
+- Engagement auto-resolve ticks (current: 2)
+- RTB and refuel duration ticks (current: 5 each)
 - Redeployment/template-change stand-down time (previously 1 minute, flat, same as land —
   confirm this still holds under real-time resolution)
 - **Lethality ratio `L` exact value** (shape confirmed: target 0.15–0.35 for a fair,
   mutually-spotted exchange between equal-strength wings)
 - **Surprise multiplier `S` exact value** (shape confirmed: target 2.0–3.0×; note `L × S`
   approaching or exceeding 1.0 at the top of the range is intentional, not a bug to fix)
-- Defense-value magnitude relative to Attack-value (target: small, ~10–15% of Attack — enough
-  that catching a reloading wing is still clearly correct play, not enough to be a free kill)
-- Weapon-ready/reload cooldown duration per aircraft type
+- Defense-value magnitude relative to Attack-value (target: small, ~10–15% of Attack —
+  current stat table values range 12–27% for fighter types, 100% for pure bombers with
+  zero attack)
 - Distance-falloff curve constants for province fixed AA (shape confirmed, numbers pending
   alongside the existing wing distance-penalty curve they're reused from)
-- Naval bomber splash-damage percentage and falloff by ship proximity within the flotilla
-- Contact-marker radius and duration per detection source quality (maritime patrol vs.
-  triangulated sinking-event contact vs. own-flotilla scouting)
 - Recon plane's detection-generation rate and how quickly visibility lapses after it leaves
-- Observation range values per aircraft type (shape confirmed: Recon Plane highest, Heavy
-  Fighter close to its own attack range, all others short by default)
 - Pursuit-path recompute interval for interceptors chasing a moving target
 - Fighter vs. Heavy Fighter dogfight modifier — a secondary Defense-value cushion on top of
   Heavy Fighter's observation-range advantage, mirroring the historical Bf 110 pattern
@@ -830,11 +892,6 @@ the build:
 - **Wing Sub-Status magnitudes** — Engine speed penalty, Weapons damage-output penalty,
   Fuel tank decay-rate multiplier, Instruments pattern-reach reduction (shape confirmed:
   multiplicative stacking, deterministic trigger-to-status mapping)
-- **Wing Size & Formation Density curve constants** — the saturating Defense-value bonus
-  curve and the roughly-linear AA-vulnerability curve, and where they cross (illustrative
-  historical anchor: 18/36/54 planes, settling near 36)
-- **Airbase recovery-congestion curve** — how much each additional stationed wing slows
-  fuel/readiness recovery for all wings at that base
 - Air Fleet directive vocabulary and auto-assignment heuristic (mirrors the land Army Group
   advance-axis heuristic; exact matching logic from playtesting)
 - Wing withdrawal threshold — HP/readiness floor at which a wing auto-RTBs rather than

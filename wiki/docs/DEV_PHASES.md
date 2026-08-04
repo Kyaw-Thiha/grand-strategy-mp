@@ -1,7 +1,9 @@
 # Grand Strategy Multiplayer — Development Phases
 
 > Development roadmap and sequencing reference.
-> Last updated: June 2026.
+> Last updated: August 2026 — Phase 12 air combat checklist reconciled with Branch L
+> (`feat/air-mission-ai`) implementation: mission auto-targeting (new subsection), damage
+> patterns, patrol behaviour, and escort rebuild.
 
 ---
 
@@ -1367,6 +1369,9 @@ mistake.
 > selectable, real-time, pathfinding wings (Call-of-War-style, not HoI4-style
 > province-assigned abstraction). The task list below supersedes the original version of
 > this phase in full — do not build against the old 3×5-grid, round-resolved design.
+> **Reconciled August 2026** with Branch L (`feat/air-mission-ai`) implementation —
+> checkboxes for damage patterns, default patrol behaviour, mission auto-targeting,
+> and escort rebuild updated to reflect completed work.
 
 **Goal:** Homogeneous air wings exist as real-time, selectable, pathfinding units. Missions
 resolve continuously, not per-round. CAS/tactical-bombing damage lands on the land tactical
@@ -1397,9 +1402,11 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       (respects current heading, no instant flip), and Loiter/orbit
 - [x] Pursuit-path generator (lead pursuit) for Interception/Air Superiority once a target is
       detected — recomputed periodically, not per-frame
-- [ ] Default Interception/Air Superiority behaviour with no visible target: generate an
+- [x] Default Interception/Air Superiority behaviour with no visible target: generate an
       orbit path over a patrol area (reuses the Loiter orbit code) and hold until a target
-      enters detection
+      enters detection — implemented via `AirMissionTargetingSystem` patrol-fallback tiers
+      (Branch L); land-only patrol shipped as a scope cut pending Phase 13 naval flotilla
+      state
 - [x] Server-authoritative position simulation — server owns the tick, client interpolates;
       broadcast path-generation id + elapsed time, not raw positions (mirrors land's
       dead-reckoning bandwidth trick)
@@ -1408,15 +1415,20 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       no separate faster tick
 
 ### Colyseus — mission handlers, one per aircraft type
-- [ ] Tactical bombing — CAS plane / Dive bomber / Tactical bomber / CAS bomber / Fighter
-      (research perk); auto-target weighting = `base_priority × distance_falloff + noise_floor`
+- [x] Tactical bombing — CAS plane / Dive bomber / Tactical bomber / CAS bomber / Fighter
+      (research perk); auto-target weighting via `AirMissionTargetingSystem` tier-chain
+      resolvers (Branch L: per-mission priority ladders with crowd-balancing and hysteresis)
 - [x] Interception — prioritises enemy bombers; Air Superiority — prioritises enemy fighters;
       target deconfliction via greedy unique-assignment across all engaged friendlies in a
       cluster, overflow doubles on highest-value remaining target
 - [x] Escort — binds a wing to a specific friendly bomber wing; path follows the bomber
       (Branch E: combat targeting via `_findEscortTargets`; E-patch: Dubins path mirroring
       in `airDubinsPathfinder.tick()`); engagement trigger is "enemy currently attacking my
-      assigned bomber," not nearest-enemy; auto-follows bomber home on RTB/destruction
+      assigned bomber," not nearest-enemy; auto-follows bomber home on RTB/destruction.
+      Rebuilt as a per-tick tiered mission in Branch L (`air_mission_targeting.ts`) —
+      Escort now uses the same mission-targeting search infrastructure as every other
+      mission type, with escort-specific tier-chain logic for target assignment and
+      automatic orphan re-assignment when the assigned bomber is destroyed
 - [ ] Strategic bombing sub-missions fully affect their intended province systems:
       - [x] Area reduces population and infrastructure.
       - [x] Industry reduces the province `industry` scalar.
@@ -1441,17 +1453,48 @@ dedicated perf pass rather than assuming it inherits land's headroom for free.
       L (`feat/air-mission-ai`) planning; land-only patrol fallback shipped in that branch
       as a scope cut, not an oversight. Revisit once Phase 13 adds real flotilla state.
 
+### Colyseus — mission auto-targeting (Branch L)
+- [x] Province neighbor graph built from map adjacency data (`buildProvinceNeighbors`)
+- [x] Border-stance helper (`isBorderingStance`) — war/neutral stance checks against
+      province borders, evaluated from the searching wing's own nation
+- [x] Shared claims registry, crowd-balancing scoring (`CROWD_WEIGHT = 0.15`,
+      `TARGET_NOISE_FLOOR = 0.1`), and per-tick `TickCache` (memoizes border-division
+      and hostile-province scans per nation/stance)
+- [x] Per-mission tier-chain resolvers — one exported resolver per mission type
+      (Interception, Air Superiority, Tactical Bombing, Strategic Bombing sub-missions,
+      Naval sub-missions, Recon); `AirMissionTargetingSystem._resolveForMission`
+      dispatches on `wing.mission`
+- [x] Hysteresis rule — wings only abandon current target for a strictly better tier or
+      when the target becomes invalid; `_wingTier` tracks last-committed tier per mission
+      type, since tier numbers are not comparable across different missions' chains
+- [x] Manual targeting bypass — player-directed manual targets (right-click interception/
+      tactical-bombing/industry-bombing, `ASSIGN_WING_MISSION`'s `is_manual` flag) are
+      excluded from auto-search via `registerManualTarget`/`clearManualTarget`
+- [x] Land-unit patrol fallback for Interception and Air Superiority tiers; friendly
+      naval unit patrol blocked until Phase 13 flotilla state exists
+- [x] Escort rebuilt as a per-tick tiered mission within this system — uses the same
+      claims registry, crowd-balancing, and hysteresis infrastructure as every other
+      mission type, with escort-specific tier-chain logic for target assignment and
+      automatic orphan re-assignment
+- [x] Defaults ON in real games, OFF under `NODE_ENV=test` to avoid breaking existing
+      test suites that manually assign `target_id`s; `test/12l-mission-targeting-*.test.ts`
+      files opt back in for targeted testing
+- [x] `AirMissionTargetingSystem.tick()` wired into `GameRoom.gameTick()` — runs after
+      `AirWingLifecycleSystem.tick()` (so this tick's LOITER/IDLE transitions are visible)
+      and before the RTB/Dubins path ticks (so a freshly-committed TRANSIT wing gets its
+      path advanced the same tick)
+
 ### Colyseus — damage patterns
-- [ ] Dive bomber — single-cell, recon-weighted (perk: fixed priority list / multi-target)
-- [ ] Tactical bomber — row, soft-target-priority carpet bombing; starts 2–3 cells from one
+- [x] Dive bomber — single-cell, recon-weighted (perk: fixed priority list / multi-target)
+- [x] Tactical bomber — row, soft-target-priority carpet bombing; starts 2–3 cells from one
       side, perk expands to full row
-- [ ] CAS bomber — column, IL-2-style; same partial→full progression, mirrored for columns
-- [ ] Fighter strafing perk — column (not row) — deliberately distinct from Tactical
+- [x] CAS bomber — column, IL-2-style; same partial→full progression, mirrored for columns
+- [x] Fighter strafing perk — column (not row) — deliberately distinct from Tactical
       bomber's pattern
-- [ ] All land-directed patterns re-check live tactical-grid state at resolution time
-      (verify against Phase 6's existing attack-pattern implementation — they already read
-      current living units, not a cached snapshot, so this should already be compatible)
-- [ ] Naval bomber — single-target base; splash-to-flotilla-membership via research perk
+- [x] All land-directed patterns re-check live tactical-grid state at resolution time
+      (verified against Phase 6's existing attack-pattern implementation — they already read
+      current living units, not a cached snapshot)
+- [x] Naval bomber — single-target base; splash-to-flotilla-membership via research perk
       (no internal ship grid exists, so splash spreads across flotilla composition)
 
 ### Colyseus — combat resolution

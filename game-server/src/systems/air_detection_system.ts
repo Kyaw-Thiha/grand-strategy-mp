@@ -1,6 +1,5 @@
 import { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE, AirWingState } from "../rooms/schema/AirWingState.js";
-import type { AirWingLifecycleSystem } from "./air_wing_lifecycle_system.js";
 import { getObservationDeg, setPassiveObservationOverrideForTesting } from "../data/air_unit_stats.js";
 
 type BroadcastFn = (type: string, msg: unknown) => void;
@@ -72,7 +71,6 @@ export class AirDetectionSystem {
 
   tick(
     state: GameRoomState,
-    lifecycleSystem: AirWingLifecycleSystem,
     broadcast: BroadcastFn,
     broadcastToNation: BroadcastToNationFn,
   ): void {
@@ -111,29 +109,6 @@ export class AirDetectionSystem {
       }
     }
     this._prevWingDetectedByNation = newWingDetectedByNation;
-
-    // ── Interception pursuit trigger ────────────────────────────────────────
-    const INTERCEPTION_PURSUIT_RANGE_DEG = 2.0;
-    for (const wing of airborneWings) {
-      if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) continue;
-      if (wing.mission !== MISSION_TYPES.INTERCEPTION && wing.mission !== MISSION_TYPES.AIR_SUPERIORITY) continue;
-
-      let bestTarget: string | null = null;
-      let bestDist = Infinity;
-      for (const enemy of airborneWings) {
-        if (!this._areNationsHostile(wing.nation_id, enemy.nation_id, state)) continue;
-        if (!enemy.is_detected) continue;
-        const dist = euclidDeg(wing.position_lng, wing.position_lat, enemy.position_lng, enemy.position_lat);
-        if (dist < bestDist && dist <= INTERCEPTION_PURSUIT_RANGE_DEG) {
-          bestDist = dist;
-          bestTarget = enemy.wing_id;
-        }
-      }
-
-      if (bestTarget) {
-        lifecycleSystem.startInterceptionPursuit(wing.wing_id, bestTarget, state);
-      }
-    }
 
     // ── Stale air-wing detection cleanup ───────────────────────────────────
     for (const [wingId] of this._prevDetected) {
@@ -242,11 +217,5 @@ export class AirDetectionSystem {
         return true;
     }
     return false;
-  }
-
-  private _areNationsHostile(nationA: string, nationB: string, state: GameRoomState): boolean {
-    if (nationA === nationB) return false;
-    const rel = state.relations.get(`${nationA}|${nationB}`) ?? state.relations.get(`${nationB}|${nationA}`);
-    return (rel?.stance ?? "neutral") === "war";
   }
 }
