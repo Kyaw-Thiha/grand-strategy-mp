@@ -8,9 +8,8 @@ import type { DubinsPathfinder } from "./air_dubins_pathfinder.js";
 // Same fuel-derived max-range formula as GameRoom._findNearestFriendlyAirbaseToPoint —
 // duplicated here (not imported as a function) because that helper lives on GameRoom and
 // depends on room-instance state; only the underlying constants are shared.
-const WING_SPEED_DEG_PER_MS = 0.0002;
-function maxRangeDeg(): number {
-  return (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * WING_SPEED_DEG_PER_MS * 1000;
+function maxRangeDeg(aircraftType: string): number {
+  return (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * getAirUnitStats(aircraftType).speed_deg_per_ms * 1000;
 }
 
 export function buildProvinceNeighbors(
@@ -177,19 +176,73 @@ export function friendlyDivisionsNearBorder(
   resolvePosition: (id: string) => { lng: number; lat: number } | null,
 ): DivisionState[] {
   const borderProvincePositions: Array<{ lng: number; lat: number }> = [];
-  for (const [provinceId] of state.provinces) {
-    if (!isBorderingStance(provinceId, viewerNationId, stance, state, provinceNeighbors)) continue;
+  // Provinces owned by a stance-X nation — used below to also admit a division that's
+  // physically inside stance-X territory (spawned or advanced there), independent of its
+  // straight-line distance to the front line. A division several provinces deep in enemy
+  // land is unambiguously "in enemy territory" even when it's well beyond
+  // BORDER_PROXIMITY_DEG from the nearest province that actually touches the border.
+  const stanceOwnedPositions: Array<{ lng: number; lat: number }> = [];
+  const friendlyOwnedPositions: Array<{ lng: number; lat: number }> = [];
+  for (const [provinceId, province] of state.provinces) {
+    if (isBorderingStance(provinceId, viewerNationId, stance, state, provinceNeighbors)) {
+      const pos = resolvePosition(provinceId);
+      if (pos) borderProvincePositions.push(pos);
+    }
+    if (!province.owner_id) continue;
+    const relation = getRelationStance(viewerNationId, province.owner_id, state);
     const pos = resolvePosition(provinceId);
-    if (pos) borderProvincePositions.push(pos);
+    if (!pos) continue;
+    if (relation === stance) stanceOwnedPositions.push(pos);
+    else if (relation === "alliance") friendlyOwnedPositions.push(pos);
   }
-  if (borderProvincePositions.length === 0) return [];
+  if (borderProvincePositions.length === 0 && stanceOwnedPositions.length === 0) return [];
+
+  const nearestDist = (lng: number, lat: number, positions: Array<{ lng: number; lat: number }>): number => {
+    let best = Infinity;
+    for (const p of positions) {
+      const d = euclidDeg(lng, lat, p.lng, p.lat);
+      if (d < best) best = d;
+    }
+    return best;
+  };
 
   const result: DivisionState[] = [];
   for (const division of state.divisions.values()) {
     if (!isFriendly(viewerNationId, division.nation_id, state)) continue;
-    const nearAny = borderProvincePositions.some(p =>
+    const nearBorder = borderProvincePositions.some(p =>
       euclidDeg(division.position_lng, division.position_lat, p.lng, p.lat) <= BORDER_PROXIMITY_DEG);
-    if (nearAny) result.push(division);
+    // "Inside stance-X territory": nearer to a stance-X-owned province marker than to any
+    // friendly-owned one. Own nation's provinces are excluded from friendlyOwnedPositions'
+    // relation check (only "alliance" is friendly here — see isFriendly), so viewerNationId's
+    // own provinces would otherwise be missing; that's fine, since a division near its own
+    // territory is already covered by nearBorder or simply isn't a useful recon target.
+    const insideStanceTerritory = stanceOwnedPositions.length > 0 &&
+      nearestDist(division.position_lng, division.position_lat, stanceOwnedPositions) <
+      nearestDist(division.position_lng, division.position_lat, friendlyOwnedPositions);
+    if (nearBorder || insideStanceTerritory) result.push(division);
+  }
+  return result;
+}
+
+/**
+ * Friendly-owned provinces that themselves directly border a stance-X neighbor — the
+ * "no unit needed" bare border-patrol candidate, distinct from friendlyDivisionsNearBorder's
+ * division-based candidates. Reuses isBorderingStance, the same real province-adjacency
+ * primitive already used for the division-based border tiers.
+ */
+export function friendlyProvincesBorderingStance(
+  viewerNationId: string,
+  stance: "war" | "neutral",
+  state: GameRoomState,
+  provinceNeighbors: Map<string, string[]>,
+  resolvePosition: (id: string) => { lng: number; lat: number } | null,
+): Array<{ id: string; lng: number; lat: number }> {
+  const result: Array<{ id: string; lng: number; lat: number }> = [];
+  for (const [provinceId, province] of state.provinces) {
+    if (!province.owner_id || !isFriendly(viewerNationId, province.owner_id, state)) continue;
+    if (!isBorderingStance(provinceId, viewerNationId, stance, state, provinceNeighbors)) continue;
+    const pos = resolvePosition(provinceId);
+    if (pos) result.push({ id: provinceId, lng: pos.lng, lat: pos.lat });
   }
   return result;
 }
@@ -197,7 +250,13 @@ export function friendlyDivisionsNearBorder(
 export const BOMBER_TYPES = new Set(["strategic_bomber", "tactical_bomber"]);
 export const LOW_ALT_BOMBER_TYPES = new Set(["cas_plane", "dive_bomber"]);
 export const FIGHTER_TYPES = new Set(["fighter", "heavy_fighter"]);
-export const BORDER_PROXIMITY_DEG = 1.5; // placeholder, see friendlyDivisionsNearBorder note
+// Tuned against the western_europe_6 map: median distance between adjacent provinces' city
+// markers is ~2.8deg (mean ~3.0deg, max ~8.4deg) — a value much below that would exclude the
+// large majority of real division-to-border-province distances, silently demoting almost
+// every case to the distance-independent tier below. Still an approximation tied to this
+// map's specific geography (see friendlyDivisionsNearBorder note); may need adjustment for
+// maps with a different scale.
+export const BORDER_PROXIMITY_DEG = 4.0;
 
 export interface TierResult { tier: number; targetId: string; }
 
@@ -213,10 +272,31 @@ export interface TickCache {
   borderDivs: Map<string, DivisionState[]>; // key: `${nationId}|${stance}`
   ownProvinces: Map<string, Array<{ id: string; lng: number; lat: number }>>; // key: nationId
   hostileProvinces: Map<string, Array<{ id: string; lng: number; lat: number }>>; // key: nationId
+  warBorderProvinces: Map<string, Array<{ id: string; lng: number; lat: number }>>; // key: nationId
 }
 
 export function createTickCache(): TickCache {
-  return { borderDivs: new Map(), ownProvinces: new Map(), hostileProvinces: new Map() };
+  return {
+    borderDivs: new Map(), ownProvinces: new Map(), hostileProvinces: new Map(),
+    warBorderProvinces: new Map(),
+  };
+}
+
+function getCachedWarBorderProvinces(
+  cache: TickCache | undefined,
+  nationId: string,
+  state: GameRoomState,
+  provinceNeighbors: Map<string, string[]>,
+  resolvePosition: (id: string) => { lng: number; lat: number } | null,
+): Array<{ id: string; lng: number; lat: number }> {
+  const compute = () => friendlyProvincesBorderingStance(nationId, "war", state, provinceNeighbors, resolvePosition);
+  if (!cache) return compute();
+  let cached = cache.warBorderProvinces.get(nationId);
+  if (!cached) {
+    cached = compute();
+    cache.warBorderProvinces.set(nationId, cached);
+  }
+  return cached;
 }
 
 function getCachedBorderDivs(
@@ -291,7 +371,12 @@ export function resolvePatrolFallback(
   const homePos = resolvePosition(wing.home_airbase_province_id);
   const ownProvinces = getCachedOwnProvinces(cache, nationId, state, resolvePosition);
   if (ownProvinces.length > 0 && homePos) {
-    const best = pickBest(ownProvinces, homePos.lng, homePos.lat, claims);
+    // Exclude the wing's own home base — it always scores distance 0 from itself and would
+    // otherwise win every time, making the wing "patrol" a point it's already sitting on.
+    // Filtered per-call (not baked into the cached ownProvinces list), since that cache is
+    // shared across every wing of this nation and other wings may have a different home base.
+    const candidates = ownProvinces.filter(p => p.id !== wing.home_airbase_province_id);
+    const best = pickBest(candidates, homePos.lng, homePos.lat, claims);
     if (best) return { tier: startTier + 2, targetId: best.id };
   }
 
@@ -406,7 +491,7 @@ export function resolveTacticalBombingTargets(
   const warBorderDivs = getCachedBorderDivs(cache, nationId, "war", state, provinceNeighbors, resolvePosition);
   const inRangeDivs = homePos
     ? warBorderDivs.filter(d =>
-        euclidDeg(homePos.lng, homePos.lat, d.position_lng, d.position_lat) <= maxRangeDeg())
+        euclidDeg(homePos.lng, homePos.lat, d.position_lng, d.position_lat) <= maxRangeDeg(wing.aircraft_type))
     : warBorderDivs;
   const bestPatrol = pickBest(
     inRangeDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
@@ -507,6 +592,15 @@ export function resolveNavalTargets(
 
 export const RECON_ESCORT_BOMBER_TYPES = new Set(["strategic_bomber", "tactical_bomber"]);
 
+// A followed bomber is only a legal recon tier-1 target while it's still actively flying
+// its mission. Deliberately excludes RTB/REFUEL (a recon must drop an RTB'd bomber and
+// re-target immediately, not follow it home), IDLE, and RELOCATE. Mirrors
+// ESCORT_AIRBORNE_STATES minus RTB — Escort's own set legitimately keeps RTB, since
+// escorts should follow their bomber home; recon should not.
+const RECON_FOLLOWABLE_BOMBER_STATES = new Set([
+  WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER,
+]);
+
 /**
  * Counts live RECON-mission wings currently targeting each target_id. Used specifically for
  * Recon's "not already accompanied" gate — the shared claims registry is keyed by target_id
@@ -545,29 +639,54 @@ export function resolveReconTargets(
   for (const bomber of state.air_wings.values()) {
     if (!isFriendly(nationId, bomber.nation_id, state)) continue;
     if (!RECON_ESCORT_BOMBER_TYPES.has(bomber.aircraft_type)) continue;
+    if (!RECON_FOLLOWABLE_BOMBER_STATES.has(bomber.lifecycle_state as WING_LIFECYCLE)) continue;
     if ((reconCounts.get(bomber.wing_id) ?? 0) > 0) continue; // already has a recon escort
     candidateBombers.push({ id: bomber.wing_id, lng: bomber.position_lng, lat: bomber.position_lat });
   }
   const bestBomber = pickBest(candidateBombers, wing.position_lng, wing.position_lat, claims);
   if (bestBomber) return { tier: 1, targetId: bestBomber.id };
 
-  // Tiers 2-4: patrol ahead of a friendly land unit in/near enemy territory, then general
-  // war-border patrol, then neutral-border patrol. Reuses the same friendlyDivisionsNearBorder
-  // + resolvePatrolFallback machinery as Interception/Air Superiority.
-  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 2, cache);
+  // Tier 2: patrol ahead of a friendly land division near a war-stance border.
+  const warBorderDivs = getCachedBorderDivs(cache, nationId, "war", state, provinceNeighbors, resolvePosition);
+  const bestDiv = pickBest(
+    warBorderDivs.map(d => ({ id: d.division_id, lng: d.position_lng, lat: d.position_lat })),
+    wing.position_lng, wing.position_lat, claims);
+  if (bestDiv) return { tier: 2, targetId: bestDiv.id };
+
+  // Tier 3: bare war-stance border patrol, vision-only — no friendly division needed.
+  const warBorderProvs = getCachedWarBorderProvinces(cache, nationId, state, provinceNeighbors, resolvePosition);
+  const bestBorderPoint = pickBest(warBorderProvs, wing.position_lng, wing.position_lat, claims);
+  if (bestBorderPoint) return { tier: 3, targetId: bestBorderPoint.id };
+
+  // Tiers 4-5: neutral-border patrol, then own cities. resolvePatrolFallback's own war-border
+  // check is guaranteed empty here (we already proved warBorderDivs was empty above, or we'd
+  // have returned at tier 2) — startTier=3 makes its neutral-border result land at tier 4 and
+  // its own-city result land at tier 5, matching AIR_COMBAT.md's numbering without touching
+  // the shared function (also used by Interception/Air Superiority/Escort with their own
+  // startTier values).
+  return resolvePatrolFallback(wing, state, provinceNeighbors, claims, resolvePosition, /* startTier */ 3, cache);
 }
 
 // ── Escort tier chain ───────────────────────────────────────────────────────────
 //
-// Unlike every other mission, Escort's "target" is a FRIENDLY bomber wing, not an enemy —
-// and its movement is not a Dubins transit at all: air_dubins_pathfinder.ts already
-// continuously syncs an escort's path_gen_id/path_elapsed_ms to its assigned bomber's own,
-// every tick, whatever that bomber is doing. This tier chain therefore only ever needs to
-// pick WHICH bomber to escort; AirMissionTargetingSystem.tick() special-cases Escort's
-// commit step to skip path computation entirely (see below).
+// Unlike every other mission, Escort's "target" is a FRIENDLY bomber wing, not an enemy.
+// This tier chain only ever needs to pick WHICH bomber to escort; air_dubins_pathfinder.ts
+// computes the actual formation-flying path every tick from whatever that bomber is
+// currently doing. AirMissionTargetingSystem.tick() special-cases Escort's commit step to
+// skip path computation entirely (see below).
 
+// Legal ongoing Escort target states — excludes RTB (an escort must drop an RTB'd bomber
+// and re-target, not treat it as an ongoing eligible target — see _targetStillValid) but
+// keeps IDLE/REFUEL, unlike Recon's RECON_FOLLOWABLE_BOMBER_STATES: Escort's own tier 3/4
+// legitimately targets grounded bombers. Shared by pickEscortBomber's airborne-tier
+// eligibility check (via ESCORT_AIRBORNE_STATES below) and _targetStillValid's Escort
+// branch, so the two can never drift out of sync.
+const ESCORT_TARGET_VALID_STATES = new Set([
+  WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER,
+  WING_LIFECYCLE.IDLE, WING_LIFECYCLE.REFUEL,
+]);
 const ESCORT_AIRBORNE_STATES = new Set([
-  WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER, WING_LIFECYCLE.RTB,
+  WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER,
 ]);
 const HEAVY_FIGHTER_ESCORT_PRIMARY  = new Set(["strategic_bomber", "tactical_bomber"]);
 const HEAVY_FIGHTER_ESCORT_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
@@ -758,10 +877,26 @@ export class AirMissionTargetingSystem {
         this._manuallyTargetedWings.delete(wing.wing_id);
       }
 
+      // Distinguishes "had a bomber, it just went RTB" from "never had a bomber" (a
+      // freshly-spawned escort with no target still falls through to patrol tiers 5-7
+      // below, unaffected) — only the former skips patrol duty and RTBs to the bomber's
+      // own base once no replacement bomber is found.
+      const oldTargetWing = isEscort && wing.target_id !== "" ? state.air_wings.get(wing.target_id) : undefined;
+      const droppedForRtb = isEscort && !currentTargetStillValid
+        && oldTargetWing !== undefined && oldTargetWing.lifecycle_state === WING_LIFECYCLE.RTB;
+
       let result: TierResult | null;
       if (isEscort) {
         result = resolveEscortTargets(
           wing, state, escortCounts, provinceNeighbors, claims, resolvePosition, cache);
+        if (droppedForRtb && (!result || result.tier >= 5)) {
+          // No bomber tier (1-4) matched (either a patrol tier, or nothing at all) — skip
+          // patrol duty, RTB to the FORMER bomber's base instead.
+          wing.escort_rtb_fallback_province_id = oldTargetWing!.home_airbase_province_id;
+          result = null;
+        } else if (result && result.tier <= 4) {
+          wing.escort_rtb_fallback_province_id = ""; // found a replacement — clear any stale stash
+        }
       } else {
         // C2: exclude the wing's own claim on its own current target from the crowd count
         // while resolving FOR this wing — otherwise every wing re-evaluating its own
@@ -778,6 +913,16 @@ export class AirMissionTargetingSystem {
       }
 
       if (!result) {
+        if (droppedForRtb && wing.escort_rtb_fallback_province_id !== "") {
+          // Bomber went RTB, no replacement bomber or patrol duty available — RTB straight
+          // to the former bomber's base rather than sitting with a dead target.
+          wing.target_id = "";
+          wing.escort_intercept_id = "";
+          this._wingTier.delete(wing.wing_id);
+          wing.lifecycle_state = WING_LIFECYCLE.RTB;
+          changed.push(wing.wing_id);
+          continue;
+        }
         // I5: invalidated target with no replacement found — clear it rather than leaving
         // the wing flying at/toward a dead target forever. The lifecycle system's existing
         // LOITER/RTB machinery takes over from here.
@@ -793,12 +938,30 @@ export class AirMissionTargetingSystem {
         ? wingTierEntry.tier
         : Infinity; // I4: no comparable prior commitment — either none, or a different mission's chain
 
+      // Escort committing to a live bomber never gets a path built here at all (see the
+      // isEscort branch below) — its "path" is the ahead/loiter formation logic mirroring
+      // the bomber every tick, not a stored commit-time path — so hasPath is meaningless
+      // for that case and must not force a spurious re-commit every tick.
+      const targetIsLiveBomberForEscort = isEscort && state.air_wings.has(result.targetId);
+      // Real bug: a wing can reach this point with the same target/tier as before but no
+      // live path — e.g. air_wing_lifecycle_system.ts's post-refuel pending-mission
+      // reassignment calls assignMission() directly (not through GameRoom.ts's
+      // ASSIGN_WING_MISSION handler, the only call site that actually builds a path), and
+      // RTB->REFUEL already cleared any previous path. If target/tier are unchanged, the
+      // "already on it" no-op used to skip committing forever, leaving the wing stuck in
+      // TRANSIT with nothing to fly (patrol-fallback targets are a division/city/marker id,
+      // not a wing id, so the pathfinder's own generic re-path loop can't resolve a position
+      // for it and recover on its own either) — this is the deterministic cause of a
+      // recon/patrol wing "staying at its airbase" after a refuel cycle even though a
+      // legitimate far-away patrol target was already resolved.
+      const pathMissing = !targetIsLiveBomberForEscort && !pathfinder.hasPath(wing.wing_id);
       // M11: the prior third disjunct here (`result.tier === previousTier && result.targetId
       // === wing.target_id`) could only ever be followed immediately by the no-op guard
       // below, so it never actually caused a commit — removed for readability.
-      const shouldCommit = !currentTargetStillValid || result.tier < previousTier;
+      const shouldCommit = !currentTargetStillValid || result.tier < previousTier || pathMissing;
       if (!shouldCommit) continue;
-      if (result.targetId === wing.target_id && result.tier === previousTier) continue; // already on it, no-op
+      if (result.targetId === wing.target_id && result.tier === previousTier
+          && !pathMissing) continue; // already on it, no-op
 
       if (isEscort && state.air_wings.has(result.targetId)) {
         // Committing to a bomber: Escort does not compute a Dubins path at all —
@@ -810,8 +973,22 @@ export class AirMissionTargetingSystem {
         // to the normal Dubins path computation below instead, same as every other mission.
         const previousTargetId = wing.target_id;
         wing.target_id = result.targetId;
+        wing.escort_intercept_id = ""; // fresh bomber assignment — never carry a stale break-off target
         this._wingTier.set(wing.wing_id, { tier: result.tier, mission: wing.mission });
         escortCounts.set(result.targetId, (escortCounts.get(result.targetId) ?? 0) + 1);
+        if (previousTargetId !== result.targetId) {
+          // Rendezvous: set the bomber-side reciprocal reference and hold it back at reduced
+          // speed (air_dubins_pathfinder.ts's per-wing advancement loop) until this escort
+          // has caught up and established its ahead formation (air_wing_lifecycle_system.ts
+          // clears both fields once that happens, or on timeout/reassignment/loss). Only a
+          // genuinely NEW bomber commit triggers this, not every re-evaluation of the same
+          // still-valid target.
+          const bomberWing = state.air_wings.get(result.targetId);
+          if (bomberWing) {
+            bomberWing.escorted_by_wing_id = wing.wing_id;
+            bomberWing.awaiting_escort_rendezvous = true;
+          }
+        }
         if (previousTargetId !== "" && previousTargetId !== result.targetId) {
           if (escortCounts.has(previousTargetId)) {
             const vacated = (escortCounts.get(previousTargetId) ?? 1) - 1;
@@ -880,6 +1057,7 @@ export class AirMissionTargetingSystem {
         startHeading,
         targetPos,
         getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
+        getAirUnitStats(wing.aircraft_type).speed_deg_per_ms,
       );
       pathfinder.storePath(wing.wing_id, path);
       wing.path_gen_id = path.path_gen_id;
@@ -903,7 +1081,14 @@ export class AirMissionTargetingSystem {
       // ENEMY nation currently sees it, which has nothing to do with whether the
       // escort/recon assignment is still meaningful.
       const pursuingEnemyWing = mission === MISSION_TYPES.INTERCEPTION || mission === MISSION_TYPES.AIR_SUPERIORITY;
-      return pursuingEnemyWing ? asWing.is_detected : true;
+      if (pursuingEnemyWing) return asWing.is_detected;
+      if (mission === MISSION_TYPES.RECON) {
+        return RECON_FOLLOWABLE_BOMBER_STATES.has(asWing.lifecycle_state as WING_LIFECYCLE);
+      }
+      if (mission === MISSION_TYPES.ESCORT) {
+        return ESCORT_TARGET_VALID_STATES.has(asWing.lifecycle_state as WING_LIFECYCLE);
+      }
+      return true;
     }
     if (state.divisions.has(targetId)) return true;   // division/patrol target — always valid while it exists
     if (state.provinces.has(targetId)) return true;   // province target — always valid while it exists

@@ -215,6 +215,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         updated.heading_deg,
         targetPos,
         getAirUnitStats(updated.aircraft_type).min_turn_radius_deg,
+        getAirUnitStats(updated.aircraft_type).speed_deg_per_ms,
       );
       this.airDubinsPathfinder.clearPath(updated.wing_id);
       this.airDubinsPathfinder.storePath(updated.wing_id, path);
@@ -287,6 +288,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
             startHeading,
             targetPos,
             getAirUnitStats(updated.aircraft_type).min_turn_radius_deg,
+            getAirUnitStats(updated.aircraft_type).speed_deg_per_ms,
           );
           this.airDubinsPathfinder.clearPath(updated.wing_id);
           this.airDubinsPathfinder.storePath(updated.wing_id, path);
@@ -319,9 +321,9 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
                       || wing.lifecycle_state === WING_LIFECYCLE.RELOCATE;
 
       if (isAirborne && homePos) {
-        const WING_SPEED_DEG_PER_MS = 0.0002;
-        const currentRange = (wing.fuel - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * WING_SPEED_DEG_PER_MS * 1000;
-        const MAX_RANGE_DEG = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * WING_SPEED_DEG_PER_MS * 1000;
+        const wingSpeedDegPerMs = getAirUnitStats(wing.aircraft_type).speed_deg_per_ms;
+        const currentRange = (wing.fuel - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * wingSpeedDegPerMs * 1000;
+        const MAX_RANGE_DEG = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * wingSpeedDegPerMs * 1000;
         const distFromWing = Math.sqrt(
           (msg.target_lng - wing.position_lng) ** 2 +
           (msg.target_lat - wing.position_lat) ** 2
@@ -396,6 +398,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         startHeading,
         endPos,
         getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
+        getAirUnitStats(wing.aircraft_type).speed_deg_per_ms,
       );
       this.airDubinsPathfinder.clearPath(wing.wing_id);
       this.airDubinsPathfinder.storePath(wing.wing_id, path);
@@ -1379,6 +1382,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           { lng: spawn.lng, lat: spawn.lat },
           spawn.heading_deg ?? 0,
           this.airDubinsPathfinder.defaultTurnRadius(),
+          getAirUnitStats(spawn.aircraft_type).speed_deg_per_ms,
         );
         this.airDubinsPathfinder.storePath(wing.wing_id, loiterPath);
         wing.path_gen_id = loiterPath.path_gen_id;
@@ -1418,9 +1422,15 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         this.airDubinsPathfinder.clearPath(wing.wing_id);
       }
 
-      const airbasePos = this._resolveTargetPosition(wing.home_airbase_province_id);
+      // Escort-only: RTB to the FORMER bomber's airbase instead of the escort's own, when
+      // no replacement bomber/patrol duty was found (see air_mission_targeting.ts).
+      const rtbDestinationId = wing.escort_rtb_fallback_province_id !== ""
+        ? wing.escort_rtb_fallback_province_id
+        : wing.home_airbase_province_id;
+      const airbasePos = this._resolveTargetPosition(rtbDestinationId);
       if (!airbasePos) continue;
-      const rtbPath = this.airDubinsPathfinder.computeRtbPath(startPos, startHeading, airbasePos, 0, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
+      if (wing.escort_rtb_fallback_province_id !== "") wing.escort_rtb_fallback_province_id = ""; // consumed
+      const rtbPath = this.airDubinsPathfinder.computeRtbPath(startPos, startHeading, airbasePos, 0, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg, getAirUnitStats(wing.aircraft_type).speed_deg_per_ms);
       this.airDubinsPathfinder.storePath(wing.wing_id, rtbPath);
       wing.path_gen_id = rtbPath.path_gen_id;
       wing.path_elapsed_ms = 0;
@@ -1570,6 +1580,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           startHeading,
           targetPos,
           getAirUnitStats(wing.aircraft_type).min_turn_radius_deg,
+          getAirUnitStats(wing.aircraft_type).speed_deg_per_ms,
         );
         this.airDubinsPathfinder.storePath(wing.wing_id, path);
         wing.path_gen_id = path.path_gen_id;
@@ -1593,7 +1604,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
             endPos.lng - startPos.lng,
             endPos.lat - startPos.lat,
           ) * 180 / Math.PI + 360) % 360;
-          const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
+          const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg, getAirUnitStats(wing.aircraft_type).speed_deg_per_ms);
           this.airDubinsPathfinder.storePath(wing.wing_id, path);
           wing.path_gen_id = path.path_gen_id;
           wing.path_elapsed_ms = 0;
@@ -1613,7 +1624,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           endPos.lng - startPos.lng,
           endPos.lat - startPos.lat,
         ) * 180 / Math.PI + 360) % 360;
-        const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg);
+        const path = this.airDubinsPathfinder.computeTransitPath(startPos, startHeading, endPos, getAirUnitStats(wing.aircraft_type).min_turn_radius_deg, getAirUnitStats(wing.aircraft_type).speed_deg_per_ms);
         this.airDubinsPathfinder.storePath(wing.wing_id, path);
         wing.path_gen_id = path.path_gen_id;
         wing.path_elapsed_ms = 0;
@@ -2299,7 +2310,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     targetLng: number,
     targetLat: number,
   ): string | null {
-    const maxRange = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * 0.0002 * 1000;
+    const maxRange = (1.0 - FUEL_RTB_THRESHOLD) / FUEL_DECAY_TRANSIT * getAirUnitStats(wing.aircraft_type).speed_deg_per_ms * 1000;
     let bestId: string | null = null;
     let bestDist = Infinity;
     for (const [pid, province] of this.state.provinces) {

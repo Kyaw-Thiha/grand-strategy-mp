@@ -21,12 +21,17 @@ let ENGAGEMENT_AUTO_RESOLVE_TICKS  = 2;
 let MAX_LOITER_TICKS               = 15;
 let RTB_DURATION_TICKS             = 5;
 let REFUEL_DURATION_TICKS          = 5;
+// Safety valve for a bomber holding back for its escort (see AirWingState's
+// awaiting_escort_rendezvous doc comment) — if the escort never arrives (destroyed mid-
+// rendezvous, some untested edge case), don't leave the bomber slowed forever.
+let RENDEZVOUS_TIMEOUT_TICKS       = 30;
 
 export function setWeaponCooldownTicksForTesting(n: number): void { WEAPON_COOLDOWN_TICKS = n; }
 export function setEngagementAutoResolveTicksForTesting(n: number): void { ENGAGEMENT_AUTO_RESOLVE_TICKS = n; }
 export function setMaxLoiterTicksForTesting(n: number): void { MAX_LOITER_TICKS = n; }
 export function setRtbDurationTicksForTesting(n: number): void { RTB_DURATION_TICKS = n; }
 export function setRefuelDurationTicksForTesting(n: number): void { REFUEL_DURATION_TICKS = n; }
+export function setRendezvousTimeoutTicksForTesting(n: number): void { RENDEZVOUS_TIMEOUT_TICKS = n; }
 export function setReadinessDecayForTesting(rate: number): void { READINESS_DECAY_PER_TICK = rate; }
 export function setReadinessRecoveryForTesting(rate: number): void { READINESS_RECOVERY_RATE = rate; }
 export function setFuelDecayForTesting(rate: number): void { FUEL_DECAY_TRANSIT = rate; }
@@ -80,8 +85,13 @@ export class AirWingLifecycleSystem {
   private _lastEngagedTarget: Map<string, string> = new Map();
   private _pendingRedeployTarget: Map<string, string> = new Map();
   private _pendingMissionAfterRedeploy: Map<string, { mission: string; target_id: string }> = new Map();
+  // A mission assignment requested while the wing was ENGAGED (mid-dogfight) — assignMission()
+  // refuses to change mission/target_id during ENGAGED, so the request is stashed here instead
+  // of silently dropped, and applied by resolveEngagement() once the fight actually ends.
+  private _pendingMissionAfterEngagement: Map<string, { mission: string; target_id: string }> = new Map();
   private _pendingTransitAfterRedeploy: Map<string, { lng: number; lat: number }> = new Map();
   private _statusFuel: Map<string, number> = new Map();
+  private _rendezvousTicks:  Map<string, number> = new Map();
 
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
@@ -100,6 +110,25 @@ export class AirWingLifecycleSystem {
       // Clear ground-attack loiter counter for non-LOITER wings
       if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
         _groundAttackLoiterCount.delete(wingId);
+      }
+
+      // Rendezvous: a bomber holding back for its escort (air_mission_targeting.ts's
+      // escort-commit branch sets both fields) resumes normal speed once the escort has
+      // caught up and formed up ahead (reached LOITER — the existing ahead-formation "I've
+      // arrived" signal), been reassigned elsewhere, been lost, or a timeout elapses.
+      // Checked unconditionally here (not nested in the lifecycle_state switch below) since
+      // it applies regardless of the bomber's own state, which is usually just TRANSIT.
+      if (wing.awaiting_escort_rendezvous) {
+        const escort = state.air_wings.get(wing.escorted_by_wing_id);
+        const ticks = (this._rendezvousTicks.get(wingId) ?? 0) + 1;
+        this._rendezvousTicks.set(wingId, ticks);
+        const escortArrived = !!escort && escort.lifecycle_state === WING_LIFECYCLE.LOITER;
+        const escortGone = !escort || escort.target_id !== wingId;
+        if (escortArrived || escortGone || ticks >= RENDEZVOUS_TIMEOUT_TICKS) {
+          wing.awaiting_escort_rendezvous = false;
+          this._rendezvousTicks.delete(wingId);
+          didChange = true;
+        }
       }
 
       // 1. Fuel + Readiness: decay while airborne, recover while IDLE/REFUEL
@@ -249,7 +278,13 @@ export class AirWingLifecycleSystem {
   assignMission(wingId: string, mission: string, targetId: string, state: GameRoomState): boolean {
     const wing = state.air_wings.get(wingId);
     if (!wing) return false;
-    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED && mission !== MISSION_TYPES.IDLE) return false;
+    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED && mission !== MISSION_TYPES.IDLE) {
+      // Don't drop the order on the floor — remember it and apply it once the dogfight
+      // resolves (resolveEngagement), instead of leaving the wing silently stuck on its
+      // previous mission.
+      this._pendingMissionAfterEngagement.set(wingId, { mission, target_id: targetId });
+      return false;
+    }
 
     wing.mission    = mission;
     wing.target_id  = targetId;
@@ -315,6 +350,7 @@ export class AirWingLifecycleSystem {
       wing.target_id = "";
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
+      this._applyPendingMissionAfterEngagement(wingId, state);
       return;
     }
 
@@ -328,6 +364,17 @@ export class AirWingLifecycleSystem {
       wing.target_id = "";
       this._loiterTicks.set(wingId, 0);
     }
+    this._applyPendingMissionAfterEngagement(wingId, state);
+  }
+
+  // Applies a mission requested mid-dogfight (assignMission's ENGAGED guard) now that the
+  // wing's lifecycle_state has just moved off ENGAGED — assignMission's own guard no longer
+  // blocks it.
+  private _applyPendingMissionAfterEngagement(wingId: string, state: GameRoomState): void {
+    const pending = this._pendingMissionAfterEngagement.get(wingId);
+    if (!pending) return;
+    this._pendingMissionAfterEngagement.delete(wingId);
+    this.assignMission(wingId, pending.mission, pending.target_id, state);
   }
 
   disbandWing(wingId: string, state: GameRoomState, broadcast: BroadcastFn, messageType = "AIR_WING_DESTROYED"): void {
@@ -345,7 +392,9 @@ export class AirWingLifecycleSystem {
     this._pendingRedeployTarget.delete(wingId);
     this._pendingMissionAfterRedeploy.delete(wingId);
     this._pendingTransitAfterRedeploy.delete(wingId);
+    this._pendingMissionAfterEngagement.delete(wingId);
     this._statusFuel.delete(wingId);
+    this._rendezvousTicks.delete(wingId);
 
     // Orphaned escorts (wings targeting wingId) are NOT reassigned here — deleting the
     // targeted wing from state.air_wings above already makes AirMissionTargetingSystem's

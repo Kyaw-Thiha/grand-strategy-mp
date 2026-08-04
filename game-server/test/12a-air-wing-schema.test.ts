@@ -215,4 +215,39 @@ describe("lane:air-combat | 12a — Air Wing Schema", function () {
     assert.strictEqual(room.state.air_wings.get("wing-a")?.aircraft_type, AIR_UNIT_TYPES.FIGHTER);
     assert.strictEqual(room.state.air_wings.get("wing-b")?.aircraft_type, AIR_UNIT_TYPES.STRATEGIC_BOMBER);
   });
+
+  // ── Per-type base speed ──────────────────────────────────────────────────
+
+  describe("getWingSpeedDegPerMs (per-aircraft-type base speed)", () => {
+    it("every aircraft type plus the default fallback has a defined speed", async () => {
+      const { getWingSpeedDegPerMs } = await import("../src/data/air_unit_stats.js");
+      for (const type of Object.values(AIR_UNIT_TYPES)) {
+        const speed = getWingSpeedDegPerMs(type);
+        assert.ok(typeof speed === "number" && speed > 0, `${type} must have a positive speed_deg_per_ms`);
+      }
+      const fallback = getWingSpeedDegPerMs("__unknown_type__");
+      assert.ok(typeof fallback === "number" && fallback > 0, "unknown types must fall back to DEFAULT_STATS");
+    });
+
+    it("fighter is faster than the default/baseline speed", async () => {
+      const { getWingSpeedDegPerMs } = await import("../src/data/air_unit_stats.js");
+      assert.ok(getWingSpeedDegPerMs(AIR_UNIT_TYPES.FIGHTER) > getWingSpeedDegPerMs("__unknown_type__"));
+    });
+
+    it("strategic_bomber is slower than the default/baseline speed", async () => {
+      const { getWingSpeedDegPerMs } = await import("../src/data/air_unit_stats.js");
+      assert.ok(getWingSpeedDegPerMs(AIR_UNIT_TYPES.STRATEGIC_BOMBER) < getWingSpeedDegPerMs("__unknown_type__"));
+    });
+
+    it("fighter is faster than every bomber type", async () => {
+      const { getWingSpeedDegPerMs } = await import("../src/data/air_unit_stats.js");
+      const fighterSpeed = getWingSpeedDegPerMs(AIR_UNIT_TYPES.FIGHTER);
+      for (const type of [
+        AIR_UNIT_TYPES.CAS_PLANE, AIR_UNIT_TYPES.DIVE_BOMBER, AIR_UNIT_TYPES.TACTICAL_BOMBER,
+        AIR_UNIT_TYPES.STRATEGIC_BOMBER, AIR_UNIT_TYPES.NAVAL_BOMBER,
+      ]) {
+        assert.ok(fighterSpeed > getWingSpeedDegPerMs(type), `fighter must be faster than ${type}`);
+      }
+    });
+  });
 });
