@@ -316,48 +316,63 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2, hovered_province_
 	if mouse_button.button_index != MOUSE_BUTTON_LEFT:
 		return false
 
-	var best_id: String = ""
+	# Pick the CLOSEST click target across every category instead of checking wing icons
+	# first and returning immediately on any match — that priority order made air combat/
+	# strategic bombing/bombing-run banners unclickable whenever a wing icon happened to be
+	# within HIT_THRESHOLD_PX of the click, since wing icons are visually small and often sit
+	# right on top of (or very near) the banner reporting on them.
 	var best_dist: float = HIT_THRESHOLD_PX
+	var best_type: String = ""
+	var best_wing_id: String = ""
+	var best_banner = null
+
 	for wing_id in _icons:
 		var icon = _icons[wing_id]
 		if not icon.visible:
 			continue
-		var dist: float = icon.position.distance_to(world_pos)
-		if dist < best_dist:
-			best_dist = dist
-			best_id   = wing_id
+		var d: float = icon.position.distance_to(world_pos)
+		if d < best_dist:
+			best_dist = d
+			best_type = "wing"
+			best_wing_id = wing_id
 
-	if not best_id.is_empty():
-		_select(best_id)
-		return true
-
-	# Check air combat banners
 	const BANNER_HIT_R: float = 20.0
 	for banner_key in _air_combat_indicators:
 		var banner = _air_combat_indicators[banner_key]
 		if not is_instance_valid(banner):
 			continue
-		if world_pos.distance_to(banner.position) <= BANNER_HIT_R:
-			banner.on_clicked()
-			return true
+		var d: float = world_pos.distance_to(banner.position)
+		if d <= BANNER_HIT_R and d < best_dist:
+			best_dist = d
+			best_type = "banner"
+			best_banner = banner
 
-	# Check strategic bombing banners
 	for banner_key in _strategic_bombing_banners:
 		var banner = _strategic_bombing_banners[banner_key]
 		if not is_instance_valid(banner):
 			continue
-		if world_pos.distance_to(banner.position) <= BANNER_HIT_R:
-			banner.on_clicked()
-			return true
+		var d: float = world_pos.distance_to(banner.position)
+		if d <= BANNER_HIT_R and d < best_dist:
+			best_dist = d
+			best_type = "banner"
+			best_banner = banner
 
-	# Check bombing run indicators
 	for province_id in _bombing_indicators:
 		var indicator = _bombing_indicators[province_id]
 		if not is_instance_valid(indicator):
 			continue
-		if world_pos.distance_to(indicator.position) <= BANNER_HIT_R:
-			indicator.on_clicked()
-			return true
+		var d: float = world_pos.distance_to(indicator.position)
+		if d <= BANNER_HIT_R and d < best_dist:
+			best_dist = d
+			best_type = "banner"
+			best_banner = indicator
+
+	if best_type == "wing":
+		_select(best_wing_id)
+		return true
+	if best_type == "banner":
+		best_banner.on_clicked()
+		return true
 
 	if not _selected_wing_id.is_empty():
 		_deselect()
