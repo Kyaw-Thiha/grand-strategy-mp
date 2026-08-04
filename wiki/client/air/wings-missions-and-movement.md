@@ -10,7 +10,9 @@ Air wings let players follow aircraft on the map, inspect fuel and readiness, re
 
 Selecting a wing emits `EventBus.air_wing_selected`, which opens the friendly air-wing panel. That panel shows current mission, target, home airbase, fuel, readiness, weapon state, and lifecycle values from the mirror. The panel now includes an `ActionsBlock` with interactive controls: a filtered mission dropdown (per aircraft type, with perk-gated missions hidden client-side), a wing size ±10 stepper (`ADJUST_WING_SIZE`), a Retreat button (airborne-only), and a non-interactive Move hint label. An escort target row with a "Pick Target" button appears when the mission is escort, opening the escort picker popup for manual pairing.
 
-A new `IDLE` mission lets a wing be told to stay grounded. Setting Escort without an explicit target triggers the server's `autoAssignEscort()` which pairs escorts with eligible airborne bombers using round-robin load balancing. If the escorted bomber is destroyed, the orphaned escort re-runs auto-assignment to find a new bomber.
+A new `IDLE` mission lets a wing be told to stay grounded. Setting Escort without an explicit target lets the server's `AirMissionTargetingSystem` auto-commit it to an eligible airborne bomber through the same per-tick tier chain every other mission uses (see [[game-server/simulation/air-operations|Air Operations]]'s "Escort and recon formation flying" section). If the escorted bomber is destroyed or reassigned, the wing's own tier resolution re-commits to a new bomber on a later tick.
+
+Left-click hit-testing (`AirWingSystem.handle_mouse_input`) checks wing icons, the air-combat banner, the strategic-bombing banner, and bombing indicators together and dispatches to whichever candidate is geometrically closest to the click — not wing icons first with an early return. This matters when icons overlap a banner: the banner is still clickable if it's the closer target.
 
 New wings are spawned via the Military panel's Air tab "+" button, which opens a spawn modal to pick aircraft type and count (default 10, ±10 stepper). Wings spawn at the nation's capital province via `CREATE_WING`.
 
