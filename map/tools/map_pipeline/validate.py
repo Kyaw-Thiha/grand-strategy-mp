@@ -32,10 +32,20 @@ VALID_WATER_TYPES = {"sea", "ocean", "lake"}
 VALID_ROAD_LEVELS = {2, 3}
 
 # Province fields that must be integers in [0, 100]
+#
+# res_manpower/res_steel/res_fuel/res_coal are the old five-key placeholder resource
+# envelope and are no longer required — RESOURCE_ECONOMY.md's ten-resource roster
+# (money, grain, iron, oil, rubber, nitrates, tungsten, chromium, aluminium, uranium)
+# supersedes it. Only res_money/res_oil are kept required here since they're common to
+# both the old and new schema and already present in every source feature; the other
+# eight new res_* fields are intentionally NOT required yet — real per-province values
+# haven't been hand-authored into the source geojson yet (pipeline.py defaults any
+# missing res_* field to 0), and requiring them here would fail validation on every
+# existing map until that authoring work is done.
 _PROVINCE_INT_0_100 = [
     "population", "industry", "infrastructure",
     "bld_fort", "bld_port", "bld_airbase", "bld_supply_hub", "bld_factory",
-    "res_manpower", "res_steel", "res_oil", "res_fuel", "res_coal", "res_money",
+    "res_money", "res_oil",
 ]
 
 # All required province property fields
