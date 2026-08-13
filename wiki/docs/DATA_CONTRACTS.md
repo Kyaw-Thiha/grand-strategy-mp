@@ -4,11 +4,22 @@
 > Feed this to Claude Code when working on networking, persistence, or API routes.
 > See also `RETENTION_MONETIZATION.md` for the design rationale behind the lobby,
 > shop, ladder, and War Room shapes below.
-> Last updated: July 2026.
+> Last updated: August 2026.
 
 Items marked `[TBD]` have a defined envelope but values that depend on game design decisions
 not yet finalised (unit types, resource types, tech categories). The contract holds — only
 the string values inside change.
+
+**Known gap, flagged rather than silently carried forward:** `ProvinceData`/`ProvinceState`
+and `UnitData`/`UnitState` below predate the Division/template/5×5-tactical-grid system
+defined in `TACTICAL_COMBAT.md` and `STRATEGIC_COMBAT.md` — there is no `Division` entity
+here at all, `buildings` is still three flat booleans/numbers instead of the `buildings{}`
+dict `MAP_DATA_CONTRACT.md` already uses, and `resources`/`unit_type` are still `[TBD]`.
+This predates today's Unit Production System addition and is a larger, separate sync pass
+than what's added below — the additions in this update (Reserve, ProductionOrder,
+`build_points`) are new, self-contained types that don't depend on that larger gap being
+closed first, but they will eventually need to reference a real `Division` entity once one
+exists.
 
 ---
 
@@ -106,6 +117,68 @@ export interface DiplomaticProposal {
   stance:       DiplomaticStance
   expires_tick: number
 }
+
+// --- Unit Production System (see RESOURCE_ECONOMY.md, ECONOMY_BUILDINGS.md) ---
+// New in this update. National (per-player), not per-province.
+
+export interface ReserveState {
+  owner_id:       string
+  land_air_pool:  Record<UnitType, number>     // [TBD, depends on UnitType] fungible HP-equivalent per type
+  naval_ships:    NavalReserveShip[]            // discrete objects, individual HP — not fungible
+}
+
+export interface NavalReserveShip {
+  ship_id:     string
+  ship_class:  string        // [TBD]
+  current_hp:  number
+  full_hp:     number
+}
+
+// One per production building instance, keyed by province_id + building_type
+export type ProductionBuildingType = "barracks" | "tank_plant" | "ordnance_factory" | "aircraft_factory"
+
+export interface ProductionOrder {
+  province_id:    string
+  building_type:  ProductionBuildingType
+  current_order:  {
+    unit_type:              UnitType           // [TBD]
+    build_points_remaining: number
+    target_slot_id:         string             // which demand slot (division or marshalling template) this order fills
+  } | null
+}
+
+// New fields on the existing unit-type definition table — additive, not a replacement
+export interface UnitTypeProductionData {
+  unit_type:    UnitType                        // [TBD]
+  build_points: number                          // NEW — distinct from the existing resource-cost vector
+  produced_by:  ProductionBuildingType | "naval_base"
+}
+
+// --- Building construction/upgrade time cost (see ECONOMY_BUILDINGS.md's `construction_points`) ---
+// New in this update. Building-side counterpart to UnitTypeProductionData above.
+
+export type BuildingType =
+  "fort" | "port" | "airbase" | "supply_hub" | "factory" |
+  "barracks" | "tank_plant" | "ordnance_factory" | "aircraft_factory" |
+  "school" | "hospital" | "warehouse" | "shipyard" | "town_hall" |
+  "res_grain" | "res_iron" | "res_oil" | "res_rubber" | "res_nitrates" |
+  "res_tungsten" | "res_chromium" | "res_aluminium" | "res_uranium"
+
+// New field per building type + target level — mirrors build_points' shape exactly
+export interface BuildingConstructionData {
+  building_type:      BuildingType
+  target_level:       number             // 1-5
+  construction_points: number             // NEW — time cost of reaching this level from the previous one
+}
+
+// One per in-progress construction/upgrade project. Multiple can exist per province
+// simultaneously (parallel, not queued) — keyed by province_id + building_type
+export interface ConstructionProject {
+  province_id:                  string
+  building_type:                BuildingType
+  target_level:                 number
+  construction_points_remaining: number
+}
 ```
 
 ---
@@ -117,7 +190,7 @@ Uses `@colyseus/schema` decorators for automatic delta-sync to clients.
 Only changed fields are transmitted each tick.
 
 ```typescript
-import { Schema, type, MapSchema } from "@colyseus/schema"
+import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema"
 
 class PlayerState extends Schema {
   @type("string")  user_id:      string
@@ -173,6 +246,44 @@ class ProposalState extends Schema {
   @type("number") expires_tick: number
 }
 
+// --- Unit Production System (see RESOURCE_ECONOMY.md, ECONOMY_BUILDINGS.md) ---
+// New in this update. National (per-player), not per-province — keyed by owner_id,
+// not province_id, in GameRoomState below.
+
+class NavalReserveShipState extends Schema {
+  @type("string") ship_id:    string
+  @type("string") ship_class: string  // [TBD]
+  @type("number") current_hp: number
+  @type("number") full_hp:    number
+}
+
+class ReserveState extends Schema {
+  @type("string") owner_id:      string
+  // Stored as JSON string until UnitType enum is finalised [TBD] — mirrors the
+  // resources_json pattern ProvinceState already uses above for the same reason
+  @type("string") land_air_pool_json: string
+  @type([ NavalReserveShipState ]) naval_ships = new ArraySchema<NavalReserveShipState>()
+}
+
+class ProductionOrderState extends Schema {
+  @type("string") province_id:             string
+  @type("string") building_type:           string  // ProductionBuildingType enum value
+  @type("boolean") has_order:              boolean = false
+  @type("string") order_unit_type:         string  // [TBD], "" if has_order is false
+  @type("number") order_build_points_left: number
+  @type("string") order_target_slot_id:    string  // "" if has_order is false
+}
+
+// New in this update — see ECONOMY_BUILDINGS.md's `construction_points`. Multiple can
+// exist for the same province_id simultaneously (parallel construction), keyed by
+// "${province_id}:${building_type}" below, same pattern as production_orders.
+class ConstructionProjectState extends Schema {
+  @type("string") province_id:                    string
+  @type("string") building_type:                  string  // BuildingType enum value
+  @type("number") target_level:                   number
+  @type("number") construction_points_remaining:  number
+}
+
 export class GameRoomState extends Schema {
   @type("string") game_id:      string
   @type("string") map_id:       string
@@ -182,11 +293,14 @@ export class GameRoomState extends Schema {
   @type("number") tick_rate_ms: number = 500
 
   // Map keys documented below
-  @type({ map: PlayerState })   players   = new MapSchema<PlayerState>()
-  @type({ map: ProvinceState }) provinces = new MapSchema<ProvinceState>()
-  @type({ map: UnitState })     units     = new MapSchema<UnitState>()
-  @type({ map: RelationState }) relations = new MapSchema<RelationState>()
-  @type({ map: ProposalState }) proposals = new MapSchema<ProposalState>()
+  @type({ map: PlayerState })              players             = new MapSchema<PlayerState>()
+  @type({ map: ProvinceState })            provinces           = new MapSchema<ProvinceState>()
+  @type({ map: UnitState })                units               = new MapSchema<UnitState>()
+  @type({ map: RelationState })            relations           = new MapSchema<RelationState>()
+  @type({ map: ProposalState })            proposals           = new MapSchema<ProposalState>()
+  @type({ map: ReserveState })             reserves            = new MapSchema<ReserveState>()
+  @type({ map: ProductionOrderState })     production_orders   = new MapSchema<ProductionOrderState>()
+  @type({ map: ConstructionProjectState }) construction_projects = new MapSchema<ConstructionProjectState>()
 }
 ```
 
@@ -198,6 +312,9 @@ export class GameRoomState extends Schema {
 | `units` | `unit_id` |
 | `relations` | `"${from_id}:${to_id}"` |
 | `proposals` | `proposal_id` |
+| `reserves` | `owner_id` — one Reserve per player, national, not per-province |
+| `production_orders` | `"${province_id}:${building_type}"` |
+| `construction_projects` | `"${province_id}:${building_type}"` |
 
 ---
 

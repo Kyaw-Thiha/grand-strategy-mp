@@ -117,7 +117,7 @@ Recomputed whenever the template is saved — same trigger as the movement profi
 ### Pathfinding Architecture
 
 Client-side bidirectional A* over a two-level unified graph. Server validates the submitted
-path. Full implementation reference: `wiki/docs/PATHFINDING.md`.
+path. Full implementation reference: `docs/PATHFINDING.md`.
 
 **Level 1 — Road graph:** Road network from `roads.geojson`. Road edges have a fixed low
 cost (0.05/deg); road_level governs animation speed, not pathfinding cost. All division
@@ -235,6 +235,26 @@ dots) that would otherwise crowd it out, the same way Steel Division 2's real-ti
 crowds out its own otherwise-solid combined-arms mechanics for a large share of its
 playerbase. A 1–4 hour session does not have room for both a deep composition-building layer
 and a deep division-count-management layer to coexist without one undermining the other.
+
+### Marshalling — a division's state before it exists on this map at all
+
+A newly-raised division does not appear on the strategic map immediately. It exists
+first in a **Marshalling** state (off-map, no dot, no position) while its template slots
+fill from the national unit-type Reserve — full mechanics in RESOURCE_ECONOMY.md's
+Reserve and Marshalling sections. Two things about this state matter specifically at the
+strategic-map layer:
+
+- **Early deployment threshold:** a player may deploy a marshalling division once it
+  reaches ≥50% aggregate HP (a whole-division percentage against total template HP, not
+  a headcount or per-slot threshold). Only once deployed does the division get a dot and
+  become part of everything described below (engagement areas, flanking, road stacking,
+  the three-tier supply status).
+- **Deployment is the moment the fill-rate model switches.** Before deployment, the
+  division fills at a fast flat national Marshalling rate; after deployment, it switches
+  permanently to this section's road-segment flow rate for any remaining fill, even if
+  still below 100% strength. A player deploying early is trading marshalling's
+  guaranteed speed for whatever the front's actual supply infrastructure can support,
+  which may be slower — a real tradeoff, not a free action.
 
 ### Division dot and engagement areas
 
@@ -397,6 +417,17 @@ This keeps server simulation load manageable while preserving full strategic mea
 - Low-altitude logistics strike: does not depend on recon. Direct effect.
 - High-altitude logistics strike: damage proportional to recon value
 - Divisions undersupplied: take increased attrition, strength degrades over time
+
+**Upstream source — production and Reserve (RESOURCE_ECONOMY.md):** what a division
+actually draws through this flow graph is a *resource-mix vector* sourced from the
+national unit-type Reserve, not an abstract "supply points" scalar. When Reserve is
+empty for a needed unit type, this road-segment flow rate is no longer the only
+bottleneck — the effective draw becomes `min(production_rate, road_segment_flow_rate)`,
+since the delivery channel and the factory line producing what it's carrying are now in
+series, not parallel. A newly-raising division uses the same `min()` logic but against
+a flat national Marshalling rate instead of this road-segment flow rate until it
+deploys — see RESOURCE_ECONOMY.md's Reserve and Marshalling sections, and the Division
+Representation section below for the deployment-state distinction this implies.
 
 ### Supply and encirclement — three-tier status system
 
@@ -1217,6 +1248,9 @@ number — it is the difference between losing one division and losing the front
 - Three-or-more-attacker flanking: confirmed the classification uses the maximum
   pairwise angle among all attackers; exact UI treatment for showing all pairwise angles
   (or just the winning pair) in the tactical combat panel from playtesting
+- Marshalling rate constant and the ≥50% aggregate-HP early-deployment threshold are
+  confirmed qualitatively; exact `MARSHALLING_RATE` value from playtesting
+  (RESOURCE_ECONOMY.md)
 
 ---
 

@@ -551,6 +551,12 @@ Applied additively to Elite-tier multipliers. Values `POST_ELITE_SCALE=0.05`,
   accelerate experience gain for units stationed in or passing through during non-combat
   downtime. Trains up to the tier currently unlocked by research — a player who has not
   researched veteran doctrine cannot train past Seasoned even at level 3 barracks.
+  **Barracks also produces new infantry-category units** (standard/motorised infantry,
+  MG, AT infantry, sniper, commando, flamethrower, recon infantry, cavalry) — this is a
+  second, separate role from the XP-training described here. Full production mechanics
+  (production rate, Reserve, the unit-type roster) are defined in ECONOMY_BUILDINGS.md's
+  Military Production Buildings section and RESOURCE_ECONOMY.md's Reserve/Marshalling
+  section, not here.
 
 ### XP UI display
 XP tier badges and pending XP bar per cell are displayed in the tactical grid panel

@@ -1,8 +1,7 @@
 # Grand Strategy Multiplayer — Map Data Contract
 
 > Defines all map layers, data schemas, authoring workflow (QGIS), pipeline, and Godot import.
-> Authoritative map contract. Read it with [[docs/ARCHITECTURE|Architecture]] when work
-> changes map source data, generation, runtime loading, rendering, or simulation consumers.
+> Feed this file to Claude Code alongside ARCHITECTURE.md when working on any map, pipeline, or rendering system.
 > Last updated: May 2026.
 
 ---
@@ -190,7 +189,7 @@ mechanics — cell layers are rendering only.
 
 **Tactical combat terrain query:**
 When tactical combat initiates, the server samples the **defender's province** for terrain
-modifiers using the O(1) province-level fields. Combat samples terrain per-pixel at sub-province resolution at each tick, reading against the cover/elevation raster at the division's live position.
+modifiers using the O(1) province-level fields. No per-pixel sampling occurs at runtime.
 
 ```
 defender_terrain = provinces[defender_province_id].terrain_elevation
@@ -353,11 +352,15 @@ Each province contains exactly one city which is the capture point for ownership
     "infrastructure": 70,
 
     "buildings": {
-      "fort":       0,
-      "port":       0,
-      "airbase":    0,
-      "supply_hub": 1,
-      "factory":    2
+      "fort":              0,
+      "port":              0,
+      "airbase":           0,
+      "supply_hub":        1,
+      "factory":           2,
+      "barracks":          0,
+      "tank_plant":        0,
+      "ordnance_factory":  0,
+      "aircraft_factory":  0
     },
 
     "resources": {
@@ -412,7 +415,7 @@ multipliers from config to produce actual per-tick output.
 |---|---|---|
 | `population` | int 0–100 | Per-province population stock. Grows over the session (rate set by config, accelerated by Grain Farm / Infrastructure buildings — see ECONOMY_BUILDINGS.md). Manpower for unit recruitment is derived from this value, not tracked as a separate field — see RESOURCE_ECONOMY.md, Population and Manpower. Also feeds end-of-session VP weighting: effective VP contribution scales with `vp_value` × population reached, not `vp_value` alone. |
 | `industry` | int 0–100 | Multiplier layer on top of resource-extraction building output and local money production. Every extraction building produces its full base-tier output with zero industry allocated — industry is purely additive upside, fed by the national Industry Pool (see ECONOMY_BUILDINGS.md), not a precondition for baseline output. Affected by bombing. |
-| `infrastructure` | int 0–100 | Two roles: (1) economic growth multiplier for the province; (2) off-road movement speed modifier for divisions moving through or out of this province. High infra = faster local movement even off-road. Does NOT define road quality — that is the road network layer. |
+| `infrastructure` | int 0–100 | Three roles: (1) economic growth multiplier for the province; (2) off-road movement speed modifier for divisions moving through or out of this province — high infra = faster local movement even off-road, does NOT define road quality (that's the road network layer); (3) sets this province's local base rate for building construction/upgrade speed (`base_construction_rate` — see ECONOMY_BUILDINGS.md's `construction_points`), on top of the national Industry Pool construction-speed multiplier. |
 
 **Buildings**
 
@@ -431,9 +434,20 @@ introduce a second building-storage mechanism.
 |---|---|
 | `fort` | Increases defender strength and organisation recovery rate |
 | `port` | Enables naval access and coastal supply. Province must border base_water or strait |
-| `airbase` | Enables air unit operations from this province |
+| `airbase` | Enables air unit operations from this province (basing/refuel/readiness — not production; see `aircraft_factory` below) |
 | `supply_hub` | Generates supply flow outward into the road graph. Primary supply source |
 | `factory` | Feeds the national Industry Pool (see ECONOMY_BUILDINGS.md) and increases unit production speed. Does not directly multiply any single province's resource output — industry is a national pool, not a per-province effect |
+| `barracks` | Produces infantry-category units (standard/motorised infantry, MG, AT infantry, sniper, commando, flamethrower, recon infantry, cavalry) and accelerates XP gain for units stationed here. See ECONOMY_BUILDINGS.md's Military Production Buildings and TACTICAL_COMBAT.md's Experience section |
+| `tank_plant` | Produces armour-category units (light/medium/heavy tank, armoured car, mechanised infantry). See ECONOMY_BUILDINGS.md's Military Production Buildings |
+| `ordnance_factory` | Produces crew-served units (artillery, towed AT gun, AA gun). See ECONOMY_BUILDINGS.md's Military Production Buildings |
+| `aircraft_factory` | Produces air wing units. Distinct from `airbase` (operations, not production). See ECONOMY_BUILDINGS.md's Military Production Buildings |
+
+**Naval production is not a separate `buildings{}` key.** It's specified in
+NAVAL_COMBAT.md as "naval base level," one of three independent upgrade tracks on `port`
+(alongside `port level` for trade and `supply base level` for land supply) — none of
+which this contract's flat `port: boolean`-style level currently distinguishes. This is
+a pre-existing gap in this schema, not introduced by the four keys above; flagging it
+here since it's now a closer neighbour to production-buildings concerns.
 
 **Resources**
 
@@ -848,6 +862,10 @@ QGIS will enforce the schema on every new feature.
 | bld_airbase | Integer | Yes | Default 0 |
 | bld_supply_hub | Integer | Yes | Default 0 |
 | bld_factory | Integer | Yes | Default 0 |
+| bld_barracks | Integer | Yes | Default 0. Infantry production + XP training — see ECONOMY_BUILDINGS.md, TACTICAL_COMBAT.md |
+| bld_tank_plant | Integer | Yes | Default 0. Armour production — see ECONOMY_BUILDINGS.md |
+| bld_ordnance_factory | Integer | Yes | Default 0. Artillery/AT/AA production — see ECONOMY_BUILDINGS.md |
+| bld_aircraft_factory | Integer | Yes | Default 0. Air wing production, distinct from bld_airbase — see ECONOMY_BUILDINGS.md |
 | bld_school | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
 | bld_hospital | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |
 | bld_warehouse | Integer | Yes | Default 0. See ECONOMY_BUILDINGS.md |

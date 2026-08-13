@@ -97,8 +97,15 @@ not a per-province resource the player manages individually. The player allocate
 pool across a single panel with live, freely-adjustable sliders:
 
 - One slice per resource (the 10 resource types — see resource buildings below)
-- One slice for construction speed (building/upgrade queue speed nationally)
-- One slice for unit production speed
+- One slice for construction speed — a national multiplier on every province's
+  simultaneous building-construction/upgrade projects: `effective_construction_rate =
+  base_construction_rate(province's Infrastructure level) × this_slice`. See
+  `construction_points`, below, for the full formula this slice plugs into
+- One slice for unit production speed — a national multiplier on every Barracks/Tank
+  Plant/Ordnance Factory/Aircraft Factory's base production rate simultaneously:
+  `effective_build_rate = base_rate(building_type, building_level) × this_slice`. See
+  Military Production Buildings below and RESOURCE_ECONOMY.md's `build_points` section
+  for the full formula this slice plugs into
 
 **Diminishing returns apply per slice independently.** Pouring 80% of the pool into one
 slice does not yield proportionally more than spreading allocation — each slice
@@ -120,6 +127,31 @@ of every building of that type the player owns nationally — a player with many
 buildings across many provinces gets more absolute value from the same allocation
 percentage than a player with one province's worth of oil buildings. The buildings
 define capability; the pool defines optimization.
+
+### `construction_points` — building/upgrade time cost
+
+Every building/upgrade project has a **`construction_points`** cost (per building type
+and target level), the direct building-side counterpart to `build_points` for units
+(RESOURCE_ECONOMY.md). This closes a gap that existed prior to this update, where
+"construction speed" was a named Industry Pool slice with no actual quantity behind it.
+
+```
+effective_construction_rate = base_construction_rate(province's Infrastructure level) × industry_pool_construction_speed_multiplier
+time_to_complete = construction_points(building_type, target_level) / effective_construction_rate
+```
+
+**Parallel, not sequential, within a province.** Every building slot in a province can be
+under construction/upgrade simultaneously — each project computes its own
+`time_to_complete` independently against the same effective rate. There is no shared or
+competing local capacity between simultaneous projects in the same province (unlike
+Naval's repair/construction slot-sharing, which is a special case unique to naval
+production, not the general model — see NAVAL_COMBAT.md). This choice keeps construction
+consistent with how every other Industry Pool interaction already works: allocating to a
+resource type multiplies *every* building of that type simultaneously, never funnels
+into one project before unlocking the next.
+
+**TBD (playtesting):** exact `construction_points` value per building type/level, and the
+exact `base_construction_rate` curve against Infrastructure level.
 
 ---
 
@@ -223,6 +255,14 @@ roster of research changing *where a building wants to live*, not just what it d
 the province (already established in MAP_DATA_CONTRACT.md), scaling with level. Small
 population growth bonus present at base level, same status as School/Hospital.
 
+**Also sets this province's local base rate for building construction/upgrade speed**
+(`base_construction_rate` in the formula under The Industry Pool, below) — every other
+building's construction/upgrade projects in this province draw on Infrastructure's level
+for their local throughput, on top of the national Industry Pool construction-speed
+multiplier. This is a genuinely new role for Infrastructure, not present before this
+update, and gives players a concrete reason to invest here even in a province with
+unremarkable resource deposits.
+
 **Complexity:** Standard (3 paths, 4 tiers)
 
 **Path A — Trade Network (money specialization):**
@@ -265,10 +305,16 @@ with level. This is the only civilian building whose core identity is a **buffer
 a generator — a deliberately different mechanical shape from every other building in
 this document.
 
+**Also caps national unit-type Reserve stock** (see RESOURCE_ECONOMY.md's Reserve
+section) — the same buffer identity extended from the ten resources to cover produced-
+but-unassigned unit HP/ship stock. No separate building or path exists for this; it's
+scoped under Bulk Storage below, alongside the resource ceiling it already governs.
+
 **Complexity:** Simple (2 paths, 3 tiers)
 
 **Path A — Bulk Storage:**
-- T1: increases the storage ceiling magnitude beyond base level scaling
+- T1: increases the storage ceiling magnitude beyond base level scaling (applies to both
+  the resource ceiling and the Reserve stock ceiling)
 - T3: unlocks a perk allowing overflow above the ceiling to convert automatically into
   a small money trickle (sell-off) rather than being wasted outright
 
@@ -283,9 +329,11 @@ this document.
 
 ### Shipyard (Civilian)
 
-**Base effect:** produces trade convoy capacity (distinct from the naval dockyard's
-warship production) — the resource that backs standing player-to-player trade routes
-and is consumed by naval blockade/interdiction. Requires a port in the same province.
+**Base effect:** produces trade convoy capacity (distinct from **naval base level**,
+the port's separate warship construction/repair track — see NAVAL_COMBAT.md and
+Military Production Buildings below) — the resource that backs standing player-to-player
+trade routes and is consumed by naval blockade/interdiction. Requires a port in the same
+province.
 
 **Complexity:** Standard (2 paths, 4 tiers)
 
@@ -589,6 +637,150 @@ the *resource* is meant to stay scarce) — here the building stays narrow becau
 
 ---
 
+## Military Production Buildings
+
+These five categories convert Reserve/production capacity into deployable units. Full
+mechanics (Reserve, Marshalling, the `build_points` formula, the auto-scheduling
+algorithm) are specified in RESOURCE_ECONOMY.md — this section covers only what these
+buildings are, what they produce, and their research-tree shape.
+
+**Why the tree shapes below are uneven, not uniform:** a building earns a genuine
+multi-path tree only if it has a second lever that (a) isn't already owned by a unit's
+own research/doctrine tree, and (b) creates a real opportunity-cost tradeoff rather than
+restating "more output" under a different label. Applying that test against WW2
+production history: light-industry buildings (infantry equipment, crew-served ordnance)
+were never a concentrated strategic-bombing target and have no honest second lever, so
+they stay narrow, the same shape as Tungsten/Chromium above. Heavy-industry buildings
+(tanks, aircraft) were the actual prized bombing targets of the war, which gives them a
+historically real second lever — resilience to disruption — mirroring Shipyard's own
+Throughput/Resilience shape above.
+
+### Barracks
+
+**Produces:** standard/motorised infantry, MG, AT infantry, sniper, commando,
+flamethrower, recon infantry, cavalry — the same grouping TACTICAL_COMBAT.md's
+Incapacitation table already uses for its 20%-floor "leg/mounted" bucket.
+
+**Also retains its existing role** (TACTICAL_COMBAT.md): accelerating XP gain for units
+garrisoned here. Two jobs, one building.
+
+**Complexity:** Simple (1 path, 2–3 tiers)
+
+**Path A — Throughput (the only axis):**
+- Magnitude increases to `base_rate` (see RESOURCE_ECONOMY.md's `build_points` formula)
+
+No second path. Infantry/small-arms production was never a concentrated historical
+bombing target, and the real historical "mass-production vs. quality" contrast (T-34 vs.
+Tiger) is a unit-design/doctrine choice, already owned by unit research trees — giving
+this building a second path would restate that choice rather than add a new one.
+
+---
+
+### Tank Plant
+
+**Produces:** light/medium/heavy tank, armoured car, **mechanised infantry** — the
+30%-floor "vehicle" bucket from TACTICAL_COMBAT.md's Incapacitation table. Mechanised
+infantry belongs here despite its name: TACTICAL_COMBAT.md gates it behind the armour
+research branch (post-medium-tank tier), not the infantry branch.
+
+**Complexity:** Simple/Standard (2 paths, 3–4 tiers)
+
+**Path A — Throughput:**
+- Magnitude increases to `base_rate`
+
+**Path B — Resilience:**
+- Reduces how much of the province's general industry-bombing effect (AIR_COMBAT.md's
+  Strategic Bombing "Industry" mission, which hits the whole-province `industry` scalar —
+  no building has a position distinct from the city point, so this cannot be a per-
+  building shield) applies specifically to this building's own output
+
+Tank production was one of WW2's two genuine prime strategic-bombing targets — Allied
+bombing set back German Tiger and 88mm production by months. Resilience is a
+historically-grounded second lever here, mirroring Shipyard's own Throughput/Resilience
+shape.
+
+---
+
+### Ordnance Factory
+
+**Produces:** artillery, towed AT gun, AA gun — TACTICAL_COMBAT.md's existing
+"no-incapacitation, crew-served" bucket (not an invented grouping). Also matches Call of
+War's own "Ordnance" category.
+
+**Complexity:** Simple (1 path, 2–3 tiers)
+
+**Path A — Throughput (the only axis):**
+- Magnitude increases to `base_rate`
+
+Same reasoning as Barracks: light/mobile ordnance production wasn't the concentrated
+bombing target that tank and aircraft plants were.
+
+---
+
+### Aircraft Factory
+
+**Produces:** all air wing types.
+
+**Distinct from `airbase`.** `airbase` (MAP_DATA_CONTRACT.md, AIR_COMBAT.md) is an
+*operations* building — basing, refuel, readiness recovery. Nothing about it produces
+aircraft. Aircraft Factory is the production building, kept separate the same way the
+naval domain already keeps Naval Base (production/repair) distinct from Port (trade) and
+Coastal Battery (defence) rather than merging roles.
+
+**Complexity:** Simple/Standard (2 paths, 3–4 tiers)
+
+**Path A — Throughput:**
+- Magnitude increases to `base_rate`
+
+**Path B — Resilience:**
+- Same shape and same undifferentiated-`industry`-scalar caveat as Tank Plant's Path B
+
+Germany's aircraft industry was Allied strategic bombing's primary target, provoking a
+dedicated dispersal response (the Jaegerstab reorganisation) — the same historical
+justification as Tank Plant.
+
+---
+
+### Naval production — not a new building
+
+Naval unit production/repair is **already fully specified** in NAVAL_COMBAT.md as
+**naval base level**, one of three independent upgrade tracks on the existing `port`
+building (alongside `port level` for trade and `supply base level` for land supply). No
+new building and no new research tree are introduced here:
+
+- Repair rate, repair capacity (simultaneous slots), and new-construction throughput all
+  scale with naval base level; repair takes priority over new construction, which takes
+  priority over refit, all sharing the same capacity slots.
+- Bombing resilience is already baked directly into the single level number (~10–15%
+  docked-ship damage reduction at level 1, ~40–50% at max level) — no separate path
+  needed. This is the strongest existing precedent for *not* building a dedicated tree
+  where the building's own level scaling already tells the whole story.
+- Naval Reserve is a pool of discrete ship objects (individual HP), not a fungible pool
+  like the four buildings above — see RESOURCE_ECONOMY.md's Reserve section.
+
+**Open question, unresolved:** does a newly-*constructed* ship auto-join its owner's
+assigned flotilla the way a *repaired* ship already does (NAVAL_COMBAT.md's Automatic
+Repair), or does new construction require manual flotilla assignment?
+
+---
+
+## Starting Buildings — Default Placement
+
+- **Capital province:** level-1 of all four land/air production buildings (Barracks,
+  Ordnance Factory, Tank Plant, Aircraft Factory) by default.
+- **Other starting provinces:** each gets one of Barracks / Ordnance Factory / Tank Plant
+  by default (distributed across the nation's starting territory), not all four.
+- **Naval base access:** seeded in at least one starting coastal province for any
+  non-landlocked nation, same water-access constraint the civilian Shipyard already has.
+- **Why level-1 can be deliberately weak:** the same "player who never opens the panel
+  still has a complete, functional system" guarantee used for every resource-extraction
+  building above (a zero-industry Oil Derrick still produces full base-tier output).
+  Deliberately underwhelming level-1 output is what makes handing out free defaults
+  safe — it guarantees *function*, not *abundance*. A player who never touches
+  production buildings can still deploy and supply divisions, just suboptimally.
+
+---
+
 ## Open Questions (To Be Resolved in Playtesting)
 
 - Exact diminishing-returns curve shape and constants for industry pool allocation per
@@ -598,7 +790,10 @@ the *resource* is meant to stay scarce) — here the building stays narrow becau
   reduction (confirmed qualitatively: must never approach invincibility — exact cap
   from playtesting)
 - Building slot count per province (leaning toward 5, matching the existing universal
-  building-level cap, but not confirmed) and per-level upgrade cost curve steepness
+  building-level cap, but not confirmed) and per-level upgrade cost curve steepness —
+  **note the capital's default four production buildings (Barracks, Ordnance Factory,
+  Tank Plant, Aircraft Factory) sit alongside every other civilian/resource building a
+  capital might also want, which puts real pressure on whatever this cap ends up being**
 - Exact tier-lock placement for Hospital's three-way T5 choice (Path A ×2 + Path C ×1)
   — confirmed structurally, exact research-cost weighting not set
 - Money output parity target between Infrastructure (Path A, fully invested) and
@@ -613,6 +808,14 @@ the *resource* is meant to stay scarce) — here the building stays narrow becau
   speed (confirmed both are viable defaults; exact starting split not set)
 - Reallocation cooldown length for the industry pool sliders (confirmed "near-instant,"
   exact seconds not set)
+- Exact `base_rate` per building level for Barracks, Tank Plant, Ordnance Factory,
+  Aircraft Factory (RESOURCE_ECONOMY.md's `build_points` formula)
+- Exact magnitude of Tank Plant's and Aircraft Factory's Resilience path, and the precise
+  mechanism for applying it against the shared, undifferentiated province `industry`
+  bombing scalar rather than a per-building target
+- Exact `construction_points` value per building type/level, and exact
+  `base_construction_rate` curve against Infrastructure level (see `construction_points`
+  above)
 
 ---
 
@@ -625,7 +828,10 @@ building and research-tree layer on top of it.
 
 **Military buildings** (fort, supply hub, radar, command post, coastal battery,
 anti-air network, listening post) — placement model, command-post radius mechanics,
-and their own perk trees are a separate design pass.
+and their own perk trees are a separate design pass. (Barracks, Tank Plant, Ordnance
+Factory, and Aircraft Factory are *not* part of this out-of-scope group — they're unit
+*production* buildings, defined above in Military Production Buildings, distinct from
+this list's defensive/detection buildings.)
 
 **Unit specialization research** (Infantry, Armoured, Artillery, Air, Naval doctrine
 trees) — covered by the unit research design tenets and the per-branch trees built on

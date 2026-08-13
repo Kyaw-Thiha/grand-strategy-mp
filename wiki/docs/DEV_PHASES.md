@@ -1138,17 +1138,57 @@ against) and for standing trade routes (needs a second nation to negotiate with)
       vector), not tracked as an independent field
 - [ ] Manpower soft cap — recruiting from a heavily exhausted manpower pool costs
       progressively more (money/time multiplier), never hard-blocks
-- [ ] Division build cost — fixed resource-vector cost paid once at raise time, sum of unit
-      costs (each unit type's cost vector includes money/iron/manpower plus whichever
-      restricted resources that unit type consumes)
+- [ ] Unit-level production, Reserve, and Marshalling (supersedes the earlier flat
+      "division build cost paid once at raise time" model) — raising a division template
+      creates independently-fillable demand slots, not a lump-sum deduction; each unit is
+      produced individually (by the relevant production building, see below) or drawn from
+      national Reserve; resource-vector cost is deducted per unit as it's produced/drawn,
+      not summed at raise time. Full spec: RESOURCE_ECONOMY.md's "Unit Build Cost,
+      Production, and Supply Draw"
+- [ ] `build_points` — per-unit-type time cost, distinct from the resource-cost vector;
+      `effective_build_rate = base_rate(building_type, building_level) ×
+      industry_pool_unit_speed_multiplier`; `time_to_complete = build_points /
+      effective_build_rate` (RESOURCE_ECONOMY.md)
+- [ ] National Reserve — land/air as a fungible HP-equivalent pool per unit type; naval as
+      a pool of discrete ship objects with individual HP; capped by Warehouse's existing
+      Bulk Storage path, extended to cover Reserve stock alongside the ten resources
+- [ ] Marshalling — a raising division fills off-map from Reserve at a flat national
+      `MARSHALLING_RATE` constant before it exists on the map; `min(production_rate,
+      MARSHALLING_RATE)` when Reserve is empty for a needed type; player may force-deploy
+      early once aggregate HP (sum of present units' current HP over sum of all
+      template-target units' full HP) reaches ≥50%; deployment permanently switches the
+      division to the field supply-graph delivery channel for any remaining fill
+- [ ] Five production buildings — Barracks (infantry, retains its existing XP-training
+      role), Tank Plant (armour + mechanised infantry), Ordnance Factory (artillery/AT/AA),
+      Aircraft Factory (air wings, distinct from the operations-only `airbase`), and Naval
+      base level (already specified in NAVAL_COMBAT.md, no new building). Research-tree
+      shape and default starting placement: ECONOMY_BUILDINGS.md's Military Production
+      Buildings and Starting Buildings sections
+- [ ] Auto-scheduling algorithm — pull-based (idle production buildings request an order
+      rather than being re-scanned every tick); demand slots ranked by missing-HP%,
+      cost-weighted by `build_points` when a building must choose between producible types;
+      deploy-stream vs. supply-stream production split defaults to 50/50 when Reserve is
+      empty and both compete for the same type
 - [ ] Division supply draw — at each tick, `(missing HP fraction) × (division's build-cost
-      resource vector)`, drawn from whatever is flowing down the existing STRATEGIC_COMBAT.md
-      supply graph; the flow becomes a resource-mix vector per division type, not a flat
-      scalar — reuses the existing hub→road-graph→division flow model, does not replace it
+      resource vector)`, drawn from Reserve first, then from whatever is flowing down the
+      existing STRATEGIC_COMBAT.md supply graph; the flow becomes a resource-mix vector per
+      division type, not a flat scalar — reuses the existing hub→road-graph→division flow
+      model, does not replace it; `min(production_rate, field_supply_line_capacity)` when
+      Reserve is empty for a needed type
 - [ ] `BUILD` handler reworked for the perk-tree model — construct/level a building (costs
-      resources, capped at level 5 per ECONOMY_BUILDINGS.md); base level produces exactly one
+      resources **and** takes time, gated by the new `construction_points` system below,
+      capped at level 5 per ECONOMY_BUILDINGS.md); base level produces exactly one
       fixed effect scaling in magnitude only; building does not gain new effect categories
       from leveling alone
+- [ ] `construction_points` — per building-type-and-target-level time cost, the building-
+      side counterpart to `build_points`; `effective_construction_rate =
+      base_construction_rate(province's Infrastructure level) ×
+      industry_pool_construction_speed_multiplier`; `time_to_complete =
+      construction_points / effective_construction_rate`. **Parallel, not sequential** —
+      every building slot in a province can be under construction/upgrade simultaneously,
+      each with its own independent progress, no shared local capacity between them (unlike
+      Naval's repair/construction slot-sharing, which stays a special case). See
+      ECONOMY_BUILDINGS.md's `construction_points` section
 - [ ] Research-to-building perk handler — applying a researched perk node to a building
       unlocks a new effect or redistributes existing effect weighting (per the adjacency-web
       rules in ECONOMY_BUILDINGS.md: paths adjacent-unlock, tier-local mutual exclusivity
