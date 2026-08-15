@@ -39,6 +39,8 @@ func _ready() -> void:
 	_test_blocked_and_cancelled_gestures()
 	await _test_cursor_anchored_wheel_zoom()
 	await _test_keyboard_speed_curve()
+	_test_smooth_pan_to_position()
+	_test_center_on_position_zoom_toggle()
 	_test_idle_processing_does_not_edge_scroll()
 
 	if _failed:
@@ -353,6 +355,67 @@ func _test_idle_processing_does_not_edge_scroll() -> void:
 		Vector2(200.0, 200.0),
 		"idle camera processing must not move based on cursor position"
 	)
+
+
+func _test_smooth_pan_to_position() -> void:
+	_reset_camera(Vector2.ZERO, 1.75)
+	_camera_system.smooth_pan_to_position(Vector2(400.0, -200.0))
+	_camera_system.call("_process", 0.05)
+	_assert_true(
+		_camera.position != Vector2.ZERO and _camera.position != Vector2(400.0, -200.0),
+		"Center Camera must interpolate instead of snapping"
+	)
+	_assert_float_close(_camera.zoom.x, 1.75, "Center Camera must preserve zoom")
+	for _frame: int in range(20):
+		_camera_system.call("_process", 0.02)
+	_assert_vector_close(
+		_camera.position,
+		Vector2(400.0, -200.0),
+		"Center Camera must finish at the requested world position"
+	)
+
+	_camera_system.smooth_pan_to_position(Vector2(-300.0, 250.0))
+	_camera_system.call("_process", 0.05)
+	_camera_system.call("_input", _make_right_button(Vector2(100.0, 100.0), true))
+	_camera_system.call(
+		"_input",
+		_make_right_motion(Vector2(112.0, 100.0), Vector2(12.0, 0.0))
+	)
+	_assert_false(
+		bool(_camera_system.get("_smooth_pan_active")),
+		"manual camera drag must cancel Center Camera interpolation"
+	)
+	_camera_system.call("_input", _make_right_button(Vector2(112.0, 100.0), false))
+
+
+func _test_center_on_position_zoom_toggle() -> void:
+	_reset_camera(Vector2.ZERO, 1.0)
+	_camera_system.center_on_position(Vector2(300.0, 150.0))
+	_assert_float_close(
+		float(_camera_system.get("_target_zoom")),
+		1.75,
+		"first Center Camera click must target the close zoom level"
+	)
+	for _frame: int in range(20):
+		_camera_system.call("_process", 0.02)
+	_camera_system.call("_process", 0.125)
+	_assert_vector_close(
+		_camera.position,
+		Vector2(300.0, 150.0),
+		"Center Camera must finish at the requested world position"
+	)
+	_assert_float_close(_camera.zoom.x, 1.75, "Center Camera must zoom in on first click")
+
+	_camera_system.center_on_position(Vector2(300.0, 150.0))
+	_assert_float_close(
+		float(_camera_system.get("_target_zoom")),
+		0.75,
+		"second Center Camera click must target the strategic zoom level"
+	)
+	for _frame: int in range(20):
+		_camera_system.call("_process", 0.02)
+	_camera_system.call("_process", 0.125)
+	_assert_float_close(_camera.zoom.x, 0.75, "Center Camera must zoom out on second click")
 
 
 func _make_right_button(

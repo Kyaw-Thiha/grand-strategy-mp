@@ -2,6 +2,8 @@ extends Node
 ## Autoload: registers all InputMap actions, applies saved remaps on startup,
 ## and provides remap / preset / save / reset API used by SettingsKeybind.
 
+signal bindings_changed()
+
 const _CONFIG_PATH := "user://keybinds.cfg"
 
 
@@ -21,6 +23,7 @@ func remap_action(action: String, event: InputEvent) -> void:
 	if event != null:
 		InputMap.action_add_event(action, event)
 	save()
+	bindings_changed.emit()
 
 
 func apply_preset(preset: Dictionary) -> void:
@@ -40,6 +43,7 @@ func apply_preset(preset: Dictionary) -> void:
 				entry.get("shift", false),
 				entry.get("alt", false)))
 	save()
+	bindings_changed.emit()
 
 
 func reset_to_default() -> void:
@@ -47,6 +51,7 @@ func reset_to_default() -> void:
 	_register_all_actions()
 	if FileAccess.file_exists(_CONFIG_PATH):
 		DirAccess.remove_absolute(_CONFIG_PATH)
+	bindings_changed.emit()
 
 
 func save() -> void:

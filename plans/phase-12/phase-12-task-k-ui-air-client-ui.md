@@ -204,7 +204,7 @@ adds `perk_air_combat` to the same serialize block — include the pre-existing 
 
 `assignMission()` just does `wing.target_id = targetId` verbatim from whatever the caller
 supplies — no priority logic, no load-balancing, anywhere in `game-server/src`. Design source:
-`wiki/docs/AIR_COMBAT.md:628-633` ("Command Layer — Air Fleets" escort spread logic — applied
+`docs/AIR_COMBAT.md:628-633` ("Command Layer — Air Fleets" escort spread logic — applied
 here **per-wing**, not as a fleet-batch operation, since Branch I/fleets stay deferred):
 ```
 Heavy fighters → strategic/tactical bombers first; fall back to CAS/dive/naval if none
@@ -1424,8 +1424,8 @@ and two new `notification_requested.emit(...)` lines are added (`AIR_WING_DESTRO
      sky-blue accent, not falling through to the generic "NOTICE" styling.
   6. Godot headless scene-load check on every modified/new `.tscn` file (no orphan-node /
      missing-script errors).
-- After implementation: reconcile `wiki/client/ui/` and `wiki/client/air/` component notes and
-  `wiki/docs/DEV_PHASES.md` §12's K-ui checkbox, per `AGENTS.md` workflow step 4.
+- After implementation: reconcile `docs/DEV_PHASES.md` §12's K-ui checkbox, per `AGENTS.md`
+  workflow step 3.
 
 ---
 

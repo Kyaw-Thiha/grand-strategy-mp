@@ -32,7 +32,7 @@ client-side cheating by reading raw WebSocket frames.
 This branch adds server-side per-nation visibility filtering for both divisions and air wings,
 driven by a new `ServerVisibilitySystem`. It also adds fog-emerge/fade animations on the client
 when units appear or disappear. Binary schema + StateView is deferred to a future infrastructure
-branch — see `wiki/future-works/binary-schema-sync.md`.
+branch — see `docs/future-works/binary-schema-sync.md`.
 
 **Test-Driven Development is mandatory.** Write ALL failing tests before implementing each step.
 

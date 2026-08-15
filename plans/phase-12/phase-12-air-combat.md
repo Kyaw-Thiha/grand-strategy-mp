@@ -381,10 +381,10 @@ persistent named groupings are better than good ad-hoc multi-select. That questi
 to be settled first; otherwise fleet membership management becomes overhead with no payoff.
 
 **Design decisions captured in:**
-- `old-docs/AIR_COMBAT.md` → "Command Layer — Air Fleets" (fleet model, escort spread logic,
+- `docs/AIR_COMBAT.md` → "Command Layer — Air Fleets" (fleet model, escort spread logic,
   RELOCATE_FLEET deferred section)
-- `wiki/future-works/air-fleet-command.md` (full design notes + dependencies)
-- `wiki/future-works/multi-select-ui.md` (multi-select UI design, prerequisite for fleet)
+- `docs/future-works/air-fleet-command.md` (full design notes + dependencies)
+- `docs/future-works/multi-select-ui.md` (multi-select UI design, prerequisite for fleet)
 
 **When to revisit:** after multi-select UI is designed and implemented. If multi-select alone
 covers the use case (select wings on map → batch assign), fleet as a persistent concept may

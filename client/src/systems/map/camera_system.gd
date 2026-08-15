@@ -14,6 +14,9 @@ const RIGHT_DRAG_THRESHOLD_PX := 8.0
 const ZOOM_STEP      := 0.15
 const ZOOM_KB_STEP   := 0.25
 const ZOOM_SPEED     := 8.0
+const SMOOTH_PAN_DURATION := 0.28
+const CENTER_CAMERA_STRATEGIC_ZOOM := 0.75
+const CENTER_CAMERA_CLOSE_ZOOM := 1.75
 const MIN_ZOOM       := 0.2
 const MAX_ZOOM       := 4.0
 const NATION_LABEL_ZOOM_THRESHOLD := 0.6
@@ -36,6 +39,10 @@ var _right_drag_start_screen: Vector2 = Vector2.ZERO
 var _zoom_anchor_active: bool = false
 var _zoom_anchor_screen: Vector2 = Vector2.ZERO
 var _zoom_anchor_world: Vector2 = Vector2.ZERO
+var _smooth_pan_active: bool = false
+var _smooth_pan_elapsed: float = 0.0
+var _smooth_pan_start: Vector2 = Vector2.ZERO
+var _smooth_pan_target: Vector2 = Vector2.ZERO
 
 
 func setup(camera: Camera2D, map_loader: Node) -> void:
@@ -61,6 +68,7 @@ func _process(delta: float) -> void:
 			_map_bounds = b
 			_bounds_ready = true
 	_handle_movement(delta)
+	_advance_smooth_pan(delta)
 	var next_zoom: float = lerpf(
 		_camera.zoom.x,
 		_target_zoom,
@@ -124,6 +132,7 @@ func _input(event: InputEvent) -> void:
 			_right_drag_active = true
 
 		if _right_drag_active:
+			_cancel_smooth_pan()
 			_reset_zoom_anchor()
 			_camera.position -= mouse_motion.relative / _camera.zoom.x
 			_clamp_position()
@@ -140,6 +149,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_cancel_smooth_pan()
 				var next_target_zoom: float = clampf(
 					_target_zoom + ZOOM_STEP,
 					MIN_ZOOM,
@@ -149,6 +159,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_capture_zoom_anchor(mb.position)
 					_target_zoom = next_target_zoom
 			elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_cancel_smooth_pan()
 				var next_target_zoom: float = clampf(
 					_target_zoom - ZOOM_STEP,
 					MIN_ZOOM,
@@ -162,10 +173,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		var ke: InputEventKey = event as InputEventKey
 		if ke.pressed and ke.ctrl_pressed:
 			if ke.keycode == KEY_EQUAL or ke.keycode == KEY_KP_ADD:
+				_cancel_smooth_pan()
 				_reset_zoom_anchor()
 				_target_zoom = clampf(_target_zoom + ZOOM_KB_STEP, MIN_ZOOM, MAX_ZOOM)
 				get_viewport().set_input_as_handled()
 			elif ke.keycode == KEY_MINUS or ke.keycode == KEY_KP_SUBTRACT:
+				_cancel_smooth_pan()
 				_reset_zoom_anchor()
 				_target_zoom = clampf(_target_zoom - ZOOM_KB_STEP, MIN_ZOOM, MAX_ZOOM)
 				get_viewport().set_input_as_handled()
@@ -185,9 +198,40 @@ func pan_to_province(province_id: String) -> void:
 
 func pan_to_position(pos: Vector2) -> void:
 	if _camera:
+		_cancel_smooth_pan()
 		_reset_zoom_anchor()
 		_camera.position = pos
 		_clamp_position()
+
+
+## Starts a short eased pan to a world position without changing camera zoom.
+func smooth_pan_to_position(pos: Vector2) -> void:
+	if _camera == null:
+		return
+	_reset_zoom_anchor()
+	_smooth_pan_start = _camera.position
+	_smooth_pan_target = pos
+	if _bounds_ready:
+		_smooth_pan_target.x = clampf(
+			_smooth_pan_target.x, _map_bounds.position.x, _map_bounds.end.x
+		)
+		_smooth_pan_target.y = clampf(
+			_smooth_pan_target.y, _map_bounds.position.y, _map_bounds.end.y
+		)
+	_smooth_pan_elapsed = 0.0
+	_smooth_pan_active = not _smooth_pan_start.is_equal_approx(_smooth_pan_target)
+
+
+## Centers on a world position and toggles between strategic and close zoom levels.
+func center_on_position(pos: Vector2) -> void:
+	smooth_pan_to_position(pos)
+	var toggle_threshold: float = (
+		CENTER_CAMERA_STRATEGIC_ZOOM + CENTER_CAMERA_CLOSE_ZOOM
+	) * 0.5
+	if _target_zoom < toggle_threshold:
+		_target_zoom = CENTER_CAMERA_CLOSE_ZOOM
+	else:
+		_target_zoom = CENTER_CAMERA_STRATEGIC_ZOOM
 
 
 func set_zoom(level: float) -> void:
@@ -227,6 +271,7 @@ func _handle_movement(delta: float) -> void:
 	var wasd_active: bool = wasd_dir != Vector2.ZERO
 
 	if wasd_active:
+		_cancel_smooth_pan()
 		_reset_zoom_anchor()
 		if _move_speed == 0.0:
 			_move_speed = BASE_SPEED
@@ -236,6 +281,22 @@ func _handle_movement(delta: float) -> void:
 		return
 
 	_move_speed = 0.0
+
+
+func _advance_smooth_pan(delta: float) -> void:
+	if not _smooth_pan_active:
+		return
+	_smooth_pan_elapsed = minf(_smooth_pan_elapsed + delta, SMOOTH_PAN_DURATION)
+	var progress: float = _smooth_pan_elapsed / SMOOTH_PAN_DURATION
+	var eased_progress: float = progress * progress * (3.0 - 2.0 * progress)
+	_camera.position = _smooth_pan_start.lerp(_smooth_pan_target, eased_progress)
+	_clamp_position()
+	if progress >= 1.0:
+		_smooth_pan_active = false
+
+
+func _cancel_smooth_pan() -> void:
+	_smooth_pan_active = false
 
 
 ## Clears right-button gesture state without emitting a gameplay click.

@@ -7,20 +7,20 @@ the current code first, with future work and implementation gaps labelled explic
 
 # Wiki
 
-- [[docs/index|Authoritative Design Sources]] — confirmed designs, implementation requirements, roadmap state, and completion checklists.
+- [Maintained Documentation](../docs/index.md) — confirmed designs, implementation requirements, roadmap state, and completion checklists.
 - [[api-server/index|API Server]] — account and game-independent backend data, lobby coordination, and trusted persistence calls.
 - [[game-server/index|Game Server]] — authoritative multiplayer rooms, live game state, and simulation resolution.
 - [[client/index|Client]] — Godot presentation, input, local UI state, and the read-only mirror of live game state.
 - [[map/index|Map Production]] — geographic source data, validation, and generated map assets.
 
-# Future Works
+# Maintained Future Work
 
 Features designed but deferred pending missing mechanics. Each note captures locked-in
 design decisions so the feature can be implemented correctly when its dependencies land.
 
-- [[future-works/air-fleet-relocate|RELOCATE_FLEET]] — Air fleet relocation to a new front; deferred until airbase levels (economy buildings) are implemented.
-- [[future-works/air-fleet-command|Air Fleet Command]] — Named theater groupings for batch-assigning missions to air wings; deferred pending multi-select UI design.
-- [[future-works/multi-select-ui|Multi-Unit Selection UI]] — Reusable box-select + batch-action panel for air wings, divisions, flotillas; prerequisite for Air Fleet design decision.
-- [[future-works/binary-schema-sync|Binary Schema Sync]] — Migrate from custom JSON broadcasts to Colyseus binary schema + StateView AOI; deferred until Phase 14 (Economy Integration) is complete so all major schema classes exist before migrating once.
+- [Air Fleet Relocation](../docs/future-works/air-fleet-relocate.md)
+- [Air Fleet Command](../docs/future-works/air-fleet-command.md)
+- [Multi-Unit Selection UI](../docs/future-works/multi-select-ui.md)
+- [Binary Schema Sync](../docs/future-works/binary-schema-sync.md)
 
 # Related Notes

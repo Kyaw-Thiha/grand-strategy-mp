@@ -1128,9 +1128,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (!player) return;
     const nation = this.getNationForPlayer(player.userId);
     if (!nation || nation.nation_id !== division.nation_id) return;
+    if (division.combat_state !== "idle") return;
+    if (division.move_order.length === 0 && !(division.final_position_lng > -998)) return;
 
     division.move_order.splice(0, division.move_order.length);
-    this.broadcast("DIVISION_UPDATES", { divisions: [this.serializeDivision(division)] });
+    division.final_position_lng = -999;
+    division.final_position_lat = -999;
+    this.broadcastFilteredDivisionUpdates([divisionId]);
   }
 
   private handleRetreat(client: Client, msg: { division_id?: string }) {
@@ -1143,24 +1147,23 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     if (!player) return;
     const nation = this.getNationForPlayer(player.userId);
     if (!nation || nation.nation_id !== division.nation_id) return;
+    if (division.combat_state !== "engaged" && division.combat_state !== "suppressed") return;
 
     const enemies: DivisionState[] = [];
     for (const eid of division.engaged_with) {
       const e = this.state.divisions.get(eid);
-      if (e) enemies.push(e);
+      if (e && e.nation_id !== division.nation_id
+        && (e.combat_state === "engaged" || e.combat_state === "suppressed")) {
+        enemies.push(e);
+      }
     }
+    if (enemies.length === 0) return;
     const changed = new Set<string>();
     this.combatSystem.initiateRetreat(division, enemies, this.state, changed, (type, msg) => this.broadcast(type, msg));
 
-    // Broadcast updates for both the retreating division and any reset opponents
-    const serializedDivs: unknown[] = [this.serializeDivision(division)];
-    for (const divId of changed) {
-      if (divId !== division.division_id) {
-        const opponent = this.state.divisions.get(divId);
-        if (opponent) serializedDivs.push(this.serializeDivision(opponent));
-      }
-    }
-    this.broadcast("DIVISION_UPDATES", { divisions: serializedDivs });
+    // Include the retreating division even though CombatSystem only tracks changed opponents.
+    changed.add(divisionId);
+    this.broadcastFilteredDivisionUpdates(changed);
   }
 
   private handleReposition(client: Client, msg: { division_id?: string; waypoints?: string[] }) {
@@ -1470,6 +1473,29 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
   }
 
+  /** Sends each client only the requested division updates visible to their nation. */
+  private broadcastFilteredDivisionUpdates(divisionIds: Iterable<string>): void {
+    const divisions = [...divisionIds]
+      .map(divisionId => this.state.divisions.get(divisionId))
+      .filter((division): division is DivisionState => division !== undefined);
+
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) continue;
+      const visibleUpdates = divisions
+        .filter(division => this.serverVisibilitySystem.canNationSeeDivision(
+          nation.nation_id,
+          division.division_id,
+        ))
+        .map(division => this.serializeDivision(division));
+      if (visibleUpdates.length > 0) {
+        client.send("DIVISION_UPDATES", { divisions: visibleUpdates });
+      }
+    }
+  }
+
   private gameTick() {
     if (this.state.phase !== "running") return;
     this.tickCount++;
@@ -1657,16 +1683,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       );
 
       const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
-      for (const client of this.clients) {
-        const p = this.state.players.get(client.sessionId);
-        if (!p) continue;
-        const nation = this.getNationForPlayer(p.userId);
-        if (!nation) continue;
-        const visibleUpdates = [...toUpdate]
-          .filter(divId => this.serverVisibilitySystem.canNationSeeDivision(nation.nation_id, divId))
-          .map(divId => this.serializeDivision(this.state.divisions.get(divId)!));
-        if (visibleUpdates.length > 0) client.send("DIVISION_UPDATES", { divisions: visibleUpdates });
-      }
+      this.broadcastFilteredDivisionUpdates(toUpdate);
     } catch (err) {
       console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
     }

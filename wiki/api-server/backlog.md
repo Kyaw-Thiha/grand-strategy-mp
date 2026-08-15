@@ -46,5 +46,5 @@ lobby cleanup, and database failures.
 - [[api-server/overview|Role and Boundaries]]
 - [[api-server/internal-api|Internal API]]
 - [[api-server/database|Database and RLS]]
-- [[docs/ARCHITECTURE|Architecture]]
-- [[docs/DATA_CONTRACTS|Data Contracts]]
+- [Architecture](../../docs/ARCHITECTURE.md)
+- [Data Contracts](../../docs/DATA_CONTRACTS.md)

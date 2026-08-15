@@ -9,10 +9,9 @@
 [ext_resource type="PackedScene" path="res://scenes/game/panels/economy_panel.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/diplomacy_panel.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/research_drawer_panel.tscn" id="9"]
-[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_division_panel.tscn" id="16"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/land_selection_popover.tscn" id="16"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_province_panel.tscn" id="17"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/enemy_division_panel.tscn" id="18"]
-[ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_stack_panel.tscn" id="19"]
 [ext_resource type="Texture2D" uid="uid://0e1htr2kalm5" path="res://assets/icons/hand-fist-solid-full.svg" id="20_handfist"]
 [ext_resource type="Texture2D" uid="uid://b8kgyra31hcqg" path="res://assets/icons/scale-balanced-solid-full.svg" id="22_scale"]
 [ext_resource type="Texture2D" uid="uid://bax6tp2sx5tpf" path="res://assets/icons/person-military-rifle-solid-full.svg" id="23_military"]
@@ -29,6 +28,7 @@
 [ext_resource type="Script" uid="uid://cvo1aqjm17xk4" path="res://src/ui/hud/notification_feed.gd" id="34_notification_feed"]
 [ext_resource type="PackedScene" uid="uid://c8q605jnjdup1" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_air_wing_panel.tscn" id="36"]
+[ext_resource type="PackedScene" path="res://scenes/game/land_selection_surround.tscn" id="37_surround"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -43,6 +43,57 @@ void fragment() {
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_icon_tint"]
 shader = SubResource("Shader_icon_tint")
 shader_parameter/icon_color = Color(0.96, 0.78, 0.38, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_map_mode_tray"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.0705882, 0.0509804, 0.0352941, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.290196, 0.196078, 0.105882, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+shadow_color = Color(0, 0, 0, 0.45)
+shadow_size = 4
+shadow_offset = Vector2(0, 2)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_map_mode_normal"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0, 0, 0)
+border_width_right = 1
+border_color = Color(0.290196, 0.196078, 0.105882, 0.65)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_map_mode_hover"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.160784, 0.109804, 0.0627451, 1)
+border_width_right = 1
+border_color = Color(0.290196, 0.196078, 0.105882, 0.8)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_map_mode_pressed"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.207843, 0.137255, 0.0666667, 1)
+border_width_right = 1
+border_width_bottom = 3
+border_color = Color(0.909804, 0.721569, 0.309804, 1)
+
+[sub_resource type="StyleBoxEmpty" id="StyleBox_map_mode_focus"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_map_modes"]
 
 [node name="GameHUD" type="CanvasLayer" unique_id=925665196]
 layer = 2
@@ -64,20 +115,20 @@ theme = ExtResource("5")
 [node name="TopBar" type="PanelContainer" parent="HUDRoot" unique_id=564437848]
 layout_mode = 0
 anchor_right = 1.0
-offset_bottom = 64.0
+offset_bottom = 50.0
 grow_horizontal = 2
 
 [node name="HBox" type="HBoxContainer" parent="HUDRoot/TopBar" unique_id=1351551587]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="NationBlock" type="HBoxContainer" parent="HUDRoot/TopBar/HBox" unique_id=597330920]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 6
 
 [node name="FlagTexture" type="TextureRect" parent="HUDRoot/TopBar/HBox/NationBlock" unique_id=859952923]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(84, 52)
+custom_minimum_size = Vector2(56, 34)
 layout_mode = 2
 size_flags_horizontal = 0
 size_flags_vertical = 4
@@ -88,7 +139,7 @@ stretch_mode = 5
 [node name="NationLabel" type="Label" parent="HUDRoot/TopBar/HBox/NationBlock" unique_id=217218198]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 16
 text = "REPUBLIC OF ALDERAC"
 
 [node name="SpacerLeft" type="Control" parent="HUDRoot/TopBar/HBox" unique_id=834515807]
@@ -97,11 +148,11 @@ size_flags_horizontal = 3
 
 [node name="ResourceBar" type="HBoxContainer" parent="HUDRoot/TopBar/HBox" unique_id=1917032429]
 layout_mode = 2
-theme_override_constants/separation = 24
+theme_override_constants/separation = 12
 
 [node name="ManpowerItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1469709022]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem" unique_id=1300477848]
 modulate = Color(0.91, 0.87, 0.78, 1)
@@ -114,12 +165,13 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="ManpowerLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/ManpowerItem" unique_id=269059706]
+unique_name_in_owner = true
 layout_mode = 2
 text = "MANPOWER --"
 
 [node name="SteelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=486653409]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=645306079]
 modulate = Color(0.91, 0.87, 0.78, 1)
@@ -132,12 +184,13 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=1587312851]
+unique_name_in_owner = true
 layout_mode = 2
 text = "STEEL --"
 
 [node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1129771256]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=590765351]
 modulate = Color(0.91, 0.87, 0.78, 1)
@@ -150,12 +203,13 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=641530814]
+unique_name_in_owner = true
 layout_mode = 2
 text = "OIL --"
 
 [node name="FuelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=667355371]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=691358137]
 modulate = Color(0.91, 0.87, 0.78, 1)
@@ -168,6 +222,7 @@ expand_mode = 1
 stretch_mode = 5
 
 [node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=1213706026]
+unique_name_in_owner = true
 layout_mode = 2
 text = "FUEL --"
 
@@ -201,7 +256,7 @@ layout_mode = 2
 
 [node name="SettingsButton" type="Button" parent="HUDRoot/TopBar/HBox/RightBlock" unique_id=1360996790]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(36, 36)
+custom_minimum_size = Vector2(32, 32)
 layout_mode = 2
 
 [node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/RightBlock/SettingsButton" unique_id=2017944142]
@@ -228,16 +283,17 @@ stretch_mode = 5
 [node name="LeftDockRail" type="PanelContainer" parent="HUDRoot" unique_id=975917011]
 layout_mode = 0
 anchor_bottom = 1.0
-offset_top = 64.0
-offset_right = 80.0
+offset_top = 50.0
+offset_right = 58.0
 grow_vertical = 2
 
 [node name="VBox" type="VBoxContainer" parent="HUDRoot/LeftDockRail" unique_id=204162851]
 layout_mode = 2
 
 [node name="DockButton_Q" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1139935493]
-custom_minimum_size = Vector2(72, 72)
+custom_minimum_size = Vector2(46, 50)
 layout_mode = 2
+tooltip_text = "Research (Q)"
 
 [node name="ResearchProgressFill" type="ColorRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q" unique_id=1153555421]
 visible = false
@@ -279,15 +335,10 @@ size_flags_horizontal = 4
 text = "Q"
 horizontal_alignment = 1
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Q/Content" unique_id=947820051]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "RES"
-horizontal_alignment = 1
-
 [node name="DockButton_E" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=1172553113]
-custom_minimum_size = Vector2(72, 72)
+custom_minimum_size = Vector2(46, 50)
 layout_mode = 2
+tooltip_text = "Economy (E)"
 
 [node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_E" unique_id=284731823]
 layout_mode = 1
@@ -317,15 +368,10 @@ size_flags_horizontal = 4
 text = "E"
 horizontal_alignment = 1
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_E/Content" unique_id=1991431313]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "ECO"
-horizontal_alignment = 1
-
 [node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=2130558185]
-custom_minimum_size = Vector2(72, 72)
+custom_minimum_size = Vector2(46, 50)
 layout_mode = 2
+tooltip_text = "Military (R)"
 
 [node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T" unique_id=2073718966]
 layout_mode = 1
@@ -355,15 +401,10 @@ size_flags_horizontal = 4
 text = "R"
 horizontal_alignment = 1
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1212662659]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "MIL"
-horizontal_alignment = 1
-
 [node name="DockButton_Y" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=745190073]
-custom_minimum_size = Vector2(72, 72)
+custom_minimum_size = Vector2(46, 50)
 layout_mode = 2
+tooltip_text = "Diplomacy (T)"
 
 [node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y" unique_id=1071195379]
 layout_mode = 1
@@ -393,144 +434,162 @@ size_flags_horizontal = 4
 text = "T"
 horizontal_alignment = 1
 
-[node name="NameLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_Y/Content" unique_id=1566262875]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "DIP"
-horizontal_alignment = 1
-
-[node name="DockSeparator" type="HSeparator" parent="HUDRoot/LeftDockRail/VBox" unique_id=2041318522]
-layout_mode = 2
-
-[node name="DockButton_U" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=955641273]
-custom_minimum_size = Vector2(72, 72)
-layout_mode = 2
-disabled = true
-text = "U"
-
-[node name="DockButton_I" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=337243024]
-custom_minimum_size = Vector2(72, 72)
-layout_mode = 2
-disabled = true
-text = "I"
-
 [node name="MapModeTabs" type="PanelContainer" parent="HUDRoot" unique_id=220020208]
 layout_mode = 0
-offset_left = 80.0
-offset_top = 64.0
+offset_left = 58.0
+offset_top = 50.0
+theme_override_styles/panel = SubResource("StyleBox_map_mode_tray")
 
 [node name="MapModeBar" type="HBoxContainer" parent="HUDRoot/MapModeTabs" unique_id=860492767]
 layout_mode = 2
+theme_override_constants/separation = 0
 
 [node name="BtnMapPolitical" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=176207158]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(132, 58)
+custom_minimum_size = Vector2(112, 38)
 layout_mode = 2
 tooltip_text = "Political map mode"
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("ButtonGroup_map_modes")
+theme_override_font_sizes/font_size = 14
+theme_override_styles/focus = SubResource("StyleBox_map_mode_focus")
+theme_override_styles/hover = SubResource("StyleBox_map_mode_hover")
+theme_override_styles/normal = SubResource("StyleBox_map_mode_normal")
+theme_override_styles/pressed = SubResource("StyleBox_map_mode_pressed")
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical" unique_id=759560892]
+[node name="Content" type="HBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical"]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -47.0
+offset_top = -9.0
+offset_right = 47.0
+offset_bottom = 9.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 2
-alignment = 1
+theme_override_constants/separation = 8
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content" unique_id=1345141962]
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
 modulate = Color(0.91, 0.87, 0.78, 1)
 material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(22, 22)
+custom_minimum_size = Vector2(16, 16)
 layout_mode = 2
-size_flags_horizontal = 4
 mouse_filter = 2
 texture = ExtResource("25_landmark")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content" unique_id=1690125850]
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical/Content"]
 layout_mode = 2
-size_flags_horizontal = 4
+mouse_filter = 2
+theme_override_font_sizes/font_size = 14
 text = "POLITICAL"
-horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=574808356]
+[node name="BtnMapTerrain" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(104, 58)
+custom_minimum_size = Vector2(112, 38)
 layout_mode = 2
-tooltip_text = "Cover map mode"
+tooltip_text = "Terrain elevation map mode"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_map_modes")
+theme_override_font_sizes/font_size = 14
+theme_override_styles/focus = SubResource("StyleBox_map_mode_focus")
+theme_override_styles/hover = SubResource("StyleBox_map_mode_hover")
+theme_override_styles/normal = SubResource("StyleBox_map_mode_normal")
+theme_override_styles/pressed = SubResource("StyleBox_map_mode_pressed")
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover" unique_id=1286011148]
+[node name="Content" type="HBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapTerrain"]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -42.0
+offset_top = -9.0
+offset_right = 42.0
+offset_bottom = 9.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 2
-alignment = 1
+theme_override_constants/separation = 8
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content" unique_id=1878298566]
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapTerrain/Content"]
 modulate = Color(0.91, 0.87, 0.78, 1)
 material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(22, 22)
+custom_minimum_size = Vector2(16, 16)
 layout_mode = 2
-size_flags_horizontal = 4
-mouse_filter = 2
-texture = ExtResource("31_rug")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content" unique_id=2060761078]
-layout_mode = 2
-size_flags_horizontal = 4
-text = "COVER"
-horizontal_alignment = 1
-
-[node name="BtnMapElevation" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar" unique_id=2046348814]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(132, 58)
-layout_mode = 2
-tooltip_text = "Elevation map mode"
-
-[node name="Content" type="VBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation" unique_id=982271855]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=1185570590]
-modulate = Color(0.91, 0.87, 0.78, 1)
-material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(22, 22)
-layout_mode = 2
-size_flags_horizontal = 4
 mouse_filter = 2
 texture = ExtResource("26_mountain")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapElevation/Content" unique_id=133091782]
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapTerrain/Content"]
 layout_mode = 2
-size_flags_horizontal = 4
-text = "ELEVATION"
-horizontal_alignment = 1
+mouse_filter = 2
+theme_override_font_sizes/font_size = 14
+text = "TERRAIN"
+vertical_alignment = 1
+
+[node name="BtnMapCover" type="Button" parent="HUDRoot/MapModeTabs/MapModeBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112, 38)
+layout_mode = 2
+tooltip_text = "Cover map mode"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_map_modes")
+theme_override_font_sizes/font_size = 14
+theme_override_styles/focus = SubResource("StyleBox_map_mode_focus")
+theme_override_styles/hover = SubResource("StyleBox_map_mode_hover")
+theme_override_styles/normal = SubResource("StyleBox_map_mode_normal")
+theme_override_styles/pressed = SubResource("StyleBox_map_mode_pressed")
+
+[node name="Content" type="HBoxContainer" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -35.0
+offset_top = -9.0
+offset_right = 35.0
+offset_bottom = 9.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("31_rug")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="HUDRoot/MapModeTabs/MapModeBar/BtnMapCover/Content"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 14
+text = "COVER"
+vertical_alignment = 1
 
 [node name="SidePanelAnchor" type="MarginContainer" parent="HUDRoot" unique_id=573809543]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
 anchor_bottom = 1.0
-offset_left = 80.0
-offset_top = 64.0
+offset_left = 58.0
+offset_top = 50.0
 grow_vertical = 2
 
 [node name="OverlayDim" type="ColorRect" parent="HUDRoot" unique_id=483503542]
@@ -584,23 +643,12 @@ visible = false
 [node name="ResearchTreePanel" parent="." unique_id=1128497234 instance=ExtResource("33_research_tree")]
 visible = false
 
-[node name="FriendlyStackPanel" parent="." unique_id=1506711193 instance=ExtResource("19")]
+[node name="LandSelectionPopover" parent="." unique_id=1960894442 instance=ExtResource("16")]
 visible = false
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_top = -160.0
-grow_horizontal = 2
-grow_vertical = 0
 
-[node name="FriendlyDivisionPanel" parent="." unique_id=1960894442 instance=ExtResource("16")]
+[node name="LandSelectionSurround" parent="." instance=ExtResource("37_surround")]
 visible = false
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_top = -160.0
-grow_horizontal = 2
-grow_vertical = 0
+control_count = 2
 
 [node name="FriendlyProvincePanel" parent="." unique_id=1527656262 instance=ExtResource("17")]
 visible = false

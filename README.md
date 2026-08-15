@@ -152,6 +152,5 @@ Repository-wide instructions live in `AGENTS.md`. Claude Code reads the root
 `CLAUDE.md`, which imports the same guide, so the two tools share one policy.
 
 Task workflows live under `skills/`. The post-change documentation workflow is
-`skills/wiki-reconcile/SKILL.md`; `AGENTS.md` tells every coding agent when to run it.
+`skills/docs-reconcile/SKILL.md`; `AGENTS.md` tells every coding agent when to run it.
 OpenAI-facing skill metadata lives beside the skill under `agents/openai.yaml`.
-
