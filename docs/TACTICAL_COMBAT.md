@@ -1209,7 +1209,8 @@ An engaged division is not frozen in place for the duration of combat. Two disti
 active-movement options exist while engaged, deliberately kept far apart in speed so neither
 is confused for the other:
 
-- **Retreat** — full or boosted speed, available once Suppressed, exits the engagement.
+- **Retreat** — full or boosted speed, manually available while Engaged or Suppressed, exits the
+  engagement.
 - **Reposition** — a new, slower movement option, available only while **below** the retreat
   threshold (i.e. not yet Suppressed), that moves the division a short distance *within or
   adjacent to* the current engagement without exiting combat.

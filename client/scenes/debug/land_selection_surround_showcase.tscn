@@ -1,0 +1,150 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/debug/land_selection_surround_showcase.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/game/land_selection_surround.tscn" id="2_surround"]
+[ext_resource type="Theme" path="res://assets/themes/tactical_overlay.tres" id="3_theme"]
+[ext_resource type="PackedScene" path="res://scenes/systems/military/division_icon.tscn" id="4_division_icon"]
+
+[node name="LandSelectionSurroundShowcase" type="Control"]
+custom_minimum_size = Vector2(1152, 720)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("3_theme")
+script = ExtResource("1_script")
+
+[node name="BrightLand" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 576.0
+offset_bottom = 360.0
+mouse_filter = 2
+color = Color(0.68, 0.64, 0.43, 1)
+
+[node name="DarkOcean" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 576.0
+offset_right = 1152.0
+offset_bottom = 360.0
+mouse_filter = 2
+color = Color(0.025, 0.12, 0.19, 1)
+
+[node name="Fog" type="ColorRect" parent="."]
+layout_mode = 0
+offset_top = 360.0
+offset_right = 576.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0.25, 0.29, 0.3, 1)
+
+[node name="Busy" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 576.0
+offset_top = 360.0
+offset_right = 1152.0
+offset_bottom = 720.0
+mouse_filter = 2
+color = Color(0.24, 0.31, 0.2, 1)
+
+[node name="BusyBandA" type="ColorRect" parent="Busy"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 80.0
+offset_right = 550.0
+offset_bottom = 88.0
+rotation = -0.25
+mouse_filter = 2
+color = Color(0.76, 0.7, 0.47, 0.9)
+
+[node name="BusyBandB" type="ColorRect" parent="Busy"]
+layout_mode = 0
+offset_left = 260.0
+offset_top = -20.0
+offset_right = 266.0
+offset_bottom = 380.0
+rotation = 0.31
+mouse_filter = 2
+color = Color(0.74, 0.2, 0.18, 0.75)
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 520.0
+offset_bottom = 48.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.95, 0.98, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "CONNECTED LAND SELECTION SURROUND"
+
+[node name="TwoLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 122.0
+offset_top = 102.0
+offset_right = 300.0
+offset_bottom = 126.0
+mouse_filter = 2
+text = "TOP-RIGHT / IDLE"
+
+[node name="TwoIcon" parent="." instance=ExtResource("4_division_icon")]
+position = Vector2(186, 217)
+
+[node name="TwoControls" parent="." instance=ExtResource("2_surround")]
+layout_mode = 0
+offset_left = 150.0
+offset_top = 145.0
+
+[node name="ThreeLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 680.0
+offset_top = 102.0
+offset_right = 880.0
+offset_bottom = 126.0
+mouse_filter = 2
+text = "TOP-LEFT / HOLD"
+
+[node name="ThreeIcon" parent="." instance=ExtResource("4_division_icon")]
+position = Vector2(756, 217)
+
+[node name="ThreeControls" parent="." instance=ExtResource("2_surround")]
+layout_mode = 0
+offset_left = 720.0
+offset_top = 145.0
+control_count = 3
+
+[node name="FourLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 660.0
+offset_top = 465.0
+offset_right = 850.0
+offset_bottom = 489.0
+mouse_filter = 2
+text = "BOTTOM-LEFT / FOUR"
+
+[node name="FourIcon" parent="." instance=ExtResource("4_division_icon")]
+position = Vector2(736, 577)
+
+[node name="FourControls" parent="." instance=ExtResource("2_surround")]
+layout_mode = 0
+offset_left = 700.0
+offset_top = 505.0
+control_count = 4
+
+[node name="BottomRightLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 122.0
+offset_top = 465.0
+offset_right = 340.0
+offset_bottom = 489.0
+mouse_filter = 2
+text = "BOTTOM-RIGHT / RETREAT"
+
+[node name="BottomRightIcon" parent="." instance=ExtResource("4_division_icon")]
+position = Vector2(186, 577)
+
+[node name="BottomRightControls" parent="." instance=ExtResource("2_surround")]
+layout_mode = 0
+offset_left = 150.0
+offset_top = 505.0

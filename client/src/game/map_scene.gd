@@ -24,6 +24,7 @@ var _nation_definitions_by_id: Dictionary = {}
 var _naval_contact_marker_system: Node = null
 
 var _chat_input_focused: bool = false
+var _ui_pointer_blocked: bool = false
 
 
 func _ready() -> void:
@@ -39,6 +40,8 @@ func _ready() -> void:
 	_camera_system.right_click_requested.connect(_on_camera_right_click_requested)
 	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
+	if not EventBus.ui_pointer_blocking_changed.is_connected(_on_ui_pointer_blocking_changed):
+		EventBus.ui_pointer_blocking_changed.connect(_on_ui_pointer_blocking_changed)
 	_map_loader.map_loaded.connect(_on_map_loaded)
 	_map_loader.map_load_failed.connect(_on_map_load_failed)
 	_naval_contact_marker_system = get_node_or_null("NavalContactMarkerSystem")
@@ -93,10 +96,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if _pause_menu.visible or _chat_input_focused:
+	if not _ui_pointer_blocked or not event is InputEventMouseButton:
 		return
-	if event is InputEventKey:
-		_military_system.handle_input(event)
+	var mouse_button: InputEventMouseButton = event
+	if mouse_button.button_index == MOUSE_BUTTON_LEFT and not mouse_button.pressed:
+		_military_system.cancel_pointer_interaction()
 
 
 ## Returns the selected map identifier for this composition.
@@ -109,6 +113,12 @@ func _get_map_id() -> String:
 ## Static map fields come from MapLoader; current ownership comes from GameState.
 func _create_map_data_source() -> Object:
 	return _RuntimeProvinceDataSource.new(_map_loader)
+
+
+func _on_ui_pointer_blocking_changed(blocking: bool) -> void:
+	_ui_pointer_blocked = blocking
+	if blocking:
+		_military_system.cancel_pointer_interaction()
 
 
 ## Allows a diagnostic subclass to seed isolated state before display systems hydrate.
@@ -155,6 +165,7 @@ func _on_map_loaded(province_count: int) -> void:
 	EventBus.move_mode_requested.connect(func(division_id: String) -> void:
 		_military_system.enter_move_mode(division_id)
 	)
+	EventBus.division_center_camera_requested.connect(_on_division_center_camera_requested)
 	_center_camera_on_selected_nation()
 
 
@@ -170,6 +181,14 @@ func _handle_missing_map_id() -> void:
 	push_error(MESSAGE)
 	EventBus.notification_requested.emit(MESSAGE, "error")
 	SceneManager.call_deferred("goto_lobby")
+
+
+## Resolves a division camera intent to a world position owned by the military system.
+func _on_division_center_camera_requested(division_id: String) -> void:
+	var world_position: Vector2 = _military_system.get_division_world_position(division_id)
+	if world_position == Vector2.INF:
+		return
+	_camera_system.center_on_position(world_position)
 
 
 func _center_camera_on_selected_nation() -> void:

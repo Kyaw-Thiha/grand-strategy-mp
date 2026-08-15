@@ -192,9 +192,15 @@ player behavior here — we're building the modes that match behavior already ob
 in the genre's own playerbase.
 
 **Switching mechanism:** single cycle key (backtick) steps forward through the three
-modes; Shift+backtick steps backward. Three dedicated keys were considered and rejected
-— a 3-state cycle is trivial to reason about and costs one key instead of three. See
-§9 for full keybind rationale.
+modes; Shift+backtick steps backward. The HUD also presents three compact, directly
+selectable controls in one row: Political, Terrain (the elevation rendering), and Cover.
+Each control is 112×38 px and uses a gold shader-tinted 16 px icon to the left of readable
+14 px text. The controls form one segmented dark tray rather than three separately framed
+buttons: inactive segments use muted brass content, while the selected segment uses a warm
+background, bright content, and a gold underline. Equal dimensions keep the row visually
+stable without returning to the former oversized tabs. Three dedicated keys remain rejected —
+a 3-state cycle is trivial to reason about and costs one key instead of three. See §9 for
+full keybind rationale.
 
 Mode presentation crossfades over 250 ms with sine in/out easing. A newer selection
 interrupts the active crossfade from its current opacity instead of queuing transitions.
@@ -259,6 +265,13 @@ terrain (see §3).
 | **Espionage** | *(future, unscoped)* | Reserved panel-row slot |
 | **Division Template Viewer** | TemplateAssignment | FULL_CENTER overlay for viewing/assigning a division template to a selected unit. Opened by clicking the mini comp grid in the bottom selection panel. View state (current template overview) and Select state (template list to assign). Locked when division is in combat. |
 
+The persistent gameplay frame is deliberately compact so the map remains primary: the
+top bar is 50 px high, the icon-first left dock is 58 px wide, and the three map-mode
+controls form a compact 38 px-high row. Side-docked drawers target 332 px and clamp down to 280 px on narrow
+viewports. At widths below 1050 px, the nation name is hidden and resource names use short
+labels. Reserved panel slots stay hidden until their systems ship rather than consuming
+permanent dock space.
+
 ### 5.2 Why Military is one panel with sub-tabs, not three standalone panels
 
 HoI4's model (separate top-level Land/Air/Naval panels) was considered and rejected
@@ -297,23 +310,54 @@ information density it needs:
 - Pressing a *different* panel's hotkey while one is open **closes the current panel,
   opens the new one** — never stacks panels.
 
-### 5.6 Bottom selection panel (max one-third of screen)
+### 5.6 Contextual selection details
 
-Content is selection-dependent:
+Single selected owned land divisions use a screen-space tactical-glass surround attached to the
+projected counter position. Province, enemy-intel, and air-wing details retain the bottom-panel
+presentation until their v2 redesign.
 
 **Selected friendly division:**
-- Identity block (icon, template name, owner flag)
-- HP + suppression dual-bar (matches engine's dual-bar system)
+- HP and suppression remain attached to the strategic-map counter as compact dual bars.
+- Clicking selects the division and displays one continuous hollow counter enclosure, neck, and
+  compact top-right tray. The transparent center keeps the counter and status indicators
+  unobscured. The committed yellow counter ring and owned-counter hover preview are omitted;
+  clicking empty map deselects normally. A new single selection reuses the former ring's quick
+  ease-out pop: the enclosure contracts by 8 px over 120 ms while its border and controls settle
+  to full emphasis. Position and action-state refreshes do not replay the transition.
+- Ordinary visible friendly and enemy land counters use slight opacity reduction while selected,
+  hovered, and drag-preview counters remain fully emphasized. Fog visibility remains authoritative.
+- The single-selection tray shows icon-only Composition and Center Camera actions in that order.
+  Composition opens `DivisionTemplateViewerPanel` without clearing selection and suspends the
+  surround until the viewer closes. Center Camera preserves selection while smoothly centering and
+  toggling between 1.75 close zoom and 0.75 strategic zoom. Composition uses
+  `table-cells-solid-full.svg`; Center Camera uses
+  `arrows-to-dot-solid-full.svg`. A moving idle division adds Hold in the third position using
+  `hand-regular-full.svg`; Hold disappears when the route ends or combat makes it ineligible. An
+  engaged or suppressed division instead adds Retreat in the third position using
+  `person-running-solid-full.svg`; Retreat disappears as soon as withdrawal starts.
+- The connected surface prefers a top-right tray. Near viewport or stable-HUD edges it first slides
+  inward by a small bounded amount, then tries top-left, lower-right, and lower-left. It avoids the
+  top bar, left dock, map-mode controls, and minimized or maximized chat; transient notifications do
+  not move it. Placement retains its current valid orientation until a preferred fallback has clear
+  room, so smooth camera movement and zoom do not cause threshold flicker.
+- Any managed panel suspends the surface. An off-screen counter, a counter behind reserved HUD, or a
+  division with no fitting connected placement hides the surface without clearing selection. It
+  restores without replaying the selection entrance when the same counter becomes placeable again.
+- The enclosure, neck, and tray background remain transparent to map input in every orientation;
+  only native action-button bounds stop clicks and drag selection. Native tooltips use Godot's
+  viewport-edge clamping.
 - Composition summary (mini 5×5 grid thumbnail — 25 colored dots by unit class:
   olive infantry, blue armour, red artillery, teal recon, dark empty). Clicking opens
-  `DivisionTemplateViewerPanel` for viewing/assigning templates. Full 5×5 grid opens in
+  `DivisionTemplateViewerPanel` without clearing selection. Full 5×5 grid opens in
   TacticalGridUI during active combat.
-- Action buttons mirroring keybinds (Move, Hold, Retreat, Cancel) — buttons exist for
-  discoverability and mouse-only play; every one is keybound and tooltips show the
-  bind, consistent with the existing convention in `STRATEGIC_COMBAT.md` ("Move [M]")
-- Movement profile glance: small terrain-passability strip for this division's cover
-  tiers — conditional reveal again, only rendered because this specific division is
-  selected
+- Move is omitted because right-click movement is primary. Hold appears in the tray for eligible
+  movement and remains available through its remappable `G` binding. Retreat appears for owned
+  engaged/suppressed divisions and uses its remappable `C` binding. Reposition remains omitted.
+- For 2+ selected divisions, show a collapsed count chip beside the active division. Expanding
+  it reveals a compact roster with HP/suppression summaries and the active composition.
+  Roster clicks change the active division without replacing the selected set.
+- If the active anchor leaves the usable viewport, hide the popover without clearing
+  selection and restore it when the anchor returns.
 
 **Selected friendly province:**
 - Resource production summary, current buildings, build-queue state

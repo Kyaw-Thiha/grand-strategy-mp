@@ -623,7 +623,7 @@ commits one waypoint and is independent of the others in the chain.
 
 Double-press-and-drag (or a configurable single-drag, see Open Questions) over empty map
 space draws a selection rectangle; on release, every division dot whose position falls
-inside the rectangle is added to the current selection. Standard modifiers apply:
+inside the rectangle replaces the current selection. Standard modifiers apply:
 `Shift + drag` adds to the existing selection rather than replacing it; `Ctrl + drag`
 removes the boxed divisions from the existing selection.
 
@@ -637,6 +637,20 @@ ambiguity about which one a given drag means.
 saved control group (`0`–`9`, per the keybind scheme in `UI_UX_DESIGN.md` §9) — it only
 sets the current selection. A player who wants to save the result presses `Ctrl + [0-9]`
 afterward, exactly as with any other selection method.
+
+### Contextual Division Inspector
+
+Owned divisions keep HP and suppression dual bars on their strategic-map counters. A short
+hover delay reveals a non-interactive identity preview; clicking opens an interactive,
+screen-space inspector adjacent to the selected counter. The inspector follows the active
+division, flips around viewport obstructions, and hides without deselecting when its anchor
+leaves the usable viewport.
+
+With 2+ divisions selected, one active division anchors the UI and supplies the displayed
+composition. Box selection initially shows a collapsed group chip; expanding it reveals a
+compact roster. Clicking a selected counter or roster entry changes the active division
+without replacing the group. `Shift` adds and `Ctrl` removes selection members. Batch Hold
+and Retreat actions apply only through `MilitarySystem`; movement remains right-click based.
 
 ### Formation Move (Multi-Division Group Move)
 

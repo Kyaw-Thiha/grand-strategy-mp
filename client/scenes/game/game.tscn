@@ -1,50 +1,50 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene format=3 uid="uid://bioevjbl2mvm"]
 
-[ext_resource type="Script" path="res://src/game/game_scene.gd" id="1"]
-[ext_resource type="Script" path="res://src/systems/map/map_loader.gd" id="2"]
-[ext_resource type="Script" path="res://src/systems/map/map_renderer.gd" id="3"]
-[ext_resource type="Script" path="res://src/systems/map/map_interaction.gd" id="4"]
-[ext_resource type="Script" path="res://src/systems/map/camera_system.gd" id="5"]
-[ext_resource type="Script" path="res://src/systems/military/military_system.gd" id="6"]
-[ext_resource type="PackedScene" path="res://scenes/game/pause_menu.tscn" id="7"]
-[ext_resource type="Script" path="res://src/systems/map/vision_system.gd" id="8"]
-[ext_resource type="PackedScene" path="res://scenes/game/game_hud.tscn" id="9"]
-[ext_resource type="Script" path="res://src/systems/air/air_wing_system.gd" id="10"]
-[ext_resource type="Script" path="res://src/systems/air/naval_contact_marker_system.gd" id="11"]
+[ext_resource type="Script" uid="uid://b65cojtndld2q" path="res://src/game/game_scene.gd" id="1"]
+[ext_resource type="Script" uid="uid://8omsbyqn8kvy" path="res://src/systems/map/map_loader.gd" id="2"]
+[ext_resource type="Script" uid="uid://yd00biq717vc" path="res://src/systems/map/map_renderer.gd" id="3"]
+[ext_resource type="Script" uid="uid://ysq1gwl2alpv" path="res://src/systems/map/map_interaction.gd" id="4"]
+[ext_resource type="Script" uid="uid://2xapaninscrt" path="res://src/systems/map/camera_system.gd" id="5"]
+[ext_resource type="Script" uid="uid://dfwuurc2gegdp" path="res://src/systems/military/military_system.gd" id="6"]
+[ext_resource type="PackedScene" uid="uid://dnxk3rd7ud6u5" path="res://scenes/game/pause_menu.tscn" id="7"]
+[ext_resource type="Script" uid="uid://c3mnf7bq2xlap" path="res://src/systems/map/vision_system.gd" id="8"]
+[ext_resource type="PackedScene" uid="uid://bafvbna6oqbcy" path="res://scenes/game/game_hud.tscn" id="9"]
+[ext_resource type="Script" uid="uid://dswfqd4vft1f3" path="res://src/systems/air/air_wing_system.gd" id="10"]
+[ext_resource type="Script" uid="uid://ctipiyem654i" path="res://src/systems/air/naval_contact_marker_system.gd" id="11"]
 
-[node name="Game" type="Node"]
+[node name="Game" type="Node" unique_id=1797555996]
 script = ExtResource("1")
 
-[node name="Camera2D" type="Camera2D" parent="."]
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1877006930]
 
-[node name="MapLoader" type="Node" parent="."]
+[node name="MapLoader" type="Node" parent="." unique_id=336519941]
 script = ExtResource("2")
 
-[node name="MapRenderer" type="Node" parent="."]
+[node name="MapRenderer" type="Node" parent="." unique_id=877612772]
 script = ExtResource("3")
 
-[node name="MapInteraction" type="Node" parent="."]
+[node name="MapInteraction" type="Node" parent="." unique_id=1846405925]
 script = ExtResource("4")
 
-[node name="CameraSystem" type="Node" parent="."]
+[node name="CameraSystem" type="Node" parent="." unique_id=1308880194]
 script = ExtResource("5")
 
-[node name="MilitarySystem" type="Node" parent="."]
+[node name="MilitarySystem" type="Node" parent="." unique_id=1373155103]
 script = ExtResource("6")
 
-[node name="VisionSystem" type="Node" parent="."]
+[node name="VisionSystem" type="Node" parent="." unique_id=2063880924]
 script = ExtResource("8")
 
-[node name="DivisionLayer" type="Node2D" parent="."]
+[node name="DivisionLayer" type="Node2D" parent="." unique_id=668914682]
 
-[node name="AirWingLayer" type="Node2D" parent="."]
+[node name="AirWingLayer" type="Node2D" parent="." unique_id=917731557]
 
-[node name="AirWingSystem" type="Node" parent="."]
+[node name="AirWingSystem" type="Node" parent="." unique_id=1936995474]
 script = ExtResource("10")
 
-[node name="NavalContactMarkerSystem" type="Node2D" parent="."]
+[node name="NavalContactMarkerSystem" type="Node2D" parent="." unique_id=584094870]
 script = ExtResource("11")
 
-[node name="PauseMenu" parent="." instance=ExtResource("7")]
+[node name="PauseMenu" parent="." unique_id=906512076 instance=ExtResource("7")]
 
-[node name="GameHUD" parent="." instance=ExtResource("9")]
+[node name="GameHUD" parent="." unique_id=1042365699 instance=ExtResource("9")]

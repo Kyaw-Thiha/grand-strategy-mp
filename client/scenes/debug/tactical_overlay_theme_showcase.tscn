@@ -1,0 +1,486 @@
+[gd_scene format=3 uid="uid://drlaprlg7ur75"]
+
+[ext_resource type="Theme" uid="uid://u3fn55nlk3xp" path="res://assets/themes/tactical_overlay.tres" id="1_theme"]
+[ext_resource type="Script" uid="uid://drucg1en4v0b4" path="res://src/debug/tactical_overlay_theme_showcase.gd" id="2_script"]
+
+[node name="TacticalOverlayThemeShowcase" type="Control" unique_id=169249970]
+custom_minimum_size = Vector2(1152, 720)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+script = ExtResource("2_script")
+
+[node name="Background" type="ColorRect" parent="." unique_id=1527799683]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.035, 0.047, 0.058, 1)
+
+[node name="BackgroundGrid" type="GridContainer" parent="." unique_id=1332546018]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="BrightLand" type="ColorRect" parent="BackgroundGrid" unique_id=751130576]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+color = Color(0.68, 0.64, 0.43, 1)
+
+[node name="RoadA" type="ColorRect" parent="BackgroundGrid/BrightLand" unique_id=19294284]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 105.0
+offset_right = 575.0
+offset_bottom = 111.0
+rotation = -0.14
+color = Color(0.32, 0.27, 0.19, 0.9)
+
+[node name="BorderA" type="ColorRect" parent="BackgroundGrid/BrightLand" unique_id=685478747]
+layout_mode = 0
+offset_left = 260.0
+offset_top = -30.0
+offset_right = 264.0
+offset_bottom = 390.0
+rotation = 0.18
+color = Color(0.85, 0.77, 0.38, 0.9)
+
+[node name="MapLabel" type="Label" parent="BackgroundGrid/BrightLand" unique_id=1084361677]
+layout_mode = 0
+offset_left = 350.0
+offset_top = 218.0
+offset_right = 520.0
+offset_bottom = 250.0
+theme_override_colors/font_color = Color(0.18, 0.17, 0.12, 0.8)
+theme_override_font_sizes/font_size = 20
+text = "ARDENNES"
+
+[node name="DarkOcean" type="ColorRect" parent="BackgroundGrid" unique_id=202279457]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+color = Color(0.025, 0.12, 0.19, 1)
+
+[node name="DepthBand" type="ColorRect" parent="BackgroundGrid/DarkOcean" unique_id=288463109]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 185.0
+offset_bottom = 250.0
+grow_horizontal = 2
+color = Color(0.035, 0.2, 0.27, 0.75)
+
+[node name="Coast" type="ColorRect" parent="BackgroundGrid/DarkOcean" unique_id=995052887]
+layout_mode = 0
+offset_left = 420.0
+offset_top = -20.0
+offset_right = 575.0
+offset_bottom = 390.0
+rotation = 0.11
+color = Color(0.3, 0.36, 0.24, 1)
+
+[node name="Fog" type="ColorRect" parent="BackgroundGrid" unique_id=1502587045]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+color = Color(0.35, 0.39, 0.39, 1)
+
+[node name="FogBand" type="ColorRect" parent="BackgroundGrid/Fog" unique_id=721587373]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.19, 0.22, 0.23, 0.48)
+
+[node name="ProvinceEdge" type="ColorRect" parent="BackgroundGrid/Fog" unique_id=1256197860]
+layout_mode = 0
+offset_left = 70.0
+offset_top = 40.0
+offset_right = 530.0
+offset_bottom = 43.0
+rotation = 0.43
+color = Color(0.66, 0.69, 0.67, 0.55)
+
+[node name="BusyDetail" type="ColorRect" parent="BackgroundGrid" unique_id=841077400]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+color = Color(0.24, 0.31, 0.2, 1)
+
+[node name="ProvinceOne" type="ColorRect" parent="BackgroundGrid/BusyDetail" unique_id=1395828308]
+layout_mode = 0
+offset_right = 210.0
+offset_bottom = 170.0
+color = Color(0.48, 0.38, 0.22, 1)
+
+[node name="ProvinceTwo" type="ColorRect" parent="BackgroundGrid/BusyDetail" unique_id=1041960538]
+layout_mode = 0
+offset_left = 335.0
+offset_top = 165.0
+offset_right = 580.0
+offset_bottom = 360.0
+color = Color(0.18, 0.35, 0.3, 1)
+
+[node name="RoadB" type="ColorRect" parent="BackgroundGrid/BusyDetail" unique_id=2082729726]
+layout_mode = 0
+offset_left = -20.0
+offset_top = 260.0
+offset_right = 600.0
+offset_bottom = 267.0
+rotation = -0.28
+color = Color(0.76, 0.7, 0.47, 0.9)
+
+[node name="BorderB" type="ColorRect" parent="BackgroundGrid/BusyDetail" unique_id=1516418574]
+layout_mode = 0
+offset_left = 250.0
+offset_top = -20.0
+offset_right = 255.0
+offset_bottom = 390.0
+rotation = -0.34
+color = Color(0.74, 0.2, 0.18, 0.75)
+
+[node name="MapLabel" type="Label" parent="BackgroundGrid/BusyDetail" unique_id=1626985441]
+layout_mode = 0
+offset_left = 330.0
+offset_top = 55.0
+offset_right = 535.0
+offset_bottom = 90.0
+theme_override_colors/font_color = Color(0.89, 0.83, 0.62, 0.9)
+theme_override_font_sizes/font_size = 18
+text = "FRONT SECTOR"
+
+[node name="TitleBlock" type="VBoxContainer" parent="." unique_id=1904740739]
+layout_mode = 0
+offset_left = 28.0
+offset_top = 22.0
+offset_right = 430.0
+offset_bottom = 72.0
+mouse_filter = 2
+theme_override_constants/separation = 1
+
+[node name="Title" type="Label" parent="TitleBlock" unique_id=114708304]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 0.97, 0.99, 1)
+theme_override_font_sizes/font_size = 20
+text = "TACTICAL GLASS / STAGE 1"
+
+[node name="Subtitle" type="Label" parent="TitleBlock" unique_id=225728515]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.73, 0.81, 0.86, 1)
+text = "Readability study over representative map values"
+
+[node name="LandGlass" type="PanelContainer" parent="." unique_id=747956961]
+layout_mode = 0
+offset_left = 38.0
+offset_top = 105.0
+offset_right = 475.0
+offset_bottom = 305.0
+theme_type_variation = &"TacticalGlassPanel"
+
+[node name="Highlight" type="PanelContainer" parent="LandGlass" unique_id=599462831]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TacticalTopHighlight"
+
+[node name="Margin" type="MarginContainer" parent="LandGlass" unique_id=1507537743]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 11
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 11
+
+[node name="Content" type="VBoxContainer" parent="LandGlass/Margin" unique_id=1474474049]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Header" type="Label" parent="LandGlass/Margin/Content" unique_id=50022358]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.98, 1)
+theme_override_font_sizes/font_size = 13
+text = "BRIGHT LAND / BUTTON STATES"
+
+[node name="StateRow" type="HBoxContainer" parent="LandGlass/Margin/Content" unique_id=336314908]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="Normal" type="Button" parent="LandGlass/Margin/Content/StateRow" unique_id=830098732]
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+text = "Normal"
+
+[node name="HoverPreview" type="Button" parent="LandGlass/Margin/Content/StateRow" unique_id=1049327867]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+text = "Hover"
+
+[node name="Pressed" type="Button" parent="LandGlass/Margin/Content/StateRow" unique_id=1883790449]
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+toggle_mode = true
+button_pressed = true
+text = "Pressed"
+
+[node name="Disabled" type="Button" parent="LandGlass/Margin/Content/StateRow" unique_id=644480629]
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+disabled = true
+text = "Disabled"
+
+[node name="FocusRow" type="HBoxContainer" parent="LandGlass/Margin/Content" unique_id=509641842]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="FocusPreview" type="Button" parent="LandGlass/Margin/Content/FocusRow" unique_id=162536632]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 0)
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+text = "Keyboard focus"
+
+[node name="LongLabel" type="Button" parent="LandGlass/Margin/Content/FocusRow" unique_id=725180716]
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Actual Godot tooltip: smooth pan, current zoom retained"
+theme_type_variation = &"TacticalOverlayButton"
+text = "Center Camera Without Zoom"
+
+[node name="OceanGlass" type="PanelContainer" parent="." unique_id=2012779451]
+layout_mode = 0
+offset_left = 677.0
+offset_top = 105.0
+offset_right = 1114.0
+offset_bottom = 305.0
+theme_type_variation = &"TacticalGlassPanel"
+
+[node name="Highlight" type="PanelContainer" parent="OceanGlass" unique_id=2053692165]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TacticalTopHighlight"
+
+[node name="Margin" type="MarginContainer" parent="OceanGlass" unique_id=1238845943]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 11
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 11
+
+[node name="Content" type="VBoxContainer" parent="OceanGlass/Margin" unique_id=1859909836]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Header" type="Label" parent="OceanGlass/Margin/Content" unique_id=117108185]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.98, 1)
+theme_override_font_sizes/font_size = 13
+text = "DARK OCEAN / SEMANTIC ACTIONS"
+
+[node name="RestingLabel" type="Label" parent="OceanGlass/Margin/Content" unique_id=1591834891]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.78, 0.84, 1)
+theme_override_font_sizes/font_size = 11
+text = "RESTING"
+
+[node name="RestingRow" type="HBoxContainer" parent="OceanGlass/Margin/Content" unique_id=726256062]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Hold" type="Button" parent="OceanGlass/Margin/Content/RestingRow" unique_id=1826447877]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TacticalHoldButton"
+text = "Hold"
+
+[node name="Retreat" type="Button" parent="OceanGlass/Margin/Content/RestingRow" unique_id=75771173]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TacticalRetreatButton"
+text = "Retreat"
+
+[node name="ActiveLabel" type="Label" parent="OceanGlass/Margin/Content" unique_id=851432792]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.78, 0.84, 1)
+theme_override_font_sizes/font_size = 11
+text = "HOVER EMPHASIS"
+
+[node name="ActiveRow" type="HBoxContainer" parent="OceanGlass/Margin/Content" unique_id=556001639]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HoldHoverPreview" type="Button" parent="OceanGlass/Margin/Content/ActiveRow" unique_id=284138174]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TacticalHoldButton"
+text = "Hold"
+
+[node name="RetreatHoverPreview" type="Button" parent="OceanGlass/Margin/Content/ActiveRow" unique_id=2036861330]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TacticalRetreatButton"
+text = "Retreat"
+
+[node name="FogGlass" type="PanelContainer" parent="." unique_id=733914300]
+layout_mode = 0
+offset_left = 38.0
+offset_top = 415.0
+offset_right = 475.0
+offset_bottom = 615.0
+theme_type_variation = &"TacticalGlassPanel"
+
+[node name="Highlight" type="PanelContainer" parent="FogGlass" unique_id=1593997413]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TacticalTopHighlight"
+
+[node name="Margin" type="MarginContainer" parent="FogGlass" unique_id=1962834232]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 11
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 11
+
+[node name="Content" type="VBoxContainer" parent="FogGlass/Margin" unique_id=705930446]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Header" type="Label" parent="FogGlass/Margin/Content" unique_id=231171957]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.98, 1)
+theme_override_font_sizes/font_size = 13
+text = "FOGGED TERRITORY / COMPACT COPY"
+
+[node name="Body" type="Label" parent="FogGlass/Margin/Content" unique_id=1125003876]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.86, 0.9, 1)
+text = "7th Infantry Division
+Entrenched · Supply stable
+Observation confidence: limited"
+
+[node name="Actions" type="HBoxContainer" parent="FogGlass/Margin/Content" unique_id=1616382586]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="A" type="Button" parent="FogGlass/Margin/Content/Actions" unique_id=832367383]
+layout_mode = 2
+theme_type_variation = &"TacticalOverlayButton"
+text = "A"
+
+[node name="Inspect" type="Button" parent="FogGlass/Margin/Content/Actions" unique_id=408451420]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TacticalOverlayButton"
+text = "Inspect Composition"
+
+[node name="BusyGlass" type="PanelContainer" parent="." unique_id=533635577]
+layout_mode = 0
+offset_left = 677.0
+offset_top = 415.0
+offset_right = 1114.0
+offset_bottom = 615.0
+theme_type_variation = &"TacticalGlassPanel"
+
+[node name="Highlight" type="PanelContainer" parent="BusyGlass" unique_id=1430579711]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TacticalTopHighlight"
+
+[node name="Margin" type="MarginContainer" parent="BusyGlass" unique_id=293088930]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 11
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 11
+
+[node name="Content" type="VBoxContainer" parent="BusyGlass/Margin" unique_id=1012589838]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Header" type="Label" parent="BusyGlass/Margin/Content" unique_id=1155690399]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.98, 1)
+theme_override_font_sizes/font_size = 13
+text = "BUSY DETAIL / TOOLTIP STYLING"
+
+[node name="Tooltip" type="PanelContainer" parent="BusyGlass/Margin/Content" unique_id=1632933017]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+theme_type_variation = &"TacticalTooltipPanel"
+
+[node name="Text" type="Label" parent="BusyGlass/Margin/Content/Tooltip" unique_id=104428385]
+layout_mode = 2
+theme_type_variation = &"TacticalTooltipLabel"
+text = "Center camera on this division
+Smooth pan · current zoom retained"
+
+[node name="Hint" type="Label" parent="BusyGlass/Margin/Content" unique_id=522346860]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.69, 0.79, 0.84, 1)
+text = "Hover Center Camera above to inspect a real tooltip popup"
+
+[node name="BackgroundLabels" type="Control" parent="." unique_id=124977329]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -1.0
+offset_top = -1.0
+offset_right = -1.0
+offset_bottom = -1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Bright" type="Label" parent="BackgroundLabels" unique_id=835117608]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 338.0
+offset_right = 150.0
+offset_bottom = 365.0
+theme_override_colors/font_color = Color(0.12, 0.12, 0.09, 0.85)
+text = "BRIGHT LAND"
+
+[node name="Ocean" type="Label" parent="BackgroundLabels" unique_id=1000431380]
+layout_mode = 0
+offset_left = 594.0
+offset_top = 338.0
+offset_right = 730.0
+offset_bottom = 365.0
+theme_override_colors/font_color = Color(0.66, 0.79, 0.86, 0.9)
+text = "DARK OCEAN"
+
+[node name="Fog" type="Label" parent="BackgroundLabels" unique_id=1187752286]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 680.0
+offset_right = 180.0
+offset_bottom = 706.0
+theme_override_colors/font_color = Color(0.78, 0.82, 0.82, 0.9)
+text = "FOGGED TERRITORY"
+
+[node name="Busy" type="Label" parent="BackgroundLabels" unique_id=1171112916]
+layout_mode = 0
+offset_left = 594.0
+offset_top = 680.0
+offset_right = 760.0
+offset_bottom = 706.0
+theme_override_colors/font_color = Color(0.9, 0.85, 0.67, 0.9)
+text = "BUSY MAP DETAIL"

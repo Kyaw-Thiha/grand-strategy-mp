@@ -285,7 +285,7 @@ Unit tests for movement profile computation and A* path validity.
       - [x] River crossing penalty applied at engagement creation and re-checked each round
       - [x] `reposition_order` cleared on all combat-end paths (retreat, destroy, disengage)
       - [x] Hold broadcast fix: `handleHold()` broadcasts `DIVISION_UPDATES` after clearing `move_order`
-      - [x] Reposition button (Row3/BtnReposition) in `friendly_division_panel.tscn`
+      - [x] Contextual Reposition action in `land_selection_popover.tscn`
       - [x] `unit_reposition` keybind (B), button label shows `[B]`
       - [x] Reposition mode: `_enter_reposition_mode()`, map click → path compute → `REPOSITION` command
       - [x] Client-side ghost path truncation at engagement boundary (waypoint graph distance)
@@ -333,10 +333,10 @@ Unit tests for movement profile computation and A* path validity.
       map_data.json; move orders trimmed at first neutral-territory waypoint; outright rejection
       when first waypoint is neutral; retreat targets avoid neutral territory via
       `getNearestNonNeutralWaypoint()`
-- [x] Combat state label: "STATE · IDLE/ENGAGED/SUPPRESSED/RETREATING" displayed in the bottom
-      selection panel's IdentityBlock, updated live via `division_updated` events
-- [x] Live HP/suppression panel: friendly_division_panel re-reads division data on
-      `division_updated` events, updating HP bar and suppression bar without re-creating buttons
+- [x] Combat state label displayed in the contextual land inspector and updated live via
+      `division_updated` events
+- [x] Live HP/suppression dual bars rendered directly on division counters and refreshed from
+      `division_updated` state
 - [ ] Positional stack mechanics:
       - [x] Allied divisions at same position form ordered stack; player can reorder
       - [x] Only first division engages enemy; on suppression threshold → rotates to back
@@ -464,10 +464,34 @@ Unit tests for movement profile computation and A* path validity.
       - [x] Ghost dot at each waypoint: faded division icon + faded engagement circle;
             observation radius shown on hover only
       - [x] Ghost dots and paths visible to owner and allies
-- [ ] Box Selection — drag over empty map space with no move mode active draws a selection
+- [x] Box Selection — drag over empty map space with no move mode active draws a selection
       rectangle; on release, every division dot inside it is added to the selection;
       `Shift+drag` adds to existing selection, `Ctrl+drag` removes from it; does not create
       or modify a saved control group on its own
+- [x] Single owned-land selection visuals — hollow connected screen-space tactical-glass surround
+      tracks the projected active counter without covering its status indicators; ordinary visible
+      friendly/enemy land counters use smooth, slight opacity differentiation; committed yellow ring
+      and owned hover preview removed; icon-only Composition and Center Camera actions preserve
+      selection, with camera centering using a short smooth pan that toggles between close and
+      strategic zoom levels; new single selections retain the former ring's quick ease-out pop
+- [x] Moving-state Hold action — implemented, automated-verified, and manually approved; an owned idle division with an
+      active waypoint route or final-position target adds Hold after the universal surround actions;
+      tray and remappable keyboard paths share MilitarySystem eligibility, while the server clears
+      both route and final target
+- [ ] Combat-state Retreat action — implemented and client-verified; owned engaged/suppressed
+      divisions add Retreat after the universal surround actions using the approved running-person
+      icon, tray and remappable keyboard paths share MilitarySystem eligibility, and the server
+      revalidates a live opposing engagement before visibility-filtering updates. Core server test
+      execution remains blocked by Node 26's workerpool incompatibility; manual interaction and visual
+      approval are complete
+- [ ] Single-selection hardening — implemented and automated-verified; the connected surround uses
+      stable top-right, top-left, lower-right, and lower-left fallbacks with bounded inward sliding,
+      avoids the top bar, left dock, map-mode controls, and chat, suspends for managed panels, and
+      safely handles off-screen units, interpolation, rapid selection, removal, and adjacent map
+      input. Automated coverage includes `960x540`, `1280x720`, and `1920x1080`; targeted physical
+      interaction, tooltip, and visual approval remain open
+- [x] Existing 2+ owned-land selection inspector remains available as a collapsed chip and roster
+      pending the later multi-selection surround redesign
 - [ ] Formation Move — move order issued to 2+ selected divisions spreads them into a grid
       formation around the destination point rather than converging on one point; adjacent
       division spacing derived from each division's own engagement radius (sum of the two
@@ -625,8 +649,8 @@ All Godot items below are implemented:
 - [x] Reusable two-column layout shell (§6.1)
 - [x] `UnitProfile` scaffolded (§6.6)
 - [x] Side-dock vs. full-center overlay modes (§5.3)
-- [x] Bottom selection panel container — FriendlyDivision, FriendlyProvince,
-      FriendlyStack, EnemyDivision states (§5.6)
+- [x] Contextual owned-land popover plus bottom panels for FriendlyProvince, EnemyDivision,
+      and FriendlyAirWing states (§5.6)
 - [x] `InputMap` with finalized keybind scheme (per UI_UX_DESIGN.md §9)
 - [x] Left-handed mirror preset (§9.1)
 - [x] Settings keybind remapping UI — list/rebind/reset, persisted to `user://keybinds.cfg`
@@ -639,7 +663,7 @@ Key files produced:
 - `src/ui/settings/settings_keybind.gd` — rebind UI with close_callback hook
 - `src/core/keybind_manager.gd` — InputMap registry + config persistence
 - `src/core/keybind_presets.gd` — DEFAULT + LEFT_HANDED presets
-- `scenes/game/panels/friendly_division_panel.tscn|.gd`
+- `scenes/game/panels/land_selection_popover.tscn|.gd`
 - `scenes/game/panels/friendly_province_panel.tscn|.gd`
 - `scenes/game/panels/enemy_division_panel.tscn|.gd`
 - `scenes/game/panels/friendly_stack_panel.tscn|.gd`
@@ -808,14 +832,14 @@ for all attack pattern logic before any Godot work.
 - [x] `template_id` added to `serializeDivision()` so client receives it in DIVISION_UPDATES broadcasts
 - [x] Default template (`preset_combined_arms`) assigned to pre-spawned divisions with grid cell population
 - [x] `DIVISION_UPDATES` broadcast after `ASSIGN_TEMPLATE` so client GameState stays in sync
-- [x] Mini 5×5 composition grid (CompBlock) in `FriendlyDivisionPanel` — 25 ColorRect cells colored by unit class
+- [x] Mini 5×5 composition grid in `LandSelectionPopover` — 25 ColorRect cells colored by unit class
       (olive infantry / steel-blue armour / dark-red artillery / teal recon / dark-brown empty)
-- [x] CompBlock hover effect (subtle darkening on mouse enter, reverts on exit)
+- [x] Composition thumbnail is a full clickable control with hover treatment and tooltip
 - [x] `DivisionTemplateViewerPanel` — FULL_CENTER overlay with read-only 5×5 grid (left) and View/Select states (right)
       - View state: current template name, division type, engagement radius, fill & role balance bars
       - Select state: scrollable template list with hover-preview in left grid, click-to-select, Confirm button
       - Locked state: hides [Change Template →] when division is engaged/retreating/suppressed
-- [x] Viewer panel wired into `GameHUD` with division deselect on open (matching DivisionBuilderPanel pattern)
+- [x] Viewer panel wired into `GameHUD`; opening it preserves the active land selection
 - [x] `game-server/test/6-assign-template.test.ts` — 6 tests (sets template_id, populates cells, clears prior cells,
       recomputes division_type, rejects when engaged, no-op for missing division)
 

@@ -510,6 +510,8 @@ EXPOSES:
   methods:
     pan_to_province(province_id: String)
     pan_to_position(position: Vector2)
+    smooth_pan_to_position(position: Vector2)
+    center_on_position(position: Vector2)
     set_zoom(level: float)
     set_player_input_enabled(enabled: bool)
 CONSUMES:
@@ -747,7 +749,10 @@ EXPOSES:
     close_all()
 CONSUMES:
   signals:
-    EventBus.division_selected      # shows FriendlyDivisionPanel or EnemyDivisionPanel
+    EventBus.division_selected      # updates active land inspector or enemy panel
+    EventBus.division_selection_changed # drives owned-land single/multi state
+    EventBus.division_hover_changed # drives delayed owned-land preview
+    EventBus.division_screen_position_updated # positions contextual land UI
     EventBus.province_selected      # shows FriendlyProvincePanel
     EventBus.division_deselected    # hides all bottom panels
     EventBus.province_deselected    # hides all bottom panels
@@ -878,24 +883,34 @@ SCENE: scenes/game/pause_menu.tscn
 
 ---
 
-### Bottom Selection Panel (4 states) — informational
+### Contextual Selection Displays — informational
 
-No formal module contract (container pattern, not a standalone module). Documents
-the 4 panel scripts and their selection behavior:
+Selection displays read `GameState` and emit intent through `EventBus`; they do not submit
+commands directly or mutate selection/gameplay state.
 
 | Script | Triggered by | Buttons / Content |
 |---|---|---|
-| `FriendlyDivisionPanel` | `EventBus.division_selected` when nation_id == my_nation | Move, Hold (disabled), Cancel; HP/suppression bars |
+| `LandSelectionSurround` | Single owned `division_selection_changed` plus projected counter position | Hollow connected selection visual; Composition, Center Camera, and eligible Hold/Retreat intent controls |
+| `LandSelectionPopover` | Multi-selection and legacy explicit inspector requests | Collapsed/expanded multi roster; composition; contextual Retreat/Reposition; Hold overflow |
 | `EnemyDivisionPanel` | `EventBus.division_selected` when nation_id != my_nation | Intel badge, apparent composition (read-only) |
 | `FriendlyProvincePanel` | `EventBus.province_selected` | Province name + nation, Upgrade/Build Radar/Manage Prod. (visible only for owner) |
-| `FriendlyStackPanel` | Placeholder for future multi-select | — |
+| `FriendlyStackPanel` | Uninstanced placeholder for future positional-stack reorder UI | — |
 
-All 4: centered at bottom via global_position math (no anchor manipulation),
-`mouse_filter = STOP` to prevent click fall-through to map layer,
-StyleBoxFlat border (4px all sides, golden color `Color(0.32, 0.22, 0.12)`).
+`LandSelectionSurround` is positioned in screen space from the active division counter. An SDF
+surface unions the enclosure and tray without seams while cutting out the counter center. Its full
+visual root ignores pointer input; only its tightly bounded native action controls stop pointer
+fall-through. Composition opens the existing template viewer while preserving selection. Center
+Camera is resolved outside the UI and executed by `CameraSystem`. `MilitarySystem` publishes Hold
+and Retreat eligibility and revalidates captured action intent before `CommandQueue` submission.
+`GameHUD` evaluates full-surface top-right, top-left, lower-right, and lower-left placements against
+the viewport and stable HUD reservations, retains valid placement through camera interpolation, and
+suspends the surface while any managed panel is open. Placement changes, context changes, and
+division removal invalidate captured presses without mutating selection.
+Remaining selection panels are centered at the bottom and stop pointer fall-through.
 
 FILES:
-- `src/ui/hud/friendly_division_panel.gd` / `scenes/game/panels/friendly_division_panel.tscn`
+- `src/ui/hud/land_selection_surround.gd` / `scenes/game/land_selection_surround.tscn`
+- `src/ui/hud/land_selection_popover.gd` / `scenes/game/panels/land_selection_popover.tscn`
 - `src/ui/hud/friendly_province_panel.gd` / `scenes/game/panels/friendly_province_panel.tscn`
 - `src/ui/hud/enemy_division_panel.gd` / `scenes/game/panels/enemy_division_panel.tscn`
 - `src/ui/hud/friendly_stack_panel.gd` / `scenes/game/panels/friendly_stack_panel.tscn`

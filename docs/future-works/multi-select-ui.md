@@ -6,6 +6,11 @@ blocks: [Air Fleet Command](air-fleet-command.md)
 
 # Multi-Unit Selection UI
 
+Land-only selection is implemented as a first domain-specific slice: box selection,
+`Shift` add, `Ctrl` remove, an active division, and the contextual collapsed/expanded roster.
+The deferred status now applies to adapting this interaction to air wings and naval flotillas
+and extracting any cross-domain batch-dispatch component required by those v2 designs.
+
 ## What It Does
 
 Allows the player to select multiple units at once (air wings, land divisions, naval
@@ -23,13 +28,13 @@ divisions, and several flotillas. Multi-select is the floor-level solution; Air 
 
 ## Design Considerations (from Phase 12 brainstorming)
 
-**Selection methods to consider:**
-- Box drag on the map (click and drag to select all units in area)
-- Shift-click to add individual units to an existing selection
+**Selection methods:**
+- Land: box drag on empty map, with Shift add and Ctrl remove, is implemented
+- Air/naval: box drag and modifier behavior remain to be designed in v2
 - Panel list with checkboxes (for when units are off-screen or buried)
 - "Select all in fleet" shortcut (if Air Fleet is implemented)
 
-**Selection panel behaviour:**
+**Cross-domain v2 panel behaviour:**
 - Appears when 2+ units are selected
 - Shows a list of selected units with key stats (type, count/strength, mission/state)
 - Individual rows are clickable — click to deselect that unit or drill into it

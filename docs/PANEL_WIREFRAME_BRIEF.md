@@ -31,7 +31,10 @@
 | **Cover** | No | Flat, full 11-tier cover-type fill, distinct colors, no hatching needed (this mode IS the detail view) |
 | **Elevation** | No | Pure relief/hypsometric shading, no political fill |
 
-- Switch via single cycle action (forward/backward), not 3 separate buttons.
+- Show three compact controls in one row: Political, Terrain, and Cover. Keep each control
+  112×38 px with a gold shader-tinted 16 px icon to the left of a readable 14 px label. Use equal
+  dimensions across all three buttons. Backtick cycles
+  forward and Shift+backtick cycles backward without requiring three dedicated keys.
 - Mode never auto-changes on zoom level — always an explicit player choice.
 - Combat terrain modifiers (forest bonus, river penalty) = hover tooltip / engagement-circle
   indicator only. Never permanent map paint in any mode.
@@ -71,23 +74,42 @@
 **Side-docked panels:** map must remain visible/live behind them at all times — these
 are opened frequently (especially Military), can't cost map awareness on every open.
 
+**Persistent HUD footprint:** 50 px top bar, 58 px icon-first left dock, and a 38 px-high
+row of three compact map-mode controls. Drawers target 332 px wide and may clamp to 280 px on narrow
+viewports. Below 1050 px, hide the nation name and abbreviate resource labels. Do not show
+reserved dock slots before their systems ship.
+
 **Full-center overlay panels:** may dim/cover the map — used for occasional,
 decision-heavy screens only (Research tree, DivisionBuilder, TacticalGridUI).
 
 ---
 
-## Bottom selection panel (max 1/3 screen height)
+## Contextual land selection and bottom details
 
-Content swaps based on what's selected — design as 4 distinct states:
+Single selected friendly land divisions use a screen-space connected surround attached to the
+counter. Province, enemy-intel, and air-wing details retain their bottom panels until v2.
 
 ### State A: Friendly division selected
-- Icon + template name + owner flag
-- HP bar + suppression bar (dual-bar, distinct visual treatment from each other)
-- Composition thumbnail (grid summary, not full 5×5 — that's TacticalGridUI's job)
-- Buttons: Move / Hold / Retreat / Cancel — each shows its keybind in a tooltip or
-  inline label (e.g. "Move [Space]")
-- Small terrain-passability strip: shows which cover tiers THIS division can/can't
-  enter (conditional — only renders for this state)
+- HP and suppression dual bars live directly beneath each strategic-map counter.
+- No owned-counter hover preview or committed yellow ring is shown. Click displays a continuous
+  hollow tactical-glass enclosure, neck, and top-right tray; its transparent center leaves the
+  counter and status indicators unobscured. A new single selection plays a 120 ms, 8 px ease-out
+  ring contraction inherited from the former selection highlight. Empty-map click deselects normally.
+- Ordinary visible friendly and enemy land counters are only slightly dimmed, while selected,
+  hovered, and drag-preview counters remain fully emphasized.
+- The tray shows icon-only Composition and Center Camera actions in fixed order. Composition opens
+  the full template viewer while preserving selection and temporarily suspending the surround.
+  Center Camera preserves selection while smoothly centering and toggling between fixed close and
+  strategic zoom levels. A moving idle division adds Hold in the third position; an engaged or
+  suppressed division replaces it with Retreat, and retreating divisions show neither action.
+- Prefer a top-right tray; apply a small inward slide before trying top-left, lower-right, then
+  lower-left. Keep the full connected surface inside the viewport and clear of the top bar, left
+  dock, map-mode row, and visible chat. Ignore transient toasts for placement stability.
+- Managed panels suspend the surface. Off-screen or reserved-HUD-covered counters hide it without
+  deselection and restore without replaying the entrance. Only action buttons block map clicks or
+  drag selection; all surrounding visual geometry remains pointer-transparent.
+- A 2+ selection starts as a collapsed count chip. Expanded mode shows an active-unit
+  composition and compact roster; selecting a roster member does not discard the group.
 
 ### State B: Friendly province selected
 - Production summary, current buildings

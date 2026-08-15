@@ -1,0 +1,21 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/hud/land_selection_surround.gd" id="1_script"]
+[ext_resource type="Theme" path="res://assets/themes/tactical_overlay.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/materials/land_selection_surround.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_surround"]
+resource_local_to_scene = true
+shader = ExtResource("3_shader")
+
+[node name="LandSelectionSurround" type="Control"]
+layout_mode = 3
+mouse_filter = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Surface" type="ColorRect" parent="."]
+layout_mode = 0
+mouse_filter = 2
+material = SubResource("ShaderMaterial_surround")
+color = Color(1, 1, 1, 1)
