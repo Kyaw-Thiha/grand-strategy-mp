@@ -39,6 +39,30 @@ var air_wing_paths: Dictionary = {}
 var naval_contact_markers: Dictionary = {}
 
 
+# ── Session reset ─────────────────────────────────────────────────────────────
+
+## Called exclusively by NetManager on disconnect — this autoload otherwise persists for the
+## life of the process, so without this a new game session's air wing system (and anything
+## else that hydrates from these dictionaries on scene load) would replay the PREVIOUS
+## session's stale data until the first fresh server broadcast overwrote it.
+func reset_session_state() -> void:
+	phase = ""
+	map_id = ""
+	game_speed = 1
+	host_session_id = ""
+	nations.clear()
+	players.clear()
+	provinces.clear()
+	divisions.clear()
+	frontline.clear()
+	relations.clear()
+	proposals.clear()
+	stacks.clear()
+	air_wings.clear()
+	air_wing_paths.clear()
+	naval_contact_markers.clear()
+
+
 # ── Write gate ───────────────────────────────────────────────────────────────
 
 ## Called exclusively by NetManager when a LOBBY_STATE_UPDATE arrives.

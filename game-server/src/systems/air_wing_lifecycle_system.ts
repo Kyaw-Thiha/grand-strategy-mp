@@ -1,5 +1,6 @@
 import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
 import { MISSION_TYPES, WING_LIFECYCLE, serializeWing } from "../rooms/schema/AirWingState.js";
+import type { MissionType } from "../rooms/schema/AirWingState.js";
 
 // ── Module-level mutable constants — mutated ONLY by exported test helpers ───
 
@@ -20,12 +21,17 @@ let ENGAGEMENT_AUTO_RESOLVE_TICKS  = 2;
 let MAX_LOITER_TICKS               = 15;
 let RTB_DURATION_TICKS             = 5;
 let REFUEL_DURATION_TICKS          = 5;
+// Safety valve for a bomber holding back for its escort (see AirWingState's
+// awaiting_escort_rendezvous doc comment) — if the escort never arrives (destroyed mid-
+// rendezvous, some untested edge case), don't leave the bomber slowed forever.
+let RENDEZVOUS_TIMEOUT_TICKS       = 30;
 
 export function setWeaponCooldownTicksForTesting(n: number): void { WEAPON_COOLDOWN_TICKS = n; }
 export function setEngagementAutoResolveTicksForTesting(n: number): void { ENGAGEMENT_AUTO_RESOLVE_TICKS = n; }
 export function setMaxLoiterTicksForTesting(n: number): void { MAX_LOITER_TICKS = n; }
 export function setRtbDurationTicksForTesting(n: number): void { RTB_DURATION_TICKS = n; }
 export function setRefuelDurationTicksForTesting(n: number): void { REFUEL_DURATION_TICKS = n; }
+export function setRendezvousTimeoutTicksForTesting(n: number): void { RENDEZVOUS_TIMEOUT_TICKS = n; }
 export function setReadinessDecayForTesting(rate: number): void { READINESS_DECAY_PER_TICK = rate; }
 export function setReadinessRecoveryForTesting(rate: number): void { READINESS_RECOVERY_RATE = rate; }
 export function setFuelDecayForTesting(rate: number): void { FUEL_DECAY_TRANSIT = rate; }
@@ -45,6 +51,24 @@ const GROUND_ATTACK_LOITER_MAX_TICKS = 5;
 const _groundAttackLoiterCount = new Map<string, number>();
 const GROUND_ATTACK_MISSIONS = new Set(["area", "tactical_bombing"]);
 
+// Every mission this branch adds auto-targeting/patrol behavior to — all of MISSION_TYPES
+// except IDLE (handled separately) and ESCORT (has its own already-correct auto-assignment
+// system and must stay excluded from the generic auto-targeted search).
+const AUTO_TARGETED_MISSIONS: Set<MissionType> = new Set([
+  MISSION_TYPES.INTERCEPTION,
+  MISSION_TYPES.AIR_SUPERIORITY,
+  MISSION_TYPES.TACTICAL_BOMBING,
+  MISSION_TYPES.AREA,
+  MISSION_TYPES.INDUSTRY,
+  MISSION_TYPES.OIL,
+  MISSION_TYPES.LOGISTICS,
+  MISSION_TYPES.RECON,
+  MISSION_TYPES.TRADE_INTERDICTION,
+  MISSION_TYPES.ANTI_SUBMARINE,
+  MISSION_TYPES.ANTI_SHIP,
+  MISSION_TYPES.PORT_STRIKE,
+]);
+
 export { FUEL_DECAY_TRANSIT, FUEL_DECAY_LOITER, FUEL_RTB_THRESHOLD };
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -61,8 +85,13 @@ export class AirWingLifecycleSystem {
   private _lastEngagedTarget: Map<string, string> = new Map();
   private _pendingRedeployTarget: Map<string, string> = new Map();
   private _pendingMissionAfterRedeploy: Map<string, { mission: string; target_id: string }> = new Map();
+  // A mission assignment requested while the wing was ENGAGED (mid-dogfight) — assignMission()
+  // refuses to change mission/target_id during ENGAGED, so the request is stashed here instead
+  // of silently dropped, and applied by resolveEngagement() once the fight actually ends.
+  private _pendingMissionAfterEngagement: Map<string, { mission: string; target_id: string }> = new Map();
   private _pendingTransitAfterRedeploy: Map<string, { lng: number; lat: number }> = new Map();
   private _statusFuel: Map<string, number> = new Map();
+  private _rendezvousTicks:  Map<string, number> = new Map();
 
   tick(state: GameRoomState, _tickCount: number, broadcast: BroadcastFn): void {
     const changed: string[] = [];
@@ -81,6 +110,25 @@ export class AirWingLifecycleSystem {
       // Clear ground-attack loiter counter for non-LOITER wings
       if (wing.lifecycle_state !== WING_LIFECYCLE.LOITER) {
         _groundAttackLoiterCount.delete(wingId);
+      }
+
+      // Rendezvous: a bomber holding back for its escort (air_mission_targeting.ts's
+      // escort-commit branch sets both fields) resumes normal speed once the escort has
+      // caught up and formed up ahead (reached LOITER — the existing ahead-formation "I've
+      // arrived" signal), been reassigned elsewhere, been lost, or a timeout elapses.
+      // Checked unconditionally here (not nested in the lifecycle_state switch below) since
+      // it applies regardless of the bomber's own state, which is usually just TRANSIT.
+      if (wing.awaiting_escort_rendezvous) {
+        const escort = state.air_wings.get(wing.escorted_by_wing_id);
+        const ticks = (this._rendezvousTicks.get(wingId) ?? 0) + 1;
+        this._rendezvousTicks.set(wingId, ticks);
+        const escortArrived = !!escort && escort.lifecycle_state === WING_LIFECYCLE.LOITER;
+        const escortGone = !escort || escort.target_id !== wingId;
+        if (escortArrived || escortGone || ticks >= RENDEZVOUS_TIMEOUT_TICKS) {
+          wing.awaiting_escort_rendezvous = false;
+          this._rendezvousTicks.delete(wingId);
+          didChange = true;
+        }
       }
 
       // 1. Fuel + Readiness: decay while airborne, recover while IDLE/REFUEL
@@ -155,15 +203,17 @@ export class AirWingLifecycleSystem {
           break;
         }
         case WING_LIFECYCLE.LOITER: {
-          const isPatrolMission = wing.mission === MISSION_TYPES.INTERCEPTION
-                                || wing.mission === MISSION_TYPES.AIR_SUPERIORITY;
-          // Patrol wings re-sortie when a new interception target is assigned
-          if (isPatrolMission && wing.target_id !== "") {
-            wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
-            this._loiterTicks.delete(wingId);
-            didChange = true;
-            break;
-          }
+          const isPatrolMission = AUTO_TARGETED_MISSIONS.has(wing.mission as MissionType);
+          // NOTE: there used to be a "relaunch to TRANSIT whenever target_id is non-empty
+          // while LOITER" check here. It is intentionally removed: AirMissionTargetingSystem
+          // already flips LOITER/IDLE -> TRANSIT itself, synchronously, the moment it commits
+          // a new/changed target (and assignMission()'s manual-reassignment path does the
+          // same). By the time this switch statement runs on a later tick, any wing whose
+          // target genuinely changed is therefore already TRANSIT, not LOITER — this check
+          // could only ever misfire on a wing that legitimately arrived at its target and is
+          // supposed to stay LOITER with target_id still set (so AirBombingSystem etc., which
+          // run later in the tick, can act on it), bouncing it back to TRANSIT before those
+          // systems ever saw it as LOITER and it never actually settled long enough to act.
           // Ground-attack specific loiter timeout (shorter than generic MAX_LOITER_TICKS)
           if (GROUND_ATTACK_MISSIONS.has(wing.mission)) {
             const gaCount = (_groundAttackLoiterCount.get(wingId) ?? 0) + 1;
@@ -228,7 +278,13 @@ export class AirWingLifecycleSystem {
   assignMission(wingId: string, mission: string, targetId: string, state: GameRoomState): boolean {
     const wing = state.air_wings.get(wingId);
     if (!wing) return false;
-    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED && mission !== MISSION_TYPES.IDLE) return false;
+    if (wing.lifecycle_state === WING_LIFECYCLE.ENGAGED && mission !== MISSION_TYPES.IDLE) {
+      // Don't drop the order on the floor — remember it and apply it once the dogfight
+      // resolves (resolveEngagement), instead of leaving the wing silently stuck on its
+      // previous mission.
+      this._pendingMissionAfterEngagement.set(wingId, { mission, target_id: targetId });
+      return false;
+    }
 
     wing.mission    = mission;
     wing.target_id  = targetId;
@@ -246,67 +302,24 @@ export class AirWingLifecycleSystem {
       return true;
     }
 
-    if (wing.lifecycle_state === WING_LIFECYCLE.IDLE
-     || wing.lifecycle_state === WING_LIFECYCLE.LOITER) {
+    if (targetId !== "" && (wing.lifecycle_state === WING_LIFECYCLE.IDLE
+     || wing.lifecycle_state === WING_LIFECYCLE.LOITER)) {
       wing.lifecycle_state = WING_LIFECYCLE.TRANSIT;
       this._loiterTicks.delete(wingId);
     }
     return true;
   }
 
-  // ── Escort auto-assignment ─────────────────────────────────────────────────
-
-  private static readonly HEAVY_FIGHTER_PRIMARY = new Set(["strategic_bomber", "tactical_bomber"]);
-  private static readonly HEAVY_FIGHTER_FALLBACK = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
-  private static readonly FIGHTER_PRIMARY = new Set(["cas_plane", "dive_bomber", "naval_bomber"]);
-  private static readonly FIGHTER_FALLBACK = new Set(["strategic_bomber", "tactical_bomber"]);
-
-  autoAssignEscort(wingId: string, state: GameRoomState): void {
-    const wing = state.air_wings.get(wingId);
-    if (!wing) return;
-
-    const isHeavy = wing.aircraft_type === "heavy_fighter";
-    const primary  = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_PRIMARY  : AirWingLifecycleSystem.FIGHTER_PRIMARY;
-    const fallback = isHeavy ? AirWingLifecycleSystem.HEAVY_FIGHTER_FALLBACK : AirWingLifecycleSystem.FIGHTER_FALLBACK;
-
-    const eligibleStates = new Set([WING_LIFECYCLE.TRANSIT, WING_LIFECYCLE.ENGAGED, WING_LIFECYCLE.LOITER]);
-
-    const escortCounts = new Map<string, number>();
-    for (const w of state.air_wings.values()) {
-      if (w.mission === MISSION_TYPES.ESCORT && w.target_id !== "") {
-        escortCounts.set(w.target_id, (escortCounts.get(w.target_id) ?? 0) + 1);
-      }
-    }
-
-    const pickFrom = (typeSet: Set<string>): string => {
-      let best = "";
-      let bestCount = Infinity;
-      for (const w of state.air_wings.values()) {
-        if (w.nation_id !== wing.nation_id) continue;
-        if (!typeSet.has(w.aircraft_type)) continue;
-        if (!eligibleStates.has(w.lifecycle_state as WING_LIFECYCLE)) continue;
-        const count = escortCounts.get(w.wing_id) ?? 0;
-        if (count < bestCount) {
-          bestCount = count;
-          best = w.wing_id;
-        }
-      }
-      return best;
-    };
-
-    let target = pickFrom(primary);
-    if (target === "") target = pickFrom(fallback);
-
-    if (target === "") {
-      if (!isHeavy) {
-        wing.mission = MISSION_TYPES.AIR_SUPERIORITY;
-      }
-      wing.target_id = "";
-      return;
-    }
-
-    wing.target_id = target;
-  }
+  // Escort auto-assignment: previously a one-shot autoAssignEscort() called only at initial
+  // assignment and at orphan-reassignment-on-disband. Retired in favor of driving Escort
+  // through AirMissionTargetingSystem's per-tick loop like every other mission
+  // (resolveEscortTargets/buildEscortCounts in air_mission_targeting.ts) — this gives Escort
+  // the same continuous re-evaluation, hysteresis, and airborne-strictly-preferred-over-idle
+  // tiering as every other mission gets, instead of a one-time snapshot decision. Orphan
+  // reassignment now falls out for free: an orphaned escort's target_id stops resolving to a
+  // live wing, AirMissionTargetingSystem's existing invalidated-target handling clears it,
+  // and the very next tick's search finds a new bomber — no special-cased disbandWing() call
+  // needed.
 
   triggerContact(wingId: string, targetWingId: string, state: GameRoomState): void {
     const wing = state.air_wings.get(wingId);
@@ -337,6 +350,7 @@ export class AirWingLifecycleSystem {
       wing.target_id = "";
       wing.lifecycle_state = WING_LIFECYCLE.RTB;
       broadcast("WING_RTB", { wing_id: wingId, nation_id: wing.nation_id, reason: "mission_complete" });
+      this._applyPendingMissionAfterEngagement(wingId, state);
       return;
     }
 
@@ -350,18 +364,22 @@ export class AirWingLifecycleSystem {
       wing.target_id = "";
       this._loiterTicks.set(wingId, 0);
     }
+    this._applyPendingMissionAfterEngagement(wingId, state);
+  }
+
+  // Applies a mission requested mid-dogfight (assignMission's ENGAGED guard) now that the
+  // wing's lifecycle_state has just moved off ENGAGED — assignMission's own guard no longer
+  // blocks it.
+  private _applyPendingMissionAfterEngagement(wingId: string, state: GameRoomState): void {
+    const pending = this._pendingMissionAfterEngagement.get(wingId);
+    if (!pending) return;
+    this._pendingMissionAfterEngagement.delete(wingId);
+    this.assignMission(wingId, pending.mission, pending.target_id, state);
   }
 
   disbandWing(wingId: string, state: GameRoomState, broadcast: BroadcastFn, messageType = "AIR_WING_DESTROYED"): void {
     const wing = state.air_wings.get(wingId);
     if (!wing) return;
-
-    const orphanedEscorts: string[] = [];
-    for (const w of state.air_wings.values()) {
-      if (w.mission === MISSION_TYPES.ESCORT && w.target_id === wingId) {
-        orphanedEscorts.push(w.wing_id);
-      }
-    }
 
     const nationId = wing.nation_id;
     state.air_wings.delete(wingId);
@@ -374,11 +392,15 @@ export class AirWingLifecycleSystem {
     this._pendingRedeployTarget.delete(wingId);
     this._pendingMissionAfterRedeploy.delete(wingId);
     this._pendingTransitAfterRedeploy.delete(wingId);
+    this._pendingMissionAfterEngagement.delete(wingId);
     this._statusFuel.delete(wingId);
+    this._rendezvousTicks.delete(wingId);
 
-    for (const escortId of orphanedEscorts) {
-      this.autoAssignEscort(escortId, state);
-    }
+    // Orphaned escorts (wings targeting wingId) are NOT reassigned here — deleting the
+    // targeted wing from state.air_wings above already makes AirMissionTargetingSystem's
+    // invalidated-target check fail on the escort's next tick, which clears its target_id
+    // and lets the normal per-tick search reassign it, exactly like every other mission's
+    // target invalidation. No special-cased reassignment needed.
 
     broadcast(messageType, {
       wing_id: wingId,
@@ -449,6 +471,10 @@ export class AirWingLifecycleSystem {
 
   getEngagementTarget(wingId: string): string | null {
     return this._lastEngagedTarget.get(wingId) ?? null;
+  }
+
+  resetLoiterTicks(wingId: string): void {
+    this._loiterTicks.delete(wingId);
   }
 
   startWeaponCooldown(wingId: string, state: GameRoomState): void {

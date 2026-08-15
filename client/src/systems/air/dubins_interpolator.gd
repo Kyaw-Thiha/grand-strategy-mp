@@ -58,7 +58,8 @@ static func evaluate_position(path_data: Dictionary, elapsed_ms: int) -> Vector2
 
 	var speed_deg_per_ms: float = float(path_data.get("speed_deg_per_ms", 0.0))
 	var total_length_deg: float = float(path_data.get("total_length_deg", 0.0))
-	var distance_covered: float = clampf(float(elapsed_ms) * speed_deg_per_ms, 0.0, total_length_deg)
+	var raw_distance: float = float(elapsed_ms) * speed_deg_per_ms
+	var distance_covered: float = clampf(raw_distance, 0.0, total_length_deg)
 	var remaining: float = distance_covered
 	var last_point: Vector2 = start_point
 

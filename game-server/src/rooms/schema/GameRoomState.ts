@@ -103,4 +103,8 @@ export class GameRoomState extends Schema {
   @type({ map: AirWingState })  air_wings  = new MapSchema<AirWingState>();
   @type({ map: NavalContactMarkerState })
   naval_contact_markers = new MapSchema<NavalContactMarkerState>();
+
+  // Province-to-province adjacency, parsed once from map_data.json at room init.
+  // Server-side only — not schema-synced, mirrors DivisionState.grid's pattern above.
+  provinceNeighbors: Map<string, string[]> = new Map();
 }

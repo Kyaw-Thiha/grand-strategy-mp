@@ -83,6 +83,30 @@ export class AirWingState extends Schema {
   // Target wing or province ID for the current mission (empty = no target)
   @type("string") target_id: string = "";
 
+  // Escort-only: hostile wing_id currently being pursued during a break-off intercept.
+  // Empty = flying formation around target_id's bomber, as normal.
+  @type("string") escort_intercept_id: string = "";
+
+  // Escort-only: set when this wing's assigned bomber just went RTB and no replacement
+  // bomber was found — stashes that bomber's home_airbase_province_id so the escort RTBs
+  // there instead of its own home base, skipping patrol duty. Cleared once consumed by
+  // _assignRtbPaths.
+  @type("string") escort_rtb_fallback_province_id: string = "";
+
+  // Bomber-only reciprocal of an escort's target_id — the wing_id of this bomber's primary
+  // escort, if any. Only one escort is tracked even if multiple are assigned; set when an
+  // escort commits to this bomber (air_mission_targeting.ts), read by
+  // awaiting_escort_rendezvous's clearing condition in air_wing_lifecycle_system.ts.
+  @type("string") escorted_by_wing_id: string = "";
+
+  // Bomber-only: true while this bomber is holding back (flying at reduced speed, see
+  // air_dubins_pathfinder.ts's per-wing advancement loop) waiting for a newly-assigned escort
+  // to catch up and get ahead of it, rather than pressing on at full speed while the escort
+  // plays catch-up indefinitely. Cleared by air_wing_lifecycle_system.ts once the escort has
+  // arrived (reached LOITER ahead of the bomber), been reassigned elsewhere, been lost, or a
+  // timeout elapses.
+  @type("boolean") awaiting_escort_rendezvous: boolean = false;
+
   // Home airbase — references an existing ProvinceState province_id
   @type("string") home_airbase_province_id: string = "";
 
@@ -180,6 +204,10 @@ export function serializeWing(wing: AirWingState): Record<string, unknown> {
     lifecycle_state:          wing.lifecycle_state,
     mission:                  wing.mission,
     target_id:                wing.target_id,
+    escort_intercept_id:      wing.escort_intercept_id,
+    escort_rtb_fallback_province_id: wing.escort_rtb_fallback_province_id,
+    escorted_by_wing_id:      wing.escorted_by_wing_id,
+    awaiting_escort_rendezvous: wing.awaiting_escort_rendezvous,
     home_airbase_province_id: wing.home_airbase_province_id,
     path_gen_id:              wing.path_gen_id,
     path_elapsed_ms:          wing.path_elapsed_ms,

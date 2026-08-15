@@ -233,6 +233,8 @@ export interface EngagementRef {
   engagement_id: string;
   attacker_nation_id: string;
   defender_nation_id: string;
+  position_lng: number;
+  position_lat: number;
   defender_cells: Array<{ unit_type: string; hp: number; suppression: number; incapacitated: boolean }>;
   applyAirStrikeDelta(deltas: Array<{ cell_index: number; hp_damage: number; supp_damage: number }>): void;
 }
@@ -1713,6 +1715,8 @@ export class CombatSystem {
         engagement_id:      syn.engagement_id,
         attacker_nation_id: syn.attacker_nation_id,
         defender_nation_id: syn.defender_nation_id,
+        position_lng:       syn.position_lng,
+        position_lat:       syn.position_lat,
         defender_cells: cells,
         applyAirStrikeDelta(deltas) {
           for (const hit of deltas) {
@@ -1749,6 +1753,8 @@ export class CombatSystem {
         engagement_id:      pair.engagement_id,
         attacker_nation_id: atkDiv.nation_id,
         defender_nation_id: defDiv.nation_id,
+        position_lng:       midLng,
+        position_lat:       midLat,
         defender_cells: liveCells,
         applyAirStrikeDelta(deltas) {
           for (const hit of deltas) {
