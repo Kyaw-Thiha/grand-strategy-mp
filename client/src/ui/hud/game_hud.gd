@@ -18,17 +18,20 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _nation_label: Label                  = %NationLabel
 @onready var _session_timer: Label                 = %SessionTimer
 @onready var _flag_texture: TextureRect            = %FlagTexture
+@onready var _manpower_label: Label                = %ManpowerLabel
+@onready var _steel_label: Label                   = %SteelLabel
+@onready var _oil_label: Label                     = %OilLabel
+@onready var _fuel_label: Label                    = %FuelLabel
 
 @onready var _btn_settings: Button = %SettingsButton
-@onready var _btn_map_pol:  Button = %BtnMapPolitical
-@onready var _btn_map_cov:  Button = %BtnMapCover
-@onready var _btn_map_ele:  Button = %BtnMapElevation
+@onready var _btn_map_political: Button = %BtnMapPolitical
+@onready var _btn_map_terrain: Button = %BtnMapTerrain
+@onready var _btn_map_cover: Button = %BtnMapCover
 
 @onready var _dock_btn_q: Button = $HUDRoot/LeftDockRail/VBox/DockButton_Q
 @onready var _dock_btn_e: Button = $HUDRoot/LeftDockRail/VBox/DockButton_E
 @onready var _dock_btn_t: Button = $HUDRoot/LeftDockRail/VBox/DockButton_T
 @onready var _dock_btn_y: Button = $HUDRoot/LeftDockRail/VBox/DockButton_Y
-@onready var _dock_btn_u: Button = $HUDRoot/LeftDockRail/VBox/DockButton_U
 @onready var _research_progress_fill: ColorRect = $HUDRoot/LeftDockRail/VBox/DockButton_Q/ResearchProgressFill
 
 @onready var _military_panel: Control = $MilitaryPanel
@@ -37,9 +40,9 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _research_panel: Control = $ResearchPanel
 @onready var _research_tree_panel: Control = $ResearchTreePanel
 
-@onready var _friendly_div_panel: Control = $FriendlyDivisionPanel
+@onready var _land_selection_popover: Control = $LandSelectionPopover
+@onready var _land_selection_surround: LandSelectionSurround = $LandSelectionSurround
 @onready var _friendly_prov_panel: Control = $FriendlyProvincePanel
-@onready var _friendly_stack_panel: Control = $FriendlyStackPanel
 @onready var _enemy_div_panel: Control = $EnemyDivisionPanel
 @onready var _friendly_air_wing_panel: Control = $FriendlyAirWingPanel
 @onready var _chat_panel: Control = $ChatPanel
@@ -62,6 +65,18 @@ var _is_ui_pointer_blocking: bool = false
 var _is_ui_text_input_focused: bool = false
 var _session_elapsed_seconds: float = 0.0
 var _last_displayed_session_seconds: int = -1
+var _map_mode_index: int = 0
+var _is_narrow_hud: bool = false
+var _division_screen_positions: Dictionary = {}
+var _selected_land_division_ids: Array[String] = []
+var _active_land_division_id: String = ""
+var _hold_eligibility_division_id: String = ""
+var _hold_eligible: bool = false
+var _retreat_eligibility_division_id: String = ""
+var _retreat_eligible: bool = false
+var _pending_land_selection_animation_id: String = ""
+var _land_surround_placement: StringName = &""
+var _land_surround_tray_slide: float = 0.0
 
 const _BOTTOM_PANEL_CHAT_GAP: float = 12.0
 const _BOTTOM_PANEL_MARGIN: float = 16.0
@@ -70,6 +85,17 @@ const _BOTTOM_SELECTION_PANEL_DOCK_GAP: float = 16.0
 const _TOAST_CHAT_GAP: float = 12.0
 const _TOAST_WIDTH: float = 328.0
 const _TOAST_HEIGHT: float = 280.0
+const _NARROW_HUD_BREAKPOINT: float = 1050.0
+const _LAND_POPOVER_OFFSET: float = 18.0
+const _LAND_POPOVER_MARGIN: float = 10.0
+const _LAND_SURROUND_VIEWPORT_MARGIN: float = 8.0
+const _LAND_SURROUND_RESERVED_GAP: float = 4.0
+const _LAND_SURROUND_PLACEMENT_HYSTERESIS: float = 8.0
+const _SIDE_DRAWER_WIDTH: float = 332.0
+const _SIDE_DRAWER_MIN_WIDTH: float = 280.0
+const _MAP_MODES: Array[String] = ["political", "elevation", "cover"]
+const _MAP_MODE_ACTIVE_TEXT := Color("fff1d2")
+const _MAP_MODE_INACTIVE_TEXT := Color("a99c87")
 
 
 ## Supplies the scene-owned map systems used by HUD panels and UI actions.
@@ -95,9 +121,10 @@ func _ready() -> void:
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_register_initial_ui_input_ownership()
 	_btn_settings.pressed.connect(func() -> void: EventBus.settings_requested.emit())
-	_btn_map_pol.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("political"))
-	_btn_map_cov.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("cover"))
-	_btn_map_ele.pressed.connect(func() -> void: EventBus.map_mode_changed.emit("elevation"))
+	_btn_map_political.pressed.connect(_set_map_mode.bind(0))
+	_btn_map_terrain.pressed.connect(_set_map_mode.bind(1))
+	_btn_map_cover.pressed.connect(_set_map_mode.bind(2))
+	_refresh_map_mode_button_visuals()
 
 	# Click outside center panel = close
 	overlay_dim.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -200,8 +227,6 @@ func _ready() -> void:
 		HUDManager.PlacementMode.FULL_CENTER
 	)
 	EventBus.division_template_viewer_open_requested.connect(func(div_id: String) -> void:
-		if _military_system != null and _military_system.has_method("deselect"):
-			_military_system.deselect()
 		if _map_interaction != null and _map_interaction.has_method("deselect"):
 			_map_interaction.deselect()
 		if _map_renderer != null and _map_renderer.has_method("clear_highlights"):
@@ -321,6 +346,13 @@ func _ready() -> void:
 	EventBus.province_selected.connect(_on_province_selected)
 	EventBus.air_wing_selected.connect(_on_air_wing_selected)
 	EventBus.division_deselected.connect(_on_bottom_bar_deselected)
+	EventBus.division_selection_changed.connect(_on_land_selection_changed)
+	EventBus.division_active_changed.connect(_on_land_active_changed)
+	EventBus.division_hold_eligibility_changed.connect(_on_division_hold_eligibility_changed)
+	EventBus.division_retreat_eligibility_changed.connect(_on_division_retreat_eligibility_changed)
+	EventBus.division_screen_position_updated.connect(_on_division_screen_position_updated)
+	EventBus.division_removed.connect(_on_land_division_removed)
+	EventBus.move_mode_active_changed.connect(hud_manager.set_move_mode_active)
 	EventBus.province_deselected.connect(_on_bottom_bar_deselected)
 	EventBus.air_wing_deselected.connect(_on_bottom_bar_deselected)
 	EventBus.research_started.connect(_on_research_started)
@@ -332,7 +364,11 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
 	if _chat_panel.has_signal("layout_changed"):
 		_chat_panel.connect("layout_changed", _on_chat_panel_layout_changed)
+	_layout_persistent_hud()
 	_layout_bottom_hud()
+	_land_selection_surround.action_requested.connect(_on_land_selection_action_requested)
+	for action_button: Button in _land_selection_surround.get_all_control_buttons():
+		_register_ui_input_ownership_root(action_button)
 
 
 func _process(delta: float) -> void:
@@ -341,6 +377,8 @@ func _process(delta: float) -> void:
 	if display_seconds != _last_displayed_session_seconds:
 		set_session_time(display_seconds)
 	_refresh_ui_pointer_blocking()
+	_position_land_selection_popover()
+	_position_land_selection_surround()
 
 
 func _make_dock_toggle(panel_name: String) -> Callable:
@@ -360,6 +398,14 @@ func _input(event: InputEvent) -> void:
 	if _chat_panel != null and _chat_panel.has_method("is_message_input_focused"):
 		if _chat_panel.is_message_input_focused():
 			return
+	if event.is_action_pressed("map_mode_forward", false, true):
+		_cycle_map_mode(1)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("map_mode_backward", false, true):
+		_cycle_map_mode(-1)
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("chat_team", false, true):
 		if _chat_panel != null and _chat_panel.has_method("open_chat_input"):
 			_chat_panel.open_chat_input()
@@ -399,9 +445,8 @@ func _register_initial_ui_input_ownership() -> void:
 		_diplomacy_panel,
 		_research_panel,
 		_research_tree_panel,
-		_friendly_div_panel,
+		_land_selection_popover,
 		_friendly_prov_panel,
-		_friendly_stack_panel,
 		_enemy_div_panel,
 		_chat_panel,
 	]:
@@ -457,7 +502,7 @@ func _is_pointer_over_registered_ui() -> bool:
 ## Returns: true when pointer-driven map camera controls should be suppressed.
 func _is_position_over_registered_ui(viewport_position: Vector2) -> bool:
 	for control: Control in _ui_pointer_blocker_roots:
-		if control != null and control.is_visible_in_tree():
+		if control != null and control.is_visible_in_tree() and control.mouse_filter != Control.MOUSE_FILTER_IGNORE:
 			if control.get_global_rect().has_point(viewport_position):
 				return true
 	return false
@@ -532,6 +577,8 @@ func _on_panel_opened(panel_name: String) -> void:
 	if btn != null:
 		_set_dock_button_active(btn)
 	var entry: Dictionary = hud_manager._registry.get(panel_name, {})
+	_land_selection_popover.set_suspended(true)
+	_land_selection_surround.set_displayed(false)
 	if entry.get("placement", -1) == HUDManager.PlacementMode.SIDE_DOCKED:
 		_hide_all_bottom_panels()
 
@@ -539,6 +586,8 @@ func _on_panel_opened(panel_name: String) -> void:
 func _on_panel_closed(panel_name: String) -> void:
 	if hud_manager.get_open_panel() == "":
 		_set_dock_button_active(null)
+		_land_selection_popover.set_suspended(false)
+		_position_land_selection_surround()
 
 
 func _get_dock_button_for_panel(panel_name: String) -> Button:
@@ -621,6 +670,41 @@ func _set_dock_button_active(btn: Button) -> void:
 		btn.add_theme_stylebox_override("normal", style)
 
 
+## Cycles the shared map mode and keeps the compact HUD controls synchronized.
+## Parameters:
+## - direction: positive for forward and negative for backward.
+## Returns: nothing.
+func _cycle_map_mode(direction: int) -> void:
+	_set_map_mode(posmod(_map_mode_index + direction, _MAP_MODES.size()))
+
+
+## Selects a map mode directly and synchronizes the three compact buttons.
+## Parameters:
+## - mode_index: index in the canonical political, cover, elevation cycle order.
+## Returns: nothing.
+func _set_map_mode(mode_index: int) -> void:
+	_map_mode_index = mode_index
+	_btn_map_political.button_pressed = mode_index == 0
+	_btn_map_terrain.button_pressed = mode_index == 1
+	_btn_map_cover.button_pressed = mode_index == 2
+	_refresh_map_mode_button_visuals()
+	EventBus.map_mode_changed.emit(_MAP_MODES[mode_index])
+
+
+## Gives the selected map-mode segment stronger text and icon emphasis.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_map_mode_button_visuals() -> void:
+	var buttons: Array[Button] = [_btn_map_political, _btn_map_terrain, _btn_map_cover]
+	for index: int in buttons.size():
+		var button: Button = buttons[index]
+		var is_active: bool = index == _map_mode_index
+		var label: Label = button.get_node("Content/Label") as Label
+		label.add_theme_color_override(
+			"font_color", _MAP_MODE_ACTIVE_TEXT if is_active else _MAP_MODE_INACTIVE_TEXT
+		)
+
+
 func _on_sub_tab_cycle_requested(panel_name: String, forward: bool) -> void:
 	if not hud_manager.is_panel_open(panel_name):
 		return
@@ -661,23 +745,119 @@ func set_nation(nation_name: String, flag_texture: Texture2D) -> void:
 
 ## ── Bottom selection bar ───────────────────────────────────────────────────
 
-## Handles division selection — shows FriendlyDivisionPanel for own divisions,
-## EnemyDivisionPanel for enemy divisions. Hides other bottom panels.
+## Handles owned land selection by clearing mutually-exclusive bottom details.
 func _on_division_selected(div_id: String) -> void:
 	var data: Dictionary = GameState.get_division(div_id)
 	if data.is_empty():
 		return
 	_hide_all_bottom_panels()
 	if _is_side_panel_open():
+		_land_selection_popover.set_suspended(true)
 		return
 	var my_nation: String = GameState.get_my_nation_id()
-	if data.get("nation_id", "") == my_nation:
-		_friendly_div_panel.populate(div_id, data)
-		_friendly_div_panel.visible = true
-	else:
+	if not my_nation.is_empty() and data.get("nation_id", "") != my_nation:
 		_enemy_div_panel.populate(div_id, data)
 		_enemy_div_panel.visible = true
-	_layout_bottom_hud()
+		_layout_bottom_hud()
+
+
+## Tracks the selected owned-land set without mutating gameplay selection.
+func _on_land_selection_changed(division_ids: Array[String]) -> void:
+	var previous_single_id: String = _active_land_division_id \
+			if _selected_land_division_ids.size() == 1 else ""
+	_selected_land_division_ids = division_ids.duplicate()
+	if not _selected_land_division_ids.has(_active_land_division_id):
+		_active_land_division_id = _selected_land_division_ids[0] \
+				if not _selected_land_division_ids.is_empty() else ""
+	var next_single_id: String = _active_land_division_id \
+			if _selected_land_division_ids.size() == 1 else ""
+	if next_single_id != previous_single_id:
+		_land_surround_placement = &""
+		_land_surround_tray_slide = 0.0
+	if next_single_id.is_empty():
+		_pending_land_selection_animation_id = ""
+	elif next_single_id != previous_single_id:
+		_pending_land_selection_animation_id = next_single_id
+	_refresh_land_selection_actions()
+	_position_land_selection_surround()
+
+
+func _on_land_active_changed(division_id: String) -> void:
+	var previous_active_id: String = _active_land_division_id
+	_active_land_division_id = division_id
+	if _selected_land_division_ids.size() == 1 and division_id != previous_active_id:
+		_pending_land_selection_animation_id = division_id
+		_land_surround_placement = &""
+		_land_surround_tray_slide = 0.0
+	_refresh_land_selection_actions()
+	_position_land_selection_surround()
+
+
+## Applies MilitarySystem-owned Hold availability to the active single-selection tray.
+## Parameters:
+## - division_id: division whose eligibility was recomputed.
+## - eligible: whether Hold is currently valid for that division.
+## Returns: nothing.
+func _on_division_hold_eligibility_changed(division_id: String, eligible: bool) -> void:
+	_hold_eligibility_division_id = division_id
+	_hold_eligible = eligible
+	_refresh_land_selection_actions()
+	_position_land_selection_surround()
+
+
+## Applies MilitarySystem-owned Retreat availability to the active single-selection tray.
+## Parameters:
+## - division_id: division whose eligibility was recomputed.
+## - eligible: whether Retreat is currently valid for that division.
+## Returns: nothing.
+func _on_division_retreat_eligibility_changed(division_id: String, eligible: bool) -> void:
+	_retreat_eligibility_division_id = division_id
+	_retreat_eligible = eligible
+	_refresh_land_selection_actions()
+	_position_land_selection_surround()
+
+
+## Refreshes tray actions while retaining a stable division context for input dispatch.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_land_selection_actions() -> void:
+	var has_single_context: bool = _selected_land_division_ids.size() == 1 \
+			and not _active_land_division_id.is_empty() \
+			and _selected_land_division_ids.has(_active_land_division_id)
+	var context_division_id: String = _active_land_division_id if has_single_context else ""
+	_land_selection_surround.set_action_context(
+		context_division_id,
+		has_single_context
+			and _hold_eligibility_division_id == context_division_id
+			and _hold_eligible,
+		has_single_context
+			and _retreat_eligibility_division_id == context_division_id
+			and _retreat_eligible
+	)
+
+
+## Relays a validated single-division tray action without mutating gameplay state.
+func _on_land_selection_action_requested(action_id: StringName, division_id: String) -> void:
+	if _selected_land_division_ids.size() != 1 or _active_land_division_id.is_empty():
+		return
+	if division_id != _active_land_division_id or not _selected_land_division_ids.has(division_id):
+		return
+	var division_data: Dictionary = GameState.get_division(division_id)
+	if division_data.is_empty() or division_data.get("combat_state", "idle") == "destroyed":
+		return
+	var my_nation: String = GameState.get_my_nation_id()
+	if not my_nation.is_empty() and division_data.get("nation_id", "") != my_nation:
+		return
+	match action_id:
+		&"composition":
+			_land_selection_surround.set_displayed(false)
+			EventBus.division_template_viewer_open_requested.emit(division_id)
+		&"center_camera":
+			EventBus.division_center_camera_requested.emit(division_id)
+		&"hold":
+			EventBus.division_hold_requested.emit(division_id)
+		&"retreat":
+			EventBus.division_retreat_requested.emit(division_id)
 
 
 ## Handles air wing selection — shows FriendlyAirWingPanel for own wings.
@@ -695,7 +875,35 @@ func _on_air_wing_selected(wing_id: String) -> void:
 
 ## Recenter all bottom panels when the viewport is resized.
 func _on_viewport_size_changed() -> void:
+	_layout_persistent_hud()
 	_layout_bottom_hud()
+	_position_land_selection_surround()
+
+
+## Applies the single narrow-screen breakpoint and clamps side drawer width.
+## Parameters:
+## - width_override: optional logical viewport width used by deterministic layout tests.
+## Returns: nothing.
+func _layout_persistent_hud(width_override: float = -1.0) -> void:
+	var viewport_width: float = width_override
+	if viewport_width <= 0.0:
+		viewport_width = get_viewport().get_visible_rect().size.x
+	var drawer_width: float = minf(
+		_SIDE_DRAWER_WIDTH,
+		maxf(_SIDE_DRAWER_MIN_WIDTH, viewport_width * 0.36)
+	)
+	for panel: Control in [_military_panel, _economy_panel, _diplomacy_panel, _research_panel]:
+		panel.custom_minimum_size.x = drawer_width
+
+	var use_narrow_layout: bool = viewport_width < _NARROW_HUD_BREAKPOINT
+	if use_narrow_layout == _is_narrow_hud:
+		return
+	_is_narrow_hud = use_narrow_layout
+	_nation_label.visible = not use_narrow_layout
+	_manpower_label.text = "MP --" if use_narrow_layout else "MANPOWER --"
+	_steel_label.text = "ST --" if use_narrow_layout else "STEEL --"
+	_oil_label.text = "OIL --"
+	_fuel_label.text = "FUEL --"
 
 
 ## Relays chat size changes back into the bottom HUD layout.
@@ -720,8 +928,261 @@ func _layout_bottom_hud_deferred() -> void:
 	await get_tree().process_frame
 	_position_chat_panel()
 	_position_toast_container()
-	for panel: Control in [_friendly_div_panel, _friendly_prov_panel, _friendly_stack_panel, _enemy_div_panel, _friendly_air_wing_panel]:
+	for panel: Control in [_friendly_prov_panel, _enemy_div_panel, _friendly_air_wing_panel]:
 		_position_bottom_selection_panel(panel)
+	_position_land_selection_popover()
+	_position_land_selection_surround()
+
+
+## Places the contextual land inspector beside its active world-space counter.
+## Parameters: none.
+## Returns: nothing.
+func _position_land_selection_popover() -> void:
+	if _land_selection_popover == null or not _land_selection_popover.is_display_requested():
+		return
+	var anchor_id: String = _land_selection_popover.get_anchor_division_id()
+	var anchor: Vector2 = _division_screen_positions.get(anchor_id, Vector2(-1.0, -1.0))
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var usable_rect := Rect2(
+		Vector2(_left_dock_rail.get_global_rect().end.x + _LAND_POPOVER_MARGIN, _map_mode_tabs.get_global_rect().end.y + _LAND_POPOVER_MARGIN),
+		Vector2(
+			viewport_size.x - _left_dock_rail.get_global_rect().end.x - (_LAND_POPOVER_MARGIN * 2.0),
+			viewport_size.y - _map_mode_tabs.get_global_rect().end.y - (_LAND_POPOVER_MARGIN * 2.0)
+		)
+	)
+	if anchor.x < usable_rect.position.x or anchor.y < usable_rect.position.y or anchor.x > usable_rect.end.x or anchor.y > usable_rect.end.y:
+		_land_selection_popover.set_anchor_available(false)
+		return
+	var popover_size: Vector2 = _land_selection_popover.get_combined_minimum_size()
+	_land_selection_popover.size = popover_size
+	var candidates: Array[Vector2] = [
+		anchor + Vector2(-popover_size.x - _LAND_POPOVER_OFFSET, -popover_size.y - _LAND_POPOVER_OFFSET),
+		anchor + Vector2(_LAND_POPOVER_OFFSET, -popover_size.y - _LAND_POPOVER_OFFSET),
+		anchor + Vector2(-popover_size.x - _LAND_POPOVER_OFFSET, _LAND_POPOVER_OFFSET),
+		anchor + Vector2(_LAND_POPOVER_OFFSET, _LAND_POPOVER_OFFSET),
+	]
+	var chosen_position: Vector2 = candidates[0]
+	for candidate: Vector2 in candidates:
+		var candidate_rect := Rect2(candidate, popover_size)
+		if usable_rect.encloses(candidate_rect) and not _land_popover_overlaps_chat(candidate_rect):
+			chosen_position = candidate
+			break
+	chosen_position.x = clampf(chosen_position.x, usable_rect.position.x, usable_rect.end.x - popover_size.x)
+	chosen_position.y = clampf(chosen_position.y, usable_rect.position.y, usable_rect.end.y - popover_size.y)
+	var chosen_rect := Rect2(chosen_position, popover_size)
+	if _land_popover_overlaps_chat(chosen_rect):
+		chosen_position.y = minf(chosen_position.y, _chat_panel.get_global_rect().position.y - popover_size.y - _LAND_POPOVER_MARGIN)
+		chosen_position.y = clampf(chosen_position.y, usable_rect.position.y, usable_rect.end.y - popover_size.y)
+	_land_selection_popover.global_position = chosen_position
+	_land_selection_popover.set_leader_target(anchor)
+	_land_selection_popover.set_anchor_available(true)
+
+
+func _land_popover_overlaps_chat(rect: Rect2) -> bool:
+	return _chat_panel != null and _chat_panel.visible and rect.intersects(_chat_panel.get_global_rect())
+
+
+func _on_division_screen_position_updated(division_id: String, screen_position: Vector2) -> void:
+	_division_screen_positions[division_id] = screen_position
+	if division_id == _active_land_division_id:
+		_position_land_selection_surround()
+
+
+## Drops stale projection data as soon as a division leaves GameState.
+## Parameters:
+## - division_id: removed division whose cached anchor is no longer valid.
+## Returns: nothing.
+func _on_land_division_removed(division_id: String) -> void:
+	_division_screen_positions.erase(division_id)
+	if division_id == _active_land_division_id:
+		_land_selection_surround.set_displayed(false)
+		_position_land_selection_surround()
+
+
+## Attaches the single-selection surround to the projected counter position.
+func _position_land_selection_surround() -> void:
+	if _land_selection_surround == null:
+		return
+	if _selected_land_division_ids.size() != 1 or _active_land_division_id.is_empty() \
+			or not _selected_land_division_ids.has(_active_land_division_id):
+		_land_selection_surround.set_displayed(false)
+		return
+	if _is_land_selection_surface_suspended():
+		_land_selection_surround.set_displayed(false)
+		return
+	var division_data: Dictionary = GameState.get_division(_active_land_division_id)
+	if division_data.is_empty():
+		_land_selection_surround.set_displayed(false)
+		return
+	if division_data.get("combat_state", "idle") == "destroyed":
+		_land_selection_surround.set_displayed(false)
+		return
+	var my_nation: String = GameState.get_my_nation_id()
+	if not my_nation.is_empty() and division_data.get("nation_id", "") != my_nation:
+		_land_selection_surround.set_displayed(false)
+		return
+	var anchor: Vector2 = _division_screen_positions.get(
+		_active_land_division_id, Vector2(-1.0, -1.0)
+	)
+	var viewport_rect: Rect2 = get_viewport().get_visible_rect()
+	var reserved_rects: Array[Rect2] = _get_land_surround_reserved_rects()
+	var placement: Dictionary = _choose_land_selection_surround_placement(
+		anchor,
+		viewport_rect,
+		reserved_rects
+	)
+	if placement.is_empty():
+		_land_selection_surround.set_displayed(false)
+		return
+	_land_surround_placement = placement.get("placement", &"") as StringName
+	_land_surround_tray_slide = float(placement.get("tray_slide", 0.0))
+	_land_selection_surround.set_placement(
+		_land_surround_placement,
+		_land_surround_tray_slide
+	)
+	_land_selection_surround.set_anchor_position(anchor)
+	_land_selection_surround.set_displayed(true)
+	if _pending_land_selection_animation_id == _active_land_division_id:
+		_pending_land_selection_animation_id = ""
+		_land_selection_surround.play_selection_enter()
+
+
+## Returns whether any managed panel currently suspends the map-attached surface.
+## Parameters: none.
+## Returns: true while HUDManager owns an open panel.
+func _is_land_selection_surface_suspended() -> bool:
+	return hud_manager != null and not hud_manager.get_open_panel().is_empty()
+
+
+## Returns stable HUD rectangles that the map-attached surface must not cover.
+## Parameters: none.
+## Returns: visible top bar, dock, map-mode, and chat rectangles.
+func _get_land_surround_reserved_rects() -> Array[Rect2]:
+	var reserved_rects: Array[Rect2] = []
+	for control: Control in [_top_bar, _left_dock_rail, _map_mode_tabs, _chat_panel]:
+		if control != null and control.is_visible_in_tree():
+			reserved_rects.append(control.get_global_rect())
+	return reserved_rects
+
+
+## Chooses a stable placement, retaining the current valid layout until a preferred one
+## has enough clearance to avoid edge oscillation during camera interpolation.
+## Parameters:
+## - anchor: projected division-counter center.
+## - viewport_rect: current visible viewport bounds.
+## - reserved_rects: stable HUD rectangles to avoid.
+## Returns: selected placement and slide, or an empty dictionary when none fits.
+func _choose_land_selection_surround_placement(
+		anchor: Vector2,
+		viewport_rect: Rect2,
+		reserved_rects: Array[Rect2]
+) -> Dictionary:
+	if not _land_surround_placement.is_empty():
+		var current := {
+			"placement": _land_surround_placement,
+			"tray_slide": _land_surround_tray_slide,
+		}
+		if _land_surround_candidate_fits(
+				anchor,
+				viewport_rect,
+				reserved_rects,
+				current,
+				0.0
+		):
+			var preferred: Dictionary = _find_land_selection_surround_placement(
+				anchor,
+				viewport_rect,
+				reserved_rects,
+				_LAND_SURROUND_PLACEMENT_HYSTERESIS
+			)
+			if not preferred.is_empty() and _land_surround_candidate_rank(preferred) \
+					< _land_surround_candidate_rank(current):
+				return preferred
+			return current
+	return _find_land_selection_surround_placement(anchor, viewport_rect, reserved_rects)
+
+
+## Finds the first fitting orientation and minimum inward tray correction.
+## Parameters:
+## - anchor: projected division-counter center.
+## - viewport_rect: current visible viewport bounds.
+## - reserved_rects: stable HUD rectangles to avoid.
+## - extra_clearance: additional viewport and obstacle clearance for hysteresis.
+## Returns: first valid placement and slide, or an empty dictionary.
+func _find_land_selection_surround_placement(
+		anchor: Vector2,
+		viewport_rect: Rect2,
+		reserved_rects: Array[Rect2],
+		extra_clearance: float = 0.0
+) -> Dictionary:
+	var max_slide: int = int(floor(_land_selection_surround.get_max_tray_slide()))
+	for placement: StringName in _land_selection_surround.get_placements():
+		for slide_step: int in range(max_slide + 1):
+			var candidate := {
+				"placement": placement,
+				"tray_slide": float(slide_step),
+			}
+			if _land_surround_candidate_fits(
+					anchor,
+					viewport_rect,
+					reserved_rects,
+					candidate,
+					extra_clearance
+			):
+				return candidate
+	return {}
+
+
+## Tests complete surface bounds against the viewport and stable HUD reservations.
+## Parameters:
+## - anchor: projected division-counter center.
+## - viewport_rect: current visible viewport bounds.
+## - reserved_rects: stable HUD rectangles to avoid.
+## - candidate: placement and slide under evaluation.
+## - extra_clearance: additional viewport and obstacle clearance.
+## Returns: true when the complete animated surface fits.
+func _land_surround_candidate_fits(
+		anchor: Vector2,
+		viewport_rect: Rect2,
+		reserved_rects: Array[Rect2],
+		candidate: Dictionary,
+		extra_clearance: float
+) -> bool:
+	var viewport_margin: float = _LAND_SURROUND_VIEWPORT_MARGIN + extra_clearance
+	var usable_rect: Rect2 = viewport_rect.grow(-viewport_margin)
+	if usable_rect.size.x <= 0.0 or usable_rect.size.y <= 0.0 \
+			or not usable_rect.has_point(anchor):
+		return false
+	var reserved_gap: float = _LAND_SURROUND_RESERVED_GAP + extra_clearance
+	for reserved_rect: Rect2 in reserved_rects:
+		if reserved_rect.grow(reserved_gap).has_point(anchor):
+			return false
+	var placement: StringName = candidate.get("placement", &"") as StringName
+	var tray_slide: float = float(candidate.get("tray_slide", 0.0))
+	var relative_bounds: Rect2 = _land_selection_surround.get_placement_bounds(
+		placement,
+		tray_slide
+	)
+	var surface_rect := Rect2(anchor + relative_bounds.position, relative_bounds.size)
+	if not usable_rect.encloses(surface_rect):
+		return false
+	for reserved_rect: Rect2 in reserved_rects:
+		if surface_rect.intersects(reserved_rect.grow(reserved_gap)):
+			return false
+	return true
+
+
+## Produces a sortable fallback rank for stable-placement comparisons.
+## Parameters:
+## - candidate: placement and slide to rank.
+## Returns: lower values for more preferred orientations and smaller slides.
+func _land_surround_candidate_rank(candidate: Dictionary) -> float:
+	var placement: StringName = candidate.get("placement", &"") as StringName
+	var placements: Array[StringName] = _land_selection_surround.get_placements()
+	var placement_index: int = placements.find(placement)
+	if placement_index < 0:
+		return INF
+	return float(placement_index * 100) + float(candidate.get("tray_slide", 0.0))
 
 
 ## Positions the persistent chat panel at the lower-right viewport corner.
@@ -845,9 +1306,7 @@ func _on_bottom_bar_deselected() -> void:
 
 ## Hides all four bottom bar panels. Called by selection handlers and deselect.
 func _hide_all_bottom_panels() -> void:
-	_friendly_div_panel.visible = false
 	_friendly_prov_panel.visible = false
-	_friendly_stack_panel.visible = false
 	_enemy_div_panel.visible = false
 	_friendly_air_wing_panel.visible = false
 

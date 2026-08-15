@@ -5,6 +5,7 @@ extends Node
 const DIVISION_ICON_SCENE := preload("res://scenes/systems/military/division_icon.tscn")
 const ENGAGEMENT_BANNER_SCENE := preload("res://scenes/systems/military/engagement_banner.tscn")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
+const MoveDestinationEffectScript := preload("res://src/systems/military/move_destination_effect.gd")
 const Pathfinder := preload("res://src/systems/military/pathfinder.gd")
 
 const NATION_COLORS: Dictionary = {
@@ -27,6 +28,8 @@ const OBSERVATION_RADIUS_PX := 45.0
 const SCOUTING_RADIUS_PX := 60.0
 const HIT_THRESHOLD_PX := 20.0
 const DRAG_SELECT_THRESHOLD_PX := 6.0
+const ORDINARY_DIVISION_EMPHASIS := 0.92
+const FULL_DIVISION_EMPHASIS := 1.0
 ## Distance threshold (deg) at which road avoidance reaches maximum strength (~1500m).
 const OFFROAD_THRESHOLD_DEG := 0.014
 ## Maximum road cost multiplier applied when player is deep off-road.
@@ -54,6 +57,7 @@ var _air_revealed_divisions: Dictionary = {}
 var _selected_division_id: String = ""
 var _selected_division_ids: Array[String] = []
 var _selection_preview_division_ids: Array[String] = []
+var _hovered_division_id: String = ""
 var _move_mode: bool = false
 var _reposition_mode: bool = false
 var _reposition_div_id: String = ""
@@ -61,6 +65,9 @@ var _drag_select_pressed: bool = false
 var _drag_select_active: bool = false
 var _drag_select_start_screen: Vector2 = Vector2.ZERO
 var _drag_select_current_screen: Vector2 = Vector2.ZERO
+var _drag_select_additive: bool = false
+var _drag_select_subtractive: bool = false
+var _drag_select_can_activate: bool = false
 
 # Waypoint chain being built (shift+click milestones — each is one milestone waypoint ID)
 var _pending_milestones: Array[String] = []
@@ -102,6 +109,25 @@ func get_icons() -> Dictionary:
 
 func get_banners() -> Dictionary:
 	return _banners
+
+
+## Returns the world-space center of a rendered division counter.
+func get_division_world_position(division_id: String) -> Vector2:
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if icon == null or not icon.visible:
+		return Vector2.INF
+	return icon.global_position
+
+
+## Returns the current viewport position for a rendered division counter.
+## Parameters:
+## - division_id: division whose counter should be projected.
+## Returns: screen position, or Vector2(-1, -1) when no visible counter exists.
+func _get_division_screen_position(division_id: String) -> Vector2:
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if icon == null or not icon.visible:
+		return Vector2(-1.0, -1.0)
+	return get_viewport().get_canvas_transform() * icon.global_position
 
 
 func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> void:
@@ -148,6 +174,13 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	EventBus.division_appeared.connect(_on_division_appeared)
 	EventBus.division_vanishing.connect(_on_division_vanishing)
 	EventBus.reposition_mode_requested.connect(_enter_reposition_mode)
+	EventBus.division_active_requested.connect(_set_active_division)
+	EventBus.division_selection_remove_requested.connect(_remove_from_selection)
+	EventBus.division_hold_selected_requested.connect(_hold_selected_divisions)
+	EventBus.division_hold_requested.connect(_hold_division)
+	EventBus.division_retreat_selected_requested.connect(_retreat_selected_divisions)
+	EventBus.division_retreat_requested.connect(_retreat_division)
+	EventBus.move_mode_cancelled.connect(_clear_pending)
 	EventBus.combat_started.connect(_on_combat_started_banner)
 	EventBus.combat_resolved.connect(_on_combat_resolved_banner)
 
@@ -189,6 +222,7 @@ func _process(delta: float) -> void:
 				and _vision_system.has_method("update_division_mask_position"):
 			_vision_system.update_division_mask_position(div_id, icon.position)
 		_update_division_visibility(div_id)
+	_emit_ui_anchor_positions()
 
 	# Live ghost refresh while building a shift chain with a moving unit
 	if _move_mode and _shift_chain_started and not _pending_milestones.is_empty() and not _path_pending:
@@ -232,13 +266,23 @@ func handle_input(event: InputEvent) -> void:
 					_submit_pending()
 		return
 
+	if event.is_action_pressed("unit_hold", false, true):
+		_hold_selected_divisions()
+		return
+	if event.is_action_pressed("unit_cancel", false, true):
+		_hold_selected_divisions()
+		return
+	if event.is_action_pressed("unit_retreat", false, true):
+		_retreat_selected_divisions()
+		return
+
 	match key.physical_keycode:
 		KEY_SHIFT:
 			# Shift pressed during the non-shift transition window promotes the route to a chain.
 			if _pending_auto_submit and _move_mode and not _pending_milestones.is_empty():
 				_pending_auto_submit = false
 				_shift_chain_started = true
-		KEY_M:
+		KEY_SPACE:
 			var own_selected_for_move: Array[String] = _get_own_selected_division_ids()
 			if not own_selected_for_move.is_empty():
 				_move_mode = true
@@ -246,24 +290,7 @@ func handle_input(event: InputEvent) -> void:
 				_pending_chain.clear()
 				_update_ghost()
 				_set_selected_icons_move_mode(true)
-		KEY_H:
-			var own_selected_for_hold: Array[String] = _get_own_selected_division_ids()
-			if not own_selected_for_hold.is_empty():
-				_clear_pending()
-				for division_id: String in own_selected_for_hold:
-					CommandQueue.submit("HOLD", { "division_id": division_id })
-		KEY_X:
-			var own_selected_for_stop: Array[String] = _get_own_selected_division_ids()
-			if not own_selected_for_stop.is_empty():
-				_clear_pending()
-				for division_id: String in own_selected_for_stop:
-					CommandQueue.submit("HOLD", { "division_id": division_id })
-		KEY_C:
-			var own_selected_for_retreat: Array[String] = _get_own_selected_division_ids()
-			if not own_selected_for_retreat.is_empty():
-				_clear_pending()
-				for division_id: String in own_selected_for_retreat:
-					CommandQueue.submit("RETREAT", { "division_id": division_id })
+				EventBus.move_mode_active_changed.emit(true)
 		KEY_B:
 			if _selected_division_id != "":
 				EventBus.reposition_mode_requested.emit(_selected_division_id)
@@ -295,11 +322,14 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 
 		if mouse_button.pressed:
 			if (_move_mode or _reposition_mode) and not _selected_division_ids.is_empty():
-				return try_click_at_world(world_pos, mouse_button.shift_pressed)
+				return try_click_at_world(world_pos, mouse_button.shift_pressed, mouse_button.ctrl_pressed)
 			_drag_select_pressed = true
 			_drag_select_active = false
 			_drag_select_start_screen = mouse_button.position
 			_drag_select_current_screen = mouse_button.position
+			_drag_select_additive = mouse_button.shift_pressed
+			_drag_select_subtractive = mouse_button.ctrl_pressed
+			_drag_select_can_activate = find_division_at_world(world_pos).is_empty()
 			_clear_selection_preview()
 			_update_selection_box_overlay()
 			return false
@@ -309,19 +339,21 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 
 		_drag_select_current_screen = mouse_button.position
 		if _drag_select_active:
-			_commit_selection(_selection_preview_division_ids)
+			_commit_drag_selection()
 			_reset_drag_selection()
 			return true
 
 		_reset_drag_selection()
-		return try_click_at_world(world_pos, mouse_button.shift_pressed)
+		return try_click_at_world(world_pos, mouse_button.shift_pressed, mouse_button.ctrl_pressed)
 
 	if event is InputEventMouseMotion:
-		if not _drag_select_pressed:
-			return false
 		var mouse_motion: InputEventMouseMotion = event
+		if not _drag_select_pressed:
+			_update_hovered_division(world_pos)
+			return false
+		_set_hovered_division("")
 		_drag_select_current_screen = mouse_motion.position
-		if not _drag_select_active \
+		if _drag_select_can_activate and not _drag_select_active \
 				and _drag_select_start_screen.distance_to(_drag_select_current_screen) >= DRAG_SELECT_THRESHOLD_PX:
 			_drag_select_active = true
 		if _drag_select_active:
@@ -332,8 +364,17 @@ func handle_mouse_input(event: InputEvent, world_pos: Vector2) -> bool:
 	return false
 
 
+## Cancels hover and an in-progress pointer selection when UI takes pointer ownership.
+## Parameters: none.
+## Returns: nothing.
+func cancel_pointer_interaction() -> void:
+	_set_hovered_division("")
+	if _drag_select_pressed or _drag_select_active:
+		_reset_drag_selection()
+
+
 ## Left-click at a world-space position. Returns true if consumed (caller should mark event handled).
-func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
+func try_click_at_world(world_pos: Vector2, shift_held: bool = false, ctrl_held: bool = false) -> bool:
 	if _reposition_mode and _reposition_div_id != "":
 		_reposition_mode = false
 		var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
@@ -359,7 +400,14 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false) -> bool:
 
 	var clicked_id := find_division_at_world(world_pos)
 	if clicked_id != "":
-		_select(clicked_id)
+		if ctrl_held:
+			_remove_from_selection(clicked_id)
+		elif shift_held:
+			_add_to_selection(clicked_id)
+		elif _selected_division_ids.has(clicked_id):
+			_set_active_division(clicked_id)
+		else:
+			_select(clicked_id)
 		return true
 
 	# Click on empty map while something selected → deselect (skip if in move mode)
@@ -379,6 +427,7 @@ func _enter_reposition_mode(div_id: String) -> void:
 	_pending_chain.clear()
 	_update_ghost()
 	_set_icon_move_mode(div_id, true)
+	EventBus.move_mode_active_changed.emit(true)
 
 ## Called by EventBus.move_mode_requested when the Move button is clicked in a
 ## bottom bar selection panel. Enables move mode for the specified division.
@@ -390,6 +439,7 @@ func enter_move_mode(division_id: String) -> void:
 	_pending_chain.clear()
 	_update_ghost()
 	_set_icon_move_mode(division_id, true)
+	EventBus.move_mode_active_changed.emit(true)
 
 ## Right-click: remove last milestone from chain if near a ghost dot, else do nothing.
 func try_right_click_at_world(world_pos: Vector2) -> bool:
@@ -434,6 +484,7 @@ func _handle_right_click_move(world_pos: Vector2, shift_held: bool) -> bool:
 	if shift_held:
 		_move_mode = true
 		_set_icon_move_mode(_selected_division_id, true)
+		EventBus.move_mode_active_changed.emit(true)
 		_handle_move_click(lng_lat.x, lng_lat.y, true)
 	else:
 		_submit_direct_move_order(_selected_division_id, lng_lat.x, lng_lat.y)
@@ -508,6 +559,9 @@ func _on_direct_move_ready(path: Array, division_id: String, target_lng: float, 
 			wpid = goal_id
 		path_to_submit.append(wpid)
 	_submit_move_order_for_division(division_id, path_to_submit, Vector2(target_lng, target_lat))
+	_spawn_move_destination_effect(
+			_map_loader.project_lng_lat(target_lng, target_lat),
+			division_id)
 
 
 func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
@@ -588,6 +642,7 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		_clear_pending()
 		return
 
+	var submitted_any_order: bool = false
 	for index: int in moving_division_ids.size():
 		var division_id: String = moving_division_ids[index]
 		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
@@ -610,6 +665,12 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		for waypoint_id: Variant in path:
 			path_to_submit.append(str(waypoint_id))
 		_submit_move_order_for_division(division_id, path_to_submit)
+		submitted_any_order = true
+
+	if submitted_any_order:
+		_spawn_move_destination_effect(
+				_map_loader.project_lng_lat(target_lng, target_lat),
+				moving_division_ids[0])
 
 	_clear_pending()
 
@@ -635,6 +696,13 @@ func _on_segment_ready(segment: Array, goal_id: String, shift_held: bool, divisi
 
 	var was_empty := _pending_chain.is_empty()
 	_append_segment_to_chain(segment, goal_id)
+	var destination_node: Dictionary = _pathfinder.get_node(goal_id)
+	if not destination_node.is_empty():
+		_spawn_move_destination_effect(
+				_map_loader.project_lng_lat(
+						float(destination_node.get("lng", 0.0)),
+						float(destination_node.get("lat", 0.0))),
+				division_id_snapshot)
 	if was_empty:
 		_pending_chain_origin_deg = _dr_pos_deg.get(_selected_division_id, Vector2.ZERO)
 		_chain_last_refresh_time = Time.get_ticks_msec() / 1000.0
@@ -1010,12 +1078,27 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array, final_
 	# Set new final goal AFTER clearing old one — must come after _dr_order assignment
 	if final_pos != Vector2.INF:
 		_dr_final_goal[div_id] = final_pos
+	if div_id == _selected_division_id:
+		_emit_active_hold_eligibility()
 
 	var icon_node := _icons.get(div_id) as Node2D
 	if icon_node:
 		icon_node.set_moving(true)
 
 	_update_division_route(div_id)
+
+
+## Spawns immediate client-only confirmation at a successfully routed move destination.
+func _spawn_move_destination_effect(world_position: Vector2, division_id: String) -> void:
+	if _icon_layer == null:
+		return
+	var division_data: Dictionary = GameState.get_division(division_id)
+	var nation_id: String = division_data.get("nation_id", "")
+	var nation_color: Color = NATION_COLORS.get(nation_id, NEUTRAL_COLOR)
+	var effect: MoveDestinationEffect = MoveDestinationEffectScript.new()
+	effect.setup(world_position, nation_color)
+	effect.z_index = 20
+	_icon_layer.add_child(effect)
 
 
 func _submit_reposition_order(div_id: String, target_lng: float, target_lat: float) -> void:
@@ -1130,6 +1213,7 @@ func _clear_pending() -> void:
 	_pending_chain_origin_deg = Vector2.ZERO
 	_chain_last_refresh_time = 0.0
 	_update_ghost()
+	EventBus.move_mode_active_changed.emit(false)
 
 
 func _set_icon_move_mode(division_id: String, active: bool) -> void:
@@ -1295,6 +1379,7 @@ func _on_division_added(division_id: String) -> void:
 
 	_icon_layer.add_child(icon)
 	_icons[division_id] = icon
+	_refresh_icon_visual_emphasis(division_id)
 
 	var route: Node2D = MoveOrderOverlay.new()
 	_icon_layer.add_child(route)
@@ -1303,6 +1388,9 @@ func _on_division_added(division_id: String) -> void:
 
 
 func _on_division_updated(division_id: String) -> void:
+	if division_id == _selected_division_id:
+		call_deferred("_emit_active_hold_eligibility")
+		call_deferred("_emit_active_retreat_eligibility")
 	var icon = _icons.get(division_id)
 	if icon == null:
 		return
@@ -1431,6 +1519,8 @@ func _on_division_updated(division_id: String) -> void:
 
 
 func _on_division_removed(division_id: String) -> void:
+	if _hovered_division_id == division_id:
+		_set_hovered_division("")
 	var icon = _icons.get(division_id)
 	if icon:
 		icon.queue_free()
@@ -1539,12 +1629,15 @@ func _update_division_visibility(division_id: String) -> void:
 
 	var should_show: bool = _is_division_visible_to_player(division_id)
 	icon.visible = should_show
+	_refresh_icon_visual_emphasis(division_id)
 
 	var route: Node2D = _route_overlays.get(division_id) as Node2D
 	if route != null:
 		route.visible = should_show
 
 	if not should_show:
+		if _hovered_division_id == division_id:
+			_set_hovered_division("")
 		if _selected_division_ids.has(division_id):
 			_selected_division_ids.erase(division_id)
 			_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
@@ -1606,6 +1699,27 @@ func _select(division_id: String) -> void:
 	_clear_pending()
 
 
+func _add_to_selection(division_id: String) -> void:
+	if _selected_division_ids.has(division_id):
+		_set_active_division(division_id)
+		return
+	var new_selection: Array[String] = _selected_division_ids.duplicate()
+	new_selection.append(division_id)
+	_commit_selection(new_selection, division_id)
+
+
+func _remove_from_selection(division_id: String) -> void:
+	if not _selected_division_ids.has(division_id):
+		return
+	var removed_index: int = _selected_division_ids.find(division_id)
+	var new_selection: Array[String] = _selected_division_ids.duplicate()
+	new_selection.erase(division_id)
+	var next_active_id: String = _selected_division_id
+	if division_id == _selected_division_id and not new_selection.is_empty():
+		next_active_id = new_selection[mini(removed_index, new_selection.size() - 1)]
+	_commit_selection(new_selection, next_active_id)
+
+
 func deselect() -> void:
 	for division_id: String in _selected_division_ids:
 		if _icons.has(division_id):
@@ -1614,13 +1728,18 @@ func deselect() -> void:
 	_clear_selection_preview()
 	_selected_division_id = ""
 	_selected_division_ids.clear()
+	_set_hovered_division("")
 	EventBus.division_deselected.emit()
+	EventBus.division_active_changed.emit("")
 	EventBus.province_deselected.emit()
 	EventBus.division_selection_changed.emit([])
+	EventBus.division_hold_eligibility_changed.emit("", false)
+	EventBus.division_retreat_eligibility_changed.emit("", false)
+	_refresh_all_icon_visual_emphasis()
 	_clear_pending()
 
 
-func _commit_selection(division_ids: Array[String]) -> void:
+func _commit_selection(division_ids: Array[String], active_division_id: String = "") -> void:
 	for old_division_id: String in _selected_division_ids:
 		if _icons.has(old_division_id):
 			(_icons[old_division_id] as Node2D).set_selected(false)
@@ -1636,20 +1755,266 @@ func _commit_selection(division_ids: Array[String]) -> void:
 			continue
 		_selected_division_ids.append(division_id)
 
-	_selected_division_id = _selected_division_ids[0] if not _selected_division_ids.is_empty() else ""
+	_selected_division_id = active_division_id if _selected_division_ids.has(active_division_id) else ""
+	if _selected_division_id.is_empty() and not _selected_division_ids.is_empty():
+		_selected_division_id = _selected_division_ids[0]
 	for selected_id: String in _selected_division_ids:
 		(_icons[selected_id] as Node2D).set_selected(true)
+		(_icons[selected_id] as Node2D).set_active_selection(selected_id == _selected_division_id)
 
 	_clear_selection_preview()
+	_refresh_all_icon_visual_emphasis()
 	_emit_selection_changed()
 
 
 func _emit_selection_changed() -> void:
+	_refresh_active_selection_icons()
 	if _selected_division_ids.is_empty():
 		EventBus.division_deselected.emit()
 	else:
 		EventBus.division_selected.emit(_selected_division_id)
+	EventBus.division_active_changed.emit(_selected_division_id)
 	EventBus.division_selection_changed.emit(_selected_division_ids.duplicate())
+	_emit_active_hold_eligibility()
+	_emit_active_retreat_eligibility()
+
+
+func _set_active_division(division_id: String) -> void:
+	if division_id == _selected_division_id or not _selected_division_ids.has(division_id):
+		return
+	_selected_division_id = division_id
+	_refresh_active_selection_icons()
+	EventBus.division_selected.emit(division_id)
+	EventBus.division_active_changed.emit(division_id)
+	_emit_active_hold_eligibility()
+	_emit_active_retreat_eligibility()
+
+
+func _refresh_active_selection_icons() -> void:
+	for selected_id: String in _selected_division_ids:
+		if _icons.has(selected_id):
+			(_icons[selected_id] as Node2D).set_active_selection(selected_id == _selected_division_id)
+	_refresh_all_icon_visual_emphasis()
+
+
+func _commit_drag_selection() -> void:
+	var new_selection: Array[String] = []
+	if _drag_select_additive or _drag_select_subtractive:
+		new_selection.assign(_selected_division_ids)
+	if _drag_select_subtractive:
+		for division_id: String in _selection_preview_division_ids:
+			new_selection.erase(division_id)
+	else:
+		for division_id: String in _selection_preview_division_ids:
+			if not new_selection.has(division_id):
+				new_selection.append(division_id)
+	var active_id: String = _nearest_division_to_screen_position(new_selection, _drag_select_current_screen)
+	_commit_selection(new_selection, active_id)
+
+
+## Finds the selected counter closest to a screen-space selection release point.
+## Parameters:
+## - division_ids: eligible selected divisions.
+## - screen_position: viewport-space release position.
+## Returns: closest division ID, or an empty string when the selection is empty.
+func _nearest_division_to_screen_position(division_ids: Array[String], screen_position: Vector2) -> String:
+	var nearest_id: String = ""
+	var nearest_distance: float = INF
+	for division_id: String in division_ids:
+		var icon_position: Vector2 = _get_division_screen_position(division_id)
+		var distance: float = icon_position.distance_squared_to(screen_position)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest_id = division_id
+	return nearest_id
+
+
+## Publishes the active counter position needed by contextual HUD anchoring.
+## Parameters: none.
+## Returns: nothing.
+func _emit_ui_anchor_positions() -> void:
+	if not _selected_division_id.is_empty():
+		EventBus.division_screen_position_updated.emit(
+			_selected_division_id,
+			_get_division_screen_position(_selected_division_id)
+		)
+
+
+## Updates the owned-division hover target while no placement interaction owns the pointer.
+## Parameters:
+## - world_position: current pointer position in map coordinates.
+## Returns: nothing.
+func _update_hovered_division(world_position: Vector2) -> void:
+	if _move_mode or _reposition_mode or _drag_select_active:
+		_set_hovered_division("")
+		return
+	var division_id: String = find_division_at_world(world_position)
+	if not division_id.is_empty() and not _is_own_unit(division_id):
+		division_id = ""
+	_set_hovered_division(division_id)
+
+
+## Emits a hover transition only when the target actually changes.
+## Parameters:
+## - division_id: newly hovered owned division, or empty to clear hover.
+## Returns: nothing.
+func _set_hovered_division(division_id: String) -> void:
+	if division_id == _hovered_division_id:
+		return
+	_hovered_division_id = division_id
+	_refresh_all_icon_visual_emphasis()
+	EventBus.division_hover_changed.emit(division_id)
+
+
+## Applies ordinary or full emphasis without affecting visibility or reveal animation.
+func _refresh_icon_visual_emphasis(division_id: String) -> void:
+	var icon: Node2D = _icons.get(division_id) as Node2D
+	if icon == null or not icon.has_method("set_visual_emphasis"):
+		return
+	var fully_emphasized: bool = _selected_division_ids.has(division_id) \
+			or _selection_preview_division_ids.has(division_id) \
+			or division_id == _hovered_division_id
+	icon.set_visual_emphasis(
+		FULL_DIVISION_EMPHASIS if fully_emphasized else ORDINARY_DIVISION_EMPHASIS
+	)
+
+
+func _refresh_all_icon_visual_emphasis() -> void:
+	for division_id: String in _icons:
+		_refresh_icon_visual_emphasis(division_id)
+
+
+## Returns whether an owned division is in ordinary movement and can receive Hold.
+## Parameters:
+## - division_data: current authoritative division snapshot.
+## - is_owned: whether the requesting player owns the division.
+## - has_local_movement: immediate dead-reckoned movement awaiting server confirmation.
+## Returns: true when the snapshot permits Hold.
+static func can_hold_division_data(
+		division_data: Dictionary,
+		is_owned: bool,
+		has_local_movement: bool = false
+) -> bool:
+	if not is_owned or division_data.is_empty():
+		return false
+	if division_data.get("combat_state", "idle") != "idle":
+		return false
+	var move_order: Array = division_data.get("move_order", [])
+	return has_local_movement or not move_order.is_empty() \
+			or float(division_data.get("final_position_lng", -999.0)) > -998.0
+
+
+## Returns whether a division can receive Hold in current authoritative client state.
+## Parameters:
+## - division_id: division to validate.
+## Returns: true when Hold may be submitted for this division.
+func _can_hold_division(division_id: String) -> bool:
+	if division_id.is_empty():
+		return false
+	var has_local_movement: bool = (
+		_dr_order.has(division_id) and not (_dr_order[division_id] as Array).is_empty()
+	) or _dr_final_goal.has(division_id)
+	return can_hold_division_data(
+		GameState.get_division(division_id),
+		_is_own_unit(division_id),
+		has_local_movement
+	)
+
+
+## Publishes Hold availability for the active selection without exposing command authority to UI.
+## Parameters: none.
+## Returns: nothing.
+func _emit_active_hold_eligibility() -> void:
+	EventBus.division_hold_eligibility_changed.emit(
+		_selected_division_id,
+		_selected_division_ids.size() == 1 and _can_hold_division(_selected_division_id)
+	)
+
+
+## Submits Hold for one selected division after revalidating its eligibility.
+## Parameters:
+## - division_id: selected division captured by the requesting UI context.
+## Returns: nothing.
+func _hold_division(division_id: String) -> void:
+	if not _selected_division_ids.has(division_id) or not _can_hold_division(division_id):
+		return
+	_clear_pending()
+	CommandQueue.submit("HOLD", {"division_id": division_id})
+
+
+## Submits Hold for every currently selected owned and eligible division.
+## Parameters: none.
+## Returns: nothing.
+func _hold_selected_divisions() -> void:
+	var eligible_division_ids: Array[String] = []
+	for division_id: String in _get_own_selected_division_ids():
+		if _can_hold_division(division_id):
+			eligible_division_ids.append(division_id)
+	if eligible_division_ids.is_empty():
+		return
+	_clear_pending()
+	for division_id: String in eligible_division_ids:
+		CommandQueue.submit("HOLD", {"division_id": division_id})
+
+
+## Returns whether an owned division's authoritative state permits Retreat.
+## Parameters:
+## - division_data: current authoritative division snapshot.
+## - is_owned: whether the requesting player owns the division.
+## Returns: true when the snapshot permits Retreat.
+static func can_retreat_division_data(division_data: Dictionary, is_owned: bool) -> bool:
+	if not is_owned or division_data.is_empty():
+		return false
+	return division_data.get("combat_state", "idle") in ["engaged", "suppressed"]
+
+
+## Returns whether a division can receive Retreat in current authoritative client state.
+## Parameters:
+## - division_id: division to validate.
+## Returns: true when Retreat may be submitted for this division.
+func _can_retreat_division(division_id: String) -> bool:
+	if division_id.is_empty():
+		return false
+	return can_retreat_division_data(
+		GameState.get_division(division_id),
+		_is_own_unit(division_id)
+	)
+
+
+## Publishes Retreat availability for the active selection without exposing command authority to UI.
+## Parameters: none.
+## Returns: nothing.
+func _emit_active_retreat_eligibility() -> void:
+	EventBus.division_retreat_eligibility_changed.emit(
+		_selected_division_id,
+		_selected_division_ids.size() == 1 and _can_retreat_division(_selected_division_id)
+	)
+
+
+## Submits Retreat for one selected division after revalidating its eligibility.
+## Parameters:
+## - division_id: selected division captured by the requesting UI context.
+## Returns: nothing.
+func _retreat_division(division_id: String) -> void:
+	if not _selected_division_ids.has(division_id) or not _can_retreat_division(division_id):
+		return
+	_clear_pending()
+	CommandQueue.submit("RETREAT", {"division_id": division_id})
+
+
+## Submits Retreat for selected owned divisions currently eligible to retreat.
+## Parameters: none.
+## Returns: nothing.
+func _retreat_selected_divisions() -> void:
+	var eligible_division_ids: Array[String] = []
+	for division_id: String in _get_own_selected_division_ids():
+		if _can_retreat_division(division_id):
+			eligible_division_ids.append(division_id)
+	if eligible_division_ids.is_empty():
+		return
+	_clear_pending()
+	for division_id: String in eligible_division_ids:
+		CommandQueue.submit("RETREAT", {"division_id": division_id})
 
 
 func _reset_drag_selection() -> void:
@@ -1657,6 +2022,9 @@ func _reset_drag_selection() -> void:
 	_drag_select_active = false
 	_drag_select_start_screen = Vector2.ZERO
 	_drag_select_current_screen = Vector2.ZERO
+	_drag_select_additive = false
+	_drag_select_subtractive = false
+	_drag_select_can_activate = false
 	_clear_selection_preview()
 	_update_selection_box_overlay()
 
@@ -1686,6 +2054,7 @@ func _set_selection_preview(division_ids: Array[String]) -> void:
 			continue
 		_selection_preview_division_ids.append(division_id)
 		(_icons[division_id] as Node2D).set_selection_preview(true)
+	_refresh_all_icon_visual_emphasis()
 
 
 func _clear_selection_preview() -> void:
@@ -1693,6 +2062,7 @@ func _clear_selection_preview() -> void:
 		if _icons.has(division_id):
 			(_icons[division_id] as Node2D).set_selection_preview(false)
 	_selection_preview_division_ids.clear()
+	_refresh_all_icon_visual_emphasis()
 
 
 func _get_drag_selection_rect() -> Rect2:
@@ -1717,11 +2087,14 @@ func _update_selection_box_overlay() -> void:
 func find_division_at_world(world_pos: Vector2) -> String:
 	var best_id := ""
 	var best_dist := HIT_THRESHOLD_PX
+	var canvas_transform: Transform2D = get_viewport().get_canvas_transform()
+	var screen_position: Vector2 = canvas_transform * world_pos
 	for div_id: String in _icons:
 		if not _is_division_visible_to_player(div_id):
 			continue
 		var icon: Node2D = _icons[div_id]
-		var d: float = icon.position.distance_to(world_pos)
+		var icon_screen_position: Vector2 = canvas_transform * icon.global_position
+		var d: float = icon_screen_position.distance_to(screen_position)
 		if d < best_dist:
 			best_dist = d
 			best_id = div_id

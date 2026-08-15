@@ -14,6 +14,6 @@ The map lets players explore the world, inspect provinces, read political and te
 - [[client/vision/index|Vision]]
 - [[client/debugging/index|Debugging]]
 - [[map/index|Map Production]]
-- [[docs/MAP_PRODUCTION_DOCS|Map Production Design]]
-- [[docs/MAP_DATA_CONTRACT|Map Data Contract]]
-- [[docs/EDITOR_MAP_GENERATION|Editor Map Generation]]
+- [Map Production Design](../../../docs/MAP_PRODUCTION_DOCS.md)
+- [Map Data Contract](../../../docs/MAP_DATA_CONTRACT.md)
+- [Editor Map Generation](../../../docs/EDITOR_MAP_GENERATION.md)

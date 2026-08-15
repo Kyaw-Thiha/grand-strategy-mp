@@ -3,21 +3,22 @@
 This is the repository operating guide for AI coding agents. Keep work scoped and preserve
 unrelated user changes.
 
-## Optional Wiki Documentation
+## Maintained Documentation
 
-`wiki/` is an optional documentation resource. Do not read, change, reconcile, validate, or
-create plans in the wiki as part of the default development workflow.
+`docs/` contains authoritative game designs, implementation requirements, roadmap state,
+and completion tracking. Before implementing a documented feature, read only the relevant
+sources and follow `docs/AGENTS.md`.
 
-Only work with the wiki when the user explicitly requests wiki documentation work. For such
-work, read and follow `wiki/AGENTS.md`; more specific agent files within the relevant wiki
-component also apply. Outside that opt-in scope, inspect current source and tests directly.
+Update maintained documentation when a user decision changes the intended design or verified
+implementation completes or contradicts a documented requirement. Keep reconciliation scoped;
+do not skim or rewrite unrelated documents. `wiki/` is a legacy Obsidian archive and is not a
+source of truth. Only modify it when the user explicitly requests archive work.
 
 ## Workflow
 
 1. Propose and agree on a plan before implementation.
 2. Execute it phase by phase and run the smallest relevant verification.
-3. Do not create or update wiki plans, notes, indexes, or checkboxes unless the user
-   explicitly requested wiki documentation work.
+3. Reconcile only the relevant maintained documents after implementation and verification.
 
 ## Repository Map
 
@@ -26,7 +27,8 @@ client/        Godot 4 client and UI
 game-server/   Colyseus authoritative simulation server
 api-server/    Hono/Bun auth, persistence, lobby, and internal API
 map/           Map source data and generation pipeline
-wiki/          Optional documentation, designs, and temporary plans
+docs/          Maintained design and technical documentation
+wiki/          Legacy Obsidian archive
 scripts/       E2E, asset-sync, and repository helpers
 ```
 
@@ -64,7 +66,7 @@ from their own folders.
 - Godot: `godot --headless --path client <scene.tscn>`.
 - Auth/session flows: `bash scripts/e2e-auth-handshake.sh` or
   `bash scripts/e2e-session-loop.sh`.
-- Explicitly requested wiki documentation: `python3 scripts/check-wiki.py`.
+- Documentation: `python3 scripts/check-docs.py`.
 
 New game-server tests must use `getTestPort`, belong to a lane in
 `game-server/test-lanes.json`, and prefix their top-level `describe()` with

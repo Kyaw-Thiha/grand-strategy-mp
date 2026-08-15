@@ -12,5 +12,5 @@ The user interface provides the menus, HUD, panels, chat, settings, and notifica
 
 - [[client/index|Client]]
 - [[client/core/index|Client Core Runtime]]
-- [[docs/UI_UX_DESIGN|UI/UX Design]]
-- [[docs/PANEL_WIREFRAME_BRIEF|Panel Wireframe Brief]]
+- [UI/UX Design](../../../docs/UI_UX_DESIGN.md)
+- [Panel Wireframe Brief](../../../docs/PANEL_WIREFRAME_BRIEF.md)

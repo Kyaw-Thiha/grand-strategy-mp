@@ -10,5 +10,5 @@ Research explains the current local technology-tree prototype and the server bou
 
 - [[client/index|Client]]
 - [[client/ui/index|User Interface]]
-- [[docs/DEV_PHASES|Development Phases]]
-- [[docs/UI_UX_DESIGN|UI/UX Design]]
+- [Development Phases](../../../docs/DEV_PHASES.md)
+- [UI/UX Design](../../../docs/UI_UX_DESIGN.md)

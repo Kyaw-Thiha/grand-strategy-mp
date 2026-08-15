@@ -4,6 +4,7 @@ extends Node
 ## Pass condition: prints "ALL PASS" and exits with code 0.
 
 const HUDManagerScript = preload("res://src/ui/hud/hud_manager.gd")
+const MilitarySystemScript = preload("res://src/systems/military/military_system.gd")
 
 var _pass_count := 0
 var _fail_count := 0
@@ -133,8 +134,47 @@ func _ready() -> void:
 	)
 	var left_dock_rail: Control = hud.get_node("HUDRoot/LeftDockRail") as Control
 	var dock_button_q: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_Q") as Control
-	var dock_button_u: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_U") as Control
-	var dock_button_i: Control = hud.get_node("HUDRoot/LeftDockRail/VBox/DockButton_I") as Control
+	var top_bar: Control = hud.get_node("HUDRoot/TopBar") as Control
+	var political_button: Button = hud.get_node("HUDRoot/MapModeTabs/MapModeBar/BtnMapPolitical") as Button
+	var terrain_button: Button = hud.get_node("HUDRoot/MapModeTabs/MapModeBar/BtnMapTerrain") as Button
+	var cover_button: Button = hud.get_node("HUDRoot/MapModeTabs/MapModeBar/BtnMapCover") as Button
+	_check(is_equal_approx(top_bar.size.y, 50.0), "TopBar uses compact 50 px height")
+	_check(is_equal_approx(left_dock_rail.size.x, 58.0), "LeftDockRail uses compact 58 px width")
+	_check(
+		political_button.custom_minimum_size == Vector2(112.0, 38.0)
+			and terrain_button.custom_minimum_size == Vector2(112.0, 38.0)
+			and cover_button.custom_minimum_size == Vector2(112.0, 38.0),
+		"map modes use three compact controls in one row"
+	)
+	_check(
+		political_button.get_node("Content/Icon").material != null
+			and terrain_button.get_node("Content/Icon").material != null
+			and cover_button.get_node("Content/Icon").material != null,
+		"map-mode controls use shader-tinted icons"
+	)
+	_check(
+		political_button.custom_minimum_size == terrain_button.custom_minimum_size
+			and terrain_button.custom_minimum_size == cover_button.custom_minimum_size,
+		"map-mode controls use equal width and height"
+	)
+	_check(
+		hud.get_node_or_null("HUDRoot/LeftDockRail/VBox/DockButton_U") == null
+			and hud.get_node_or_null("HUDRoot/LeftDockRail/VBox/DockButton_I") == null,
+		"unshipped reserved dock slots do not consume space"
+	)
+	var emitted_map_modes: Array[String] = []
+	EventBus.map_mode_changed.connect(func(mode: String) -> void: emitted_map_modes.append(mode))
+	terrain_button.pressed.emit()
+	_check(emitted_map_modes == ["elevation"], "Terrain control selects elevation rendering")
+	_check(terrain_button.button_pressed, "selected map-mode control tracks current mode")
+	hud.call("_layout_persistent_hud", 900.0)
+	_check(not hud.get_node("%NationLabel").visible, "narrow HUD hides nation name")
+	_check(hud.get_node("%ManpowerLabel").text == "MP --", "narrow HUD abbreviates resource labels")
+	_check(
+		is_equal_approx(diplomacy_panel.custom_minimum_size.x, 324.0),
+		"narrow HUD clamps drawer width relative to viewport"
+	)
+	hud.call("_layout_persistent_hud")
 	_check(
 		bool(hud.call("_is_position_over_registered_ui", _center_of_control(left_dock_rail))),
 		"LeftDockRail rect blocks pointer-driven camera input"
@@ -142,14 +182,6 @@ func _ready() -> void:
 	_check(
 		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_q))),
 		"nested active dock button rect blocks pointer-driven camera input"
-	)
-	_check(
-		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_u))),
-		"disabled U dock button rect blocks pointer-driven camera input"
-	)
-	_check(
-		bool(hud.call("_is_position_over_registered_ui", _center_of_control(dock_button_i))),
-		"disabled I dock button rect blocks pointer-driven camera input"
 	)
 	_check(
 		bool(hud.call("_is_position_over_registered_ui", _center_of_control(chat_panel))),
@@ -162,15 +194,199 @@ func _ready() -> void:
 	hud.call("_layout_bottom_hud")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_check_bottom_panel_layout(hud, hud.get_node("FriendlyDivisionPanel") as Control, "FriendlyDivisionPanel")
 	_check_bottom_panel_layout(hud, hud.get_node("FriendlyProvincePanel") as Control, "FriendlyProvincePanel")
-	_check_bottom_panel_layout(hud, hud.get_node("FriendlyStackPanel") as Control, "FriendlyStackPanel")
 	_check_bottom_panel_layout(hud, hud.get_node("EnemyDivisionPanel") as Control, "EnemyDivisionPanel")
-	var friendly_division_panel: Control = hud.get_node("FriendlyDivisionPanel") as Control
-	friendly_division_panel.visible = true
+	var land_popover: Control = hud.get_node("LandSelectionPopover") as Control
+	_check(land_popover != null, "GameHUD includes contextual land selection popover")
+	var land_surround: Control = hud.get_node("LandSelectionSurround") as Control
+	_check(land_surround != null, "GameHUD includes single-selection surround")
+	_check(land_surround.mouse_filter == Control.MOUSE_FILTER_IGNORE, "selection surround visual root ignores pointer input")
+	var action_buttons: Array[Button] = land_surround.get_control_buttons()
+	_check(action_buttons.size() == 2, "single-selection surround exposes two universal actions")
+	_check(
+		action_buttons[0].name == "Composition" and action_buttons[1].name == "CenterCamera",
+		"universal actions keep Composition before Center Camera"
+	)
+	_check(
+		not action_buttons[0].disabled and not action_buttons[1].disabled,
+		"universal actions are enabled"
+	)
+	_check(
+		action_buttons[0].icon != null and action_buttons[1].icon != null,
+		"universal actions use approved icon assets"
+	)
+	_check(
+		action_buttons[0].icon.resource_path == "res://assets/icons/table-cells-solid-full.svg",
+		"Composition uses the approved table-cells icon"
+	)
+	_check(
+		action_buttons[0].icon.get_width() == 24
+			and action_buttons[0].get_theme_constant("icon_max_width") == 24,
+		"Composition icon is rasterized and displayed at its legible 24-pixel size "
+			+ "(texture=%d, display=%d)" % [
+				action_buttons[0].icon.get_width(),
+				action_buttons[0].get_theme_constant("icon_max_width"),
+			]
+	)
+	_check(
+		action_buttons[1].icon.resource_path == "res://assets/icons/arrows-to-dot-solid-full.svg",
+		"Center Camera uses the approved arrows-to-dot icon"
+	)
+	_check(
+		action_buttons[1].get_theme_constant("icon_max_width") == 22,
+		"Composition sizing does not enlarge other surround actions"
+	)
+	var actual_reserved_rects: Array[Rect2] = hud.call("_get_land_surround_reserved_rects")
+	_check(
+		actual_reserved_rects.size() == 4
+			and actual_reserved_rects.has(top_bar.get_global_rect())
+			and actual_reserved_rects.has(left_dock_rail.get_global_rect())
+			and actual_reserved_rects.has(
+				(hud.get_node("HUDRoot/MapModeTabs") as Control).get_global_rect()
+			)
+			and actual_reserved_rects.has(chat_panel.get_global_rect()),
+		"surround placement reserves the visible persistent HUD and chat"
+	)
+	_check(
+		not actual_reserved_rects.has(notification_feed.get_global_rect()),
+		"transient notifications do not destabilize surround placement"
+	)
+	for common_viewport_size: Vector2 in [
+		Vector2(960.0, 540.0),
+		Vector2(1280.0, 720.0),
+		Vector2(1920.0, 1080.0),
+	]:
+		var common_viewport := Rect2(Vector2.ZERO, common_viewport_size)
+		var common_anchor: Vector2 = common_viewport_size * 0.5
+		var common_placement: Dictionary = hud.call(
+			"_find_land_selection_surround_placement",
+			common_anchor,
+			common_viewport,
+			[] as Array[Rect2]
+		)
+		var common_bounds: Rect2 = land_surround.get_placement_bounds(
+			common_placement.get("placement", &"") as StringName,
+			float(common_placement.get("tray_slide", 0.0))
+		)
+		_check(
+			common_placement.get("placement", &"") == &"top_right"
+				and common_viewport.grow(-8.0).encloses(
+					Rect2(common_anchor + common_bounds.position, common_bounds.size)
+				),
+			"%dx%d centered surround prefers top-right within its viewport margin" % [
+				int(common_viewport_size.x),
+				int(common_viewport_size.y),
+			]
+		)
+	var synthetic_viewport := Rect2(Vector2.ZERO, Vector2(1280.0, 720.0))
+	var no_reserved_rects: Array[Rect2] = []
+	var placement: Dictionary = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(640.0, 360.0),
+		synthetic_viewport,
+		no_reserved_rects
+	)
+	_check(
+		placement.get("placement", &"") == &"top_right"
+			and is_zero_approx(float(placement.get("tray_slide", -1.0))),
+		"centered surround prefers the unshifted top-right tray"
+	)
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(1170.0, 360.0),
+		synthetic_viewport,
+		no_reserved_rects
+	)
+	_check(
+		placement.get("placement", &"") == &"top_right"
+			and is_equal_approx(float(placement.get("tray_slide", -1.0)), 8.0),
+		"small right-edge overflow slides the preferred tray inward"
+	)
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(1190.0, 360.0),
+		synthetic_viewport,
+		no_reserved_rects
+	)
+	_check(
+		placement.get("placement", &"") == &"top_left",
+		"right-edge placement mirrors left after the slide limit"
+	)
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(640.0, 70.0),
+		synthetic_viewport,
+		no_reserved_rects
+	)
+	_check(
+		placement.get("placement", &"") == &"bottom_right",
+		"top-edge placement falls back to the lower-right tray"
+	)
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(1190.0, 70.0),
+		synthetic_viewport,
+		no_reserved_rects
+	)
+	_check(
+		placement.get("placement", &"") == &"bottom_left",
+		"top-right corner uses lower-left after the first three placements fail"
+	)
+	var synthetic_top_bar: Array[Rect2] = [Rect2(0.0, 0.0, 1280.0, 50.0)]
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(640.0, 110.0),
+		synthetic_viewport,
+		synthetic_top_bar
+	)
+	_check(
+		placement.get("placement", &"") == &"bottom_right",
+		"reserved top-bar space pushes the tray below the counter"
+	)
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(640.0, 25.0),
+		synthetic_viewport,
+		synthetic_top_bar
+	)
+	_check(placement.is_empty(), "counter anchors behind reserved HUD hide the surround")
+	var synthetic_chat: Array[Rect2] = [Rect2(900.0, 500.0, 360.0, 200.0)]
+	placement = hud.call(
+		"_find_land_selection_surround_placement",
+		Vector2(850.0, 600.0),
+		synthetic_viewport,
+		synthetic_chat
+	)
+	_check(
+		placement.get("placement", &"") == &"top_left",
+		"visible chat reservation mirrors an otherwise overlapping tray"
+	)
+	var geometry_anchor := Vector2(500.0, 300.0)
+	for placement_name: StringName in land_surround.get_placements():
+		land_surround.set_placement(placement_name)
+		land_surround.set_anchor_position(geometry_anchor)
+		var relative_bounds: Rect2 = land_surround.get_placement_bounds(placement_name)
+		_check(
+			land_surround.get_anchor_position().is_equal_approx(geometry_anchor),
+			"%s placement preserves the exact counter anchor" % placement_name
+		)
+		_check(
+			Rect2(geometry_anchor + relative_bounds.position, relative_bounds.size).is_equal_approx(
+				land_surround.get_global_rect()
+			),
+			"%s placement reports its complete surface bounds" % placement_name
+		)
+		_check(
+			relative_bounds.position.x <= -40.0
+				and relative_bounds.position.y <= -40.0
+				and relative_bounds.end.x >= 40.0
+				and relative_bounds.end.y >= 40.0,
+			"%s placement bounds contain the full entrance expansion" % placement_name
+		)
+	land_surround.set_placement(&"top_right")
 	mgr.show_panel("military")
 	await get_tree().process_frame
-	_check(not friendly_division_panel.visible, "Opening side panel closes bottom selection panel")
+	_check(bool(land_popover.get("_suspended")), "Opening side panel suspends land selection popover")
 	GameState.divisions = {
 		"test_div": {
 			"nation_id": "germany",
@@ -179,12 +395,434 @@ func _ready() -> void:
 			"max_hp": 100.0,
 			"suppression": 0.0,
 			"combat_state": "idle",
+			"move_order": [],
+			"final_position_lng": -999.0,
+			"final_position_lat": -999.0,
+		},
+		"test_div_2": {
+			"nation_id": "germany",
+			"division_type": "infantry",
+			"hp": 100.0,
+			"max_hp": 100.0,
+			"suppression": 0.0,
+			"combat_state": "idle",
+			"move_order": [],
+			"final_position_lng": -999.0,
+			"final_position_lat": -999.0,
 		},
 	}
+	_check(
+		MilitarySystemScript.can_hold_division_data(
+			{"combat_state": "idle", "move_order": ["wp"], "final_position_lng": -999.0},
+			true
+		),
+		"Hold eligibility accepts ordinary waypoint movement"
+	)
+	_check(
+		MilitarySystemScript.can_hold_division_data(
+			{"combat_state": "idle", "move_order": [], "final_position_lng": 12.0},
+			true
+		),
+		"Hold eligibility accepts final-target-only movement"
+	)
+	_check(
+		MilitarySystemScript.can_hold_division_data(
+			{"combat_state": "idle", "move_order": [], "final_position_lng": -999.0},
+			true,
+			true
+		),
+		"Hold eligibility accepts immediate local movement awaiting confirmation"
+	)
+	for ineligible_state: String in ["engaged", "suppressed", "retreating", "destroyed"]:
+		_check(
+			not MilitarySystemScript.can_hold_division_data(
+				{
+					"combat_state": ineligible_state,
+					"move_order": ["wp"],
+					"final_position_lng": 12.0,
+				},
+				true
+			),
+			"Hold eligibility rejects %s divisions" % ineligible_state
+		)
+	_check(
+		not MilitarySystemScript.can_hold_division_data(
+			{"combat_state": "idle", "move_order": [], "final_position_lng": -999.0},
+			true
+		),
+		"Hold eligibility rejects stopped divisions"
+	)
+	_check(
+		not MilitarySystemScript.can_hold_division_data(
+			{"combat_state": "idle", "move_order": ["wp"], "final_position_lng": -999.0},
+			false
+		),
+		"Hold eligibility rejects foreign divisions"
+	)
+	for eligible_retreat_state: String in ["engaged", "suppressed"]:
+		_check(
+			MilitarySystemScript.can_retreat_division_data(
+				{"combat_state": eligible_retreat_state},
+				true
+			),
+			"Retreat eligibility accepts owned %s divisions" % eligible_retreat_state
+		)
+	for ineligible_retreat_state: String in ["idle", "retreating", "destroyed"]:
+		_check(
+			not MilitarySystemScript.can_retreat_division_data(
+				{"combat_state": ineligible_retreat_state},
+				true
+			),
+			"Retreat eligibility rejects %s divisions" % ineligible_retreat_state
+		)
+	_check(
+		not MilitarySystemScript.can_retreat_division_data(
+			{"combat_state": "engaged"},
+			false
+		),
+		"Retreat eligibility rejects foreign divisions"
+	)
 	EventBus.division_selected.emit("test_div")
 	await get_tree().process_frame
 	_check(not _any_bottom_panel_visible(hud), "Division selection does not reopen bottom panel while side panel is open")
 	mgr.close_all()
+	await get_tree().process_frame
+	_check(not bool(land_popover.get("_suspended")), "Closing side panel restores land popover availability")
+	var move_cancel_log: Array[bool] = []
+	EventBus.move_mode_cancelled.connect(func() -> void: move_cancel_log.append(true))
+	EventBus.move_mode_active_changed.emit(true)
+	var move_escape := InputEventKey.new()
+	move_escape.pressed = true
+	move_escape.physical_keycode = KEY_ESCAPE
+	mgr._input(move_escape)
+	_check(move_cancel_log.size() == 1, "Escape cancels active land placement mode before opening menus")
+	EventBus.division_selection_changed.emit(["test_div"] as Array[String])
+	EventBus.division_active_changed.emit("test_div")
+	EventBus.division_screen_position_updated.emit("test_div", Vector2(500.0, 300.0))
+	hud._process(0.0)
+	_check(land_surround.visible, "single selection shows connected surround")
+	_check(land_surround.get_anchor_position().is_equal_approx(Vector2(500.0, 300.0)), "surround anchors to selected division screen position")
+	_check(not land_popover.visible, "single selection does not open old inspector")
+	var surround_surface: ColorRect = land_surround.get_node("Surface") as ColorRect
+	var surround_material: ShaderMaterial = surround_surface.material as ShaderMaterial
+	var first_selection_tween: Tween = land_surround.get("_selection_tween") as Tween
+	_check(first_selection_tween != null, "new single selection starts the surround entrance animation")
+	_check(
+		is_equal_approx(float(surround_material.get_shader_parameter("selection_pop")), 8.0),
+		"selection entrance starts with the old eight-pixel ring expansion"
+	)
+	_check(
+		is_equal_approx(action_buttons[0].self_modulate.a, 0.6),
+		"selection entrance starts controls partially faded without moving their hitboxes"
+	)
+	hud._process(0.0)
+	_check(
+		land_surround.get("_selection_tween") == first_selection_tween,
+		"position refresh does not restart the selection entrance"
+	)
+	await get_tree().create_timer(0.14).timeout
+	_check(
+		is_zero_approx(float(surround_material.get_shader_parameter("selection_pop")))
+			and is_zero_approx(float(surround_material.get_shader_parameter("selection_emphasis"))),
+		"selection entrance settles its ring geometry and border emphasis"
+	)
+	_check(
+		is_equal_approx(action_buttons[0].self_modulate.a, 1.0),
+		"selection entrance settles controls at full opacity"
+	)
+	var placement_change_composition_requests: Array[String] = []
+	EventBus.division_template_viewer_open_requested.connect(func(division_id: String) -> void:
+		placement_change_composition_requests.append(division_id)
+	)
+	action_buttons[0].button_down.emit()
+	EventBus.division_screen_position_updated.emit(
+		"test_div",
+		Vector2(viewport_size.x - 88.0, 300.0)
+	)
+	hud._process(0.0)
+	action_buttons[0].pressed.emit()
+	_check(
+		placement_change_composition_requests.is_empty(),
+		"placement mirroring during button-down cancels the armed action"
+	)
+	EventBus.division_screen_position_updated.emit("test_div", Vector2(500.0, 300.0))
+	hud._process(0.0)
+	mgr.show_panel("military")
+	hud._process(0.0)
+	_check(not land_surround.visible, "any managed side panel suspends the surround")
+	mgr.hide_panel("military")
+	hud._process(0.0)
+	_check(land_surround.visible, "closing the managed panel restores the surround")
+	_check(
+		land_surround.get("_selection_tween") == first_selection_tween,
+		"panel suspension does not replay the selection entrance"
+	)
+	var surround_visibility_changes: Array[bool] = []
+	land_surround.visibility_changed.connect(func() -> void:
+		surround_visibility_changes.append(land_surround.visible)
+	)
+	hud._process(0.0)
+	_check(
+		surround_visibility_changes.is_empty(),
+		"position refresh preserves surround visibility so buttons remain interactive"
+	)
+	_check(
+		bool(hud.call(
+			"_is_position_over_registered_ui",
+			action_buttons[0].get_global_rect().get_center()
+		)),
+		"surround actions block map input only inside their button bounds"
+	)
+	_check(
+		not bool(hud.call("_is_position_over_registered_ui", land_surround.get_anchor_position())),
+		"hollow counter center passes map input through"
+	)
+	_check(
+		not bool(hud.call(
+			"_is_position_over_registered_ui",
+			action_buttons[0].get_global_rect().end + Vector2(2.0, -17.0)
+		)),
+		"tray gap and button-adjacent pixels pass map input through"
+	)
+	var idle_surround_width: float = land_surround.size.x
+	var hold_requests: Array[String] = []
+	EventBus.division_hold_requested.connect(func(division_id: String) -> void:
+		hold_requests.append(division_id)
+	)
+	GameState.divisions["test_div"]["move_order"] = ["wp"]
+	EventBus.division_hold_eligibility_changed.emit("test_div", true)
+	_check(
+		land_surround.get("_selection_tween") == first_selection_tween,
+		"Hold eligibility refresh does not restart the selection entrance"
+	)
+	action_buttons = land_surround.get_control_buttons()
+	_check(action_buttons.size() == 3, "moving single selection adds Hold as the third action")
+	_check(
+		action_buttons[0].name == "Composition"
+			and action_buttons[1].name == "CenterCamera"
+			and action_buttons[2].name == "Hold",
+		"moving layout preserves universal order before Hold"
+	)
+	_check(
+		action_buttons[2].icon != null
+			and action_buttons[2].icon.resource_path == "res://assets/icons/hand-regular-full.svg",
+		"Hold uses the approved hand icon"
+	)
+	_check(
+		action_buttons[2].icon.get_width() == 22
+			and action_buttons[2].theme_type_variation == &"TacticalHoldButton",
+		"Hold uses legible sizing and its restrained semantic style"
+	)
+	_check(action_buttons[2].tooltip_text.begins_with("Hold ["), "Hold tooltip includes its remappable keybind")
+	var original_hold_events: Array[InputEvent] = InputMap.action_get_events("unit_hold")
+	InputMap.action_erase_events("unit_hold")
+	var temporary_hold_key := InputEventKey.new()
+	temporary_hold_key.physical_keycode = KEY_F10
+	InputMap.action_add_event("unit_hold", temporary_hold_key)
+	KeybindManager.bindings_changed.emit()
+	_check(action_buttons[2].tooltip_text.contains("F10"), "Hold tooltip reacts to runtime key remapping")
+	InputMap.action_erase_events("unit_hold")
+	for original_hold_event: InputEvent in original_hold_events:
+		InputMap.action_add_event("unit_hold", original_hold_event)
+	KeybindManager.bindings_changed.emit()
+	_check(land_surround.size.x > idle_surround_width, "moving layout expands the connected tray for Hold")
+	_press_action_button(action_buttons[2])
+	_check(hold_requests == ["test_div"], "Hold requests the selected moving division")
+
+	action_buttons[2].button_down.emit()
+	GameState.divisions["test_div"]["combat_state"] = "engaged"
+	EventBus.division_retreat_eligibility_changed.emit("test_div", true)
+	EventBus.division_hold_eligibility_changed.emit("test_div", false)
+	action_buttons[2].pressed.emit()
+	_check(hold_requests == ["test_div"], "combat starting during a Hold press cancels the stale action")
+	action_buttons = land_surround.get_control_buttons()
+	_check(action_buttons.size() == 3, "moving-to-engaged transition replaces Hold with Retreat")
+	_check(
+		action_buttons[0].name == "Composition"
+			and action_buttons[1].name == "CenterCamera"
+			and action_buttons[2].name == "Retreat",
+		"combat layout preserves universal order before Retreat"
+	)
+	_check(
+		action_buttons[2].icon != null
+			and action_buttons[2].icon.resource_path == "res://assets/icons/person-running-solid-full.svg",
+		"Retreat uses the approved running-person icon"
+	)
+	_check(
+		action_buttons[2].icon.get_width() == 22
+			and action_buttons[2].get_theme_constant("icon_max_width") == 22
+			and action_buttons[2].theme_type_variation == &"TacticalRetreatButton",
+		"Retreat uses legible sizing and its restrained semantic style"
+	)
+	_check(
+		action_buttons[2].tooltip_text.begins_with("Retreat ["),
+		"Retreat tooltip includes its remappable keybind"
+	)
+	_check(
+		land_surround.get("_selection_tween") == first_selection_tween,
+		"combat eligibility refresh does not restart the selection entrance"
+	)
+	var original_retreat_events: Array[InputEvent] = InputMap.action_get_events("unit_retreat")
+	InputMap.action_erase_events("unit_retreat")
+	var temporary_retreat_key := InputEventKey.new()
+	temporary_retreat_key.physical_keycode = KEY_F11
+	InputMap.action_add_event("unit_retreat", temporary_retreat_key)
+	KeybindManager.bindings_changed.emit()
+	_check(action_buttons[2].tooltip_text.contains("F11"), "Retreat tooltip reacts to runtime key remapping")
+	InputMap.action_erase_events("unit_retreat")
+	for original_retreat_event: InputEvent in original_retreat_events:
+		InputMap.action_add_event("unit_retreat", original_retreat_event)
+	KeybindManager.bindings_changed.emit()
+	var retreat_requests: Array[String] = []
+	EventBus.division_retreat_requested.connect(func(division_id: String) -> void:
+		retreat_requests.append(division_id)
+	)
+	_press_action_button(action_buttons[2])
+	_check(retreat_requests == ["test_div"], "Retreat requests the selected engaged division")
+	GameState.divisions["test_div"]["combat_state"] = "suppressed"
+	EventBus.division_retreat_eligibility_changed.emit("test_div", true)
+	action_buttons = land_surround.get_control_buttons()
+	_check(action_buttons.size() == 3 and action_buttons[2].name == "Retreat", "suppressed divisions retain Retreat")
+	action_buttons[2].button_down.emit()
+	GameState.divisions["test_div"]["combat_state"] = "retreating"
+	EventBus.division_retreat_eligibility_changed.emit("test_div", false)
+	action_buttons[2].pressed.emit()
+	_check(retreat_requests == ["test_div"], "retreat starting during a press cancels the stale action")
+	action_buttons = land_surround.get_control_buttons()
+	_check(action_buttons.size() == 2, "Retreat disappears when withdrawal starts")
+	_check(is_equal_approx(land_surround.size.x, idle_surround_width), "withdrawal restores two-action tray geometry")
+	GameState.divisions["test_div"]["combat_state"] = "idle"
+	var composition_requests: Array[String] = []
+	EventBus.division_template_viewer_open_requested.connect(func(division_id: String) -> void:
+		composition_requests.append(division_id)
+	)
+	_press_action_button(action_buttons[0])
+	await get_tree().process_frame
+	hud._process(0.0)
+	_check(composition_requests == ["test_div"], "Composition requests the active division")
+	_check(mgr.is_panel_open("division_template_viewer"), "Composition opens the template viewer")
+	_check(not land_surround.visible, "Composition suspends the surround while its viewer is open")
+	_check(
+		hud.get("_selected_land_division_ids") == ["test_div"],
+		"Composition preserves the selected division"
+	)
+	EventBus.division_template_viewer_closed.emit()
+	await get_tree().process_frame
+	hud._process(0.0)
+	_check(land_surround.visible, "closing Composition restores the selected surround")
+	var center_camera_requests: Array[String] = []
+	EventBus.division_center_camera_requested.connect(func(division_id: String) -> void:
+		center_camera_requests.append(division_id)
+	)
+	_press_action_button(action_buttons[1])
+	_check(center_camera_requests == ["test_div"], "Center Camera requests the active division")
+	_check(
+		hud.get("_selected_land_division_ids") == ["test_div"],
+		"Center Camera preserves the selected division"
+	)
+	_check(
+		float(surround_material.get_shader_parameter("inner_radius")) > 0.0,
+		"selection surround leaves a transparent cutout over the division counter"
+	)
+	GameState.divisions["test_div"]["combat_state"] = "destroyed"
+	hud._process(0.0)
+	_check(not land_surround.visible, "destroyed selected division hides its surround")
+	_press_action_button(action_buttons[1])
+	_check(
+		center_camera_requests == ["test_div"],
+		"destroyed divisions reject stale action-button activation"
+	)
+	GameState.divisions["test_div"]["combat_state"] = "idle"
+	EventBus.division_screen_position_updated.emit("test_div", Vector2(-1.0, -1.0))
+	hud._process(0.0)
+	_check(not land_surround.visible, "off-screen selected land unit hides surround without clearing selection")
+	EventBus.division_screen_position_updated.emit("test_div", Vector2(620.0, 340.0))
+	hud._process(0.0)
+	_check(land_surround.visible, "returning selected unit restores surround")
+	_check(
+		land_surround.get("_selection_tween") == first_selection_tween,
+		"off-screen restoration does not replay the selection entrance"
+	)
+	_check(land_surround.get_anchor_position().is_equal_approx(Vector2(620.0, 340.0)), "selection anchor updates when projected position changes")
+	var edge_slide_start: float = viewport_size.x - 118.0
+	for interpolated_x: float in [
+		edge_slide_start,
+		edge_slide_start + 6.0,
+		edge_slide_start + 12.0,
+		edge_slide_start + 15.0,
+	]:
+		EventBus.division_screen_position_updated.emit("test_div", Vector2(interpolated_x, 340.0))
+		hud._process(0.0)
+		_check(
+			land_surround.visible
+				and land_surround.get_anchor_position().is_equal_approx(
+					Vector2(interpolated_x, 340.0)
+				),
+			"surround remains attached during interpolated edge movement at x=%d" % int(interpolated_x)
+		)
+	_check(
+		land_surround.get_placement() == &"top_right",
+		"small interpolated edge corrections retain the current orientation"
+	)
+	EventBus.division_screen_position_updated.emit(
+		"test_div",
+		Vector2(edge_slide_start + 30.0, 340.0)
+	)
+	hud._process(0.0)
+	_check(
+		land_surround.visible and land_surround.get_placement() == &"top_left",
+		"interpolation mirrors only after the preferred slide range is exhausted"
+	)
+	EventBus.division_screen_position_updated.emit("test_div", Vector2(900.0, 340.0))
+	hud._process(0.0)
+	_check(
+		land_surround.get_placement() == &"top_right",
+		"preferred placement returns after gaining hysteresis clearance"
+	)
+	EventBus.division_active_changed.emit("test_div_2")
+	hud._process(0.0)
+	_check(
+		not land_surround.visible,
+		"active division mismatches are rejected until the selected set catches up"
+	)
+	EventBus.division_selection_changed.emit(["test_div_2"] as Array[String])
+	EventBus.division_active_changed.emit("test_div_2")
+	EventBus.division_selection_changed.emit(["test_div"] as Array[String])
+	EventBus.division_active_changed.emit("test_div")
+	EventBus.division_selection_changed.emit(["test_div_2"] as Array[String])
+	EventBus.division_active_changed.emit("test_div_2")
+	EventBus.division_screen_position_updated.emit("test_div_2", Vector2(740.0, 420.0))
+	hud._process(0.0)
+	_check(
+		land_surround.visible
+			and land_surround.get_anchor_position().is_equal_approx(Vector2(740.0, 420.0)),
+		"rapid A-B-A-B selection changes settle on the final projected anchor"
+	)
+	_check(
+		land_surround.get("_selection_tween") != first_selection_tween
+			and is_equal_approx(
+				float(surround_material.get_shader_parameter("selection_pop")),
+				8.0
+			),
+		"changing single selection starts a fresh entrance animation"
+	)
+	var changed_selection_buttons: Array[Button] = land_surround.get_control_buttons()
+	changed_selection_buttons[1].button_down.emit()
+	GameState.divisions.erase("test_div_2")
+	EventBus.division_removed.emit("test_div_2")
+	changed_selection_buttons[1].pressed.emit()
+	_check(not land_surround.visible, "division removal immediately hides an armed surround")
+	_check(
+		not (hud.get("_division_screen_positions") as Dictionary).has("test_div_2"),
+		"division removal clears its cached screen projection"
+	)
+	_check(
+		center_camera_requests == ["test_div"],
+		"division removal during button-down cancels the stale action"
+	)
+	EventBus.division_selection_changed.emit([] as Array[String])
+	hud._process(0.0)
+	_check(not land_surround.visible, "deselection hides connected surround")
 	chat_input.grab_focus()
 	await get_tree().process_frame
 	_check(text_focus_log == [true], "Chat input focus blocks keyboard camera input")
@@ -286,6 +924,12 @@ func _check(cond: bool, label: String) -> void:
 	else:
 		_fail_count += 1
 		print("FAIL: ", label)
+
+
+## Emits the native button sequence needed to exercise action press arming in headless tests.
+func _press_action_button(button: Button) -> void:
+	button.button_down.emit()
+	button.pressed.emit()
 
 
 ## Seeds GameState with a deterministic relation snapshot for HUD tests.
@@ -448,7 +1092,7 @@ func _toast_is_above_chat(hud: Node) -> bool:
 ## - hud: GameHUD test instance.
 ## Returns: true when a bottom panel is visible.
 func _any_bottom_panel_visible(hud: Node) -> bool:
-	for panel_name: String in ["FriendlyDivisionPanel", "FriendlyProvincePanel", "FriendlyStackPanel", "EnemyDivisionPanel"]:
+	for panel_name: String in ["FriendlyProvincePanel", "EnemyDivisionPanel"]:
 		var panel: Control = hud.get_node(panel_name) as Control
 		if panel.visible:
 			return true

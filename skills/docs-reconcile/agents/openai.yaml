@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs Reconcile"
+  short_description: "Reconcile maintained design documentation"
+  default_prompt: "Use $docs-reconcile after the completed change to update affected authoritative documents, checklists, and links."

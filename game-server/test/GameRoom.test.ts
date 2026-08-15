@@ -3,7 +3,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { SignJWT } from "jose";
 import appConfig from "../src/app.config.js";
 import { getTestPort } from "./helpers.js";
-import { GameRoomState } from "../src/rooms/schema/GameRoomState.js";
+import { DivisionState, GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 import { setCombatGraceTicksForTesting } from "../src/systems/combat_system.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
@@ -131,6 +131,274 @@ describe("lane:core | GameRoom", () => {
       client.leave();
       await room.waitForNextPatch();
       assert.strictEqual(room.state.players.size, 0);
+    });
+  });
+
+  describe("HOLD", () => {
+    async function setupHoldRoom() {
+      const tokenA = await makeToken({ sub: "user-a", steam_id: "dev_steamid", has_host_pass: true });
+      const tokenB = await makeToken({ sub: "user-b", steam_id: "dev_steamid", has_host_pass: true });
+      const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+      const clientA = await colyseus.connectTo(room, { token: tokenA });
+      const clientB = await colyseus.connectTo(room, { token: tokenB });
+      await room.waitForNextPatch();
+
+      room.state.phase = "running";
+      room.state.nations.get("germany")!.player_id = "user-a";
+      room.state.nations.get("france")!.player_id = "user-b";
+
+      const division = new DivisionState();
+      division.division_id = "germany_div_test";
+      division.nation_id = "germany";
+      room.state.divisions.set(division.division_id, division);
+
+      (room as any).serverVisibilitySystem = {
+        canNationSeeDivision: (nationId: string, divisionId: string) =>
+          nationId === "germany" && divisionId === division.division_id,
+      };
+      const serverClientA = room.clients.find(client => client.sessionId === clientA.sessionId)!;
+      const serverClientB = room.clients.find(client => client.sessionId === clientB.sessionId)!;
+      const sentToA: Array<{ type: string; message: any }> = [];
+      const sentToB: Array<{ type: string; message: any }> = [];
+      (serverClientA as any).send = (type: string, message: any) => sentToA.push({ type, message });
+      (serverClientB as any).send = (type: string, message: any) => sentToB.push({ type, message });
+      const hold = (client: typeof room.clients[number]) =>
+        (room as any).handleHold(client, { division_id: division.division_id });
+
+      return {
+        room,
+        division,
+        sentToA,
+        sentToB,
+        hold,
+        serverClientA,
+        serverClientB,
+      };
+    }
+
+    function assertHoldUpdate(messages: Array<{ type: string; message: any }>) {
+      assert.strictEqual(messages.length, 1);
+      assert.strictEqual(messages[0].type, "DIVISION_UPDATES");
+      assert.strictEqual(messages[0].message.divisions.length, 1);
+      assert.strictEqual(messages[0].message.divisions[0].division_id, "germany_div_test");
+      assert.deepStrictEqual(messages[0].message.divisions[0].move_order, []);
+      assert.strictEqual(messages[0].message.divisions[0].final_position_lng, -999);
+      assert.strictEqual(messages[0].message.divisions[0].final_position_lat, -999);
+    }
+
+    it("stops active route movement and broadcasts the cleared destination", async () => {
+      const { division, sentToA, sentToB, hold, serverClientA } = await setupHoldRoom();
+      division.move_order.push("waypoint_a", "waypoint_b");
+      division.final_position_lng = 12.5;
+      division.final_position_lat = 48.25;
+
+      hold(serverClientA);
+
+      assert.strictEqual(division.move_order.length, 0);
+      assert.strictEqual(division.final_position_lng, -999);
+      assert.strictEqual(division.final_position_lat, -999);
+      assertHoldUpdate(sentToA);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("stops final-target-only movement", async () => {
+      const { division, sentToA, sentToB, hold, serverClientA } = await setupHoldRoom();
+      division.final_position_lng = 7.25;
+      division.final_position_lat = 46.5;
+
+      hold(serverClientA);
+
+      assert.strictEqual(division.move_order.length, 0);
+      assert.strictEqual(division.final_position_lng, -999);
+      assert.strictEqual(division.final_position_lat, -999);
+      assertHoldUpdate(sentToA);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("does not alter or broadcast a stopped division", async () => {
+      const { division, sentToA, sentToB, hold, serverClientA } = await setupHoldRoom();
+
+      hold(serverClientA);
+
+      assert.strictEqual(division.move_order.length, 0);
+      assert.strictEqual(division.final_position_lng, -999);
+      assert.strictEqual(division.final_position_lat, -999);
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("does not alter or broadcast movement outside the running phase", async () => {
+      const { room, division, sentToA, sentToB, hold, serverClientA } = await setupHoldRoom();
+      room.state.phase = "lobby";
+      division.move_order.push("waypoint_a");
+      division.final_position_lng = 12.5;
+      division.final_position_lat = 48.25;
+
+      hold(serverClientA);
+
+      assert.deepStrictEqual([...division.move_order], ["waypoint_a"]);
+      assert.strictEqual(division.final_position_lng, 12.5);
+      assert.strictEqual(division.final_position_lat, 48.25);
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("does not alter or broadcast combat movement", async () => {
+      const { division, sentToA, sentToB, hold, serverClientA } = await setupHoldRoom();
+      division.combat_state = "engaged";
+      division.move_order.push("waypoint_a");
+      division.final_position_lng = 12.5;
+      division.final_position_lat = 48.25;
+
+      hold(serverClientA);
+
+      assert.deepStrictEqual([...division.move_order], ["waypoint_a"]);
+      assert.strictEqual(division.final_position_lng, 12.5);
+      assert.strictEqual(division.final_position_lat, 48.25);
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("does not alter or broadcast movement owned by another player", async () => {
+      const { division, sentToA, sentToB, hold, serverClientB } = await setupHoldRoom();
+      division.move_order.push("waypoint_a");
+      division.final_position_lng = 12.5;
+      division.final_position_lat = 48.25;
+
+      hold(serverClientB);
+
+      assert.deepStrictEqual([...division.move_order], ["waypoint_a"]);
+      assert.strictEqual(division.final_position_lng, 12.5);
+      assert.strictEqual(division.final_position_lat, 48.25);
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+  });
+
+  describe("RETREAT", () => {
+    async function setupRetreatRoom() {
+      const tokenA = await makeToken({ sub: "user-a", steam_id: "dev_steamid", has_host_pass: true });
+      const tokenB = await makeToken({ sub: "user-b", steam_id: "dev_steamid", has_host_pass: true });
+      const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+      const clientA = await colyseus.connectTo(room, { token: tokenA });
+      const clientB = await colyseus.connectTo(room, { token: tokenB });
+      await room.waitForNextPatch();
+
+      room.state.phase = "running";
+      room.state.nations.get("germany")!.player_id = "user-a";
+      room.state.nations.get("france")!.player_id = "user-b";
+
+      const division = new DivisionState();
+      division.division_id = "germany_div_retreat";
+      division.nation_id = "germany";
+      division.combat_state = "engaged";
+      division.position_lng = 10;
+      division.position_lat = 50;
+      division.engaged_with.push("france_div_enemy");
+      room.state.divisions.set(division.division_id, division);
+
+      const enemy = new DivisionState();
+      enemy.division_id = "france_div_enemy";
+      enemy.nation_id = "france";
+      enemy.combat_state = "engaged";
+      enemy.position_lng = 10.1;
+      enemy.position_lat = 50;
+      enemy.engaged_with.push(division.division_id);
+      room.state.divisions.set(enemy.division_id, enemy);
+
+      (room as any).serverVisibilitySystem = {
+        canNationSeeDivision: (nationId: string, divisionId: string) =>
+          nationId === "germany" && divisionId === division.division_id,
+      };
+      const serverClientA = room.clients.find(client => client.sessionId === clientA.sessionId)!;
+      const serverClientB = room.clients.find(client => client.sessionId === clientB.sessionId)!;
+      const sentToA: Array<{ type: string; message: any }> = [];
+      const sentToB: Array<{ type: string; message: any }> = [];
+      (serverClientA as any).send = (type: string, message: any) => sentToA.push({ type, message });
+      (serverClientB as any).send = (type: string, message: any) => sentToB.push({ type, message });
+      const retreat = (client: typeof room.clients[number]) =>
+        (room as any).handleRetreat(client, { division_id: division.division_id });
+
+      return {
+        room,
+        division,
+        enemy,
+        sentToA,
+        sentToB,
+        retreat,
+        serverClientA,
+        serverClientB,
+      };
+    }
+
+    function assertRetreatUpdate(messages: Array<{ type: string; message: any }>) {
+      assert.strictEqual(messages.length, 1);
+      assert.strictEqual(messages[0].type, "DIVISION_UPDATES");
+      assert.strictEqual(messages[0].message.divisions.length, 1);
+      assert.strictEqual(messages[0].message.divisions[0].division_id, "germany_div_retreat");
+      assert.strictEqual(messages[0].message.divisions[0].combat_state, "retreating");
+    }
+
+    for (const combatState of ["engaged", "suppressed"] as const) {
+      it(`starts and visibility-filters an owned ${combatState} division retreat`, async () => {
+        const { division, sentToA, sentToB, retreat, serverClientA } = await setupRetreatRoom();
+        division.combat_state = combatState;
+
+        retreat(serverClientA);
+
+        assert.strictEqual(division.combat_state, "retreating");
+        assert.strictEqual(division.engaged_with.length, 0);
+        assertRetreatUpdate(sentToA);
+        assert.strictEqual(sentToB.length, 0);
+      });
+    }
+
+    for (const combatState of ["idle", "retreating", "destroyed"] as const) {
+      it(`rejects an owned ${combatState} division`, async () => {
+        const { division, sentToA, sentToB, retreat, serverClientA } = await setupRetreatRoom();
+        division.combat_state = combatState;
+
+        retreat(serverClientA);
+
+        assert.strictEqual(division.combat_state, combatState);
+        assert.deepStrictEqual([...division.engaged_with], ["france_div_enemy"]);
+        assert.strictEqual(sentToA.length, 0);
+        assert.strictEqual(sentToB.length, 0);
+      });
+    }
+
+    it("rejects Retreat outside the running phase", async () => {
+      const { room, division, sentToA, sentToB, retreat, serverClientA } = await setupRetreatRoom();
+      room.state.phase = "lobby";
+
+      retreat(serverClientA);
+
+      assert.strictEqual(division.combat_state, "engaged");
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("rejects a division owned by another player", async () => {
+      const { division, sentToA, sentToB, retreat, serverClientB } = await setupRetreatRoom();
+
+      retreat(serverClientB);
+
+      assert.strictEqual(division.combat_state, "engaged");
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+    });
+
+    it("rejects stale combat state without a live opposing engagement", async () => {
+      const { room, division, enemy, sentToA, sentToB, retreat, serverClientA } = await setupRetreatRoom();
+      enemy.combat_state = "retreating";
+
+      retreat(serverClientA);
+
+      assert.strictEqual(division.combat_state, "engaged");
+      assert.deepStrictEqual([...division.engaged_with], [enemy.division_id]);
+      assert.strictEqual(sentToA.length, 0);
+      assert.strictEqual(sentToB.length, 0);
+      assert.strictEqual(room.state.divisions.get(division.division_id), division);
     });
   });
 
