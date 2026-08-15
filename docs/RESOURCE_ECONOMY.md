@@ -226,36 +226,155 @@ not two competing ones.
 
 ---
 
-## Unit Build Cost vs. Supply Draw
+## Unit Build Cost, Production, and Supply Draw
 
-Two separate moments, two separate mechanics, deliberately not merged into one
+Three separate mechanics that plug into each other, deliberately not merged into one
 continuous-upkeep model (Stellaris's per-unit continuous upkeep was explicitly considered
-and rejected — see Why Not Continuous Upkeep below).
+and rejected — see Why Not Continuous Upkeep below):
 
-### Build cost — fixed, paid once, at division raise time
+1. **Build cost** — what a unit consumes from the resource-cost vector.
+2. **`build_points`** — how long a unit takes to produce, independent of (1).
+3. **Supply draw** — the ongoing resource-vector cost of keeping a fielded unit healthy.
 
-A division's build cost is the sum of its units' individual costs. Each unit type has a
-resource cost vector (money + iron + manpower, plus oil/rubber/chromium/etc. depending on
-unit type — armour costs rubber and iron, AT guns at the premium tier cost chromium, and
-so on). This is paid once, when the division is raised, exactly the Call-of-War model:
-flat cost up front, not a continuously compounding tax.
+### Division raising is unit-level under the hood, not a single lump payment
+
+A division template is still raised with one click, exactly as before — that player-facing
+action doesn't change. What changes is what happens underneath it: raising a template
+creates a set of independently-fillable demand slots (one per template line) rather than
+deducting the whole division's cost in one lump sum at raise time. Each slot is filled by
+an individual unit, produced or drawn from Reserve, and its resource cost is deducted
+per-unit as that happens — not summed and charged up front. See Reserve and Marshalling,
+below, for how slots actually get filled.
+
+### Build cost — resource vector, deducted per unit as it is produced or drawn from Reserve
+
+Each unit type has a resource cost vector (money + iron + manpower, plus oil/rubber/
+chromium/etc. depending on unit type — armour costs rubber and iron, AT guns at the
+premium tier cost chromium, and so on). This part of the model is unchanged from the
+original design: flat, known cost per unit, not a continuously compounding tax.
 
 **Manpower as part of this vector specifically:** infantry-type units carry a higher
 manpower-cost component; armour/mechanised units carry a lower one, reflecting real crew-
 size ratios (a tank battalion has far fewer soldiers than an equivalent infantry
 battalion). This is baked into the existing per-unit cost vector, not a separate system.
 
+### `build_points` — a second, separate cost axis: how long, not what
+
+Resource cost answers "what does this unit consume." A new, separate field —
+**`build_points`** — answers "how long does this unit take to produce." Higher-tier units
+(e.g. a heavy tank vs. a light tank) carry higher `build_points`, independent of how their
+resource cost vector compares. This is deliberately not folded into the resource vector,
+because it's consumed by a different scarce thing: a production building's own tick
+capacity, not the nation's resource stockpile.
+
+A unit's effective time-to-complete at a given production building is:
+
+```
+effective_build_rate = base_rate(building_type, building_level) × industry_pool_unit_speed_multiplier
+time_to_complete = unit.build_points / effective_build_rate
+```
+
+`base_rate` scales with building level only, the same "level scales magnitude, research
+adds perks" rule every building in ECONOMY_BUILDINGS.md already follows.
+`industry_pool_unit_speed_multiplier` is the Industry Pool's existing unit-production-speed
+slice, which this finally gives a concrete formula to act on. Which five buildings produce
+which unit categories, and their research-tree shape, is specified in
+ECONOMY_BUILDINGS.md.
+
+### Reserve — the buffer between production and consumption
+
+Produced units don't attach to a division the instant they're finished. They flow into a
+national **Reserve** first:
+
+- **Land/air Reserve** is a fungible HP-equivalent pool per unit type — not a list of
+  discrete unit objects. Producing 100 HP-equivalent of Medium Tank and later drawing 60
+  for a division slot is simple subtraction, mirroring how an air wing already tracks
+  `count (doubles as HP pool)` rather than individual aircraft (see TACTICAL_COMBAT.md /
+  AIR_COMBAT.md).
+- **Naval Reserve** is a pool of discrete ship objects, each with individual HP — ships
+  are not fungible. This matches naval's existing repair/construction model in
+  NAVAL_COMBAT.md without any change.
+- **Storage cap:** Reserve is not unlimited. This does not introduce a new building — it
+  extends Warehouse's existing Bulk Storage path (ECONOMY_BUILDINGS.md) to also buffer
+  unit-type Reserve stock, alongside the ten resources it already caps.
+- **Scope:** Reserve stock is produced at whichever province holds the relevant building,
+  but is drawn from differently depending on the consumer — see Marshalling below for new
+  divisions, and Supply draw below for fielded ones.
+
+Both a newly-raising division (filling its template slots) and an already-fielded,
+damaged division (topping up lost HP) draw from this same national Reserve. When Reserve
+covers demand, the draw is limited only by the relevant delivery channel's own rate (see
+below). When Reserve is empty for a needed type, fresh production becomes the bottleneck
+instead — the delivery channel and the factory line are then in series, not parallel, and
+the slower of the two throttles the whole draw:
+
+```
+effective_fill_rate = min(production_rate, delivery_channel_rate)
+```
+
+A fast factory behind a slow delivery channel is still slow; a fast channel behind an
+idle factory is still idle. This is the same bottleneck logic the existing road-segment
+flow-rate model already uses elsewhere in STRATEGIC_COMBAT.md — this system just adds a
+new upstream source feeding into it, not a new kind of math.
+
+### Reserve status — deficit/excess severity
+
+For UI and scheduler-priority purposes, each Reserve category's health is expressed as a
+**net rate relative to that category's own storage cap**, not a raw HP/tick number — this
+normalises across unit types whose absolute production/consumption rates aren't
+comparable (Infantry's ±50/tick and Tank's ±2/tick can represent the same relative
+severity):
+
+```
+severity = (production_rate - consumption_rate) / reserve_cap_per_tick
+```
+
+Five bands (placeholder thresholds, TBD from playtesting, structurally confirmed):
+
+| Band | Severity range |
+|---|---|
+| Heavy deficit | ≤ −15% |
+| Light deficit | −15% to −2% |
+| Neutral | −2% to +2% |
+| Slight surplus | +2% to +15% |
+| Heavy surplus | ≥ +15% |
+
+**Zero-demand edge case:** a unit type with no current demand at all (no marshalling
+template or fielded division currently wants it) reads as **Neutral**, never as a
+deficit — zero supply against zero demand is not a problem, and classifying it as a
+deficit would be a false alarm every game starts with by default.
+
+### Marshalling — filling a division before it deploys
+
+A newly-raised division exists off-map in a **Marshalling** state before the player sends
+it to the front. During Marshalling, its delivery channel is a flat national constant —
+`MARSHALLING_RATE` — independent of province and independent of building level, and
+deliberately fast relative to normal field supply (exact value: playtesting). If Reserve
+is empty for a needed type, the fill rate drops to `min(production_rate,
+MARSHALLING_RATE)` per the formula above.
+
+**Early deployment:** once a marshalling division reaches **≥50% aggregate HP** — computed
+as `(sum of current HP across present units) / (sum of full HP across all template-target
+units)`, a whole-division percentage against total HP, not a headcount or per-slot
+threshold — the player may deploy it early. Doing so trades the fast, guaranteed
+`MARSHALLING_RATE` for whatever the front's actual field-supply infrastructure can support,
+which may be slower. This is a real, legible strategic tradeoff: fielding sooner at the
+cost of a potentially slower fill from then on, not simply "the number goes up regardless."
+Once deployed, a division permanently switches to the field supply-graph delivery channel
+described next, even if still below 100% strength.
+
 ### Supply draw — proportional flow, drawn continuously while in the field
 
-A division's supply draw at any tick equals **(missing HP fraction) × (division's total
-build cost, expressed as the same resource vector used at build time)**. This draw is
-satisfied by whatever is flowing down the supply graph already defined in
-STRATEGIC_COMBAT.md (hub → road graph → division's current segment) — the new piece is
-that the flow itself is now a *resource-mix vector*, not a flat scalar "supply points"
-value. A tank-heavy division's draw is mostly oil + rubber; an infantry-heavy division's
-draw is mostly nitrates + grain. The same road segment carries a different effective
-resource mix depending on what's moving through it, which is free emergent depth from
-the existing flow-graph system rather than a new one.
+Once deployed, a division's supply draw at any tick equals **(missing HP fraction) ×
+(unit's build cost, expressed as the same resource vector used at production time)**. This
+draw is satisfied first from Reserve if available, and is delivered via the supply graph
+already defined in STRATEGIC_COMBAT.md (hub → road graph → division's current segment) —
+the delivery channel rate in the `min()` formula above is this road-segment flow rate for
+a division in the field. The flow itself is a *resource-mix vector*, not a flat scalar
+"supply points" value: a tank-heavy division's draw is mostly oil + rubber; an infantry-
+heavy division's draw is mostly nitrates + grain. The same road segment carries a
+different effective resource mix depending on what's moving through it, which is free
+emergent depth from the existing flow-graph system rather than a new one.
 
 **Where this plugs into the existing three-tier supply status (STRATEGIC_COMBAT.md):**
 Tier 1 (Out of Supply) already sets HP recovery rate to zero. Resource-specific
@@ -265,6 +384,15 @@ penalty or rubber's vehicle-recovery penalty if the *nation* lacks the resource,
 though the *graph connectivity* is fine. Supply tier answers "can this division reach a
 hub at all"; resource shortage answers "does the nation have enough of what this
 division specifically needs, once it's connected."
+
+### Which unit gets produced next — the allocation algorithm
+
+Which idle production building builds what, and which fielded/marshalling demand gets
+served first, is governed by a national auto-scheduling algorithm (pull-based: idle
+buildings request an order rather than being re-evaluated every tick), ranked primarily
+by each demand slot's missing-HP percentage, cost-weighted by `build_points` when a
+building must choose between producible types. Full specification of this algorithm is
+out of scope for this document — see the Unit Production System implementation handoff.
 
 ### Why not continuous per-unit upkeep (Stellaris model) — rejected, explicitly
 
@@ -427,6 +555,17 @@ actual relationship (a shared border, or a granted transit right, or naval secur
 - NPC liquidity floor's exact spread-from-fair-price and refresh behaviour
 - Whether reallocation of the industry pool needs any switching cooldown at all, or can
   be fully free (see ECONOMY_BUILDINGS.md's own open question on this)
+- Exact `build_points` value per unit type/tier, and exact production `base_rate` per
+  building level for each of the five production buildings (ECONOMY_BUILDINGS.md)
+- Exact `MARSHALLING_RATE` constant
+- Default deploy-stream vs. supply-stream production split when Reserve is empty and both
+  compete for the same unit type (currently specified as a flat 50/50, adjustable
+  weighting deferred to a post-launch iteration — not v1 scope)
+- Whether a newly-*constructed* ship auto-joins its owner's assigned flotilla the way a
+  *repaired* ship already does (NAVAL_COMBAT.md), or requires manual assignment
+- Exact severity band thresholds for Reserve status (±2%/±15% given as placeholders in
+  Reserve status — deficit/excess severity, above; structurally confirmed, exact cutoffs
+  from playtesting)
 
 ---
 

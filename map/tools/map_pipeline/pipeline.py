@@ -45,6 +45,16 @@ PASSTHROUGH_FILES = [
 
 ALL_UNIT_TYPES = ["infantry", "armor", "motorized", "artillery"]
 
+# The ten-resource roster per RESOURCE_ECONOMY.md / MAP_DATA_CONTRACT.md. Supersedes the old
+# five-key placeholder envelope (manpower, steel, oil, fuel, coal, money) — not additive.
+RESOURCE_TYPES = [
+    "money", "grain", "iron", "oil", "rubber",
+    "nitrates", "tungsten", "chromium", "aluminium", "uranium",
+]
+
+# TBD playtesting — flat abundance value used by the "playtest" resource preset below.
+PLAYTEST_RESOURCE_ABUNDANCE = 60
+
 
 # ── argument parsing ──────────────────────────────────────────────────────────
 
@@ -52,15 +62,29 @@ def parse_args() -> argparse.Namespace:
     """
     Parse command-line arguments.
 
-    --map:      Name of the source directory under map/ (e.g. europe_1938_6)
-    --skip-dem: Skip the DEM mosaicing and heightmap export step. Useful during
-                development when only map_data.json changes are needed.
+    --map:              Name of the source directory under map/ (e.g. europe_1938_6)
+    --skip-dem:         Skip the DEM mosaicing and heightmap export step. Useful during
+                        development when only map_data.json changes are needed.
+    --resource-preset:  Override res_* resource abundance values instead of reading them
+                        from the source geojson. Omit this flag (the default) to use
+                        whatever is hand-authored in provinces.geojson's res_* fields —
+                        the durable, documented authoring path. 'playtest' ignores res_*
+                        entirely and round-robin-assigns all ten resource types across
+                        each playable nation's own provinces, so every nation has access
+                        to every resource somewhere without needing real authored data.
+                        The source geojson is never modified by this flag — switching
+                        between playtest and authored data is just adding or omitting
+                        this flag on the next pipeline run.
     """
     parser = argparse.ArgumentParser(description="Map data pipeline: GeoJSON → Godot map_data.json")
     parser.add_argument("--map", required=True,
                         help="Source map directory name under map/ (e.g. europe_1938_6)")
     parser.add_argument("--skip-dem", action="store_true",
                         help="Skip DEM mosaicing and heightmap export")
+    parser.add_argument("--resource-preset", choices=["playtest"], default=None,
+                        help="Override res_* values with a named preset instead of reading "
+                             "the source geojson (see docstring above). Omit for the default "
+                             "authored-from-geojson behavior.")
     return parser.parse_args()
 
 
@@ -127,7 +151,9 @@ def _parse_is_core(value) -> list:
 
 # ── province building ─────────────────────────────────────────────────────────
 
-def build_provinces(sources: dict, simplify_tolerance: float) -> list[dict]:
+def build_provinces(
+    sources: dict, simplify_tolerance: float, resource_preset: str | None = None,
+) -> list[dict]:
     """
     Build the province output list from validated source features.
 
@@ -138,6 +164,10 @@ def build_provinces(sources: dict, simplify_tolerance: float) -> list[dict]:
     Parameters:
         sources:            Dict from validate_all() keyed by file name.
         simplify_tolerance: Shapely simplify tolerance in degrees. 0.001° ≈ 100m.
+        resource_preset:    None (default) reads resources{} from the source geojson's
+                            res_* fields as authored. 'playtest' overrides resources{}
+                            for every playable province via _apply_playtest_resource_preset()
+                            after the base list is built, ignoring res_* entirely.
 
     Returns a list of province dicts ready to write into map_data.json.
     """
@@ -174,14 +204,7 @@ def build_provinces(sources: dict, simplify_tolerance: float) -> list[dict]:
             "supply_hub": props.get("bld_supply_hub", 0),
             "factory":    props.get("bld_factory", 0),
         }
-        resources = {
-            "manpower": props.get("res_manpower", 0),
-            "steel":    props.get("res_steel", 0),
-            "oil":      props.get("res_oil", 0),
-            "fuel":     props.get("res_fuel", 0),
-            "coal":     props.get("res_coal", 0),
-            "money":    props.get("res_money", 0),
-        }
+        resources = {r: props.get(f"res_{r}", 0) for r in RESOURCE_TYPES}
 
         provinces_out.append({
             "province_id":       pid,
@@ -206,7 +229,40 @@ def build_provinces(sources: dict, simplify_tolerance: float) -> list[dict]:
             "is_objective":      bool(props.get("is_objective", False)),
         })
 
+    if resource_preset == "playtest":
+        _apply_playtest_resource_preset(provinces_out)
+
     return provinces_out
+
+
+def _apply_playtest_resource_preset(provinces_out: list[dict]) -> None:
+    """
+    Playtest-only resource override — mutates provinces_out in place.
+
+    Ignores res_* entirely. For every playable province, zeroes all ten resources first,
+    then round-robins each nation's ten resource types across that nation's own playable
+    provinces (sorted by province_id for determinism), so every nation has access to every
+    resource somewhere in its own territory without every single province having every
+    resource. Non-playable provinces are left untouched (never player-owned, so their
+    resources never matter). This is a deliberate playtesting shortcut, not the documented
+    hand-authored-in-QGIS model — see --resource-preset's help text.
+
+    With 8 provinces and 10 resource types (the current western_europe_6 map), two of a
+    nation's provinces end up with two assigned resources each and the remaining six get
+    one each — every type covered exactly once per nation, cycling generically for any
+    other province count so this isn't hardcoded to 8.
+    """
+    by_nation: dict[str, list[dict]] = defaultdict(list)
+    for p in provinces_out:
+        if p["is_playable"]:
+            by_nation[p["nation_id"]].append(p)
+
+    for provs in by_nation.values():
+        provs.sort(key=lambda p: p["province_id"])
+        for p in provs:
+            p["resources"] = {r: 0 for r in RESOURCE_TYPES}
+        for i, res_type in enumerate(RESOURCE_TYPES):
+            provs[i % len(provs)]["resources"][res_type] = PLAYTEST_RESOURCE_ABUNDANCE
 
 
 # ── adjacency building ────────────────────────────────────────────────────────
@@ -1526,7 +1582,10 @@ def main() -> None:
 
     # Build province and adjacency data
     print("Building provinces...")
-    provinces = build_provinces(sources, simplify_tolerance)
+    if args.resource_preset:
+        print(f"  [NOTE] --resource-preset={args.resource_preset} active — res_* values in "
+              f"the source geojson are being IGNORED; provinces.geojson itself is untouched")
+    provinces = build_provinces(sources, simplify_tolerance, resource_preset=args.resource_preset)
     print(f"  {len(provinces)} provinces built")
 
     print("Building adjacency graph...")
@@ -1560,23 +1619,37 @@ def main() -> None:
         print(f"  waypoints.json: +{len(coarse_nodes)} coarse nodes → "
               f"{len(existing_wp['nodes'])} total, {len(existing_wp['edges'])} edges")
 
-    print("Inserting boundary-conforming nodes...")
-    bn_nodes, bn_edges = insert_boundary_nodes(sources, existing_wp)
-    if bn_nodes:
-        existing_wp["nodes"].extend(bn_nodes)
-        existing_wp["edges"].extend(bn_edges)
-        with open(wp_path, "w", encoding="utf-8") as f:
-            json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
-        print(f"  waypoints.json: +{len(bn_nodes)} boundary nodes → "
-              f"{len(existing_wp['nodes'])} total")
+    # Disabled: insert_boundary_nodes()'s boundary-sampling explodes to ~474k nodes on
+    # real fragmented cover/elevation source data (_sample_boundary resets its sampling
+    # cursor per disjoint boundary fragment, so every small same-type patch contributes
+    # nodes regardless of length) — it never actually shipped in committed waypoints.json
+    # before, and adding it back roughly quintupled client load time. Re-enable only after
+    # fixing that sampling behavior.
+    # print("Inserting boundary-conforming nodes...")
+    # bn_nodes, bn_edges = insert_boundary_nodes(sources, existing_wp)
+    # if bn_nodes:
+    #     existing_wp["nodes"].extend(bn_nodes)
+    #     existing_wp["edges"].extend(bn_edges)
+    #     with open(wp_path, "w", encoding="utf-8") as f:
+    #         json.dump(existing_wp, f, ensure_ascii=False, separators=(",", ":"))
+    #     print(f"  waypoints.json: +{len(bn_nodes)} boundary nodes → "
+    #           f"{len(existing_wp['nodes'])} total")
 
-    print("Building HPA* cluster hierarchy...")
-    cluster_data = generate_hpa_clusters(sources, existing_wp)
-    cluster_path = output_dir / "waypoints_clusters.json"
-    with open(cluster_path, "w", encoding="utf-8") as f:
-        json.dump(cluster_data, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"  waypoints_clusters.json: {len(cluster_data['clusters'])} clusters, "
-          f"{len(cluster_data['abstract_edges'])} abstract edges")
+    # Disabled: generate_hpa_clusters()'s Step 4 (precomputing intra-cluster A* costs
+    # between every border-node pair) takes 20+ minutes and produces waypoints_clusters.json
+    # — a file that has never actually been consumed anywhere. game-server never references
+    # it, HPA*, or clusters at all; client's pathfinder.gd has HPA*-query code gated behind
+    # FileAccess.file_exists() on this file, but since it's never shipped, that branch never
+    # runs and pathfinding always falls back to plain flat A*, which is what's live today.
+    # Left in place (not deleted) for when a future larger map needs the hierarchy for
+    # query-time performance — re-enable by uncommenting this block.
+    # print("Building HPA* cluster hierarchy...")
+    # cluster_data = generate_hpa_clusters(sources, existing_wp)
+    # cluster_path = output_dir / "waypoints_clusters.json"
+    # with open(cluster_path, "w", encoding="utf-8") as f:
+    #     json.dump(cluster_data, f, ensure_ascii=False, separators=(",", ":"))
+    # print(f"  waypoints_clusters.json: {len(cluster_data['clusters'])} clusters, "
+    #       f"{len(cluster_data['abstract_edges'])} abstract edges")
 
     # Fine grid (0.07° ≈ 7.5 km): server-only — generated after coarse so fine nodes
     # can connect to coarse nodes via the TERRAIN_CONNECT_DEG snapping
