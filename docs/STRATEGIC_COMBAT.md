@@ -429,7 +429,23 @@ a flat national Marshalling rate instead of this road-segment flow rate until it
 deploys — see RESOURCE_ECONOMY.md's Reserve and Marshalling sections, and the Division
 Representation section below for the deployment-state distinction this implies.
 
+**Relationship to subprovinces (see Subprovince Capture System, below):** "road segment"
+here continues to mean the road graph itself, not the road-corridor *subprovince* cells that
+now also exist along the same roads — they're two views of the same physical corridor, not
+two competing graphs. The open question is whether supply flow should stay gated to
+friendly/allied-owned road-corridor subprovinces exclusively (matching the existing
+"exclusively along roads" rule in MAP_DATA_CONTRACT.md), or whether it should be allowed to
+fall back onto non-road subprovinces at reduced throughput when a division is off-road. Not
+yet decided — see that section's open question.
+
 ### Supply and encirclement — three-tier status system
+
+> **Status: Active.** Connectivity for all three tiers is now computed as a query over the
+> subprovince adjacency graph (see Subprovince Capture System, below) instead of the earlier
+> waypoint-influence-percentage version. Same three tiers, same debuffs, same design intent —
+> only the connectivity check underneath changed. If you're looking at this from an older
+> version of this doc: the `≥50%`/`≥70%` influence thresholds and the 8-direction radius
+> sample are gone; replaced with graph-exact checks that need no tuned percentage at all.
 
 Supply cutoff and true encirclement are distinct historical and gameplay states. A
 division typically progresses through all three tiers as a pocket closes — each tier
@@ -442,22 +458,43 @@ transitions happen over minutes, but the same logic applies — a player who res
 the Out of Supply notification quickly can restore the supply chain. Only if they ignore
 both early warnings does the true Kessel close.
 
+**Shared definitions**, used by all three tiers:
+
+```
+FRIENDLY(sp) := sp.owner in {self, allies}
+BLOCKED(sp)  := not FRIENDLY(sp)          # enemy OR neutral — a neutral nation's
+                                           # territory is not an escape route or a
+                                           # supply path, same rule everywhere below
+
+ring(n) := subprovinces at exact hop-distance n from the division's current
+           subprovince, found by breadth-first search over the subprovince
+           adjacency graph (subprovince_adjacency.geojson — see MAP_DATA_CONTRACT.md)
+```
+
 ---
 
 **Tier 1 — Out of Supply**
 
-*Trigger:* Supply connectivity check fails — no path of ≥50% friendly-influenced
-waypoints exists between the division and any friendly supply hub (see Dynamic Frontline
-System for influence computation). The division can still move and retreat freely.
+*Trigger:*
+```
+path_exists = subprovince_graph_search(
+    start      = division.subprovince,
+    goal       = any friendly-or-allied-owned supply hub,
+    valid_edge = lambda sp: FRIENDLY(sp) and sp.kind == "road"
+)
+if not path_exists: status = OUT_OF_SUPPLY
+```
+No path exists to any friendly-or-allied supply hub walking only through friendly-or-allied
+**road-corridor** subprovinces. The division can still move and retreat freely.
 
 *Debuffs:*
 - HP recovery rate → 0 (no supply reaching the division; wounds do not heal)
 - Suppression threshold degrades slowly each tick (morale erodes under supply stress)
 - Movement speed reduced (fuel and rations running low)
 
-*Can retreat:* Yes — clean retreat on open friendly-influenced ground is still possible.
+*Can retreat:* Yes — clean retreat on friendly-or-allied ground is still possible.
 
-*Player window:* Push a relief force to restore the influence chain, or order a retreat
+*Player window:* Push a relief force to reopen a road-corridor path, or order a retreat
 before the situation worsens. The notification "Supply route severed — [division]" fires
 immediately when this status is triggered.
 
@@ -465,35 +502,47 @@ immediately when this status is triggered.
 
 **Tier 2 — Cut Off**
 
-*Trigger:* No retreat path exists through friendly-influenced ground (≥50% friendly) in
-any direction — not even off-road. The division is administratively isolated. However,
-enemy divisions are not yet physically present in all directions — a costly fighting
-breakout may still be possible.
+*Trigger (checked only if Out of Supply):*
+```
+for n in [3, 2, 1]:                      # outermost ring checked first
+    if all(BLOCKED(sp) for sp in ring(n)):
+        status = CUT_OFF
+        break
+```
+Equivalently: Cut Off iff ring(1), ring(2), or ring(3) around the division has zero
+friendly-or-allied subprovinces — the escape chain is broken at that distance band, even if
+rings closer in or farther out still have friendly ground. The division is administratively
+isolated, but enemy divisions are not yet physically present in every direction — a costly
+fighting breakout may still be possible.
 
 *Debuffs:* All Tier 1 debuffs, plus:
-- Retreat command now triggers a **fighting withdrawal** through enemy-influenced ground
-  — the retreating division takes HP damage proportional to enemy influence density along
-  the escape path, and moves at reduced speed
+- Retreat command now triggers a **fighting withdrawal** through enemy/neutral-owned
+  ground — the retreating division takes HP damage proportional to how much of the escape
+  path is `BLOCKED`, and moves at reduced speed
 
 *Can retreat:* Yes — but costly. The division fights its way out rather than retreating
 cleanly. A weakened division attempting a fighting withdrawal risks being destroyed before
 reaching friendly ground.
 
 *Player window:* Attempt the breakout now before physical forces close the pocket, or
-mount a relief attack from outside to restore a friendly-influenced corridor.
+mount a relief attack from outside to reopen one of the broken rings.
 
 ---
 
 **Tier 3 — Encircled (true Kessel)**
 
-*Trigger:* 8-direction check (N, NE, E, SE, S, SW, W, NW sampled from division centre)
-shows that every direction has either:
-- An enemy division's engagement area overlapping within that radius, OR
-- ≥70% enemy influence on the waypoint graph in that direction
-
-The higher threshold (70% vs 50%) for true encirclement prevents influence-wash exploits
-where an attacking player who rapidly advances their frontline gets full encirclement
-status without actually committing covering forces to close the pocket.
+*Trigger (checked only if Cut Off):*
+```
+for n in [2, 1]:
+    if all(BLOCKED(sp) for sp in ring(n)):
+        status = ENCIRCLED
+        break
+```
+Equivalently: Encircled iff ring(1) or ring(2) around the division has zero
+friendly-or-allied subprovinces. Because this check (rings 1–2) is a strict subset of Cut
+Off's check (rings 1–3), Encircled can never fire without Cut Off having already fired in
+the same evaluation — the tier-escalation invariant below holds automatically, with no
+separate ordering logic required.
 
 *Debuffs:* All Tier 1 and Tier 2 debuffs, plus:
 - **All units:** suppression threshold lowered further — morale degrades faster
@@ -519,38 +568,18 @@ high-HP, high-experience divisions collapse under stacking Tier 3 debuffs.
 
 ---
 
-**Detection algorithms:**
+**Retreat pathing** (also used outside these three checks, whenever a division retreats):
+cheapest path from the division's subprovince to a friendly-or-allied road-corridor cell or
+supply hub, cost-weighted by ownership — friendly/allied cells cheap, contested cells medium,
+enemy/neutral cells expensive (and only traversable under the Tier 2 fighting-withdrawal
+rule). Road-corridor cells keep their natural speed advantage with no special-casing needed,
+since they're already the cheap edges in this same graph.
 
-```
-OUT_OF_SUPPLY:
-  path_exists = waypoint_graph_search(
-      start = division.position,
-      goal  = any friendly supply hub,
-      valid_edge = lambda e: friendly_influence(e) >= 0.50
-  )
-  if not path_exists: status = OUT_OF_SUPPLY
-
-CUT_OFF (checked only if OUT_OF_SUPPLY):
-  escape_exists = waypoint_graph_search(
-      start = division.position,
-      goal  = any friendly-influenced territory boundary,
-      valid_edge = lambda e: True   # any edge passable — cost proportional to enemy influence
-  )
-  if not escape_exists: status = CUT_OFF
-
-ENCIRCLED (checked only if CUT_OFF):
-  directions = [N, NE, E, SE, S, SW, W, NW]
-  blocked = 0
-  for direction in directions:
-      sample_point = division.position + direction * engagement_radius
-      if enemy_division_overlaps(sample_point) or enemy_influence(sample_point) >= 0.70:
-          blocked += 1
-  if blocked == 8: status = ENCIRCLED
-```
-
-All three checks run server-side each supply tick. Status degrades one tier at a time —
-a division cannot jump directly from normal to Encircled without passing through the
-intermediate states.
+All three checks run server-side each supply tick, over the same subprovince adjacency graph
+already used for capture and rendering — no separate data structure to maintain. Status
+degrades one tier at a time within a single tick's cascading check — a division cannot jump
+directly from normal to Encircled without the check having passed through Out of Supply and
+Cut Off first, in that order, in that same evaluation.
 
 ---
 
@@ -603,16 +632,6 @@ it simply has a queued destination it will head to after the fight.
 7. **Right-click any waypoint** in an existing chain: deletes that waypoint; subsequent
    waypoints reorder automatically; division continues on updated path
 
-### Move Order Feedback
-
-Every successfully routed player move destination receives brief client-side confirmation.
-Four targeting brackets snap inward, then a bright center point emits two expanding rings
-that fade within approximately 0.6 seconds. The effect uses a lightened version of the
-division's nation color, remains a consistent screen size across camera zoom levels, and does
-not replace the persistent route or waypoint rendering. Group movement emits one effect at
-the clicked group center; shift-move chains emit one at each successfully added waypoint.
-Clicks for which no route can be found emit no confirmation.
-
 ### Move Trigger: Click, Not Drag
 
 Movement is triggered by the click described above (hotkey/button to enter move mode,
@@ -654,7 +673,7 @@ commits one waypoint and is independent of the others in the chain.
 
 Double-press-and-drag (or a configurable single-drag, see Open Questions) over empty map
 space draws a selection rectangle; on release, every division dot whose position falls
-inside the rectangle replaces the current selection. Standard modifiers apply:
+inside the rectangle is added to the current selection. Standard modifiers apply:
 `Shift + drag` adds to the existing selection rather than replacing it; `Ctrl + drag`
 removes the boxed divisions from the existing selection.
 
@@ -668,20 +687,6 @@ ambiguity about which one a given drag means.
 saved control group (`0`–`9`, per the keybind scheme in `UI_UX_DESIGN.md` §9) — it only
 sets the current selection. A player who wants to save the result presses `Ctrl + [0-9]`
 afterward, exactly as with any other selection method.
-
-### Contextual Division Inspector
-
-Owned divisions keep HP and suppression dual bars on their strategic-map counters. A short
-hover delay reveals a non-interactive identity preview; clicking opens an interactive,
-screen-space inspector adjacent to the selected counter. The inspector follows the active
-division, flips around viewport obstructions, and hides without deselecting when its anchor
-leaves the usable viewport.
-
-With 2+ divisions selected, one active division anchors the UI and supplies the displayed
-composition. Box selection initially shows a collapsed group chip; expanding it reveals a
-compact roster. Clicking a selected counter or roster entry changes the active division
-without replacing the group. `Shift` adds and `Ctrl` removes selection members. Batch Hold
-and Retreat actions apply only through `MilitarySystem`; movement remains right-click based.
 
 ### Formation Move (Multi-Division Group Move)
 
@@ -779,209 +784,153 @@ not a runtime-computed mirror.
 
 ---
 
-## Dynamic Frontline System
+## Subprovince Capture System
 
-> **Status: Deferred — planned for a later development phase (supply system milestone).**
+> **Status: Active — replaces the Dynamic Frontline System that previously occupied this
+> section.** That design (continuous per-tick influence blending, 50%/70% thresholds, a
+> shader-rendered isoline) is superseded, not merely deferred; it is not being resumed. This
+> replacement was chosen after the influence-based approach was actually implemented once
+> before and found not to work in practice.
 
 ### Overview
 
-The dynamic frontline is a continuous visual representation of territorial influence that
-shifts in real time as divisions move, advance, and retreat. It is distinct from province
-ownership — provinces change hands only when their city is captured. Between city captures,
-the frontline colour wash communicates who is dominating each part of the map at a glance.
+Provinces are subdivided at map-build time into **subprovinces** — a static, pre-baked mesh
+of small polygons that exactly partition each province (no gaps, no overlaps, proven at
+build time — see Generation, below). Ownership of each subprovince is a discrete per-nation
+flag, changed by literal occupancy, not a continuous influence value computed fresh every
+tick. This removes an entire category of problems the old design had: no isoline shader, no
+tuned percentage thresholds, no per-tick recomputation across the whole map. Ownership is a
+flag on a precomputed graph node — checked and changed, not calculated.
 
-This serves two purposes: aesthetic (the map reads like a living battlefield) and
-intelligence (experienced players read colour intensity to identify weakening fronts before
-divisions have physically retreated).
+Subprovinces are also now the shared substrate for supply connectivity, retreat pathing, and
+encirclement (see Supply System, above) — all three run as queries over one subprovince
+adjacency graph instead of three separate mechanisms built on three different ideas of
+"territory."
 
-### Influence Computation (Server-Side, Per Tick)
+### Subprovince Generation (Pipeline, Build-Time Only)
 
-Both sides' units contribute influence simultaneously. The frontline colour is the net
-result of all nations' influence values competing in each province — not a binary
-ownership flag. A province with equal forces from both sides shows a centred frontline.
-A province with heavy attacking force vs light defending force shows the frontline pushed
-deep into the defender's territory even before the city falls.
+Generated once per map export, alongside `waypoints.json` — never regenerated at runtime,
+never hand-edited. See MAP_DATA_CONTRACT.md's Subprovinces section for the file format.
+Prototype reference implementations (not yet wired into `pipeline.py`) are attached to the
+handoff for this feature — see HANDOFF.md.
 
-**Unit-based influence (all nations):**
+**Carving order is what guarantees terrain-type boundaries are never crossed:**
 
-```
-unit_influence[nation][province] = sum(
-  division_aggregate_hp_fraction × distance_falloff
-  for each division of that nation whose engagement area overlaps this province
-)
-```
+1. **Capital ring.** Buffer the city point by a fixed radius, clip to the province. Flagged
+   `is_capital = true`, exempt from the normal capture rule below — changes owner only on
+   city/province capture.
+2. **Merged town cells.** Every other `urban` cover_combat patch in the province becomes
+   exactly one subprovince regardless of size — never subdivided, unlike hinterland patches.
+   These flip under the normal capture rule; only the capital ring is locked.
+3. **Road corridor.** Buffer every road centerline by one fixed width and seed spacing,
+   identical for every `road_level` — `road_level` continues to govern movement/animation
+   speed only, never corridor geometry. Seed points along the centerline (jittered, roughly
+   1.5–2.5km spacing), Voronoi-partition the buffered strip from those seeds. Produces the
+   chain of small cells that gets captured one at a time advancing down a road.
+4. **Hinterland fill, terrain-patch-first.** Whatever remains is intersected against each
+   `cover_combat` patch *before* anything else happens to it. A patch small enough becomes
+   one subprovince as-is. A patch too large for one capture-sized cell is subdivided, but
+   only within that single patch — a subprovince edge can never cross from one cover_combat
+   type into another, because it is never handed geometry spanning two types to begin with.
+5. **Terrain-cost-weighted split for oversized patches**, not a plain geometric Voronoi
+   split. Seed the patch (jittered points), then run multi-source Dijkstra over a per-pixel
+   cost raster instead of straight-line distance:
+   ```
+   cost(pixel) = 1 / (cover_move[cover_combat(pixel)] × elevation_move[elevation_type(pixel)])
+   ```
+   `cover_move` / `elevation_move` are this document's existing off-road movement multiplier
+   tables (Layer 2) — inverted, since they're speed values (higher = faster) and Dijkstra
+   needs a cost value (higher = more expensive to cross). Because `cover_combat` is constant
+   inside one patch by construction (step 4), the texture this reacts to comes from
+   `elevation_type`, an independent layer that can still vary underneath a single cover
+   patch — a forest block spanning both flat ground and a ridge, for example. Boundaries
+   inside a subdivided patch bend to run along the expensive terrain rather than cut straight
+   across it, for the same underlying reason a real administrative border would. This is a
+   raster labeling, so full coverage inside the patch is exact by construction — every pixel
+   gets exactly one owner, no polygon-topology edge cases to get wrong. Vectorize the result
+   back into polygons using the same raster→vector step already used for `cover.geojson` and
+   `elevation.geojson`.
+6. **Rivers** remain a hard splitter, the same role they already play at the province level
+   — a thin, very-high-cost band stamped along `rivers.geojson` into the cost raster, crossed
+   only at a deliberate low-cost gap where a bridge exists.
+7. **Sliver merge.** Any cell below a minimum area threshold merges into whichever neighbor
+   it shares the most boundary with. Reassigns area, never discards it.
 
-- **division_aggregate_hp_fraction:** sum of all living unit HPs in the division's grid
-  normalised by the maximum possible HP for a full 25-unit grid. A full fresh division
-  projects maximum influence. A battered near-destroyed division projects near zero.
-  This makes the frontline a genuine intelligence signal — a fading colour region reveals
-  a weakening front before the division has physically retreated
-- **distance_falloff:** divisions whose engagement area centre is closer to the province
-  contribute more than divisions whose area only clips the province edge
-- **Recon units do not contribute to influence.** Recon observes, it does not control.
-  Prevents cheap recon-cap exploits where players paint territory without committing
-  real forces
+**Do not add cosmetic noise to finished polygon edges after the fact.** A prototype pass
+tried wobbling each cell's boundary post-hoc for a hand-drawn look and it silently broke
+exact tiling — two cells sharing a border each perturbed their own copy of it independently,
+opening real gaps (measured ~2% of area on a test province; a "fix" using coordinate-matched
+edge keys made it worse, since boundaries built by different operations don't reliably share
+bit-identical coordinates even when they're the same line). Irregularity belongs in the seed
+jitter (steps 3/5) and the terrain-cost field (step 5) — both exact-tiling-safe by
+construction. A genuinely wavy *rendered* edge on top of this should be a purely cosmetic
+mesh-displacement effect in Godot, fully decoupled from the authoritative server polygon —
+capture, supply, and encirclement must all agree on the exact geometry; only the server's
+copy is allowed to be authoritative.
 
-**Ownership bonus (province owner only):**
+**Full coverage is a build-time assertion, not an assumption:**
+`province_polygon.difference(unary_union(all_subprovinces_in_province)).area` must equal 0
+(within float tolerance) before the pipeline accepts the export. Fail the build otherwise.
 
-The nation that owns a province gets a passive influence bonus from that ownership —
-representing administrative control, population, infrastructure, and road network:
+### Capture Rule
 
-```
-province_influence[nation] = unit_influence[nation][province]
-                            + (ownership_bonus if province.owner == nation else 0)
-```
+- A subprovince flips to a nation's ownership the instant any of that nation's units
+  physically occupies its polygon. No radius, no engagement-area involvement — literal
+  occupancy only.
+- **Ownership is sticky at the province level, not the subprovince level.** As long as the
+  attacking nation has at least one living unit anywhere in the province, everything they've
+  captured stays captured, even cells they're no longer standing on. Only when the attacker
+  has zero units left in the province — all destroyed or retreated out — do all subprovinces
+  they'd captured there revert to the defender, in a single pass, at once.
+- **Combat freezes color.** A subprovince with an active tactical-combat instance keeps
+  showing whichever nation held it before the fight started until that instance resolves —
+  no flip mid-fight, regardless of which side currently has units standing on it.
+- **(Open — confirm before implementing)** Whether recon-classified units should be excluded
+  from triggering a flip, as they were excluded from contributing to the old influence
+  system. Current default: no exclusion, any unit type flips a cell it occupies.
+- **(Open — confirm before implementing)** Whether a city capture cascades to instantly flip
+  every remaining un-captured subprovince in that province to the new owner, or whether
+  subprovinces the attacker never physically touched stay defender-colored until
+  individually captured. Leaning toward cascade, for consistency with the existing "province
+  ownership transfers... immediately" rule, but this hasn't been explicitly confirmed against
+  the discrete-ownership model.
 
-The ownership bonus is a fixed scalar (exact value set by playtesting — large enough
-that ownership matters, small enough that a strong attacking force can overcome it).
+### Rendering — Fade Transition
 
-**Total influence and frontline rendering:**
+Ownership flips are authoritative and instantaneous server-side — retreat, supply, and
+encirclement all need to agree on the true state immediately. The *rendered* color is
+purely client-side and eases: old nation color → neutral gray → new nation color, roughly
+300–500ms each half. If a cell flips again before a tween finishes, restart the tween from
+its current interpolated color rather than queuing the new one — a cell changing hands
+repeatedly should look unsettled, not laggy.
 
-```
-total_influence[province] = sum(province_influence[nation] for all nations)
-nation_share[nation]      = province_influence[nation] / total_influence[province]
-```
+This replaces the old shader-based isoline rendering entirely: flat per-polygon fill, no
+influence-blend shader math, no distance-falloff computation, no ownership-bonus scalar.
+There is no frontline "line" to compute or smooth anymore — the visible boundary between two
+differently-colored adjacent subprovince polygons *is* the front line.
 
-At 50%+ share for one nation, the frontline isoline passes through toward that nation.
-At full dominance (100% share), the province interior is fully that nation's colour.
-
-**City capture — the ownership flip and influence inversion:**
-
-When a division captures a city node, two things happen simultaneously:
-
-1. Province ownership transfers to the capturing nation. Income, supply, and the
-   ownership bonus immediately flip to the new owner
-2. **Influence roles invert:** The previous defender loses the ownership bonus and
-   now projects influence only from where their actual units are plus roads they still
-   physically control. They are now in the same position the attacker was in before
-   the capture — projecting influence outward from unit positions only
-
-The frontline does not instantly snap to fully new-owner-coloured. If the previous owner
-still has units nearby, their unit-based influence persists — the colour shifts from the
-ownership bonus flip but the frontline line stays near the actual force positions. Both
-sides push against each other from their new relative positions.
-
-**Roads and retreat influence:**
-
-A division retreating from a captured province continues to project influence along roads
-it still physically controls (i.e. roads not yet dominated by enemy influence). The
-frontline colour along friendly-controlled road corridors remains friendly even as the
-province interior shifts. This makes the post-capture situation legible at a glance:
-friendly colour along a road means it is still defended; enemy colour washing over it
-means it has been abandoned.
-
-### Province Colour Rendering (Client-Side Shader)
-
-**Province interiors** are rendered with a colour wash shader driven by influence values:
-- Base colour: the province's current **owner's predefined nation colour** (e.g. France
-  blue, Germany grey, Britain khaki). This is the default when no foreign influence
-  is present.
-- As a foreign nation's influence increases, their predefined nation colour bleeds into
-  the province interior, proportional to their influence advantage.
-- At full foreign dominance, the interior is fully that nation's colour.
-- Multiple nations can partially influence the same province — their colours blend
-  proportionally.
-
-**Province borders** never change. The geographic province boundary is always visible
-and static — it is the political map, not the military map.
-
-**The frontline line** — the visual boundary between influence zones within a province —
-is rendered client-side as the isoline at the 50% influence threshold. It is smoothed
-with a curve fit to appear organic rather than pixelated. It has no mechanical role —
-it is purely cosmetic.
-
-**Nation colours are predefined per nation** and never change during a session. France is
-always France's colour. A province being dominated by Germany simply has Germany's colour
-washing into it — the province border still shows France's political ownership until the
-city is captured.
+**(Open — confirm before implementing)** Should the "combat in progress" frozen-color state
+render identically to the fade-transition's neutral-gray hold, so an active fight reads
+visually the same as "undecided"? Or should it stay the pre-combat solid color throughout
+the fight? Both were discussed, not resolved.
 
 ### City Capture and Ownership Transfer
 
-**City capture** is the only event that transfers province ownership:
-- A division physically occupies the city node (the province's capital city position)
-- Province ownership transfers to the capturing nation immediately
-- The province's **baseline colour** switches to the new owner's predefined nation colour
-- The ownership bonus in the influence computation flips to the new owner — the previous
-  owner loses it instantly and now projects influence only from unit positions and
-  roads they still physically control (same rules as an attacker before capture)
-- The previous owner's influence does not disappear — their units still project
-  unit-based influence from wherever those units are. The frontline moves but does not
-  instantly jump to fully new-owner-coloured if defending units are still nearby
-
-Between city captures, the frontline colour wash can shift back and forth freely as
-military forces advance and retreat. A province can be fully dominated by enemy influence
-colours for an extended period without changing ownership — ownership only snaps on city
-capture.
-
-**Visual reading of encirclements:** A province surrounded by enemy-influenced territory
-that still shows the original owner's city (and thus their baseline colour) is visually
-readable as a pocket — the original colour partially holds due to unit influence even as
-enemy colour dominates the surrounding territory. Makes encirclements legible without
-any special UI overlay.
-
-**Visual reading of post-capture retreats:** After a city falls, friendly colour
-persisting along road corridors behind the new front signals those roads are still
-defended by retreating forces. Enemy colour washing over roads signals abandonment.
-Players can read the strategic situation from the colour map alone.
-
-### Supply Connectivity via Frontline
-
-Supply connectivity is a separate check from the road-graph supply flow system. It uses
-the influence map to determine whether a division's supply route is secured:
-
-**Connectivity rule:** Starting from the division's position, trace backward through the
-waypoint graph toward the nearest supply hub. If every waypoint along the path is in
-friendly-influenced territory (influence value > 50% for the owning nation), the division
-is supply-connected. If any waypoint is neutral or enemy-influenced with no friendly unit
-securing it, the connection is broken.
-
-**What this means in practice:**
-- Division advancing along a road with friendly territory behind it → supply connected
-- Division going off-road with other friendly units behind it forming a continuous
-  influenced chain → supply connected as long as the chain is unbroken
-- Division going off-road with no friendly units behind it, ground becoming neutral →
-  supply severed; player receives notification; out-of-supply attrition begins
-- Enemy advance that cuts through the influence chain without physically touching the road
-  → supply severed; models historical "deep penetration cuts supply" without requiring the
-  attacker to physically block the road
-
-This makes influence map penetration mechanically meaningful — a fast armoured advance
-that creates a bulge in the enemy's territory can sever supply to divisions behind the
-front line even before physically encircling them.
-
-**Supply chain notification:** When a division's influence-connectivity check fails, the
-player receives: "Supply route severed — [division name] — [province name]". The supply
-status indicator on the division icon shifts to show out-of-supply state.
+Unchanged trigger from the previous design: a division physically occupying the city node
+flips province ownership immediately. What changes is only what happens to the rest of the
+subprovince mosaic at that moment — see the cascade-vs-no-cascade open question above.
 
 ### Frontline Visibility by Player Type
 
-**Belligerent nations (at war):** See full frontline colour wash and their own division
-positions/compositions. Enemy division positions visible within observation radius only;
-enemy composition shows as "?" unless observation value is high enough or alliance
-intelligence sharing is active.
+Same intent as before, simplified mechanism:
 
-**Neutral nations:** See the frontline colour wash at province level (the macro picture —
-which provinces are being pressured, which fronts are moving) but do not see individual
-division dots or compositions beyond what their own observation areas would reveal. This
-gives neutral players newspaper-level information about the war:
-- "France is losing ground in Alsace" — visible from colour shift
-- "Germany has 4 armoured divisions on the border" — not visible without alliance or recon
-
-**Why neutral players see the frontline wash:**
-Diplomatic decisions require macro-level information. A neutral nation deciding whether to
-intervene needs to see who is winning, not fight blind. Broadcasting province-level
-influence scalars to all players is cheap server-side — it is a small payload of numbers
-per province, not complex unit data.
-
-**Why neutral players do not see division details:**
-Intelligence has value. A neutral player who can see all division compositions has no
-incentive to invest in alliances that grant intelligence sharing, and the fog-of-war
-system loses meaning. Province-level colour is enough for informed diplomacy.
-
-**Server mechanics:** Influence values are computed once per tick and broadcast to all
-connected players. Division position and composition data is filtered per-player by the
-existing observation radius system. No additional server complexity is required — the
-frontline system uses data already being computed.
+- **Belligerent nations:** full subprovince ownership visible, plus own division
+  positions/compositions. Enemy division positions only within observation radius; enemy
+  composition hidden unless observation or alliance intelligence-sharing reveals it.
+- **Neutral nations:** province-level macro picture only —
+  `owned_subprovince_count / total_subprovince_count` per nation, per province, is cheap to
+  compute and broadcast, giving neutrals the same "newspaper-level" intelligence the old
+  influence percentage gave them, without exposing subprovince- or division-level detail.
 
 ---
 
@@ -1224,9 +1173,9 @@ nor pure Call of War (destruction only → arbitrary outcomes).
 
 | Status | Trigger | Debuffs | Can retreat? |
 |---|---|---|---|
-| Out of Supply (Tier 1) | Supply connectivity < 50% friendly influence on path to hub | No HP recovery, slow suppression threshold decay, reduced speed | Yes — clean retreat |
-| Cut Off (Tier 2) | No friendly-influenced retreat path in any direction | All Tier 1 + fighting withdrawal on retreat (takes damage moving) | Yes — costly |
-| Encircled (Tier 3) | All 8 directions blocked: enemy presence or ≥70% enemy influence | All Tier 2 + armour fuel decay, escalating debuffs per tick | No — disabled |
+| Out of Supply (Tier 1) | No path to a friendly/allied supply hub through friendly/allied road-corridor subprovinces | No HP recovery, slow suppression threshold decay, reduced speed | Yes — clean retreat |
+| Cut Off (Tier 2) | ring(1), ring(2), or ring(3) around the division has zero friendly/allied subprovinces | All Tier 1 + fighting withdrawal on retreat (takes damage moving) | Yes — costly |
+| Encircled (Tier 3) | ring(1) or ring(2) around the division has zero friendly/allied subprovinces | All Tier 2 + armour fuel decay, escalating debuffs per tick | No — disabled |
 
 **Design intent:** Sessions must resolve. Stale fronts are avoided by ensuring that suppressed
 divisions without column depth behind them are destroyed rather than indefinitely pushed back.
@@ -1257,6 +1206,20 @@ number — it is the difference between losing one division and losing the front
   attack bonus % — qualitatively confirmed, exact values from playtesting)
 - Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
   — balance between path quality and graph size)
+- Subprovince generation constants — `target_cell_area`, `hinterland_spacing` (fine-density
+  starting point chosen; exact values from playtesting against session-length targets), road
+  corridor buffer width/spacing (confirmed uniform across all `road_level`s; exact values
+  TBD), capital/town buffer radius, sliver `min_area` merge threshold
+- Whether recon-classified units are excluded from triggering a subprovince capture flip
+  (see Subprovince Capture System — Capture Rule)
+- Whether city capture cascades to flip every remaining subprovince in the province, or only
+  ones the attacker physically touched (see Subprovince Capture System — Capture Rule)
+- Fade-transition duration for subprovince ownership color changes (300–500ms per half
+  proposed, not confirmed by playtesting) and whether the combat-frozen state should render
+  as the same neutral-gray hold or stay solid pre-combat color throughout the fight
+- Whether road-segment supply flow stays gated exclusively to friendly/allied road-corridor
+  subprovinces, or falls back to non-road subprovinces at reduced throughput when a division
+  is off-road (see Supply System — Model: Road Segment Flow Rate)
 - Movement profile recomputation trigger debounce (avoid recomputing on every keystroke
   during template editing — trigger on save/confirm)
 - Box selection trigger gesture: double-press-and-drag vs. a plain single-drag over empty
