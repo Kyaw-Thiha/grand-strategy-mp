@@ -119,10 +119,10 @@ func _create_map_data_source() -> Object:
 
 
 ## Provides subprovince ownership to SubprovinceRenderer.
-## Preview seed: each cell's owner is its province's GameState owner (Batch 4 will later
-## drive the renderer with server-synced subprovince ownership instead).
+## Reads real per-cell ownership synced from the server via GameState.subprovinces
+## (populated by SUBPROVINCE_INIT and kept current by SUBPROVINCE_CAPTURED events).
 func _create_subprovince_owner_source() -> Object:
-	return _RuntimeSubprovinceOwnerSource.new(_map_loader)
+	return _GameStateSubprovinceOwnerSource.new()
 
 
 func _on_ui_pointer_blocking_changed(blocking: bool) -> void:
@@ -327,19 +327,12 @@ class _RuntimeProvinceDataSource:
 		return province_data
 
 
-class _RuntimeSubprovinceOwnerSource:
+class _GameStateSubprovinceOwnerSource:
 	extends RefCounted
 
-	var _loader: Node
-
-	func _init(loader: Node) -> void:
-		_loader = loader
-
-	## Resolves a cell's owner for the preview renderer: the province owner from GameState.
+	## Resolves a cell's real owner from server-synced GameState.subprovinces.
+	## Returns an empty string when the cell has no recorded owner yet (e.g. before
+	## SUBPROVINCE_INIT arrives), matching the renderer's "unowned" fill contract.
 	func get_subprovince_owner(subprovince_id: String) -> String:
-		var cell: Dictionary = _loader.get_subprovince_data(subprovince_id)
-		var province_id: String = cell.get("province_id", "")
-		if province_id.is_empty():
-			return ""
-		var province: Dictionary = GameState.get_province(province_id)
-		return String(province.get("owner_id", province.get("nation_id", "")))
+		var cell: Dictionary = GameState.subprovinces.get(subprovince_id, {})
+		return String(cell.get("owner_id", ""))
