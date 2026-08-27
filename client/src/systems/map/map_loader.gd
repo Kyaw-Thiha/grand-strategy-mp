@@ -1,3 +1,4 @@
+class_name MapLoader
 extends Node
 ## Loads a processed map from client/assets/data/<map_id>/ and instances
 ## the generated static scene from client/scenes/map/<map_id>.scn.
@@ -6,8 +7,6 @@ extends Node
 signal map_loaded(province_count: int)
 signal map_load_failed(error: String)
 
-const MAP_CANVAS_WIDTH := 4096.0
-const MAP_CANVAS_HEIGHT := 3000.0
 const GENERATED_SCENE_ROOT := "res://scenes/map"
 
 var _map_id: String = ""
@@ -18,9 +17,11 @@ var _province_click_areas: Dictionary = {} # province_id → Array[Area2D]
 var _adjacency: Array = []
 var _terrain_lookup: Dictionary = {}
 var _waypoints: Dictionary = {}    # { nodes: [], edges: [], road_connections: [] }
+var _subprovince_data: Dictionary = {}    # subprovince_id → { province_id, kind, ... , raw_polygon }
+var _subprovince_adjacency: Dictionary = {} # subprovince_id → PackedStringArray of neighbor IDs
+var _province_subprovince_ids: Dictionary = {} # province_id → PackedStringArray
 
-var _proj_center: Vector2 = Vector2.ZERO
-var _scale: float = 1.0
+var _projection: MapProjection
 
 
 func load_map(map_id: String) -> void:
@@ -36,7 +37,7 @@ func load_map(map_id: String) -> void:
 
 	_bounds = map_data.get("bounds", {})
 	_adjacency = map_data.get("adjacency", [])
-	_setup_projection()
+	_projection = MapProjection.new(_bounds)
 
 	var terrain_raw: Variant = _load_json("%s/terrain_lookup.json" % data_root)
 	if terrain_raw is Dictionary:
@@ -50,6 +51,9 @@ func load_map(map_id: String) -> void:
 		if pid.is_empty():
 			continue
 		_province_data[pid] = province_data
+
+	if not _load_subprovince_data(data_root):
+		return
 
 	if not _load_generated_scene(map_id):
 		return
@@ -113,56 +117,76 @@ func get_waypoint_graph() -> Dictionary:
 	return _waypoints
 
 ## Converts WGS84 (lng, lat) to Godot screen-space Vector2.
-## Public wrapper around the internal Mercator projection.
+## Public wrapper around the shared MapProjection.
 func project_lng_lat(lng: float, lat: float) -> Vector2:
-	return _project(lng, lat)
+	if _projection == null:
+		return Vector2.ZERO
+	return _projection.project(lng, lat)
 
 
 ## Inverse of project_lng_lat. Returns [lng, lat] for a world-space pixel position.
 func world_to_lng_lat(world_pos: Vector2) -> Vector2:
-	if _scale == 0.0:
+	if _projection == null:
 		return Vector2.ZERO
-	var raw_x: float = world_pos.x / _scale + _proj_center.x
-	var raw_y: float = -world_pos.y / _scale + _proj_center.y
-	var lng: float = raw_x * 180.0 / PI
-	var lat: float = (atan(exp(raw_y)) - PI / 4.0) * 360.0 / PI
-	return Vector2(lng, lat)
+	return _projection.unproject(world_pos)
 
 
 func get_map_bounds() -> Rect2:
 	if _bounds.is_empty():
 		return Rect2()
-	var tl := _project(_bounds.get("min_lng", 0.0), _bounds.get("max_lat", 0.0))
-	var br := _project(_bounds.get("max_lng", 0.0), _bounds.get("min_lat", 0.0))
+	var tl := _projection.project(_bounds.get("min_lng", 0.0), _bounds.get("max_lat", 0.0))
+	var br := _projection.project(_bounds.get("max_lng", 0.0), _bounds.get("min_lat", 0.0))
 	return Rect2(tl, br - tl)
 
 
-# ── projection ────────────────────────────────────────────────────────────────
+# ── subprovince lookups ───────────────────────────────────────────────────────
 
-func _setup_projection() -> void:
-	var cx: float = (_bounds.get("min_lng", 0.0) + _bounds.get("max_lng", 0.0)) * 0.5
-	var cy: float = (_bounds.get("min_lat", 0.0) + _bounds.get("max_lat", 0.0)) * 0.5
-	_proj_center = _mercator_raw(cx, cy)
-
-	var tl := _mercator_raw(_bounds.get("min_lng", 0.0), _bounds.get("max_lat", 0.0))
-	var br := _mercator_raw(_bounds.get("max_lng", 0.0), _bounds.get("min_lat", 0.0))
-	var raw_w: float = abs(br.x - tl.x)
-	var raw_h: float = abs(br.y - tl.y)
-	_scale = min(MAP_CANVAS_WIDTH / raw_w, MAP_CANVAS_HEIGHT / raw_h)
+## Returns raw parsed subprovince properties for a cell ID, or {} when unknown.
+func get_subprovince_data(subprovince_id: String) -> Dictionary:
+	return _subprovince_data.get(subprovince_id, {})
 
 
-func _mercator_raw(lng: float, lat: float) -> Vector2:
-	var x := lng * PI / 180.0
-	var y := log(tan(PI / 4.0 + lat * PI / 360.0))
-	return Vector2(x, y)
+## Returns all subprovince IDs belonging to a province (prebuilt at load time).
+func get_province_subprovince_ids(province_id: String) -> PackedStringArray:
+	return _province_subprovince_ids.get(province_id, PackedStringArray())
 
 
-func _project(lng: float, lat: float) -> Vector2:
-	var raw := _mercator_raw(lng, lat)
-	return Vector2(
-		(raw.x - _proj_center.x) * _scale,
-		-(raw.y - _proj_center.y) * _scale
-	)
+## Returns the outer rings of a cell projected into world space (one Polygon2D
+## compatible ring per part; empty for zero-area artifact cells).
+func get_subprovince_rings(subprovince_id: String) -> Array[PackedVector2Array]:
+	var data: Dictionary = get_subprovince_data(subprovince_id)
+	var rings: Array = data.get("raw_polygon", [])
+	var result: Array[PackedVector2Array] = []
+	for ring: Variant in rings:
+		if ring is Array:
+			result.append(_projection.project_ring(ring))
+	return result
+
+
+## Returns the largest projected ring of a cell — the main renderable outline.
+func get_subprovince_polygon(subprovince_id: String) -> PackedVector2Array:
+	var rings := get_subprovince_rings(subprovince_id)
+	var largest := PackedVector2Array()
+	for ring: PackedVector2Array in rings:
+		if ring.size() > largest.size():
+			largest = ring
+	return largest
+
+
+func get_subprovince_neighbors(subprovince_id: String) -> PackedStringArray:
+	return _subprovince_adjacency.get(subprovince_id, PackedStringArray())
+
+
+func get_subprovince_count() -> int:
+	return _subprovince_data.size()
+
+
+## Returns every loaded subprovince ID (deterministic: dictionary iteration order).
+func get_all_subprovince_ids() -> Array:
+	var ids: Array = []
+	for id: Variant in _subprovince_data.keys():
+		ids.append(String(id))
+	return ids
 
 
 # ── generated scene loading ───────────────────────────────────────────────────
@@ -181,6 +205,113 @@ func _clear_loaded_map() -> void:
 	_adjacency.clear()
 	_terrain_lookup.clear()
 	_waypoints.clear()
+	_subprovince_data.clear()
+	_subprovince_adjacency.clear()
+	_province_subprovince_ids.clear()
+	_projection = null
+
+
+## Loads and indexes the authoritative subprovince assets for a map.
+## Fail-clear: both files are load-bearing, so any missing/malformed data hard-fails the
+## map load (same treatment as a missing map_data.json), not a warn-and-continue.
+## Returns: true on success.
+func _load_subprovince_data(data_root: String) -> bool:
+	var sp_raw: Variant = _load_json("%s/subprovinces.geojson" % data_root)
+	var adj_raw: Variant = _load_json("%s/subprovince_adjacency.geojson" % data_root)
+	if not sp_raw is Dictionary or not adj_raw is Dictionary:
+		push_error("MapLoader: subprovince assets missing or invalid for '%s'" % _map_id)
+		map_load_failed.emit("Failed to load subprovince assets for '%s'" % _map_id)
+		return false
+
+	var sp_collection: Dictionary = sp_raw
+	var adj_collection: Dictionary = adj_raw
+	if sp_collection.get("type", "") != "FeatureCollection" \
+			or not sp_collection.get("features", []) is Array \
+			or adj_collection.get("type", "") != "FeatureCollection" \
+			or not adj_collection.get("features", []) is Array:
+		push_error("MapLoader: subprovince assets are not FeatureCollections for '%s'" % _map_id)
+		map_load_failed.emit("Malformed subprovince assets for '%s'" % _map_id)
+		return false
+
+	var features: Array = sp_collection.get("features", [])
+	for index: int in features.size():
+		var feature: Variant = features[index]
+		if not feature is Dictionary:
+			continue
+		var props: Dictionary = (feature as Dictionary).get("properties", {})
+		var sid: String = props.get("subprovince_id", "")
+		var pid: String = props.get("province_id", "")
+		var kind: String = props.get("kind", "")
+		if sid.is_empty() or pid.is_empty() or kind.is_empty():
+			push_error("MapLoader: subprovince feature %d missing required properties" % index)
+			map_load_failed.emit("Malformed subprovince asset for '%s'" % _map_id)
+			return false
+		var rings: Array = _collect_rings(feature.get("geometry", {}))
+		_subprovince_data[sid] = {
+			"province_id": pid,
+			"kind": kind,
+			"cover_combat": props.get("cover_combat", ""),
+			"elevation_type": props.get("elevation_type", ""),
+			"is_capital": bool(props.get("is_capital", false)),
+			"raw_polygon": rings,
+		}
+		if not _province_subprovince_ids.has(pid):
+			_province_subprovince_ids[pid] = PackedStringArray()
+		var province_list: PackedStringArray = _province_subprovince_ids[pid]
+		province_list.append(sid)
+		_province_subprovince_ids[pid] = province_list
+
+	var adj_features: Array = adj_collection.get("features", [])
+	for index: int in adj_features.size():
+		var feature: Variant = adj_features[index]
+		if not feature is Dictionary:
+			continue
+		var props: Dictionary = (feature as Dictionary).get("properties", {})
+		var sid: String = props.get("subprovince_id", "")
+		if sid.is_empty():
+			push_error("MapLoader: subprovince adjacency feature %d missing subprovince_id" % index)
+			map_load_failed.emit("Malformed subprovince asset for '%s'" % _map_id)
+			return false
+		var neighbors: PackedStringArray = PackedStringArray()
+		for neighbor: Variant in props.get("neighbors", []):
+			if neighbor is String:
+				neighbors.append(neighbor)
+		_subprovince_adjacency[sid] = neighbors
+
+	for sid: String in _subprovince_adjacency.keys():
+		if not _subprovince_data.has(sid):
+			push_error("MapLoader: adjacency references unknown subprovince %s" % sid)
+			map_load_failed.emit("Malformed subprovince asset for '%s'" % _map_id)
+			return false
+	for sid: String in _subprovince_data.keys():
+		if not _subprovince_adjacency.has(sid):
+			push_error("MapLoader: subprovince %s missing from adjacency" % sid)
+			map_load_failed.emit("Malformed subprovince asset for '%s'" % _map_id)
+			return false
+	return true
+
+
+## Collects a cell's [lng, lat] outer rings from a Polygon or MultiPolygon geometry.
+## Returns an empty array for zero-area artifact geometries (LineString etc.).
+func _collect_rings(geometry: Variant) -> Array:
+	var rings: Array = []
+	if not geometry is Dictionary:
+		return rings
+	var geom_dict: Dictionary = geometry
+	var gtype: String = geom_dict.get("type", "")
+	var coordinates: Variant = geom_dict.get("coordinates", null)
+	if gtype == "Polygon" and coordinates is Array and coordinates.size() > 0:
+		var outer: Variant = coordinates[0]
+		if outer is Array and outer.size() >= 4:
+			rings.append(outer)
+		return rings
+	if gtype == "MultiPolygon" and coordinates is Array:
+		for part: Variant in coordinates:
+			if part is Array and part.size() > 0:
+				var outer: Variant = part[0]
+				if outer is Array and outer.size() >= 4:
+					rings.append(outer)
+	return rings
 
 
 ## Instances the generated static map scene and indexes its runtime nodes.

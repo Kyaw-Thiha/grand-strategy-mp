@@ -3,8 +3,6 @@ extends EditorScript
 ## Generates a static map scene from processed map JSON assets.
 ## Run from the Godot editor after adjusting the exported paths if needed.
 
-const MAP_CANVAS_WIDTH: float = 4096.0
-const MAP_CANVAS_HEIGHT: float = 3000.0
 const CITY_DOT_RADIUS: float = 8.0
 const PORT_DOT_RADIUS: float = 8.0
 
@@ -77,8 +75,7 @@ const ELEVATION_COLORS := {
 @export_dir var output_scene_root: String = "res://scenes/map"
 
 var _bounds: Dictionary = {}
-var _projection_center: Vector2 = Vector2.ZERO
-var _projection_scale: float = 1.0
+var _projection: MapProjection
 var _skipped_polygon_count: int = 0
 
 
@@ -574,15 +571,7 @@ func _add_line(parent: Node, coordinates: Array, properties: Dictionary, layer_n
 ## Parameters: none.
 ## Returns: nothing.
 func _setup_projection() -> void:
-	var center_lng: float = (_bounds.get("min_lng", 0.0) + _bounds.get("max_lng", 0.0)) * 0.5
-	var center_lat: float = (_bounds.get("min_lat", 0.0) + _bounds.get("max_lat", 0.0)) * 0.5
-	_projection_center = _mercator_raw(center_lng, center_lat)
-
-	var top_left: Vector2 = _mercator_raw(_bounds.get("min_lng", 0.0), _bounds.get("max_lat", 0.0))
-	var bottom_right: Vector2 = _mercator_raw(_bounds.get("max_lng", 0.0), _bounds.get("min_lat", 0.0))
-	var raw_width: float = abs(bottom_right.x - top_left.x)
-	var raw_height: float = abs(bottom_right.y - top_left.y)
-	_projection_scale = min(MAP_CANVAS_WIDTH / raw_width, MAP_CANVAS_HEIGHT / raw_height)
+	_projection = MapProjection.new(_bounds)
 
 
 ## Converts WGS84 coordinates to raw Mercator radians.
@@ -591,9 +580,7 @@ func _setup_projection() -> void:
 ## - lat: latitude.
 ## Returns: raw Mercator position.
 func _mercator_raw(lng: float, lat: float) -> Vector2:
-	var x: float = lng * PI / 180.0
-	var y: float = log(tan(PI / 4.0 + lat * PI / 360.0))
-	return Vector2(x, y)
+	return MapProjection.mercator_raw(lng, lat)
 
 
 ## Projects WGS84 coordinates into Godot world coordinates.
@@ -602,11 +589,7 @@ func _mercator_raw(lng: float, lat: float) -> Vector2:
 ## - lat: latitude.
 ## Returns: Godot world-space point.
 func _project(lng: float, lat: float) -> Vector2:
-	var raw: Vector2 = _mercator_raw(lng, lat)
-	return Vector2(
-		(raw.x - _projection_center.x) * _projection_scale,
-		-(raw.y - _projection_center.y) * _projection_scale
-	)
+	return _projection.project(lng, lat)
 
 
 ## Projects one WGS84 polygon ring into a PackedVector2Array.
@@ -614,12 +597,7 @@ func _project(lng: float, lat: float) -> Vector2:
 ## - ring: array of [lng, lat] coordinate pairs.
 ## Returns: projected polygon points.
 func _ring_to_vector2_array(ring: Array) -> PackedVector2Array:
-	var points: PackedVector2Array = PackedVector2Array()
-	points.resize(ring.size())
-	for index: int in ring.size():
-		var coordinate: Array = ring[index]
-		points[index] = _project(float(coordinate[0]), float(coordinate[1]))
-	return points
+	return _projection.project_ring(ring)
 
 
 ## Assigns polygon points only when Godot can triangulate them.
