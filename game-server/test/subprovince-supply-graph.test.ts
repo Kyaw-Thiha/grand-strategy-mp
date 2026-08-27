@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findSupplyRoute } from "../src/systems/supply_graph.js";
+import { findSupplyRoute, findRetreatPath } from "../src/systems/supply_graph.js";
 import { ring, computeSupplyTier } from "../src/systems/supply_system.js";
 import type { SubprovinceGraph } from "../src/data/map_loader.js";
 
@@ -211,5 +211,163 @@ describe("lane:subprovince | ring-based supply tier", () => {
       const tier = computeSupplyTier(graph, ownership, new Set(), isFriendlyUs, "s");
       assert.equal(tier, "out_of_supply");
     });
+  });
+});
+
+describe("lane:subprovince | retreat-cost graph search", () => {
+  const isFriendlyFr = (owner: string) => owner === "fr";
+  const neverFrozen = () => false;
+
+  it("can traverse enemy-owned unoccupied ground, unlike findSupplyRoute in the same topology", () => {
+    const graph = graphOf(
+      [def("start", "p1", "hinterland"), def("enemy", "p1", "hinterland"), def("hub", "p1", "capital")],
+      [["start", "enemy"], ["enemy", "hub"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["enemy", { ownerId: "de", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+
+    // findSupplyRoute is cut_off in this topology (no occupied-by-requester exception applies).
+    const supplyRoute = findSupplyRoute(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, () => false, "d1");
+    assert.equal(supplyRoute.status, "cut_off");
+
+    // findRetreatPath succeeds by crossing the enemy cell at the expensive tier.
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "enemy", "hub"]);
+  });
+
+  it("blockedFraction is 0 for an all-friendly path", () => {
+    const graph = graphOf(
+      [def("start", "p1", "hinterland"), def("mid", "p1", "hinterland"), def("hub", "p1", "capital")],
+      [["start", "mid"], ["mid", "hub"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["mid", { ownerId: "fr", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "mid", "hub"]);
+    assert.equal(retreat.blockedFraction, 0);
+  });
+
+  it("blockedFraction is 1 for a path with no friendly ground reachable before the target", () => {
+    const graph = graphOf(
+      [def("start", "p1", "hinterland"), def("enemy", "p1", "hinterland"), def("hub", "p1", "capital")],
+      [["start", "enemy"], ["enemy", "hub"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["enemy", { ownerId: "de", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "enemy", "hub"]);
+    assert.equal(retreat.blockedFraction, 1);
+  });
+
+  it("blockedFraction is proportional for a mixed path (1 enemy hop out of 3 total -> 1/3)", () => {
+    const graph = graphOf(
+      [
+        def("start", "p1", "hinterland"), def("h1", "p1", "hinterland"), def("h2", "p1", "hinterland"),
+        def("h3", "p1", "hinterland"), def("hub", "p1", "capital"),
+      ],
+      [["start", "h1"], ["h1", "h2"], ["h2", "h3"], ["h3", "hub"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["h1", { ownerId: "fr", provinceId: "p1" }],
+      ["h2", { ownerId: "de", provinceId: "p1" }],
+      ["h3", { ownerId: "fr", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "h1", "h2", "h3", "hub"]);
+    assert.equal(retreat.blockedFraction, 1 / 3);
+  });
+
+  it("prefers a longer friendly-only path over a shorter path that crosses enemy ground", () => {
+    // Direct route start -> enemy -> hub is 1 hop through enemy ground (cost 20 * road-throughput
+    // inversion at minimum = 20). The friendly detour start -> a -> b -> hub is 3 friendly
+    // off-road hops (cost 2.0 each = 6 total, since "a"/"b" are "hinterland" rather than "road"
+    // so they don't themselves qualify as retreat targets and terminate the search early), which
+    // is cheaper than the single enemy hop despite having more hops — this is only true because
+    // of the cost-tier ordering, not hop count.
+    const graph = graphOf(
+      [
+        def("start", "p1", "hinterland"), def("enemy", "p1", "road"), def("hub", "p1", "capital"),
+        def("a", "p1", "hinterland"), def("b", "p1", "hinterland"),
+      ],
+      [["start", "enemy"], ["enemy", "hub"], ["start", "a"], ["a", "b"], ["b", "hub"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["enemy", { ownerId: "de", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+      ["a", { ownerId: "fr", provinceId: "p1" }],
+      ["b", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "a", "b", "hub"]);
+    assert.equal(retreat.blockedFraction, 0);
+  });
+
+  it("contested (combat-frozen) ground costs less than non-frozen enemy ground", () => {
+    // Two single-hop routes to the same-cost target: one through a combat-frozen enemy cell,
+    // one through a non-frozen enemy cell. The frozen route must win since contested < enemy/neutral.
+    const graph = graphOf(
+      [
+        def("start", "p1", "hinterland"), def("frozen", "p1", "hinterland"), def("hubA", "p1", "capital"),
+        def("cold", "p1", "hinterland"), def("hubB", "p1", "capital"),
+      ],
+      [["start", "frozen"], ["frozen", "hubA"], ["start", "cold"], ["cold", "hubB"]],
+    );
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["frozen", { ownerId: "de", provinceId: "p1" }],
+      ["hubA", { ownerId: "fr", provinceId: "p1" }],
+      ["cold", { ownerId: "de", provinceId: "p1" }],
+      ["hubB", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const isCombatFrozen = (id: string) => id === "frozen";
+    const retreat = findRetreatPath(graph, ownership, new Set(["hubA", "hubB"]), "start", "fr", isFriendlyFr, isCombatFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start", "frozen", "hubA"]);
+  });
+
+  it("deterministic tie-break: reordering the neighbors map does not change the selected path", () => {
+    const graph1 = graphOf(
+      [def("start", "p1", "hinterland"), def("a", "p1", "road"), def("b", "p1", "road"), def("hub", "p1", "capital")],
+      [["start", "a"], ["a", "hub"], ["start", "b"], ["b", "hub"]],
+    );
+    const reorderedNeighbors = new Map([...graph1.neighbors].reverse());
+    const graph2: SubprovinceGraph = { nodes: graph1.nodes, neighbors: reorderedNeighbors };
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }], ["a", { ownerId: "fr", provinceId: "p1" }],
+      ["b", { ownerId: "fr", provinceId: "p1" }], ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const r1 = findRetreatPath(graph1, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    const r2 = findRetreatPath(graph2, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(r1.subprovinceIds, r2.subprovinceIds);
+  });
+
+  it("returns the start cell with blockedFraction 0 when the start is already a valid retreat target", () => {
+    const graph = graphOf([def("start", "p1", "road")], []);
+    const ownership = new Map([["start", { ownerId: "fr", provinceId: "p1" }]]);
+    const retreat = findRetreatPath(graph, ownership, new Set(), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start"]);
+    assert.equal(retreat.blockedFraction, 0);
+  });
+
+  it("falls back to the start cell with blockedFraction 0 when the graph is disconnected from start", () => {
+    const graph = graphOf([def("start", "p1", "hinterland"), def("hub", "p1", "capital")], []);
+    const ownership = new Map([
+      ["start", { ownerId: "fr", provinceId: "p1" }],
+      ["hub", { ownerId: "fr", provinceId: "p1" }],
+    ]);
+    const retreat = findRetreatPath(graph, ownership, new Set(["hub"]), "start", "fr", isFriendlyFr, neverFrozen);
+    assert.deepEqual(retreat.subprovinceIds, ["start"]);
+    assert.equal(retreat.blockedFraction, 0);
   });
 });
