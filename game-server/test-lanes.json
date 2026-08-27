@@ -76,6 +76,23 @@
       "tests": [
         "test/GameRoom.test.ts"
       ]
+    },
+    "subprovince": {
+      "source_prefixes": [
+        "src/systems/subprovince_system.ts",
+        "src/systems/supply_graph.ts",
+        "src/data/subprovince_loader.ts"
+      ],
+      "tests": [
+        "test/subprovince-loader.test.ts",
+        "test/subprovince-loader-parity.test.ts",
+        "test/subprovince-spatial-index.test.ts",
+        "test/subprovince-system-unit.test.ts",
+        "test/subprovince-capture.test.ts",
+        "test/subprovince-supply-graph.test.ts",
+        "test/subprovince-supply.test.ts",
+        "test/subprovince-city-cascade.test.ts"
+      ]
     }
   },
   "shared": {
