@@ -113,9 +113,35 @@ describe("lane:subprovince | Batch 5 — City Capture Cascade", () => {
     const g1 = [...graph.nodes.values()].filter((d) => d.provinceId === GERMANY_PROVINCE);
     provinceCellIds = g1.map((d) => d.id);
 
-    const hinterlandDefs = g1.filter((d) => d.kind === "hinterland");
-    const verifiedHinterland = pickVerifiedCells(hinterlandDefs, spatialIndex, 3);
-    [attackerCell, defenderCell, unrelatedCell] = verifiedHinterland;
+    const __dirEarly = dirname(fileURLToPath(import.meta.url));
+    const mapDataEarly = JSON.parse(
+      readFileSync(join(__dirEarly, "..", "..", "client", "assets", "data", MAP_ID, "map_data.json"), "utf-8"),
+    ) as { provinces: Array<{ province_id: string; city_position?: [number, number] }> };
+    // _checkProvinceCapture (Fix 1) now additionally requires the occupying division be within
+    // CONTEST_RADIUS_KM of the province's own city_position before the legacy whole-province
+    // auto-capture fires — an arbitrary hinterland cell is no longer guaranteed to qualify.
+    // attackerCell must be the cell that actually contains GERMANY_PROVINCE's city_position, so
+    // standing there always satisfies that proximity requirement (distance 0), while still being
+    // an ordinary hinterland/road cell whose own capture the existing per-cell assertions exercise.
+    const germanyProvinceData = mapDataEarly.provinces.find((p) => p.province_id === GERMANY_PROVINCE);
+    if (!germanyProvinceData?.city_position) throw new Error(`no city_position found for ${GERMANY_PROVINCE}`);
+    const germanyProvinceCityId = findSubprovinceAtPoint(
+      germanyProvinceData.city_position[0], germanyProvinceData.city_position[1], spatialIndex,
+    );
+    if (!germanyProvinceCityId) throw new Error(`${GERMANY_PROVINCE}'s city_position resolved to no subprovince cell`);
+    const germanyProvinceCityDef = graph.nodes.get(germanyProvinceCityId)!;
+    attackerCell = centroidOf(germanyProvinceCityDef);
+    if (findSubprovinceAtPoint(attackerCell.lng, attackerCell.lat, spatialIndex) !== germanyProvinceCityId) {
+      // Centroid didn't verify (rare, non-convex cell) — fall back to the exact city point itself,
+      // which is guaranteed to resolve into this cell since that's how it was looked up above.
+      attackerCell = { id: germanyProvinceCityId, lng: germanyProvinceData.city_position[0], lat: germanyProvinceData.city_position[1] };
+    } else {
+      attackerCell = { id: germanyProvinceCityId, lng: attackerCell.lng, lat: attackerCell.lat };
+    }
+
+    const hinterlandDefs = g1.filter((d) => d.kind === "hinterland" && d.id !== attackerCell.id);
+    const verifiedHinterland = pickVerifiedCells(hinterlandDefs, spatialIndex, 2);
+    [defenderCell, unrelatedCell] = verifiedHinterland;
 
     const dist = bfsDistances(graph, defenderCell.id);
     const intermediateCandidates = hinterlandDefs.filter(
@@ -362,11 +388,19 @@ describe("lane:subprovince | Batch 5 — City Capture Cascade", () => {
     clients[ATTACKER].send("SET_RELATION", { nation_a: ATTACKER, nation_b: DEFENDER, stance: "war" });
     await room.waitForNextPatch();
 
-    // Attacker stands directly inside the capital cell's polygon.
+    // Attacker stands directly inside the capital cell's polygon. Uses the province's exact
+    // city_position (not capitalCell's ring centroid, which can land more than CONTEST_RADIUS_KM
+    // away from city_position depending on how the capital ring got clipped during generation) so
+    // Fix 1's city-proximity requirement is always satisfied once the contest below is removed.
+    assert.strictEqual(
+      findSubprovinceAtPoint(germanyCapitalCityPosition.lng, germanyCapitalCityPosition.lat, spatialIndex),
+      capitalCell.id,
+      "sanity: the capital province's city_position must resolve into the capital cell itself",
+    );
     await spawnDivision(clients[ATTACKER], room, {
       division_id: "attacker",
-      position_lng: capitalCell.lng,
-      position_lat: capitalCell.lat,
+      position_lng: germanyCapitalCityPosition.lng,
+      position_lat: germanyCapitalCityPosition.lat,
     });
     // A germany defender exactly at the province's city position contests the capture
     // (within CONTEST_RADIUS_KM), so _checkProvinceCapture must NOT flip the province this tick.

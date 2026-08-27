@@ -2,6 +2,7 @@ import { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
 import { WING_LIFECYCLE } from "../rooms/schema/AirWingState.js";
 import { findProvinceAtPoint, ProvincePIPEntry } from "../utils/geo_utils.js";
 import type { AirDetectionSystem } from "./air_detection_system.js";
+import type { SubprovinceSystem } from "./subprovince_system.js";
 
 type BroadcastToClientFn = (clientSessionId: string, type: string, msg: unknown) => void;
 type GetAllianceFn       = (nationId: string) => Set<string>;
@@ -46,11 +47,13 @@ function serializeDivision(div: DivisionState): Record<string, unknown> {
 
 export class ServerVisibilitySystem {
   private _pipEntries:  ProvincePIPEntry[];
+  private _subprovinceSystem: SubprovinceSystem;
   private _prevDivVis:  Map<string, Set<string>> = new Map(); // nationId → Set<divisionId>
   private _prevWingVis: Map<string, Set<string>> = new Map(); // nationId → Set<wingId>
 
-  constructor(pipEntries: ProvincePIPEntry[]) {
+  constructor(pipEntries: ProvincePIPEntry[], subprovinceSystem: SubprovinceSystem) {
     this._pipEntries = pipEntries;
+    this._subprovinceSystem = subprovinceSystem;
   }
 
   canNationSeeDivision(nationId: string, divisionId: string): boolean {
@@ -120,11 +123,17 @@ export class ServerVisibilitySystem {
     for (const [divId, div] of state.divisions.entries()) {
       const divProvinceId = findProvinceAtPoint(div.position_lng, div.position_lat, this._pipEntries);
       const divProvinceOwnerId = divProvinceId ? state.provinces.get(divProvinceId)?.owner_id : null;
+      // Subprovince ownership is the authoritative per-cell truth (Batch 4+); a nation that has
+      // captured the exact cell a division stands in sees it, even if the parent province as a
+      // whole is still owned by someone else.
+      const divSubprovinceId = this._subprovinceSystem.getSubprovinceAtPosition({ lng: div.position_lng, lat: div.position_lat });
+      const divSubprovinceOwnerId = divSubprovinceId ? state.subprovinces.get(divSubprovinceId)?.owner_id : null;
       for (const [nationId] of state.nations) {
         if (div.nation_id === nationId) { this._addToResult(result, nationId, divId); continue; }
         if (getAlliance(div.nation_id).has(nationId)) { this._addToResult(result, nationId, divId); continue; }
         if (detection.getVisibleDivisionsForNation(nationId).has(divId)) { this._addToResult(result, nationId, divId); continue; }
         if (divProvinceOwnerId === nationId) { this._addToResult(result, nationId, divId); continue; }
+        if (divSubprovinceOwnerId === nationId) { this._addToResult(result, nationId, divId); continue; }
         for (const [, observerDiv] of state.divisions.entries()) {
           if (observerDiv.nation_id !== nationId) continue;
           const radiusDeg = observerDiv.observation_radius / KM_PER_DEG;
@@ -147,12 +156,15 @@ export class ServerVisibilitySystem {
     for (const [wingId, wing] of state.air_wings.entries()) {
       const wingProvinceId = findProvinceAtPoint(wing.position_lng, wing.position_lat, this._pipEntries);
       const wingProvinceOwnerId = wingProvinceId ? state.provinces.get(wingProvinceId)?.owner_id : null;
+      const wingSubprovinceId = this._subprovinceSystem.getSubprovinceAtPosition({ lng: wing.position_lng, lat: wing.position_lat });
+      const wingSubprovinceOwnerId = wingSubprovinceId ? state.subprovinces.get(wingSubprovinceId)?.owner_id : null;
       for (const [nationId] of state.nations) {
         if (wing.nation_id === nationId) { this._addToResult(result, nationId, wingId); continue; }
         if (getAlliance(wing.nation_id).has(nationId)) { this._addToResult(result, nationId, wingId); continue; }
         if (GROUND_STATES.has(wing.lifecycle_state as any)) continue;
         if (detection.getWingDetectedByNations(wingId).has(nationId)) { this._addToResult(result, nationId, wingId); continue; }
         if (wingProvinceOwnerId === nationId) { this._addToResult(result, nationId, wingId); continue; }
+        if (wingSubprovinceOwnerId === nationId) { this._addToResult(result, nationId, wingId); continue; }
       }
     }
     return result;

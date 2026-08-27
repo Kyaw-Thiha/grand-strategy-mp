@@ -1171,6 +1171,13 @@ export class CombatSystem {
         // Must be physically inside the province polygon
         if (!this._inProvince(div.position_lng, div.position_lat, prov)) continue;
 
+        // Must control the city itself, not just be somewhere uncontested in the province —
+        // otherwise a division wandering into an empty corner of enemy territory instantly
+        // flips the whole province (and, via cascadeCityCapture below, nearly every subprovince
+        // cell in it) despite never approaching the actual city.
+        const distToCity = this._distKm(div.position_lng, div.position_lat, prov.city_lng, prov.city_lat);
+        if (distToCity > CONTEST_RADIUS_KM) continue;
+
         // Capture is contested only if an enemy is physically at the city (within CONTEST_RADIUS_KM).
         // Using engagement_radius (50 km) was too strict — any frontline unit blocked every nearby city.
         let contested = false;

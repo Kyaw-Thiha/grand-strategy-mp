@@ -10,9 +10,10 @@
 import { listen } from "@colyseus/tools";
 import { Encoder } from "@colyseus/schema";
 
-// Colyseus default buffer is 8 KB — too small for 60+ divisions with full schema.
-// Bump to 256 KB so state patches encode without overflow.
-Encoder.BUFFER_SIZE = 256 * 1024;
+// Colyseus default buffer is 8 KB — too small for 60+ divisions with full schema, and 256 KB
+// is still too small for the initial full-state sync once subprovinces.geojson is loaded
+// (~6,140 subprovince entries on the full map). Bump to 1 MB.
+Encoder.BUFFER_SIZE = 1024 * 1024;
 
 // Import Colyseus config
 import app from "./app.config.js";

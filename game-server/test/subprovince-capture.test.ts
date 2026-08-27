@@ -230,6 +230,30 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
     assert.strictEqual(sp.owner_id, ATTACKER);
   });
 
+  it("capturing nation receives the detailed SUBPROVINCE_CAPTURED event even when not at war with the loser", async () => {
+    // Regression test: subprovince capture never required active war (literal-occupancy capture
+    // works without it), but _emitCaptureEvents' belligerency filter used to be built entirely
+    // from areNationsAtWar(...), which returns false for identical nations — so the capturing
+    // nation itself was misclassified as a neutral bystander to its own capture whenever it
+    // wasn't formally at war with the loser, and received only PROVINCE_CONTEST_UPDATE instead of
+    // the detailed event carrying subprovince_id. No SET_RELATION call here — relations default
+    // to not-at-war, which is exactly the scenario that must still deliver the detailed event.
+    const { room, clients } = await joinNations([ATTACKER]);
+    const captured: any[] = [];
+    clients[ATTACKER].onMessage("SUBPROVINCE_CAPTURED", (msg: any) => captured.push(msg));
+
+    await spawnDivision(clients[ATTACKER], room, {
+      division_id: "d1",
+      position_lng: literalCell.lng,
+      position_lat: literalCell.lat,
+    });
+    await tickRoom(room);
+
+    assert.strictEqual(room.state.subprovinces.get(literalCell.id).owner_id, ATTACKER, "sanity: the cell must actually have captured");
+    assert.strictEqual(captured.length, 1, "the capturing nation must receive exactly one detailed SUBPROVINCE_CAPTURED event for its own capture");
+    assert.strictEqual(captured[0].subprovince_id, literalCell.id);
+  });
+
   it("capital-kind cells never flip via checkCaptureAfterMovement", async () => {
     const { room, clients } = await joinNations([ATTACKER]);
     const before = room.state.subprovinces.get(capitalCell.id).owner_id;

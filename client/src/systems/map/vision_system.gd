@@ -89,6 +89,12 @@ var _unit_mask_radii_by_division_id: Dictionary = {}
 var _unit_visibility_dirty: bool = false
 var _dynamic_visibility_refresh_elapsed: float = 0.0
 var _mask_revision: int = 0
+## Set by province/subprovince capture and relation-change events, all of which can arrive in
+## bursts (a city-capture cascade broadcasts one event per flipped cell). Debounced by the same
+## timer as _unit_visibility_dirty so a whole burst collapses into exactly one full
+## refresh_visibility() rebuild instead of one per event.
+var _static_visibility_dirty: bool = false
+var _static_visibility_refresh_elapsed: float = 0.0
 
 
 ## Stores the map loader reference and creates the runtime visibility mask.
@@ -103,6 +109,16 @@ func setup(map_loader: Node, _map_renderer: Node = null) -> void:
 
 
 func _process(delta: float) -> void:
+	if _static_visibility_dirty:
+		_static_visibility_refresh_elapsed += delta
+		if _static_visibility_refresh_elapsed >= DYNAMIC_VISIBILITY_REFRESH_INTERVAL_SEC:
+			_static_visibility_refresh_elapsed = 0.0
+			_static_visibility_dirty = false
+			_unit_visibility_dirty = false
+			_dynamic_visibility_refresh_elapsed = 0.0
+			refresh_visibility()
+			return
+
 	if not _unit_visibility_dirty:
 		return
 	_dynamic_visibility_refresh_elapsed += delta
@@ -122,9 +138,12 @@ func on_map_loaded(_province_count: int) -> void:
 	EventBus.division_added.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
 	EventBus.division_updated.connect(func(_id: String) -> void: _mark_unit_visibility_dirty())
 	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_dynamic_visibility())
-	EventBus.province_captured.connect(func(_pid: String, _owner: String) -> void: refresh_visibility())
+	EventBus.province_captured.connect(func(_pid: String, _owner: String) -> void: _mark_static_visibility_dirty())
+	EventBus.subprovince_captured.connect(
+		func(_sp_id: String, _pid: String, _owner: String) -> void: _mark_static_visibility_dirty()
+	)
 	EventBus.relation_changed.connect(
-		func(_from_id: String, _to_id: String) -> void: refresh_visibility()
+		func(_from_id: String, _to_id: String) -> void: _mark_static_visibility_dirty()
 	)
 	EventBus.lobby_state_updated.connect(refresh_visibility)
 	refresh_visibility()
@@ -168,6 +187,15 @@ func _refresh_dynamic_visibility() -> void:
 ## Returns: nothing.
 func _mark_unit_visibility_dirty() -> void:
 	_unit_visibility_dirty = true
+
+
+## Marks province/subprovince ownership or relation data for a throttled full refresh_visibility()
+## rebuild. Debounced (see _process()) so a burst of many events in one frame — e.g. a city-capture
+## cascade broadcasting one SUBPROVINCE_CAPTURED per flipped cell — collapses into one rebuild
+## instead of one per event.
+## Returns: nothing.
+func _mark_static_visibility_dirty() -> void:
+	_static_visibility_dirty = true
 
 
 ## Returns whether a province is in the current local visible set.
@@ -444,17 +472,33 @@ func _compute_province_centroid(province_id: String) -> Vector2:
 
 # ── mask source management ────────────────────────────────────────────────────
 
-## Rebuilds exact static polygons for locally owned and allied territory.
+## Rebuilds exact static polygons for locally owned and allied territory, plus any
+## individually captured subprovince cells that fall outside otherwise-friendly provinces
+## (a captured cell inside an already-friendly province would be a fully redundant stamp,
+## since the whole-province polygon already covers it).
 func _rebuild_friendly_province_polygons() -> void:
 	_free_province_polygons()
 	var my_nation_id: String = GameState.get_my_nation_id()
-	if not my_nation_id.is_empty():
-		for province_id: String in _map_loader.get_all_province_ids():
-			if not _is_friendly_nation(
-				_get_province_nation_id(province_id), my_nation_id
-			):
-				continue
-			_spawn_province_mask_polygons(province_id)
+	if my_nation_id.is_empty():
+		_request_mask_render()
+		return
+
+	var friendly_provinces: Dictionary = {}
+	for province_id: String in _map_loader.get_all_province_ids():
+		if not _is_friendly_nation(_get_province_nation_id(province_id), my_nation_id):
+			continue
+		friendly_provinces[province_id] = true
+		_spawn_province_mask_polygons(province_id)
+
+	for subprovince_id: String in GameState.subprovinces:
+		var cell: Dictionary = GameState.subprovinces[subprovince_id]
+		if String(cell.get("owner_id", "")) != my_nation_id:
+			continue
+		var province_id: String = String(cell.get("province_id", ""))
+		if friendly_provinces.has(province_id):
+			continue
+		_spawn_subprovince_mask_polygons(subprovince_id)
+
 	_request_mask_render()
 
 
@@ -479,6 +523,28 @@ func _spawn_province_mask_polygons(province_id: String) -> void:
 
 		var mask_polygon := Polygon2D.new()
 		mask_polygon.name = "%s_%s" % [province_id, source_fill.name]
+		mask_polygon.polygon = mask_points
+		mask_polygon.color = PROVINCE_MASK_COLOR
+		mask_polygon.material = _mask_stamp_material
+		_mask_source_root.add_child(mask_polygon)
+		_friendly_province_polygons.append(mask_polygon)
+
+
+## Stamps one individually-captured subprovince cell's rings into mask coordinates, same
+## treatment as a friendly province's fill (solid green-channel reveal, no unit radius
+## involved). MapLoader's ring data is already in the same world space province Fill nodes
+## use (both derive from MapProjection), so no to_global() conversion is needed here.
+func _spawn_subprovince_mask_polygons(subprovince_id: String) -> void:
+	var rings: Array[PackedVector2Array] = _map_loader.get_subprovince_rings(subprovince_id)
+	for ring: PackedVector2Array in rings:
+		if ring.size() < 3:
+			continue
+		var mask_points := PackedVector2Array()
+		for vertex: Vector2 in ring:
+			mask_points.append(_world_to_mask_position(vertex))
+
+		var mask_polygon := Polygon2D.new()
+		mask_polygon.name = "sp_%s" % subprovince_id
 		mask_polygon.polygon = mask_points
 		mask_polygon.color = PROVINCE_MASK_COLOR
 		mask_polygon.material = _mask_stamp_material

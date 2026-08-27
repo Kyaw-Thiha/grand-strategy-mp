@@ -9,6 +9,14 @@ import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState
 import { SubprovinceState } from "../rooms/schema/GameRoomState.js";
 import { areNationsAtWar } from "./combat_system.js";
 import { findSupplyRoute } from "./supply_graph.js";
+import { loadProvincePIPData, findProvinceAtPoint, type ProvincePIPEntry } from "../utils/geo_utils.js";
+import { appendFileSync } from "fs";
+
+// TEMPORARY debug logging — writes to a file instead of stdout so it doesn't flood the
+// terminal. Remove this whole block (and its call sites) once the sticky-capture bug is fixed.
+function spdebug(line: string): void {
+  appendFileSync("/tmp/spdebug.log", `${new Date().toISOString()} ${line}\n`);
+}
 
 export type CaptureDelta = { subprovinceId: string; newOwner: string | null };
 type BroadcastFn = (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void;
@@ -51,12 +59,20 @@ export class SubprovinceSystem {
   private attackerProvinces = new Map<string, Set<string>>();
   /** subprovinceId of any cell with a division in "engaged"/"suppressed" combat_state this tick. */
   private frozenSubprovinceIds = new Set<string>();
+  /**
+   * Province-level (not subprovince-level) point-in-polygon index, used only by
+   * _nationHasLivingDivisionInProvince. Deliberately coarser than the subprovince grid: a tiny
+   * geometric gap between two adjacent subprovince cells must never read as "division left the
+   * province" and trigger a false revert of every captured cell in it.
+   */
+  private provincePipEntries: ProvincePIPEntry[] = [];
 
   /** Loads the subprovince graph and spatial index for the given map. Must be called before any other method. */
   loadForRoom(mapId: string): void {
     this.graph = loadSubprovinceGraphForRoom(mapId);
     this.spatialIndex = buildSubprovinceSpatialIndex(this.graph);
     this.defsById = this.graph.nodes;
+    this.provincePipEntries = loadProvincePIPData(mapId);
   }
 
   /** Exposes the loaded subprovince graph (nodes + adjacency) for supply-graph consumers (Task 8). */
@@ -132,7 +148,7 @@ export class SubprovinceSystem {
 
     const def = this.defsById.get(subprovinceId);
     if (!def) return deltas;
-    if (def.kind === "capital") return deltas; // capital cells only flip via Batch 5's city cascade
+    if (def.kind === "capital") return deltas;
     if (NON_CAPTURING_STATES.has(division.combat_state)) return deltas;
     // An engaged/suppressed division never captures its own cell this tick; freeze marking for
     // OTHER divisions sharing this cell is scanCombatFreeze's responsibility, not this check's.
@@ -143,6 +159,7 @@ export class SubprovinceSystem {
     if (!sp) return deltas;
 
     if (division.nation_id !== sp.owner_id) {
+      spdebug(`CAPTURE division=${division.division_id} nation=${division.nation_id} sp=${subprovinceId} province=${sp.province_id} owner ${sp.owner_id} -> ${division.nation_id}`);
       sp.owner_id = division.nation_id;
       deltas.push({ subprovinceId, newOwner: division.nation_id });
 
@@ -163,8 +180,10 @@ export class SubprovinceSystem {
   ): CaptureDelta[] {
     const deltas: CaptureDelta[] = [];
     const stillPresent = this._nationHasLivingDivisionInProvince(nationId, provinceId, state);
+    spdebug(`REVERT-CHECK nation=${nationId} province=${provinceId} stillPresent=${stillPresent}`);
     if (stillPresent) return deltas;
 
+    spdebug(`REVERTING nation=${nationId} province=${provinceId}`);
     const province = state.provinces.get(provinceId);
     const properOwner = province?.owner_id ?? "";
     for (const [subprovinceId, sp] of state.subprovinces) {
@@ -271,10 +290,12 @@ export class SubprovinceSystem {
     for (const division of state.divisions.values()) {
       if (division.nation_id !== nationId) continue;
       if (division.combat_state === "destroyed") continue;
-      const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
-      if (subprovinceId === null) continue;
-      const def = this.defsById.get(subprovinceId);
-      if (def?.provinceId === provinceId) return true;
+      // Province-level PIP, not subprovince-grid resolution: a division standing in a tiny gap
+      // between two adjacent subprovince cells must still count as "in the province" here, or a
+      // single missed tick reverts every captured cell in it with no retry.
+      const resolvedProvinceId = findProvinceAtPoint(division.position_lng, division.position_lat, this.provincePipEntries);
+      spdebug(`PRESENCE division=${division.division_id} nation=${division.nation_id} combat_state=${division.combat_state} resolvedProvince=${resolvedProvinceId} targetProvince=${provinceId} match=${resolvedProvinceId === provinceId}`);
+      if (resolvedProvinceId === provinceId) return true;
     }
     return false;
   }
@@ -295,7 +316,15 @@ export class SubprovinceSystem {
       if (!sp) continue;
       const provinceId = sp.province_id;
       const otherOwner = otherOwnerOverride ?? state.provinces.get(provinceId)?.owner_id ?? "";
+      // The capturing nation and the nation that lost the cell are always directly involved in
+      // this specific event, regardless of formal war status between them — subprovince capture
+      // never required active war (literal-occupancy capture works without it). War status only
+      // gates whether a THIRD PARTY gets the detailed event; it must never exclude the two
+      // parties actually in the capture, which areNationsAtWar(nationId, nationId) would
+      // otherwise do for the capturing nation whenever it isn't formally at war with the loser.
       const isBelligerent = (nationId: string): boolean =>
+        nationId === delta.newOwner ||
+        nationId === otherOwner ||
         areNationsAtWar(nationId, delta.newOwner ?? "", state.relations) ||
         areNationsAtWar(nationId, otherOwner, state.relations);
       broadcast(

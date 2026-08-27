@@ -1288,6 +1288,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     );
     this.serverVisibilitySystem = new ServerVisibilitySystem(
       loadProvincePIPData(this.state.map_id),
+      this.subprovinceSystem,
     );
     this._initRelations();
     this.broadcastRelations();
