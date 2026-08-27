@@ -104,6 +104,49 @@ func _ready() -> void:
 		"SubprovinceFills (index %d) must precede SubprovinceBorders (index %d) so borders paint on top"
 		% [fills.get_index(), borders.get_index()])
 
+	# Capture fade: EventBus.subprovince_captured drives an interruptible fill fade. A
+	# fresh capture fades from the cell's current static color to the new owner's palette
+	# color; a second capture arriving mid-flight restarts the fade from the LIVE
+	# interpolated color (not the pre-transition original, not the interrupted target).
+	var capture_ids: Array = loader.get_all_subprovince_ids()
+	_assert_true(capture_ids.size() >= 2,
+		"map must expose at least two subprovinces for capture-fade tests")
+	var capture_id_1 := String(capture_ids[0])
+	var capture_id_2 := String(capture_ids[1])
+
+	var fill_1: Polygon2D = renderer.get_fill_node(capture_id_1)
+	var old_color_1: Color = fill_1.color
+	EventBus.subprovince_captured.emit(capture_id_1, "", "germany")
+	await get_tree().create_timer(0.15).timeout
+	await get_tree().process_frame
+	var mid_color_1: Color = fill_1.color
+	var target_color_1: Color = renderer.get_owner_color("germany")
+	_assert_true(_color_between(old_color_1, mid_color_1, target_color_1),
+		"mid-tween fill color must lie strictly between old (%s) and new (%s), got %s"
+			% [old_color_1, target_color_1, mid_color_1])
+	_assert_true(not mid_color_1.is_equal_approx(old_color_1),
+		"mid-tween color must have moved away from the old color")
+	_assert_true(not mid_color_1.is_equal_approx(target_color_1),
+		"mid-tween color must not already equal the target color")
+	await get_tree().create_timer(SubprovinceRenderer.CAPTURE_FADE_DURATION).timeout
+	_assert_true(fill_1.color.is_equal_approx(target_color_1),
+		"fade must settle at the target color once the tween completes")
+
+	var fill_2: Polygon2D = renderer.get_fill_node(capture_id_2)
+	EventBus.subprovince_captured.emit(capture_id_2, "", "germany")
+	await get_tree().create_timer(0.15).timeout
+	await get_tree().process_frame
+	var live_color_at_interrupt: Color = fill_2.color
+	var interrupted_target: Color = renderer.get_owner_color("germany")
+	EventBus.subprovince_captured.emit(capture_id_2, "", "united_kingdom")
+	await get_tree().process_frame
+	var color_immediately_after_restart: Color = fill_2.color
+	_assert_true(_color_close(color_immediately_after_restart, live_color_at_interrupt, 0.08),
+		("interrupted transition must restart from the live interpolated color " +
+			"(live=%s got=%s)") % [live_color_at_interrupt, color_immediately_after_restart])
+	_assert_true(not color_immediately_after_restart.is_equal_approx(interrupted_target),
+		"interrupted transition must not snap to the first (interrupted) target color")
+
 	renderer.queue_free()
 	loader.queue_free()
 	await get_tree().process_frame
@@ -148,6 +191,29 @@ func _all_borders_below_fog(borders_layer: Node2D) -> bool:
 		if border.z_index >= 0 or border.z_as_relative:
 			return false
 	return true
+
+
+## Returns true if `mid`'s red channel lies strictly between `a` and `b`'s red channels
+## (i.e. mid-tween, not yet snapped to either endpoint). Mirrors the SDD plan's reference
+## check; red is a sufficient discriminator here since every palette entry used in these
+## tests differs on that channel.
+func _color_between(a: Color, mid: Color, b: Color) -> bool:
+	if b.r == a.r:
+		return true
+	var t_r := (mid.r - a.r) / (b.r - a.r)
+	return t_r > 0.01 and t_r < 0.99
+
+
+## Returns true if every channel of `a` and `b` is within `tolerance` of each other. Looser
+## than Color.is_equal_approx's tight fixed epsilon, which is unsuitable for comparing a
+## tween's value across a single elapsed frame.
+func _color_close(a: Color, b: Color, tolerance: float) -> bool:
+	return (
+		absf(a.r - b.r) <= tolerance
+		and absf(a.g - b.g) <= tolerance
+		and absf(a.b - b.b) <= tolerance
+		and absf(a.a - b.a) <= tolerance
+	)
 
 
 func _assert_true(condition: bool, message: String) -> void:

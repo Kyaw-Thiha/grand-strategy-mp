@@ -20,6 +20,7 @@ const FILL_ALPHA := 0.5
 const BORDER_COLOR := Color(0.21, 0.21, 0.21, 0.30)
 const BORDER_WIDTH := 0.6
 const UNOWNED_COLOR := Color(0.55, 0.55, 0.55)
+const CAPTURE_FADE_DURATION := 0.4 # tunable, HANDOFF.md proposes 300-500ms
 
 var _map_loader: MapLoader = null
 var _data_source: Object = null
@@ -30,13 +31,15 @@ var _border_tween: Tween = null
 var _borders_shown := false
 var _fill_groups: Dictionary = {}      # province_id → Node2D
 var _border_groups: Dictionary = {}    # province_id → Node2D
+var _fill_by_id: Dictionary = {}       # subprovince_id → Array[Polygon2D] (one per ring)
 var _province_bounds: Dictionary = {}  # province_id → Rect2 (world AABB)
 var _province_visible: Dictionary = {} # province_id → bool (last culled state)
 var _fill_node_count := 0
 var _border_node_count := 0
+var _fade_tweens: Dictionary = {}      # subprovince_id → Tween (in-flight capture fade)
 
 
-## Prepares the two drawable sub-layers.
+## Prepares the two drawable sub-layers and wires one-time signal connections.
 ## Parameters: none.
 ## Returns: nothing.
 func _init() -> void:
@@ -48,6 +51,7 @@ func _init() -> void:
 	_border_layer.visible = false
 	_border_layer.modulate.a = 0.0
 	add_child(_border_layer)
+	_connect_capture_signal()
 
 
 ## Registers the MapLoader and the ownership data source.
@@ -155,10 +159,15 @@ func _rebuild() -> void:
 	_clear_layer(_border_layer)
 	_fill_groups.clear()
 	_border_groups.clear()
+	_fill_by_id.clear()
 	_province_bounds.clear()
 	_province_visible.clear()
 	_fill_node_count = 0
 	_border_node_count = 0
+	for tween: Variant in _fade_tweens.values():
+		if tween != null and (tween as Tween).is_valid():
+			(tween as Tween).kill()
+	_fade_tweens.clear()
 	if _map_loader == null or _data_source == null:
 		return
 
@@ -176,6 +185,7 @@ func _rebuild() -> void:
 		var owner_id: String = String(_data_source.get_subprovince_owner(subprovince_id))
 		var fill_color: Color = _color_for_owner(owner_id)
 		var largest_ring := PackedVector2Array()
+		var cell_fills: Array[Polygon2D] = []
 		for ring: PackedVector2Array in rings:
 			var polygon := Polygon2D.new()
 			polygon.polygon = ring
@@ -186,8 +196,10 @@ func _rebuild() -> void:
 			fill_group.add_child(polygon)
 			_fill_node_count += 1
 			_expand_province_bounds(province_id, ring)
+			cell_fills.append(polygon)
 			if ring.size() > largest_ring.size():
 				largest_ring = ring
+		_fill_by_id[subprovince_id] = cell_fills
 		if largest_ring.size() >= 3:
 			var line := Line2D.new()
 			line.points = largest_ring
@@ -247,6 +259,70 @@ func _color_for_owner(owner_id: String) -> Color:
 	return color
 
 
+## Public wrapper over the owner→color palette lookup, exposed so tests can compute
+## expected fade targets without reaching into private renderer state.
+## Parameters:
+## - owner_id: nation/owner identifier, or empty for unowned.
+## Returns: the resolved fill Color (preview alpha applied).
+func get_owner_color(owner_id: String) -> Color:
+	return _color_for_owner(owner_id)
+
+
+## Connects the capture signal exactly once per renderer instance (wired from _init, which
+## Godot only calls once per object, so this never double-connects across _rebuild() calls).
+## Parameters: none.
+## Returns: nothing.
+func _connect_capture_signal() -> void:
+	if not EventBus.subprovince_captured.is_connected(_on_subprovince_captured):
+		EventBus.subprovince_captured.connect(_on_subprovince_captured)
+
+
+## Fades a captured cell's fill(s) from their current color to the new owner's palette
+## color. Interruptible: a second capture on the same cell while a fade is still running
+## kills the in-flight tween and restarts from the LIVE interpolated color read at that
+## moment (Godot 4's Tween.kill() leaves the animated property at its last-set value, it
+## does not reset it), never from the pre-transition original nor by snapping to target.
+## Parameters:
+## - subprovince_id: the captured cell.
+## - _province_id: parent province, unused here (contested-tint interaction is Task 14).
+## - new_owner_id: the new owner to fade the fill(s) toward.
+## Returns: nothing.
+func _on_subprovince_captured(
+		subprovince_id: String, _province_id: String, new_owner_id: String
+) -> void:
+	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	if fills.is_empty():
+		return
+	var start_color: Color = (fills[0] as Polygon2D).color
+	var old_tween: Tween = _fade_tweens.get(subprovince_id)
+	if old_tween != null and old_tween.is_valid():
+		start_color = (fills[0] as Polygon2D).color # live interpolated value at kill time
+		old_tween.kill()
+	_fade_tweens.erase(subprovince_id)
+
+	var target_color: Color = get_owner_color(new_owner_id)
+	for fill: Polygon2D in fills:
+		fill.color = start_color
+
+	var tween := create_tween()
+	tween.tween_method(
+		_apply_fade_color.bind(subprovince_id), start_color, target_color, CAPTURE_FADE_DURATION
+	)
+	_fade_tweens[subprovince_id] = tween
+
+
+## Tween step callback: writes one interpolated color to every fill ring of a cell (a cell
+## may have multiple disjoint rings, e.g. islands, that must stay in visual lockstep).
+## Parameters:
+## - color: this step's interpolated color.
+## - subprovince_id: the cell whose fills to update.
+## Returns: nothing.
+func _apply_fade_color(color: Color, subprovince_id: String) -> void:
+	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	for fill: Polygon2D in fills:
+		fill.color = color
+
+
 func _clear_layer(layer: Node2D) -> void:
 	for child: Node in layer.get_children():
 		child.queue_free()
@@ -254,6 +330,16 @@ func _clear_layer(layer: Node2D) -> void:
 
 func get_fill_node_count() -> int:
 	return _fill_node_count
+
+
+## Returns a representative fill Polygon2D for a subprovince (its first ring), or null if
+## the cell isn't rendered. Test-only accessor; multi-ring cells keep all rings in lockstep,
+## so any one of them reflects the cell's current fade state.
+func get_fill_node(subprovince_id: String) -> Polygon2D:
+	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	if fills.is_empty():
+		return null
+	return fills[0] as Polygon2D
 
 
 func get_border_node_count() -> int:
