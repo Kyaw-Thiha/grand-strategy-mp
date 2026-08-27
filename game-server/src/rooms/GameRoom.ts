@@ -13,6 +13,7 @@ import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
+import { SubprovinceSystem } from "../systems/subprovince_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
@@ -86,6 +87,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private combatSystem     = new CombatSystem(this.movementSystem);
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
+  private subprovinceSystem = new SubprovinceSystem();
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
   private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
@@ -1262,7 +1264,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
     this.frontlineSystem.loadMapData(this.state.map_id);
+    this.subprovinceSystem.loadForRoom(this.state.map_id);
     this._initProvinces(this.state.map_id);
+    // Must run after _initProvinces populates province.owner_id, since subprovince ownership
+    // is seeded from each subprovince's parent province's current owner_id.
+    this.subprovinceSystem.initializeOwnership(this.state);
     this.airStrategicBombingSystem = new AirStrategicBombingSystem(
       this._provinceCityPositionLookup,
     );
@@ -1292,6 +1298,14 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (province.owner_id) provinceOwners[pid] = province.owner_id;
     }
     this.broadcast("PROVINCE_INIT", { provinces: provinceOwners });
+
+    // Send initial subprovince ownership snapshot (owner_id only — geometry/kind/province_id
+    // are already static client data loaded from the map pipeline in Batch 3).
+    const subprovinceSnapshot: Record<string, string> = {};
+    for (const [id, sp] of this.state.subprovinces) {
+      subprovinceSnapshot[id] = sp.owner_id;
+    }
+    this.broadcast("SUBPROVINCE_INIT", { subprovinces: subprovinceSnapshot });
 
     // Send full initial division state — profile sent once at top level (shared by all divisions)
     const sharedProfileJson = this.state.divisions.values().next().value?.movement_profile_json ?? "";
@@ -1453,6 +1467,25 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
   }
 
+  /**
+   * Sends a message to each client whose resolved nation_id passes sessionFilter. Used as the
+   * BroadcastFn callback shape SubprovinceSystem's capture/revert methods expect, modeled on the
+   * existing broadcastToNation/broadcastFilteredAirWingUpdates per-client resolution pattern.
+   */
+  private _broadcastToFilteredNations(
+    sessionFilter: (nationId: string) => boolean,
+    type: string,
+    msg: unknown,
+  ): void {
+    for (const c of this.clients) {
+      const p = this.state.players.get(c.sessionId);
+      if (!p) continue;
+      const n = this.getNationForPlayer(p.userId);
+      if (!n || !sessionFilter(n.nation_id)) continue;
+      c.send(type, msg);
+    }
+  }
+
   private broadcastFilteredAirWingUpdates(msg: { wings: unknown[] }): void {
     if (!this.serverVisibilitySystem) {
       this.broadcast("AIR_WING_UPDATES", msg);
@@ -1507,6 +1540,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     try {
       this.movementSystem.tick(this.state);
+
+      // Subprovince capture check — must run in this exact order: reset freeze tracking, then
+      // one full scan marking every engaged/suppressed division's cell frozen, THEN per-division
+      // capture checks, THEN per-(attacker,province) revert checks. See subprovince_system.ts's
+      // scanCombatFreeze/resetFreezeTracking doc comments for why this order is load-bearing.
+      this.subprovinceSystem.resetFreezeTracking();
+      this.subprovinceSystem.scanCombatFreeze(this.state.divisions.values());
+      for (const division of this.state.divisions.values()) {
+        this.subprovinceSystem.checkCaptureAfterMovement(division, this.state, (sessionFilter, type, msg) =>
+          this._broadcastToFilteredNations(sessionFilter, type, msg),
+        );
+      }
+      for (const { nationId, provinceId } of this.subprovinceSystem.getTrackedAttackerProvincePairs()) {
+        this.subprovinceSystem.revertNationCaptureIfProvinceEmpty(nationId, provinceId, this.state, (sessionFilter, type, msg) =>
+          this._broadcastToFilteredNations(sessionFilter, type, msg),
+        );
+      }
+
       const pendingCaptures: Array<{ province_id: string; new_owner_id: string }> = [];
       const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => {
         this.broadcast(type, msg);
