@@ -36,6 +36,28 @@ export function buildSubprovinceSpatialIndex(graph: SubprovinceGraph): Subprovin
 }
 
 /**
+ * Reads client/assets/data/<mapId>/map_data.json's provinces array and returns every
+ * province_id -> city_position pair, regardless of is_supply_hub — used both to seed static
+ * hubs at room load and to resolve a province's city on demand when a player-built hub
+ * (SubprovinceSystem.registerDynamicHub) completes construction in a province that wasn't one
+ * of the map's original hubs.
+ */
+export function loadProvinceCityPositions(mapId: string): Map<string, [number, number]> {
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const dataPath = join(__dir, "../../..", "client", "assets", "data", mapId, "map_data.json");
+  const raw = getCachedFile<{
+    provinces: Array<{ province_id: string; city_position?: [number, number] }>;
+  }>(dataPath);
+
+  const positions = new Map<string, [number, number]>();
+  for (const p of raw.provinces) {
+    if (!p.city_position) continue;
+    positions.set(p.province_id, p.city_position);
+  }
+  return positions;
+}
+
+/**
  * Reads client/assets/data/<mapId>/map_data.json's provinces array and returns
  * province_id -> city_position for every province flagged is_supply_hub. Hub placement is
  * static, authored map data (Task A of the supply-hub plan) — the server never infers hubs

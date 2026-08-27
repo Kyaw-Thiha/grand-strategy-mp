@@ -14,6 +14,7 @@ import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
 import { SubprovinceSystem, makeIsFriendly } from "../systems/subprovince_system.js";
+import { SupplyHubConstructionSystem } from "../systems/supply_hub_construction_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
@@ -93,6 +94,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private supplySystem     = new SupplySystem();
   private frontlineSystem  = new FrontlineSystem();
   private subprovinceSystem = new SubprovinceSystem();
+  private supplyHubConstructionSystem = new SupplyHubConstructionSystem();
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
   private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
@@ -146,6 +148,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("VOTE_SPEED",       (client, msg) => this.handleVoteSpeed(client, msg));
     this.onMessage("END_GAME",         (client, _msg) => this.handleEndGame(client));
     this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
+    this.onMessage("BUILD_SUPPLY_HUB", (client, msg) => this.handleBuildSupplyHub(client, msg));
     this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
     this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
@@ -942,6 +945,27 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.checkAutoStart();
   }
 
+  private handleBuildSupplyHub(client: Client, msg: { province_id?: string }) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation) {
+      client.send("ERROR", { message: "Select a nation before building a supply hub" });
+      return;
+    }
+    const provinceId = msg.province_id;
+    if (!provinceId) {
+      client.send("ERROR", { message: "province_id is required" });
+      return;
+    }
+    const result = this.supplyHubConstructionSystem.startConstruction(
+      nation.nation_id, provinceId, this.state, this.subprovinceSystem, Date.now(),
+    );
+    if (result.ok === false) {
+      client.send("ERROR", { message: result.error });
+    }
+  }
+
   private handleSendChat(client: Client, msg: { message?: string }) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
@@ -1572,6 +1596,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           this._broadcastToFilteredNations(sessionFilter, type, msg),
         );
       }
+
+      this.supplyHubConstructionSystem.tick(this.state, Date.now(), (provinceId) => {
+        this.subprovinceSystem.registerDynamicHub(provinceId);
+        this.broadcast("SUPPLY_HUB_COMPLETED", { province_id: provinceId });
+      });
 
       const pendingCaptures: Array<{ province_id: string; new_owner_id: string }> = [];
       const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => {

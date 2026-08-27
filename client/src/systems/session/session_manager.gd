@@ -94,6 +94,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"PROVINCE_CONTEST_UPDATE":
 			GameState._apply_province_contest_updated(data)
 
+		"SUPPLY_HUB_COMPLETED":
+			GameState._apply_supply_hub_completed(data)
+
 		"STACK_FORMED":
 			GameState._apply_stack_formed(data)
 

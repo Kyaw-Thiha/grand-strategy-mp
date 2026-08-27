@@ -40,6 +40,14 @@ export class ProvinceState extends Schema {
   @type("number") infrastructure:      number = 50;
   @type("number") oil_bombed_until_ms: number = 0;
   @type("number") naval_base_level: number = 0;
+  /** Player-built supply hub, separate from the static, map-authored is_supply_hub provinces
+   *  SubprovinceSystem loads at room start. */
+  @type("boolean") has_supply_hub: boolean = false;
+  /** Reserved for future upgrade tiers — no gameplay effect yet. */
+  @type("number") supply_hub_level: number = 0;
+  /** 0 = not under construction; otherwise a server clock timestamp (Date.now()-based, same
+   *  pattern as oil_bombed_until_ms) at which construction completes. */
+  @type("number") supply_hub_construction_ends_at_ms: number = 0;
 }
 
 export class SubprovinceState extends Schema {

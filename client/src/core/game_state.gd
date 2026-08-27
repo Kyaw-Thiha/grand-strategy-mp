@@ -189,6 +189,17 @@ func _apply_province_captured(data: Dictionary) -> void:
 	EventBus.province_captured.emit(province_id, new_owner)
 
 
+## Called by SessionManager when server sends SUPPLY_HUB_COMPLETED.
+func _apply_supply_hub_completed(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	if province_id.is_empty():
+		return
+	if not provinces.has(province_id):
+		provinces[province_id] = {}
+	provinces[province_id]["has_supply_hub"] = true
+	EventBus.supply_hub_completed.emit(province_id)
+
+
 ## Called by SessionManager when server sends SUBPROVINCE_INIT (once at game start).
 func _apply_subprovince_init(data: Dictionary) -> void:
 	for sp_id: String in data.get("subprovinces", {}):

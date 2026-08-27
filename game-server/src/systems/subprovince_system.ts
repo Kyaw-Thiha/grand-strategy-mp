@@ -3,6 +3,7 @@ import {
   buildSubprovinceSpatialIndex,
   findSubprovinceAtPoint,
   loadSupplyHubProvinces,
+  loadProvinceCityPositions,
   type SubprovincePIPEntry,
 } from "../data/subprovince_loader.js";
 import type { SubprovinceGraph, SubprovinceDefinition } from "../data/map_loader.js";
@@ -73,6 +74,13 @@ export class SubprovinceSystem {
    * Static for the room's lifetime — a hub province's city_position never moves.
    */
   private hubSubprovinceIds: Set<string> = new Set();
+  /** province_id -> city_position for every province on the map, used by registerDynamicHub to
+   *  resolve a newly-built hub's location without re-reading map_data.json each time. */
+  private provinceCityPositions: Map<string, [number, number]> = new Map();
+  /** province_ids that are statically, map-authored hubs (Task A) — distinct from
+   *  hubSubprovinceIds, which stores resolved SUBPROVINCE ids, not province ids. Used by
+   *  SupplyHubConstructionSystem to reject building a redundant hub where one already exists. */
+  private staticHubProvinceIds: Set<string> = new Set();
 
   /** Loads the subprovince graph and spatial index for the given map. Must be called before any other method. */
   loadForRoom(mapId: string): void {
@@ -80,9 +88,12 @@ export class SubprovinceSystem {
     this.spatialIndex = buildSubprovinceSpatialIndex(this.graph);
     this.defsById = this.graph.nodes;
     this.provincePipEntries = loadProvincePIPData(mapId);
+    this.provinceCityPositions = loadProvinceCityPositions(mapId);
 
     this.hubSubprovinceIds = new Set();
+    this.staticHubProvinceIds = new Set();
     for (const [provinceId, [lng, lat]] of loadSupplyHubProvinces(mapId)) {
+      this.staticHubProvinceIds.add(provinceId);
       const subprovinceId = this.getSubprovinceAtPosition({ lng, lat });
       if (subprovinceId === null) {
         console.warn(`[SubprovinceSystem] hub province ${provinceId}'s city_position resolved to no subprovince cell — skipping`);
@@ -90,6 +101,33 @@ export class SubprovinceSystem {
       }
       this.hubSubprovinceIds.add(subprovinceId);
     }
+  }
+
+  /** True if provinceId is one of the map's original, statically-authored supply hubs. */
+  isStaticHubProvince(provinceId: string): boolean {
+    return this.staticHubProvinceIds.has(provinceId);
+  }
+
+  /**
+   * Registers a newly player-built hub (SupplyHubConstructionSystem, once construction
+   * completes) so getHubSubprovinceIds() recognizes it immediately. Resolves provinceId's city
+   * to a subprovince id the same way loadForRoom does for static hubs — no separate resolution
+   * path. No-ops (with a warning) if the province has no known city_position or it resolves to
+   * no subprovince cell, same fail-soft convention as the static-hub loading above.
+   */
+  registerDynamicHub(provinceId: string): void {
+    const cityPosition = this.provinceCityPositions.get(provinceId);
+    if (!cityPosition) {
+      console.warn(`[SubprovinceSystem] registerDynamicHub: no known city_position for province ${provinceId}`);
+      return;
+    }
+    const [lng, lat] = cityPosition;
+    const subprovinceId = this.getSubprovinceAtPosition({ lng, lat });
+    if (subprovinceId === null) {
+      console.warn(`[SubprovinceSystem] registerDynamicHub: province ${provinceId}'s city_position resolved to no subprovince cell`);
+      return;
+    }
+    this.hubSubprovinceIds.add(subprovinceId);
   }
 
   /** Exposes the loaded subprovince graph (nodes + adjacency) for supply-graph consumers (Task 8). */
