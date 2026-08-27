@@ -28,8 +28,8 @@ export class SubprovinceSystem {
   private defsById = new Map<string, SubprovinceDefinition>();
   /** attackerNationId -> Set<provinceId> the attacker currently holds at least one cell in */
   private attackerProvinces = new Map<string, Set<string>>();
-  /** subprovinceId -> nationId of the last division resolved into it, per tick (rebuilt each checkCapture pass) */
-  private occupantByCell = new Map<string, Set<string>>();
+  /** subprovinceId of any cell with a division in "engaged"/"suppressed" combat_state this tick. */
+  private frozenSubprovinceIds = new Set<string>();
 
   /** Loads the subprovince graph and spatial index for the given map. Must be called before any other method. */
   loadForRoom(mapId: string): void {
@@ -63,21 +63,46 @@ export class SubprovinceSystem {
 
   /** True if the given cell is currently frozen against capture due to active combat this tick. */
   isCombatFrozen(subprovinceId: string): boolean {
-    const occupants = this.occupantByCell.get(subprovinceId);
-    return occupants !== undefined && occupants.has("__frozen__");
+    return this.frozenSubprovinceIds.has(subprovinceId);
   }
 
   /**
-   * Clears all freeze markers. Must be called once at the start of each tick's capture pass
-   * (before any checkCaptureAfterMovement calls for that tick) so cells that are no longer in
-   * active combat can un-freeze; checkCaptureAfterMovement re-sets the marker for any cell that
-   * is still in active combat this tick.
+   * One full pass over all divisions for this tick, marking frozen every cell containing a
+   * division whose combat_state is "engaged" or "suppressed". Does NOT perform any capture or
+   * revert logic — it only updates freeze state so a later capture pass can read it.
+   *
+   * Required per-tick call order (a later task's GameRoom wiring must follow this exactly):
+   *   1. resetFreezeTracking()
+   *   2. scanCombatFreeze(allDivisions)  — one pass over every living division for the tick
+   *   3. checkCaptureAfterMovement(division, ...) for each division, in any order
+   * Steps 1-2 must both complete, in order, before any call in step 3 — this guarantees an
+   * idle/enemy division sharing a cell with an engaged/suppressed division is blocked from
+   * capturing that cell regardless of which division is processed first within step 3.
    */
-  resetFreezeTracking(): void {
-    this.occupantByCell.clear();
+  scanCombatFreeze(divisions: Iterable<DivisionState>): void {
+    for (const division of divisions) {
+      if (!ACTIVE_COMBAT_STATES.has(division.combat_state)) continue;
+      const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+      if (subprovinceId === null) continue;
+      this.frozenSubprovinceIds.add(subprovinceId);
+    }
   }
 
-  /** Called once per living division per tick, after movementSystem.tick(). */
+  /**
+   * Clears all freeze markers. Must be called once at the start of each tick's capture pass,
+   * followed by a single scanCombatFreeze(allDivisions) call covering every living division for
+   * that tick, and only then by the per-division checkCaptureAfterMovement calls for that tick.
+   * See scanCombatFreeze's doc comment for the exact three-step order this class requires.
+   */
+  resetFreezeTracking(): void {
+    this.frozenSubprovinceIds.clear();
+  }
+
+  /**
+   * Called once per living division per tick, after movementSystem.tick(). Requires
+   * resetFreezeTracking() + scanCombatFreeze(allDivisions) to have already run this tick (see
+   * scanCombatFreeze's doc comment) — this method only READS freeze state, it does not set it.
+   */
   checkCaptureAfterMovement(division: DivisionState, state: GameRoomState, broadcast: BroadcastFn): CaptureDelta[] {
     const deltas: CaptureDelta[] = [];
     const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
@@ -87,13 +112,9 @@ export class SubprovinceSystem {
     if (!def) return deltas;
     if (def.kind === "capital") return deltas; // capital cells only flip via Batch 5's city cascade
     if (NON_CAPTURING_STATES.has(division.combat_state)) return deltas;
-
-    if (ACTIVE_COMBAT_STATES.has(division.combat_state)) {
-      let frozenSet = this.occupantByCell.get(subprovinceId);
-      if (!frozenSet) { frozenSet = new Set(); this.occupantByCell.set(subprovinceId, frozenSet); }
-      frozenSet.add("__frozen__");
-      return deltas;
-    }
+    // An engaged/suppressed division never captures its own cell this tick; freeze marking for
+    // OTHER divisions sharing this cell is scanCombatFreeze's responsibility, not this check's.
+    if (ACTIVE_COMBAT_STATES.has(division.combat_state)) return deltas;
     if (this.isCombatFrozen(subprovinceId)) return deltas;
 
     const sp = state.subprovinces.get(subprovinceId);
@@ -103,7 +124,7 @@ export class SubprovinceSystem {
       sp.owner_id = division.nation_id;
       deltas.push({ subprovinceId, newOwner: division.nation_id });
 
-      if (division.nation_id !== sp.province_id && division.nation_id !== state.provinces.get(sp.province_id)?.owner_id) {
+      if (division.nation_id !== state.provinces.get(sp.province_id)?.owner_id) {
         let provinces = this.attackerProvinces.get(division.nation_id);
         if (!provinces) { provinces = new Set(); this.attackerProvinces.set(division.nation_id, provinces); }
         provinces.add(sp.province_id);
@@ -125,6 +146,7 @@ export class SubprovinceSystem {
     const province = state.provinces.get(provinceId);
     const properOwner = province?.owner_id ?? "";
     for (const [subprovinceId, sp] of state.subprovinces) {
+      if (this.isCombatFrozen(subprovinceId)) continue;
       if (sp.province_id === provinceId && sp.owner_id === nationId && nationId !== properOwner) {
         sp.owner_id = properOwner;
         deltas.push({ subprovinceId, newOwner: properOwner });
