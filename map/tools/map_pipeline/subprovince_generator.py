@@ -908,61 +908,6 @@ def cell_bounds_contain(geometry: BaseGeometry, point: Point) -> bool:
     return min_x <= point.x <= max_x and min_y <= point.y <= max_y
 
 
-def _merge_road_junction_clusters(cells: Sequence[PolygonLabel], config: SubprovinceConfig) -> list[PolygonLabel]:
-    """Consolidate road-cell fragments clustered around junctions where 3+ roads meet.
-
-    `_build_road_cells` claims each road's corridor in turn via pairwise difference against
-    already-claimed area, which guarantees no true overlap but can carve the convergence point
-    where several independently-noised, wavy corridors meet into several small, oddly-shaped
-    leftover fragments — reading as a tangle of slivers rather than a clean junction. Along a
-    single road's own segmented pieces, each interior segment only ever touches its two
-    neighbors; a road cell touching three or more *other* road cells is specifically a
-    convergence point, so this only fires at genuine junctions, not ordinary segment boundaries.
-    Connected junction-adjacent cells are grouped and unioned into one clean polygon each.
-    """
-    road_indices = [i for i, cell in enumerate(cells) if cell.kind == "road"]
-    road_set = set(road_indices)
-    if not road_indices:
-        return list(cells)
-    touch_count = {i: sum(1 for j in _adjacent_indices(cells, i, config.geometry_tolerance) if j in road_set)
-                  for i in road_indices}
-    junction_seeds = [i for i in road_indices if touch_count[i] >= 3]
-    if not junction_seeds:
-        return list(cells)
-    visited: set[int] = set()
-    clusters: list[set[int]] = []
-    for seed in junction_seeds:
-        if seed in visited:
-            continue
-        cluster: set[int] = set()
-        frontier = [seed]
-        while frontier:
-            i = frontier.pop()
-            if i in cluster:
-                continue
-            cluster.add(i)
-            visited.add(i)
-            for j in _adjacent_indices(cells, i, config.geometry_tolerance):
-                if j in road_set and touch_count.get(j, 0) >= 3 and j not in cluster:
-                    frontier.append(j)
-        clusters.append(cluster)
-    result = list(cells)
-    to_remove: set[int] = set()
-    for cluster in clusters:
-        if len(cluster) < 2:
-            continue
-        members = [result[i] for i in cluster]
-        merged = _valid_merged_polygon(unary_union([member.geometry for member in members]))
-        if merged is None:
-            continue
-        largest = max(members, key=lambda member: member.geometry.area)
-        result.append(PolygonLabel(merged, "road", largest.cover_combat, largest.elevation_type, False))
-        to_remove.update(cluster)
-    if not to_remove:
-        return result
-    return [cell for i, cell in enumerate(result) if i not in to_remove]
-
-
 def merge_slivers(cells: Sequence[PolygonLabel], min_area: float, tolerance: float,
                   road_min_area: float | None = None) -> list[PolygonLabel]:
     """Absorb undersized cells into a neighbor.
@@ -1247,7 +1192,6 @@ def generate_subprovinces(province_id: str, province: BaseGeometry,
     timings.mark("urban")
 
     road_cells, remaining = _build_road_cells(remaining, roads, terrain, config)
-    road_cells = _merge_road_junction_clusters(road_cells, config)
     timings.mark("roads")
 
     hinterland_cells = _build_hinterland_cells(remaining, terrain_patches, terrain, config)

@@ -238,37 +238,6 @@ def test_naturalization_keeps_roads_clean(capsys):
     assert "Timing:" in out
 
 
-def test_road_junction_cluster_gets_merged():
-    from subprovince_generator import _merge_road_junction_clusters
-    # Two "hub" cells each touching 3 other road cells (each other plus two arms) form a
-    # junction cluster and merge into one polygon; the four single-touch arms stay separate.
-    hub1 = PolygonLabel(box(2, 2, 3, 3), "road", "plains", "flat", False)
-    hub2 = PolygonLabel(box(3, 2, 4, 3), "road", "plains", "flat", False)
-    arm_a = PolygonLabel(box(2, 3, 3, 4), "road", "plains", "flat", False)
-    arm_b = PolygonLabel(box(2, 1, 3, 2), "road", "plains", "flat", False)
-    arm_c = PolygonLabel(box(3, 3, 4, 4), "road", "plains", "flat", False)
-    arm_d = PolygonLabel(box(3, 1, 4, 2), "road", "plains", "flat", False)
-    cells = [hub1, hub2, arm_a, arm_b, arm_c, arm_d]
-    result = _merge_road_junction_clusters(cells, config())
-    assert len(result) == 5
-    merged_hub = next(c for c in result if c.geometry.area == pytest.approx(2.0))
-    assert merged_hub.geometry.is_valid
-    assert sum(c.geometry.area for c in result) == pytest.approx(sum(c.geometry.area for c in cells))
-
-
-def test_road_junction_merge_skips_ordinary_segment_chain():
-    from subprovince_generator import _merge_road_junction_clusters
-    # An ordinary chain of road segments, each touching only its two neighbors, is never a
-    # junction (degree < 3 everywhere) and must be left untouched.
-    cells = [
-        PolygonLabel(box(0, 0, 1, 1), "road", "plains", "flat", False),
-        PolygonLabel(box(1, 0, 2, 1), "road", "plains", "flat", False),
-        PolygonLabel(box(2, 0, 3, 1), "road", "plains", "flat", False),
-    ]
-    result = _merge_road_junction_clusters(cells, config())
-    assert len(result) == 3
-
-
 def test_lateral_profile_smooths_between_stations():
     from subprovince_generator import _lateral_profile
     # control_count == n_samples (one control point per station) makes every station an
