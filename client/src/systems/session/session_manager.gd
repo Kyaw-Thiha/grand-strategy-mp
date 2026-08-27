@@ -85,6 +85,15 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
 
+		"SUBPROVINCE_INIT":
+			GameState._apply_subprovince_init(data)
+
+		"SUBPROVINCE_CAPTURED":
+			GameState._apply_subprovince_captured(data)
+
+		"PROVINCE_CONTEST_UPDATE":
+			GameState._apply_province_contest_updated(data)
+
 		"STACK_FORMED":
 			GameState._apply_stack_formed(data)
 

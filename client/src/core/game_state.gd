@@ -18,6 +18,8 @@ var players: Dictionary = {}
 # ── In-game state (populated from Phase 4+ events) ───────────────────────────
 # provinces: { province_id → { owner_id: String, ... } }
 var provinces: Dictionary = {}
+# subprovinces: { subprovince_id → { province_id: String, owner_id: String } }
+var subprovinces: Dictionary = {}
 # divisions: { division_id → DivisionState dict (mirrors server DivisionState) }
 var divisions: Dictionary = {}
 # frontline: { province_id → { nation_id: float share, ... } }
@@ -53,6 +55,7 @@ func reset_session_state() -> void:
 	nations.clear()
 	players.clear()
 	provinces.clear()
+	subprovinces.clear()
 	divisions.clear()
 	frontline.clear()
 	relations.clear()
@@ -184,6 +187,37 @@ func _apply_province_captured(data: Dictionary) -> void:
 	provinces[province_id]["owner_id"]  = new_owner
 	provinces[province_id]["nation_id"] = new_owner
 	EventBus.province_captured.emit(province_id, new_owner)
+
+
+## Called by SessionManager when server sends SUBPROVINCE_INIT (once at game start).
+func _apply_subprovince_init(data: Dictionary) -> void:
+	for sp_id: String in data.get("subprovinces", {}):
+		if not subprovinces.has(sp_id):
+			subprovinces[sp_id] = {}
+		subprovinces[sp_id]["owner_id"] = data["subprovinces"][sp_id]
+
+
+## Called by SessionManager when server sends SUBPROVINCE_CAPTURED.
+func _apply_subprovince_captured(data: Dictionary) -> void:
+	var subprovince_id: String = data.get("subprovince_id", "")
+	var province_id: String = data.get("province_id", "")
+	var new_owner: String = data.get("new_owner_id", "")
+	if subprovince_id.is_empty():
+		return
+	if not subprovinces.has(subprovince_id):
+		subprovinces[subprovince_id] = {}
+	subprovinces[subprovince_id]["province_id"] = province_id
+	subprovinces[subprovince_id]["owner_id"] = new_owner
+	EventBus.subprovince_captured.emit(subprovince_id, province_id, new_owner)
+
+
+## Called by SessionManager when server sends PROVINCE_CONTEST_UPDATE.
+func _apply_province_contest_updated(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var contested: bool = data.get("contested", false)
+	if province_id.is_empty():
+		return
+	EventBus.province_contest_updated.emit(province_id, contested)
 
 
 ## Called by SessionManager when server sends COMBAT_STARTED.
