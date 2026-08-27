@@ -49,6 +49,22 @@ let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
 
+/**
+ * Determines whether two nations are currently at war, based on their relation record.
+ * Standalone (not a class method) so both CombatSystem and SubprovinceSystem can call it
+ * without a circular instance dependency.
+ */
+export function areNationsAtWar(
+  nationA: string,
+  nationB: string,
+  relations: { get(key: string): RelationState | undefined },
+): boolean {
+  if (nationA === nationB) return false;
+  const rel = relations.get(`${nationA}|${nationB}`)
+    ?? relations.get(`${nationB}|${nationA}`);
+  return (rel?.stance ?? "neutral") === "war";
+}
+
 import {
   BASE_ATTRITION,
   SIDE_ARMOUR_MULT,
@@ -280,7 +296,7 @@ export class CombatSystem {
         pairsToRemove.push(key);
         continue;
       }
-      if (!this._areNationsAtWar(divA.nation_id, divB.nation_id, state.relations)) {
+      if (!areNationsAtWar(divA.nation_id, divB.nation_id, state.relations)) {
         pairsToRemove.push(key);
       }
     }
@@ -386,7 +402,7 @@ export class CombatSystem {
 
         // Skip same-nation, non-enemies, destroyed
         if (a.nation_id === b.nation_id) continue;
-        if (!this._areNationsAtWar(a.nation_id, b.nation_id, state.relations)) continue;
+        if (!areNationsAtWar(a.nation_id, b.nation_id, state.relations)) continue;
         if (
         a.combat_state === "destroyed" ||
         a.combat_state === "retreating" ||
@@ -1134,7 +1150,7 @@ export class CombatSystem {
         let contested = false;
         for (const enemy of divList) {
           if (enemy.nation_id === div.nation_id) continue;
-          if (!this._areNationsAtWar(div.nation_id, enemy.nation_id, state.relations)) continue;
+          if (!areNationsAtWar(div.nation_id, enemy.nation_id, state.relations)) continue;
           if (enemy.combat_state === "destroyed") continue;
           const enemyToCity = this._distKm(enemy.position_lng, enemy.position_lat, prov.city_lng, prov.city_lat);
           if (enemyToCity <= CONTEST_RADIUS_KM) {
@@ -1168,17 +1184,6 @@ export class CombatSystem {
       }
       // "engaged" and "suppressed" divisions do NOT decay suppression
     }
-  }
-
-  private _areNationsAtWar(
-    nationA: string,
-    nationB: string,
-    relations: { get(key: string): RelationState | undefined },
-  ): boolean {
-    if (nationA === nationB) return false;
-    const rel = relations.get(`${nationA}|${nationB}`)
-      ?? relations.get(`${nationB}|${nationA}`);
-    return (rel?.stance ?? "neutral") === "war";
   }
 
   private _removeEngagedOpponent(division: DivisionState, opponentId: string): void {
