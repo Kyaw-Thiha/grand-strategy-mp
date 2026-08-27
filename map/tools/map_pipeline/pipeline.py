@@ -229,7 +229,10 @@ def build_provinces(
             "name":              props["name"],
             "map_id":            props["map_id"],
             "nation_id":         props["nation_id"],
-            "is_capital":        bool(props.get("is_capital", False)),
+            # provinces.geojson's own is_capital is never authored (always False) — the real
+            # flag lives on the matching cities.geojson feature, the same source the subprovince
+            # generator already uses to mark a cell's kind as "capital".
+            "is_capital":        bool(city_props.get("is_capital", False)),
             "is_playable":       bool(props.get("is_playable", True)),
             "is_core":           _parse_is_core(props.get("is_core")),
             "city_name":         props["city_name"],

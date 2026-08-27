@@ -12,13 +12,6 @@ import { SubprovinceState } from "../rooms/schema/GameRoomState.js";
 import { areNationsAtWar } from "./combat_system.js";
 import { findSupplyRoute } from "./supply_graph.js";
 import { loadProvincePIPData, findProvinceAtPoint, type ProvincePIPEntry } from "../utils/geo_utils.js";
-import { appendFileSync } from "fs";
-
-// TEMPORARY debug logging — writes to a file instead of stdout so it doesn't flood the
-// terminal. Remove this whole block (and its call sites) once the sticky-capture bug is fixed.
-function spdebug(line: string): void {
-  appendFileSync("/tmp/spdebug.log", `${new Date().toISOString()} ${line}\n`);
-}
 
 export type CaptureDelta = { subprovinceId: string; newOwner: string | null };
 type BroadcastFn = (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void;
@@ -214,7 +207,6 @@ export class SubprovinceSystem {
     if (!sp) return deltas;
 
     if (division.nation_id !== sp.owner_id) {
-      spdebug(`CAPTURE division=${division.division_id} nation=${division.nation_id} sp=${subprovinceId} province=${sp.province_id} owner ${sp.owner_id} -> ${division.nation_id}`);
       sp.owner_id = division.nation_id;
       deltas.push({ subprovinceId, newOwner: division.nation_id });
 
@@ -235,10 +227,8 @@ export class SubprovinceSystem {
   ): CaptureDelta[] {
     const deltas: CaptureDelta[] = [];
     const stillPresent = this._nationHasLivingDivisionInProvince(nationId, provinceId, state);
-    spdebug(`REVERT-CHECK nation=${nationId} province=${provinceId} stillPresent=${stillPresent}`);
     if (stillPresent) return deltas;
 
-    spdebug(`REVERTING nation=${nationId} province=${provinceId}`);
     const province = state.provinces.get(provinceId);
     const properOwner = province?.owner_id ?? "";
     for (const [subprovinceId, sp] of state.subprovinces) {
@@ -352,7 +342,6 @@ export class SubprovinceSystem {
       // between two adjacent subprovince cells must still count as "in the province" here, or a
       // single missed tick reverts every captured cell in it with no retry.
       const resolvedProvinceId = findProvinceAtPoint(division.position_lng, division.position_lat, this.provincePipEntries);
-      spdebug(`PRESENCE division=${division.division_id} nation=${division.nation_id} combat_state=${division.combat_state} resolvedProvince=${resolvedProvinceId} targetProvince=${provinceId} match=${resolvedProvinceId === provinceId}`);
       if (resolvedProvinceId === provinceId) return true;
     }
     return false;
