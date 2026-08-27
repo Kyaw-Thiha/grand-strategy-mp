@@ -11,6 +11,7 @@ extends Node2D
 ## The whole layer sits on a plain Node2D (below fog, which renders on a CanvasLayer).
 
 const NATION_PALETTE: Dictionary = preload("res://src/systems/map/map_renderer.gd").NATION_PALETTE
+const VisionRenderLayers := preload("res://src/systems/map/vision_render_layers.gd")
 
 const BORDER_VISIBILITY_ZOOM := 1.2
 const CULLING_MARGIN_RATIO := 0.35
@@ -180,6 +181,8 @@ func _rebuild() -> void:
 			polygon.polygon = ring
 			polygon.color = fill_color
 			polygon.antialiased = true
+			polygon.z_as_relative = false
+			polygon.z_index = VisionRenderLayers.SUBPROVINCE_FILL_Z
 			fill_group.add_child(polygon)
 			_fill_node_count += 1
 			_expand_province_bounds(province_id, ring)
@@ -192,6 +195,8 @@ func _rebuild() -> void:
 			line.width = BORDER_WIDTH
 			line.default_color = BORDER_COLOR
 			line.antialiased = true
+			line.z_as_relative = false
+			line.z_index = VisionRenderLayers.SUBPROVINCE_BORDER_Z
 			border_group.add_child(line)
 			_border_node_count += 1
 

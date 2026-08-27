@@ -3,6 +3,7 @@ extends Node
 ## and fill colors resolved from the ownership data source.
 
 const MAP_ID := "western_europe_6"
+const VisionRenderLayers := preload("res://src/systems/map/vision_render_layers.gd")
 
 var _failed: bool = false
 var _loaded: bool = false
@@ -89,6 +90,12 @@ func _ready() -> void:
 	_assert_true(renderer.is_province_visible("we6_malta_01"), "malta must be visible at full view")
 	_assert_true(renderer.is_province_visible("we6_france_01"), "france must be visible at full view")
 
+	# Layering: fills and borders must draw strictly below the fog overlay, and fills must
+	# sit strictly below province-level Fill Polygon2D nodes (implicit sibling z=0).
+	_assert_true(_all_fills_below_fog(fills), "all subprovince fills must have z_index < FOG_OVERLAY_Z")
+	_assert_true(_all_fills_below_province_z(fills), "all subprovince fills must have z_index < 0 (province fill z)")
+	_assert_true(_all_borders_below_fog(borders), "all subprovince borders must have z_index < FOG_OVERLAY_Z")
+
 	renderer.queue_free()
 	loader.queue_free()
 	await get_tree().process_frame
@@ -99,6 +106,38 @@ func _ready() -> void:
 		return
 	print("[PASS] test_subprovince_renderer: all tests passed")
 	get_tree().quit(0)
+
+
+## Walks a SubprovinceFills/SubprovinceBorders layer's province groups, returning every
+## direct child CanvasItem (Polygon2D fills or Line2D borders) found.
+func _get_all_layer_nodes(layer: Node2D) -> Array[CanvasItem]:
+	var nodes: Array[CanvasItem] = []
+	for group: Node in layer.get_children():
+		for item: Node in group.get_children():
+			if item is CanvasItem:
+				nodes.append(item as CanvasItem)
+	return nodes
+
+
+func _all_fills_below_fog(fills_layer: Node2D) -> bool:
+	for fill: CanvasItem in _get_all_layer_nodes(fills_layer):
+		if fill.z_index >= VisionRenderLayers.FOG_OVERLAY_Z:
+			return false
+	return true
+
+
+func _all_fills_below_province_z(fills_layer: Node2D) -> bool:
+	for fill: CanvasItem in _get_all_layer_nodes(fills_layer):
+		if fill.z_index >= 0 or fill.z_as_relative:
+			return false
+	return true
+
+
+func _all_borders_below_fog(borders_layer: Node2D) -> bool:
+	for border: CanvasItem in _get_all_layer_nodes(borders_layer):
+		if border.z_index >= VisionRenderLayers.FOG_OVERLAY_Z:
+			return false
+	return true
 
 
 func _assert_true(condition: bool, message: String) -> void:
