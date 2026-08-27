@@ -107,6 +107,23 @@ func _ready() -> void:
 		"SubprovinceFills (index %d) must precede SubprovinceBorders (index %d) so borders paint on top"
 		% [fills.get_index(), borders.get_index()])
 
+	# Regression: SUBPROVINCE_FILL_Z/BORDER_Z previously collided with MAP_OCEAN_Z (both -1),
+	# which is a large opaque Polygon2D covering the full map (vision_system.gd). Same z-index
+	# ties break by scene-tree order, which let the ocean layer draw over the subprovince
+	# layer in the live game, hiding fills/borders entirely despite this file's other z-index
+	# tests passing (they never checked distinctness from the ocean layer). Assert the full
+	# ordering directly on the shared constants so a future renumbering can't reintroduce this.
+	_assert_true(VisionRenderLayers.OCEAN_BACKGROUND_Z < VisionRenderLayers.MAP_OCEAN_Z,
+		"OCEAN_BACKGROUND_Z must be strictly below MAP_OCEAN_Z")
+	_assert_true(VisionRenderLayers.MAP_OCEAN_Z < VisionRenderLayers.SUBPROVINCE_FILL_Z,
+		"MAP_OCEAN_Z must be strictly below SUBPROVINCE_FILL_Z, or the opaque ocean layer can draw over subprovince fills")
+	_assert_true(VisionRenderLayers.MAP_OCEAN_Z < VisionRenderLayers.SUBPROVINCE_BORDER_Z,
+		"MAP_OCEAN_Z must be strictly below SUBPROVINCE_BORDER_Z, or the opaque ocean layer can draw over subprovince borders")
+	_assert_true(VisionRenderLayers.SUBPROVINCE_FILL_Z < 0,
+		"SUBPROVINCE_FILL_Z must be strictly below province fills' implicit z=0")
+	_assert_true(VisionRenderLayers.SUBPROVINCE_BORDER_Z < 0,
+		"SUBPROVINCE_BORDER_Z must be strictly below province fills' implicit z=0")
+
 	# Capture fade: EventBus.subprovince_captured drives an interruptible fill fade. A
 	# fresh capture fades from the cell's current static color to the new owner's palette
 	# color; a second capture arriving mid-flight restarts the fade from the LIVE
