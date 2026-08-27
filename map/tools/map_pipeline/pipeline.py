@@ -32,6 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 sys.path.insert(0, str(Path(__file__).parent))
 from validate import validate_all
+from subprovince_generator import SubprovinceConfig, default_config
+from subprovince_io import generate_real_province, publish_subprovince_outputs
 
 # Pass-through files copied unchanged to the output directory
 PASSTHROUGH_FILES = [
@@ -83,8 +85,14 @@ def parse_args() -> argparse.Namespace:
                         help="Skip DEM mosaicing and heightmap export")
     parser.add_argument("--resource-preset", choices=["playtest"], default=None,
                         help="Override res_* values with a named preset instead of reading "
-                             "the source geojson (see docstring above). Omit for the default "
-                             "authored-from-geojson behavior.")
+                         "the source geojson (see docstring above). Omit for the default "
+                         "authored-from-geojson behavior.")
+    parser.add_argument("--subprovince-province", default=None,
+                        help="Generate subprovince outputs for exactly one province ID")
+    parser.add_argument("--subprovince-only", action="store_true",
+                        help="When combined with --subprovince-province, publish only the "
+                             "subprovince outputs and skip map_data, passthrough, waypoint, "
+                             "terrain-grid, and DEM generation")
     return parser.parse_args()
 
 
@@ -1580,6 +1588,66 @@ def main() -> None:
     # Validate all source files — exits on any error
     sources = validate_all(map_dir)
 
+    selected_subprovinces = None
+    selected_subprovince_adjacency = None
+    if args.subprovince_province is not None:
+        province_feature = next(
+            (feature for feature in sources["provinces"]
+             if (feature.get("properties") or {}).get("province_id") == args.subprovince_province),
+            None,
+        )
+        if province_feature is None:
+            print(f"[ERROR] Selected subprovince province not found: {args.subprovince_province}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Building subprovinces for {args.subprovince_province}...")
+        subprovince_values = map_config.get("subprovince", {})
+        defaults = default_config()
+        field_defaults = defaults.__dict__
+        subprovince_config = SubprovinceConfig(
+            city_radius=float(subprovince_values.get("city_radius", field_defaults["city_radius"])),
+            city_noise_amplitude=float(subprovince_values.get("city_noise_amplitude", field_defaults["city_noise_amplitude"])),
+            city_noise_wavelength=float(subprovince_values.get("city_noise_wavelength", field_defaults["city_noise_wavelength"])),
+            urban_min_area=float(subprovince_values.get("urban_min_area", field_defaults["urban_min_area"])),
+            urban_target_area=float(subprovince_values.get("urban_target_area", field_defaults["urban_target_area"])),
+            road_width=float(subprovince_values.get("road_width", field_defaults["road_width"])),
+            road_segment_length=float(subprovince_values.get("road_segment_length", field_defaults["road_segment_length"])),
+            hinterland_target_area=float(subprovince_values.get("hinterland_target_area", field_defaults["hinterland_target_area"])),
+            hinterland_max_area=float(subprovince_values.get("hinterland_max_area", field_defaults["hinterland_max_area"])),
+            min_area=float(subprovince_values.get("min_area", field_defaults["min_area"])),
+            road_min_area=float(subprovince_values.get("road_min_area", field_defaults["road_min_area"])),
+            hinterland_tiny_grid_cells=float(subprovince_values.get("hinterland_tiny_grid_cells", field_defaults["hinterland_tiny_grid_cells"])),
+            hinterland_split_grid_cells=float(subprovince_values.get("hinterland_split_grid_cells", field_defaults["hinterland_split_grid_cells"])),
+            natural_noise_amplitude=float(subprovince_values.get("natural_noise_amplitude", field_defaults["natural_noise_amplitude"])),
+            natural_noise_wavelength=float(subprovince_values.get("natural_noise_wavelength", field_defaults["natural_noise_wavelength"])),
+            geometry_tolerance=float(subprovince_values.get("geometry_tolerance", field_defaults["geometry_tolerance"])),
+            seed=int(subprovince_values.get("seed", field_defaults["seed"])),
+        )
+        try:
+            selected_subprovinces, selected_subprovince_adjacency = generate_real_province(
+                province_feature, sources, subprovince_config
+            )
+        except Exception as exc:
+            print(f"[ERROR] Subprovince generation failed for {args.subprovince_province}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.subprovince_only:
+        if selected_subprovinces is None or selected_subprovince_adjacency is None:
+            print("[ERROR] --subprovince-only requires --subprovince-province", file=sys.stderr)
+            sys.exit(1)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        publish_subprovince_outputs(output_dir, selected_subprovinces, selected_subprovince_adjacency)
+        print(f"  subprovinces.geojson: {len(selected_subprovinces)} cells")
+        print(f"  subprovince_adjacency.geojson: {len(selected_subprovince_adjacency)} nodes")
+        print()
+        print("── Summary ──────────────────────────────────")
+        print(f"  Subprovince province: {args.subprovince_province}")
+        print(f"  Subprovince cells: {len(selected_subprovinces)}")
+        print(f"  Subprovince adjacency:{len(selected_subprovince_adjacency):>5}")
+        print("  Subprovince validation: passed")
+        print("─────────────────────────────────────────────")
+        print("Done.")
+        return
+
     # Build province and adjacency data
     print("Building provinces...")
     if args.resource_preset:
@@ -1598,6 +1666,10 @@ def main() -> None:
 
     write_map_data(output_dir, map_config, provinces, adjacency)
     copy_passthrough_files(map_dir, output_dir)
+    if selected_subprovinces is not None and selected_subprovince_adjacency is not None:
+        publish_subprovince_outputs(output_dir, selected_subprovinces, selected_subprovince_adjacency)
+        print(f"  subprovinces.geojson: {len(selected_subprovinces)} cells")
+        print(f"  subprovince_adjacency.geojson: {len(selected_subprovince_adjacency)} nodes")
 
     print("Building waypoint graph (roads)...")
     generate_waypoints(sources, output_dir)
@@ -1690,6 +1762,13 @@ def main() -> None:
         print(f"    {btype:<14} {count}")
     print(f"  Road crossings: {road_edges}")
     print(f"  Waypoint nodes: {wp_count}")
+    if selected_subprovinces is None:
+        print("  Subprovinces: not generated (no province selected)")
+    else:
+        print(f"  Subprovince province: {args.subprovince_province}")
+        print(f"  Subprovince cells: {len(selected_subprovinces)}")
+        print(f"  Subprovince adjacency:{len(selected_subprovince_adjacency):>5}")
+        print("  Subprovince validation: passed")
     print("─────────────────────────────────────────────")
     print("Done.")
 
