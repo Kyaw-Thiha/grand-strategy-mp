@@ -123,6 +123,11 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "Supply · Normal"
 
+[node name="Route" type="Label" parent="Margin/Content/Body/Details"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = ""
+
 [node name="SelectionSummary" type="Label" parent="Margin/Content/Body/Details"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.65, 0.56, 1)

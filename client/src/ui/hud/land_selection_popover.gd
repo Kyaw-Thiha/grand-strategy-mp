@@ -40,6 +40,7 @@ const EMPTY_CELL_COLOR := Color(0.10, 0.08, 0.07, 1.0)
 @onready var _comp_grid: GridContainer = $Margin/Content/Body/Composition/VBox/Grid
 @onready var _template: Label = $Margin/Content/Body/Details/Template
 @onready var _supply: Label = $Margin/Content/Body/Details/Supply
+@onready var _route: Label = $Margin/Content/Body/Details/Route
 @onready var _selection_summary: Label = $Margin/Content/Body/Details/SelectionSummary
 @onready var _actions: HBoxContainer = $Margin/Content/Actions
 @onready var _retreat: Button = $Margin/Content/Actions/Retreat
@@ -75,6 +76,7 @@ func _ready() -> void:
 	EventBus.division_active_changed.connect(_on_active_changed)
 	EventBus.division_inspector_requested.connect(_on_inspector_requested)
 	EventBus.division_updated.connect(_on_division_updated)
+	EventBus.supply_route_updated.connect(_on_supply_route_updated)
 	_apply_mode()
 
 
@@ -163,6 +165,7 @@ func _refresh_content() -> void:
 	_meta.text = "%s · %s" % [str(data.get("division_type", "infantry")).capitalize(), str(data.get("nation_id", "")).replace("_", " ").capitalize()]
 	_template.text = str(data.get("division_type", "infantry")).capitalize()
 	_supply.text = "Supply · %s" % str(data.get("supply_status", "normal")).replace("_", " ").capitalize()
+	_refresh_route_display()
 	_selection_summary.text = _get_template_summary()
 	_refresh_comp_grid(data)
 	_refresh_roster()
@@ -323,3 +326,23 @@ func _expand_group() -> void:
 func _open_composition() -> void:
 	if not _active_id.is_empty():
 		EventBus.division_template_viewer_open_requested.emit(_active_id)
+
+
+## Updates the route status display from the current supply route data.
+## Parameters: none.
+## Returns: nothing.
+func _refresh_route_display() -> void:
+	var route_data: Dictionary = GameState.supply_routes.get(_active_id, {})
+	if route_data.is_empty():
+		_route.text = ""
+		return
+
+	var status: String = str(route_data.get("status", "")).replace("_", " ").capitalize()
+	var throughput_ratio: float = float(route_data.get("throughputRatio", 0.0))
+	var percentage: int = roundi(throughput_ratio * 100.0)
+	_route.text = "Route: %s (%d%%)" % [status, percentage]
+
+
+func _on_supply_route_updated(division_id: String, _route: Dictionary) -> void:
+	if division_id == _active_id:
+		_refresh_route_display()
