@@ -73,6 +73,7 @@ export class DivisionState extends Schema {
   @type("number") final_position_lng: number = -999; // exact click target (-999 = none)
   @type("number") final_position_lat: number = -999;
   @type("string")          template_id: string = "";
+  @type("string") subprovince_id: string = ""; // resolved each tick by SubprovinceSystem.checkCaptureAfterMovement
   grid: DivisionGridState = new DivisionGridState(); // server-side only — not schema-synced
 }
 

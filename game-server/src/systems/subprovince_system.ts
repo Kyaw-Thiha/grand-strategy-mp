@@ -127,6 +127,7 @@ export class SubprovinceSystem {
   checkCaptureAfterMovement(division: DivisionState, state: GameRoomState, broadcast: BroadcastFn): CaptureDelta[] {
     const deltas: CaptureDelta[] = [];
     const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+    division.subprovince_id = subprovinceId ?? "";
     if (subprovinceId === null) return deltas;
 
     const def = this.defsById.get(subprovinceId);
