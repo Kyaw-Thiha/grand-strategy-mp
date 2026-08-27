@@ -119,10 +119,10 @@ func _ready() -> void:
 		"MAP_OCEAN_Z must be strictly below SUBPROVINCE_FILL_Z, or the opaque ocean layer can draw over subprovince fills")
 	_assert_true(VisionRenderLayers.MAP_OCEAN_Z < VisionRenderLayers.SUBPROVINCE_BORDER_Z,
 		"MAP_OCEAN_Z must be strictly below SUBPROVINCE_BORDER_Z, or the opaque ocean layer can draw over subprovince borders")
-	_assert_true(VisionRenderLayers.SUBPROVINCE_FILL_Z < 0,
-		"SUBPROVINCE_FILL_Z must be strictly below province fills' implicit z=0")
-	_assert_true(VisionRenderLayers.SUBPROVINCE_BORDER_Z < 0,
-		"SUBPROVINCE_BORDER_Z must be strictly below province fills' implicit z=0")
+	_assert_true(VisionRenderLayers.SUBPROVINCE_FILL_Z == 0,
+		"SUBPROVINCE_FILL_Z must equal province fills' implicit z=0 (proven-working pre-Batch-6-z-index configuration; a negative value here previously collided with MAP_OCEAN_Z)")
+	_assert_true(VisionRenderLayers.SUBPROVINCE_BORDER_Z == 0,
+		"SUBPROVINCE_BORDER_Z must equal province fills' implicit z=0, same reasoning as SUBPROVINCE_FILL_Z")
 
 	# Capture fade: EventBus.subprovince_captured drives an interruptible fill fade. A
 	# fresh capture fades from the cell's current static color to the new owner's palette
