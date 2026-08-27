@@ -13,7 +13,7 @@ import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
 import { FrontlineSystem } from "../systems/frontline_system.js";
-import { SubprovinceSystem } from "../systems/subprovince_system.js";
+import { SubprovinceSystem, makeIsFriendly } from "../systems/subprovince_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
@@ -31,6 +31,11 @@ import { loadProvincePIPData }    from "../utils/geo_utils.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
+
+// How many game ticks between subprovince-graph supply route recomputation/broadcast.
+// Matches the (unexported) SUPPLY_TICK_INTERVAL used by the disabled legacy SupplySystem.tick()
+// cadence in supply_system.ts, kept in sync deliberately rather than sharing an import.
+const SUPPLY_TICK_INTERVAL = 5;
 
 interface JwtPayload {
   sub: string;
@@ -1583,6 +1588,28 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         }
       }
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+
+      // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
+      // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
+      // (own nation always, allied nation always, otherwise gated by fog-of-war visibility) so they
+      // are sent as a client event rather than synced through the Colyseus schema, which can't
+      // express per-viewer filtering.
+      if (this.tickCount % SUPPLY_TICK_INTERVAL === 0) {
+        const routes = this.supplySystem.computeSubprovinceRoutes(this.state, this.subprovinceSystem);
+        for (const route of routes) {
+          const division = this.state.divisions.get(route.divisionId);
+          if (!division) continue;
+          const isFriendly = makeIsFriendly(division.nation_id, this.state.relations);
+          this._broadcastToFilteredNations(
+            (nationId) =>
+              isFriendly(nationId) ||
+              this.serverVisibilitySystem.canNationSeeDivision(nationId, division.division_id),
+            "SUPPLY_ROUTE_UPDATE",
+            route,
+          );
+        }
+      }
+
       this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
 
       this.airDetectionSystem.tick(
