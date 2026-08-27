@@ -12,6 +12,26 @@ import { areNationsAtWar } from "./combat_system.js";
 export type CaptureDelta = { subprovinceId: string; newOwner: string | null };
 type BroadcastFn = (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void;
 
+/**
+ * Builds a friendliness predicate for supply routing: a subprovince owner counts as friendly
+ * if it's the requesting nation itself, or a nation explicitly allied ("alliance" stance) with
+ * it. Reuses `areNationsAtWar` to short-circuit the war case, but does NOT treat merely-neutral
+ * (not at war, not allied) nations as friendly — `state.relations` distinguishes "alliance" as
+ * its own stance beyond "war"/"neutral", so supply transit requires that explicit alliance, not
+ * just the absence of war.
+ */
+export function makeIsFriendly(
+  nationId: string,
+  relations: GameRoomState["relations"],
+): (ownerId: string) => boolean {
+  return (ownerId: string) => {
+    if (ownerId === nationId) return true;
+    if (areNationsAtWar(nationId, ownerId, relations)) return false;
+    const rel = relations.get(`${nationId}|${ownerId}`) ?? relations.get(`${ownerId}|${nationId}`);
+    return (rel?.stance ?? "neutral") === "alliance";
+  };
+}
+
 const ACTIVE_COMBAT_STATES = new Set(["engaged", "suppressed"]);
 const NON_CAPTURING_STATES = new Set(["retreating", "destroyed"]);
 

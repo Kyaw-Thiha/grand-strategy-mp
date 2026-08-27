@@ -3,6 +3,8 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { getCachedFile } from "../data/map_cache.js";
 import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
+import { findSupplyRoute, type SupplyRoute } from "./supply_graph.js";
+import { SubprovinceSystem, makeIsFriendly } from "./subprovince_system.js";
 
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
@@ -71,6 +73,47 @@ export class SupplySystem {
     } catch {
       console.warn("[SupplySystem] map_data.json not found — supply checks disabled");
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // computeSubprovinceRoutes — authoritative subprovince-graph supply routing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Computes one SupplyRoute per living (non-destroyed) division whose current position
+   * resolves to a known subprovince, via Dijkstra over the subprovince adjacency graph
+   * (see `findSupplyRoute` in supply_graph.ts). Divisions whose position resolves to no
+   * subprovince are silently skipped rather than throwing.
+   */
+  computeSubprovinceRoutes(state: GameRoomState, subprovinceSystem: SubprovinceSystem): SupplyRoute[] {
+    const graph = subprovinceSystem.getGraph();
+    const ownership = new Map<string, { ownerId: string; provinceId: string }>();
+    for (const [id, sp] of state.subprovinces) {
+      ownership.set(id, { ownerId: sp.owner_id, provinceId: sp.province_id });
+    }
+
+    const routes: SupplyRoute[] = [];
+    for (const division of state.divisions.values()) {
+      if (division.combat_state === "destroyed") continue;
+      const startId = subprovinceSystem.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+      if (startId === null) continue;
+
+      const isFriendly = makeIsFriendly(division.nation_id, state.relations);
+      const hubs = subprovinceSystem.getHubSubprovinceIds(state, isFriendly);
+      // Scoped to the requesting DIVISION's own nation only — a division may transit through a
+      // cell its own side occupies even if that cell isn't (yet) friendly-owned, but this must
+      // never extend to allies' occupation, only the requester's own nation's divisions.
+      const isOccupiedByRequester = (subprovinceId: string) =>
+        [...state.divisions.values()].some(
+          (d) => d.nation_id === division.nation_id && d.combat_state !== "destroyed" &&
+                 subprovinceSystem.getSubprovinceAtPosition({ lng: d.position_lng, lat: d.position_lat }) === subprovinceId,
+        );
+
+      routes.push(
+        findSupplyRoute(graph, ownership, hubs, startId, division.nation_id, isFriendly, isOccupiedByRequester, division.division_id),
+      );
+    }
+    return routes;
   }
 
   // ---------------------------------------------------------------------------
