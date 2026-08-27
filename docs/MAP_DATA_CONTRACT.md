@@ -536,6 +536,16 @@ Whoever controls the **city point** controls the parent province.
 - Capturing an enemy city captures the province (and all its resource income).
 - `is_capital = true` marks the nation's capital city — losing it applies a national morale penalty (exact value defined in game rules, not here).
 
+**Current implementation:** province-level only. A unit within `CAPTURE_RADIUS_KM` of the
+city (no enemy within `CONTEST_RADIUS_KM`) flips `owner_id` and fires `PROVINCE_CAPTURED`.
+There is no cell-level ownership yet.
+
+**Planned subprovince cascade (see `STRATEGIC_COMBAT.md` — Capture Rule):** the generated
+`kind` and shared-edge adjacency files are the inputs the server will use to cascade one
+graph hop when an urban/city cell is captured:
+`urban/city -> adjacent roads -> adjacent hinterland of the urban cell and of those roads`.
+Metadata above is generated data; runtime ownership remains server-authoritative.
+
 ### Authoring notes
 
 - Exactly **one city per province** — no provinces without a city.
@@ -820,21 +830,29 @@ way)
 ```
 
 Computed once at build time (shared-edge test between generated polygons). This is what the
-server's ring-BFS (Cut Off / Encircled checks), retreat pathing, and the Out of Supply path
-search all run over — see `STRATEGIC_COMBAT.md`'s Supply System section.
+server's ring-BFS (Cut Off / Encircled checks), retreat pathing, the Out of Supply path
+search, and the **urban capture cascade** all run over — see `STRATEGIC_COMBAT.md`'s Supply
+System and Capture Rule sections.
 
 **Generation summary** (full detail in `STRATEGIC_COMBAT.md` — Subprovince Capture System):
-capital ring and town patches carved first as fixed shapes → road corridor buffered and
-Voronoi-split at one uniform width/spacing regardless of `road_level` → remaining area
-intersected against `cover_combat` patches, one subprovince per patch unless it's oversized
-→ oversized patches subdivided via multi-source Dijkstra over a cost raster
-(`cost = 1 / (cover_move × elevation_move)`, this document's Layer 2 movement tables,
-inverted) instead of a plain geometric Voronoi split → rivers enforced as a hard high-cost
-band in that same raster → slivers merged into their largest neighbor. Full coverage
-(`province.difference(union(all_cells)).area == 0`) is asserted at build time, not assumed.
+city cell generated first (uses the connected urban agglomeration containing the city, otherwise
+a configured radius with natural boundary noise) → remaining urban terrain grouped into connected
+agglomerations and carved as town cells (oversized agglomerations split into a controlled count
+of natural cells) → road centerlines buffered at one uniform width regardless of
+`road_level`, split into natural segments with bounded longitudinal edge noise (jittered cut
+positions, fixed centerline/junction anchors) that never overlap urban/city → the
+remaining land divided into large hinterland blobs by dominant `cover_combat` + `elevation_type`
+majority — **a hinterland blob may cross source cover/elevation boundaries when one combination
+remains dominant** (minority terrain inside a blob is allowed; only oversized blobs are
+subdivided, tiny fragments and same-majority neighbours are merged) → shared non-road borders
+naturalized with bounded deterministic noise so they look like real province borders (neither
+smooth nor pixel-jagged); roads and city/urban borders stay clean → slivers merged into their
+largest neighbor. Complete coverage (`province.difference(union(all_cells))` within tolerance)
+is asserted at build time and again after the WGS84 transform, not assumed.
 
-**Reference implementation:** prototype scripts attached to the handoff for this feature
-(see `HANDOFF.md`) — not yet integrated into `pipeline.py`.
+**Reference implementation:** `map/tools/map_pipeline/subprovince_generator.py` (generation),
+`subprovince_io.py` (real-map adapters and WGS84 serialization). Run one province with
+`pipeline.py --map <id> --skip-dem --subprovince-province <province_id> --subprovince-only`.
 
 ---
 

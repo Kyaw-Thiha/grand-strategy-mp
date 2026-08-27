@@ -809,68 +809,51 @@ adjacency graph instead of three separate mechanisms built on three different id
 
 ### Subprovince Generation (Pipeline, Build-Time Only)
 
-Generated once per map export, alongside `waypoints.json` — never regenerated at runtime,
-never hand-edited. See MAP_DATA_CONTRACT.md's Subprovinces section for the file format.
-Prototype reference implementations (not yet wired into `pipeline.py`) are attached to the
-handoff for this feature — see HANDOFF.md.
+Generated per selected province at map export time — never regenerated at runtime, never
+hand-edited. See MAP_DATA_CONTRACT.md's Subprovinces section for the file format, and
+`map/tools/map_pipeline/subprovince_generator.py` for the reference implementation.
 
-**Carving order is what guarantees terrain-type boundaries are never crossed:**
+**Carving order is what keeps terrain and feature boundaries clean:**
 
-1. **Capital ring.** Buffer the city point by a fixed radius, clip to the province. Flagged
-   `is_capital = true`, exempt from the normal capture rule below — changes owner only on
-   city/province capture.
-2. **Merged town cells.** Every other `urban` cover_combat patch in the province becomes
-   exactly one subprovince regardless of size — never subdivided, unlike hinterland patches.
-   These flip under the normal capture rule; only the capital ring is locked.
-3. **Road corridor.** Buffer every road centerline by one fixed width and seed spacing,
-   identical for every `road_level` — `road_level` continues to govern movement/animation
-   speed only, never corridor geometry. Seed points along the centerline (jittered, roughly
-   1.5–2.5km spacing), Voronoi-partition the buffered strip from those seeds. Produces the
-   chain of small cells that gets captured one at a time advancing down a road.
-4. **Hinterland fill, terrain-patch-first.** Whatever remains is intersected against each
-   `cover_combat` patch *before* anything else happens to it. A patch small enough becomes
-   one subprovince as-is. A patch too large for one capture-sized cell is subdivided, but
-   only within that single patch — a subprovince edge can never cross from one cover_combat
-   type into another, because it is never handed geometry spanning two types to begin with.
-5. **Terrain-cost-weighted split for oversized patches**, not a plain geometric Voronoi
-   split. Seed the patch (jittered points), then run multi-source Dijkstra over a per-pixel
-   cost raster instead of straight-line distance:
-   ```
-   cost(pixel) = 1 / (cover_move[cover_combat(pixel)] × elevation_move[elevation_type(pixel)])
-   ```
-   `cover_move` / `elevation_move` are this document's existing off-road movement multiplier
-   tables (Layer 2) — inverted, since they're speed values (higher = faster) and Dijkstra
-   needs a cost value (higher = more expensive to cross). Because `cover_combat` is constant
-   inside one patch by construction (step 4), the texture this reacts to comes from
-   `elevation_type`, an independent layer that can still vary underneath a single cover
-   patch — a forest block spanning both flat ground and a ridge, for example. Boundaries
-   inside a subdivided patch bend to run along the expensive terrain rather than cut straight
-   across it, for the same underlying reason a real administrative border would. This is a
-   raster labeling, so full coverage inside the patch is exact by construction — every pixel
-   gets exactly one owner, no polygon-topology edge cases to get wrong. Vectorize the result
-   back into polygons using the same raster→vector step already used for `cover.geojson` and
-   `elevation.geojson`.
-6. **Rivers** remain a hard splitter, the same role they already play at the province level
-   — a thin, very-high-cost band stamped along `rivers.geojson` into the cost raster, crossed
-   only at a deliberate low-cost gap where a bridge exists.
-7. **Sliver merge.** Any cell below a minimum area threshold merges into whichever neighbor
-   it shares the most boundary with. Reassigns area, never discards it.
+1. **City cell.** If connected `urban` cover_combat terrain of at least the configured minimum
+   area surrounds the city point, that urban region becomes the city's cell. Otherwise use the
+   configured city radius and warp the boundary with deterministic low-frequency noise so a
+   city with no urban data still gets a natural-looking cell. Flagged `is_capital = true`,
+   exempt from the normal capture rule below — changes owner only on city/province capture.
+2. **Merged town cells.** Every other `urban` cover_combat patch in the province becomes a
+   town cell (kind `town`). Only oversized urban patches are subdivided; normal ones stay whole.
+   These flip under the normal capture rule; only the city cell is locked.
+3. **Road corridor.** Buffer every road centerline by one fixed width, identical for every
+   `road_level` — `road_level` continues to govern movement/animation speed only, never corridor
+   geometry. Both longitudinal corridor edges receive **coherent, bounded lateral noise** (width
+   varies a few percent) and segment cut positions are jittered, so roads read as worn natural
+   corridors rather than perfectly straight strips; the centerline and junction anchors stay fixed.
+   Corridors are clipped against the already-carved city/urban geometry (so roads never overlap
+   them) and split into natural segments along the centerline.
+4. **Hinterland blobs by terrain majority.** Whatever remains is divided into large geometric
+   blobs (deterministic far-spaced interior seeds + a clipped Voronoi partition), and each blob
+   carries the dominant `cover_combat` + `elevation_type` combination. **A hinterland blob may
+   cross source cover/elevation boundaries when one combination remains dominant** — minority
+   terrain inside a blob is allowed and expected. Only oversized blobs are subdivided; tiny
+   fragments and adjacent same-majority blobs are merged. This keeps most provinces at a handful
+   to a few dozen hinterland cells instead of hundreds.
+5. **Natural shared borders.** Shared urban and hinterland borders are smoothed
+   (topology-preserving simplification) and then perturbed with bounded, deterministic noise so
+   they read as real province borders — neither smooth nor pixel-jagged. The same edge is applied
+   to both neighboring cells from a single noisy wall, so tiling stays exact; roads and city/urban
+   boundaries are excluded from this wall pass but carry their own small bounded edge noise from
+   steps 1/3, and road/city boundaries are never crossed.
+6. **Sliver merge.** Any cell below a minimum area threshold merges into whichever neighbor it
+   shares the most boundary with. Reassigns area, never discards it.
 
-**Do not add cosmetic noise to finished polygon edges after the fact.** A prototype pass
-tried wobbling each cell's boundary post-hoc for a hand-drawn look and it silently broke
-exact tiling — two cells sharing a border each perturbed their own copy of it independently,
-opening real gaps (measured ~2% of area on a test province; a "fix" using coordinate-matched
-edge keys made it worse, since boundaries built by different operations don't reliably share
-bit-identical coordinates even when they're the same line). Irregularity belongs in the seed
-jitter (steps 3/5) and the terrain-cost field (step 5) — both exact-tiling-safe by
-construction. A genuinely wavy *rendered* edge on top of this should be a purely cosmetic
-mesh-displacement effect in Godot, fully decoupled from the authoritative server polygon —
-capture, supply, and encirclement must all agree on the exact geometry; only the server's
-copy is allowed to be authoritative.
+Noise is applied to the shared wall once (both cells reuse it), which is what keeps the
+partition gap/overlap-free — the exact-tiling failure mode of per-polygon edge wobbling is
+therefore avoided by construction.
 
 **Full coverage is a build-time assertion, not an assumption:**
-`province_polygon.difference(unary_union(all_subprovinces_in_province)).area` must equal 0
-(within float tolerance) before the pipeline accepts the export. Fail the build otherwise.
+`province_polygon.difference(unary_union(all_subprovinces_in_province)).area` must be within
+tolerance before the pipeline accepts the export, and is re-checked after the WGS84 transform.
+Fail the build otherwise.
 
 ### Capture Rule
 
@@ -888,12 +871,32 @@ copy is allowed to be authoritative.
 - **(Open — confirm before implementing)** Whether recon-classified units should be excluded
   from triggering a flip, as they were excluded from contributing to the old influence
   system. Current default: no exclusion, any unit type flips a cell it occupies.
-- **(Open — confirm before implementing)** Whether a city capture cascades to instantly flip
-  every remaining un-captured subprovince in that province to the new owner, or whether
-  subprovinces the attacker never physically touched stay defender-colored until
-  individually captured. Leaning toward cascade, for consistency with the existing "province
-  ownership transfers... immediately" rule, but this hasn't been explicitly confirmed against
-  the discrete-ownership model.
+- **Urban capture cascade (finalized).** When an urban/city subprovince changes ownership,
+  ownership cascades a bounded number of graph hops rather than flipping the whole mosaic:
+
+  ```text
+  captured urban/city cell
+      -> capture its adjacent road cells
+      -> capture the hinterland cells adjacent to the captured urban cell
+      -> capture the hinterland cells adjacent to those newly captured road cells
+  ```
+
+  Rules to be enforced by the authoritative server (planned, not yet implemented):
+
+  - Expansion is **exactly one graph hop** from the urban cell, plus one further hop from
+    the road cells captured by that first hop. There is no hinterland-to-hinterland chaining
+    and no road-to-road chaining.
+  - "Adjacent" means shared-edge subprovince adjacency from `subprovince_adjacency.geojson`,
+    never geographic radius.
+  - Enemy-occupied cells and combat-frozen cells are never captured by the cascade.
+  - Surviving former-defender-occupied cells and one preserved supply route keep the
+    existing city-capture preservation exceptions.
+  - Every changed cell emits one `SUBPROVINCE_CAPTURED` event; the existing
+    `PROVINCE_CAPTURED` event is unchanged and separate.
+
+  This produces a natural invasion seam — capturing a city's urban core pulls in the roads
+  and the land immediately around them, while untouched hinterland stays contested until it
+  is physically entered.
 
 ### Rendering — Fade Transition
 
@@ -916,9 +919,15 @@ the fight? Both were discussed, not resolved.
 
 ### City Capture and Ownership Transfer
 
-Unchanged trigger from the previous design: a division physically occupying the city node
-flips province ownership immediately. What changes is only what happens to the rest of the
-subprovince mosaic at that moment — see the cascade-vs-no-cascade open question above.
+**Currently implemented (province-level):** a division that physically occupies the city
+node (within `CAPTURE_RADIUS_KM = 40`, with no enemy unit within `CONTEST_RADIUS_KM = 20` of
+the city) flips the whole province's owner immediately and fires `PROVINCE_CAPTURED`. There
+is no server-side subprovince ownership yet, so no cell-level cascade runs today.
+
+**Planned (see urban capture cascade above):** when subprovince ownership lands, capturing an
+urban/city cell starts the bounded one-hop cascade to adjacent road and hinterland cells.
+This is what changes for the rest of the subprovince mosaic at capture time; the province-
+level trigger itself is unchanged.
 
 ### Frontline Visibility by Player Type
 
@@ -1206,14 +1215,16 @@ number — it is the difference between losing one division and losing the front
   attack bonus % — qualitatively confirmed, exact values from playtesting)
 - Waypoint graph sampling interval (target: one waypoint per ~500m–1km real-world distance
   — balance between path quality and graph size)
-- Subprovince generation constants — `target_cell_area`, `hinterland_spacing` (fine-density
-  starting point chosen; exact values from playtesting against session-length targets), road
-  corridor buffer width/spacing (confirmed uniform across all `road_level`s; exact values
-  TBD), capital/town buffer radius, sliver `min_area` merge threshold
+- Subprovince generation constants — city radius/noise, urban target area, road corridor
+  buffer width and segment length (confirmed uniform across all `road_level`s; exact values
+  TBD), hinterland `target_area`/`max_area` (large blobs, not fine cells), natural-noise
+  amplitude/wavelength, sliver `min_area` merge threshold — all configurable in
+  `SubprovinceConfig` / `map.json` `subprovince` block for playtesting
 - Whether recon-classified units are excluded from triggering a subprovince capture flip
   (see Subprovince Capture System — Capture Rule)
-- Whether city capture cascades to flip every remaining subprovince in the province, or only
-  ones the attacker physically touched (see Subprovince Capture System — Capture Rule)
+- The exact boundary values of the urban capture cascade (one-hop to roads/hinterland is
+  finalized; whether cascade depth from `road` — e.g. a second road hop — should ever extend
+  further is a playtesting question)
 - Fade-transition duration for subprovince ownership color changes (300–500ms per half
   proposed, not confirmed by playtesting) and whether the combat-frozen state should render
   as the same neutral-gray hold or stay solid pre-combat color throughout the fight
