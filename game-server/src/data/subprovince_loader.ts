@@ -1,5 +1,8 @@
 import { loadSubprovinceGraph, type SubprovinceGraph } from "./map_loader.js";
 import { pointInPolygon } from "../utils/geo_utils.js";
+import { getCachedFile } from "./map_cache.js";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 /** Thin per-room wrapper around the already file-level-cached Batch 3 parser. */
 export function loadSubprovinceGraphForRoom(mapId: string): SubprovinceGraph {
@@ -30,6 +33,27 @@ export function buildSubprovinceSpatialIndex(graph: SubprovinceGraph): Subprovin
     entries.push({ id: def.id, rings: def.polygon, minLng, maxLng, minLat, maxLat });
   }
   return entries;
+}
+
+/**
+ * Reads client/assets/data/<mapId>/map_data.json's provinces array and returns
+ * province_id -> city_position for every province flagged is_supply_hub. Hub placement is
+ * static, authored map data (Task A of the supply-hub plan) — the server never infers hubs
+ * from cell kind at runtime.
+ */
+export function loadSupplyHubProvinces(mapId: string): Map<string, [number, number]> {
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const dataPath = join(__dir, "../../..", "client", "assets", "data", mapId, "map_data.json");
+  const raw = getCachedFile<{
+    provinces: Array<{ province_id: string; is_supply_hub?: boolean; city_position?: [number, number] }>;
+  }>(dataPath);
+
+  const hubs = new Map<string, [number, number]>();
+  for (const p of raw.provinces) {
+    if (!p.is_supply_hub || !p.city_position) continue;
+    hubs.set(p.province_id, p.city_position);
+  }
+  return hubs;
 }
 
 /** Returns the subprovince_id containing (lng, lat), or null if none matches. */

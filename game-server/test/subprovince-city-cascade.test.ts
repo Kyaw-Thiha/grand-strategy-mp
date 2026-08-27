@@ -259,11 +259,13 @@ describe("lane:subprovince | Batch 5 — City Capture Cascade", () => {
   });
 
   it("preserves the selected supply route to another owned hub", async () => {
-    // Temporarily promote a hinterland cell in a different germany-owned province to a
-    // "capital" (i.e. supply-hub) kind, and fabricate a bidirectional edge connecting it to
-    // routeIntermediateCell (itself adjacent to defenderCell) — see the fixture comment above
-    // for why both the different-province placement and the fabricated edge are necessary.
-    routeHubDef.kind = "capital";
+    // Fabricate a bidirectional edge connecting a hinterland cell in a different germany-owned
+    // province to routeIntermediateCell (itself adjacent to defenderCell) — see the fixture
+    // comment above for why the different-province placement and the fabricated edge are
+    // necessary. Hub status itself (is_supply_hub) is static, authored map data resolved once
+    // in SubprovinceSystem.loadForRoom() — it can no longer be faked by mutating a graph node's
+    // `kind` after the room has already started, so this test injects the fabricated hub
+    // directly into the room's already-loaded hub set instead.
     const intermediateNeighbors = graph.neighbors.get(routeIntermediateCell.id) ?? [];
     const hubNeighbors = graph.neighbors.get(routeHubDef.id) ?? [];
     graph.neighbors.set(routeIntermediateCell.id, [...intermediateNeighbors, routeHubDef.id]);
@@ -289,6 +291,7 @@ describe("lane:subprovince | Batch 5 — City Capture Cascade", () => {
       // getHubSubprovinceIds), using the pre-capture ownership snapshot (nothing has flipped
       // yet at this point), to determine which cells SHOULD be preserved.
       const subprovinceSystem = (room as any).subprovinceSystem;
+      (subprovinceSystem as any).hubSubprovinceIds.add(routeHubDef.id);
       const isFriendlyGermany = makeIsFriendly(DEFENDER, room.state.relations);
       const hubs = subprovinceSystem.getHubSubprovinceIds(room.state, isFriendlyGermany);
       assert.ok(hubs.has(routeHubDef.id), "sanity: the fabricated hub must be recognized as a germany-friendly hub");

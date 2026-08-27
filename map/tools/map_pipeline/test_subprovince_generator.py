@@ -21,6 +21,7 @@ from subprovince_generator import (
 from subprovince_raster import build_working_grid
 from subprovince_validation import (
     SubprovinceValidationError,
+    build_cross_province_adjacency,
     build_subprovince_adjacency,
     validate_subprovince_partition,
 )
@@ -452,6 +453,54 @@ def test_adjacency_matches_brute_force_and_ignores_order():
     assert {k: sorted(v) for k, v in indexed.items()} == reference
     reordered = build_subprovince_adjacency(list(reversed(cells)), 1e-6)
     assert {k: sorted(v) for k, v in reordered.items()} == {k: sorted(v) for k, v in indexed.items()}
+
+
+def test_cross_province_adjacency_connects_touching_cells_of_adjacent_provinces():
+    p1_cells = assign_stable_ids("p1", [
+        PolygonLabel(box(0, 0, 1, 1), "hinterland", "plains", "flat", False),
+    ])
+    p2_cells = assign_stable_ids("p2", [
+        PolygonLabel(box(1, 0, 2, 1), "hinterland", "plains", "flat", False),
+    ])
+    province_adjacency = [{"from_province": "p1", "to_province": "p2"}]
+    cross = build_cross_province_adjacency(
+        {"p1": p1_cells, "p2": p2_cells}, province_adjacency, 1e-6,
+    )
+    assert cross[p1_cells[0].subprovince_id] == [p2_cells[0].subprovince_id]
+    assert cross[p2_cells[0].subprovince_id] == [p1_cells[0].subprovince_id]
+
+
+def test_cross_province_adjacency_skips_touching_cells_with_no_province_adjacency_entry():
+    p1_cells = assign_stable_ids("p1", [
+        PolygonLabel(box(0, 0, 1, 1), "hinterland", "plains", "flat", False),
+    ])
+    p2_cells = assign_stable_ids("p2", [
+        PolygonLabel(box(1, 0, 2, 1), "hinterland", "plains", "flat", False),
+    ])
+    # Geometry touches, but no province_adjacency entry links p1/p2 — must produce no edges.
+    cross = build_cross_province_adjacency({"p1": p1_cells, "p2": p2_cells}, [], 1e-6)
+    assert cross == {}
+
+
+def test_cross_province_adjacency_excludes_same_province_edges():
+    p1_cells = assign_stable_ids("p1", [
+        PolygonLabel(box(0, 0, 1, 1), "hinterland", "plains", "flat", False),
+        PolygonLabel(box(1, 0, 2, 1), "hinterland", "plains", "flat", False),
+    ])
+    p2_cells = assign_stable_ids("p2", [
+        PolygonLabel(box(2, 0, 3, 1), "hinterland", "plains", "flat", False),
+    ])
+    province_adjacency = [{"from_province": "p1", "to_province": "p2"}]
+    cross = build_cross_province_adjacency(
+        {"p1": p1_cells, "p2": p2_cells}, province_adjacency, 1e-6,
+    )
+    # p1's own two touching cells must NOT appear here (that's intra-province adjacency,
+    # already produced by build_subprovince_adjacency elsewhere) — only the p1/p2 boundary edge.
+    p1_a, p1_b = p1_cells[0].subprovince_id, p1_cells[1].subprovince_id
+    p2_only = p2_cells[0].subprovince_id
+    assert p1_a not in cross or p1_b not in cross[p1_a]
+    assert cross.get(p1_b) == [p2_only]
+    assert cross.get(p2_only) == [p1_b]
 
 
 def test_city_noise_is_deterministic():

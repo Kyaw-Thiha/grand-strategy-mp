@@ -1,10 +1,16 @@
 import { describe, it, before } from "mocha";
 import assert from "assert";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { fileURLToPath } from "url";
 import { SupplySystem } from "../src/systems/supply_system.js";
 import { SubprovinceSystem, makeIsFriendly } from "../src/systems/subprovince_system.js";
 import { GameRoomState, ProvinceState, DivisionState, RelationState } from "../src/rooms/schema/GameRoomState.js";
 import { loadSubprovinceGraph, type SubprovinceDefinition } from "../src/data/map_loader.js";
-import { buildSubprovinceSpatialIndex, findSubprovinceAtPoint, type SubprovincePIPEntry } from "../src/data/subprovince_loader.js";
+import { buildSubprovinceSpatialIndex, findSubprovinceAtPoint, loadSupplyHubProvinces, type SubprovincePIPEntry } from "../src/data/subprovince_loader.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const MAP_ID = "western_europe_6";
 const GERMANY_PROVINCE = "we6_germany_01";
@@ -123,6 +129,75 @@ describe("lane:subprovince | supply system integration", () => {
     const supplySys = new SupplySystem();
     const routes = supplySys.computeSubprovinceRoutes(state, subSys);
     assert.equal(routes.length, 0);
+  });
+
+  describe("getHubSubprovinceIds", () => {
+    // Hub status is static, authored map data resolved once in loadForRoom() (Task A/C of the
+    // supply-hub plan) — no longer inferred from cell kind at runtime. These tests inject
+    // resolved hub ids directly into the private hubSubprovinceIds set (mirroring the technique
+    // subprovince-city-cascade.test.ts already uses) to test the friendly-ownership filtering
+    // logic in isolation from loadSupplyHubProvinces' real map_data.json parsing, which has its
+    // own dedicated test below.
+    it("includes a hub cell only when its owner passes isFriendly", () => {
+      const subSys = new SubprovinceSystem();
+      subSys.loadForRoom(MAP_ID);
+      (subSys as any).hubSubprovinceIds.add(germanyCell.id);
+
+      const state = new GameRoomState();
+      const province = new ProvinceState();
+      province.province_id = GERMANY_PROVINCE;
+      province.owner_id = "germany";
+      state.provinces.set(GERMANY_PROVINCE, province);
+      subSys.initializeOwnership(state);
+      state.subprovinces.get(germanyCell.id)!.owner_id = "germany";
+
+      const hubsFriendly = subSys.getHubSubprovinceIds(state, (ownerId) => ownerId === "germany");
+      assert.ok(hubsFriendly.has(germanyCell.id));
+
+      const hubsNotFriendly = subSys.getHubSubprovinceIds(state, (ownerId) => ownerId === "france");
+      assert.ok(!hubsNotFriendly.has(germanyCell.id));
+    });
+
+    it("never includes a cell that was not resolved as a hub, regardless of ownership", () => {
+      const subSys = new SubprovinceSystem();
+      subSys.loadForRoom(MAP_ID);
+      // germanyCell deliberately NOT added to hubSubprovinceIds this time.
+
+      const state = new GameRoomState();
+      const province = new ProvinceState();
+      province.province_id = GERMANY_PROVINCE;
+      province.owner_id = "germany";
+      state.provinces.set(GERMANY_PROVINCE, province);
+      subSys.initializeOwnership(state);
+
+      const hubs = subSys.getHubSubprovinceIds(state, () => true);
+      assert.ok(!hubs.has(germanyCell.id));
+    });
+  });
+
+  describe("loadSupplyHubProvinces", () => {
+    it("returns only provinces flagged is_supply_hub, mapped to their city_position", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sp-hub-test-"));
+      const mapId = `test_map_${path.basename(tmpDir)}`;
+      const dataDir = path.join(__dirname, "..", "..", "client", "assets", "data", mapId);
+      fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(path.join(dataDir, "map_data.json"), JSON.stringify({
+        provinces: [
+          { province_id: "p_hub", is_supply_hub: true, city_position: [1.5, 2.5] },
+          { province_id: "p_not_hub", is_supply_hub: false, city_position: [3.5, 4.5] },
+          { province_id: "p_no_flag", city_position: [5.5, 6.5] },
+        ],
+      }));
+      try {
+        const hubs = loadSupplyHubProvinces(mapId);
+        assert.equal(hubs.size, 1);
+        assert.deepEqual(hubs.get("p_hub"), [1.5, 2.5]);
+        assert.equal(hubs.has("p_not_hub"), false);
+        assert.equal(hubs.has("p_no_flag"), false);
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("makeIsFriendly", () => {

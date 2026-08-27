@@ -12,7 +12,7 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
-from shapely.geometry import box
+from shapely.geometry import box, mapping
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -37,10 +37,24 @@ def fake_gen(province_to_cells, broken=set()):
 
 
 def make_sources(province_ids):
-    return {"provinces": [
-        {"type": "Feature", "geometry": None, "properties": {"province_id": pid}}
-        for pid in province_ids
-    ]}
+    # Valid, non-touching box geometry per province (spaced apart) so build_adjacency — now
+    # called from main()'s --subprovince-all-provinces/--subprovince-retry-failed paths for
+    # cross-province adjacency enrichment — can run without crashing. These orchestration tests
+    # don't care about real adjacency detection, so non-touching boxes (empty adjacency result)
+    # are sufficient; rivers/roads/base_water are empty since build_adjacency tolerates that.
+    return {
+        "provinces": [
+            {
+                "type": "Feature",
+                "geometry": mapping(box(i * 10, 0, i * 10 + 1, 1)),
+                "properties": {"province_id": pid},
+            }
+            for i, pid in enumerate(province_ids)
+        ],
+        "rivers": [],
+        "roads": [],
+        "base_water": [],
+    }
 
 
 def test_all_valid_provinces_merge_into_one_file(tmp_path):
@@ -176,3 +190,55 @@ def _patch_main_environment(tmp_path, monkeypatch, args):
                         lambda map_dir: make_sources(["p_a", "p_b"]))
     monkeypatch.setattr(pipeline_module, "generate_real_province",
                         fake_gen({"p_a": 1, "p_b": 1}, broken=set()))
+
+def _province(pid, nation_id, is_capital=False, is_playable=True):
+    return {"province_id": pid, "nation_id": nation_id, "is_capital": is_capital, "is_playable": is_playable}
+
+
+def _chain_adjacency(pids):
+    """Undirected chain: pids[0]-pids[1]-pids[2]-... so hop-distance is well-defined."""
+    return [{"from_province": pids[i], "to_province": pids[i + 1]} for i in range(len(pids) - 1)]
+
+
+def test_assign_supply_hubs_playable_nation_gets_four_including_capital():
+    pids = [f"n_{i:02d}" for i in range(8)]
+    provinces = [_province(pids[i], "n", is_capital=(i == 0)) for i in range(8)]
+    adjacency = _chain_adjacency(pids)
+    pipeline_module.assign_supply_hubs(provinces, adjacency)
+    hubs = [p["province_id"] for p in provinces if p["is_supply_hub"]]
+    assert len(hubs) == 4
+    assert pids[0] in hubs  # capital always included
+
+
+def test_assign_supply_hubs_non_playable_nation_gets_only_capital():
+    pids = [f"m_{i:02d}" for i in range(3)]
+    provinces = [_province(pids[i], "m", is_capital=(i == 0), is_playable=False) for i in range(3)]
+    adjacency = _chain_adjacency(pids)
+    pipeline_module.assign_supply_hubs(provinces, adjacency)
+    hubs = [p["province_id"] for p in provinces if p["is_supply_hub"]]
+    assert hubs == [pids[0]]
+
+
+def test_assign_supply_hubs_is_deterministic():
+    pids = [f"n_{i:02d}" for i in range(8)]
+    adjacency = _chain_adjacency(pids)
+    provinces_a = [_province(pids[i], "n", is_capital=(i == 0)) for i in range(8)]
+    provinces_b = [_province(pids[i], "n", is_capital=(i == 0)) for i in range(8)]
+    pipeline_module.assign_supply_hubs(provinces_a, adjacency)
+    pipeline_module.assign_supply_hubs(provinces_b, adjacency)
+    hubs_a = sorted(p["province_id"] for p in provinces_a if p["is_supply_hub"])
+    hubs_b = sorted(p["province_id"] for p in provinces_b if p["is_supply_hub"])
+    assert hubs_a == hubs_b
+
+
+def test_assign_supply_hubs_spreads_hubs_rather_than_clustering():
+    # A chain of 8: n_00-n_01-...-n_07, capital at n_00. The greedy max-min-distance algorithm
+    # must not pick hubs adjacent to each other when farther-away provinces are available.
+    pids = [f"n_{i:02d}" for i in range(8)]
+    provinces = [_province(pids[i], "n", is_capital=(i == 0)) for i in range(8)]
+    adjacency = _chain_adjacency(pids)
+    pipeline_module.assign_supply_hubs(provinces, adjacency)
+    hub_indices = sorted(int(p["province_id"].split("_")[1]) for p in provinces if p["is_supply_hub"])
+    # On a chain, the farthest point from n_00 is n_07 — it must be selected before any
+    # immediate neighbor of an already-picked hub, given strictly larger min-distance available.
+    assert 7 in hub_indices

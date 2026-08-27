@@ -74,6 +74,47 @@ def build_subprovince_adjacency(polygons: Sequence, tolerance: float) -> dict[st
     return {identifier: sorted(neighbors) for identifier, neighbors in adjacency.items()}
 
 
+def build_cross_province_adjacency(
+    polygons_by_province: Mapping[str, Sequence],
+    province_adjacency: Sequence[Mapping[str, str]],
+    tolerance: float,
+) -> dict[str, list[str]]:
+    """
+    Connects subprovince cells across a province boundary wherever the two provinces are
+    already linked in the province-level adjacency graph and their generated cells share a
+    real geometric boundary. Reuses build_subprovince_adjacency's exact shared-edge test (it
+    doesn't inspect province_id itself, so calling it on the concatenation of two provinces'
+    cells is sufficient) and discards same-province edges from the result, since those are
+    already covered by each province's own intra-province adjacency.
+
+    border_type/passable_by are deliberately not consulted: the pipeline currently has no
+    non-land border_type and passable_by is always the full unit list, so gating on either
+    would be a no-op today.
+    """
+    cross_edges: dict[str, set[str]] = {}
+    for edge in province_adjacency:
+        from_province = edge["from_province"]
+        to_province = edge["to_province"]
+        from_cells = polygons_by_province.get(from_province)
+        to_cells = polygons_by_province.get(to_province)
+        if not from_cells or not to_cells:
+            continue  # one or both provinces failed generation or weren't selected this run
+
+        from_ids = {polygon.subprovince_id for polygon in from_cells}
+        to_ids = {polygon.subprovince_id for polygon in to_cells}
+        combined_adjacency = build_subprovince_adjacency([*from_cells, *to_cells], tolerance)
+        for left_id, neighbor_ids in combined_adjacency.items():
+            if left_id not in from_ids:
+                continue
+            for right_id in neighbor_ids:
+                if right_id not in to_ids:
+                    continue
+                cross_edges.setdefault(left_id, set()).add(right_id)
+                cross_edges.setdefault(right_id, set()).add(left_id)
+
+    return {identifier: sorted(neighbors) for identifier, neighbors in cross_edges.items()}
+
+
 def validate_subprovince_adjacency(polygons: Sequence, adjacency: Mapping[str, Sequence[str]]) -> None:
     identifiers = {polygon.subprovince_id for polygon in polygons}
     if set(adjacency) != identifiers:

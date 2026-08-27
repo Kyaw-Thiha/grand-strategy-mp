@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from validate import validate_all
 from subprovince_generator import SubprovinceConfig, default_config
 from subprovince_io import generate_real_province, publish_subprovince_outputs
+from subprovince_validation import build_cross_province_adjacency
 
 # Pass-through files copied unchanged to the output directory
 PASSTHROUGH_FILES = [
@@ -244,6 +245,7 @@ def build_provinces(
             "resources":         resources,
             "vp_value":          props.get("vp_value", 0),
             "is_objective":      bool(props.get("is_objective", False)),
+            "is_supply_hub":     False,
         })
 
     if resource_preset == "playtest":
@@ -280,6 +282,72 @@ def _apply_playtest_resource_preset(provinces_out: list[dict]) -> None:
             p["resources"] = {r: 0 for r in RESOURCE_TYPES}
         for i, res_type in enumerate(RESOURCE_TYPES):
             provs[i % len(provs)]["resources"][res_type] = PLAYTEST_RESOURCE_ABUNDANCE
+
+
+def assign_supply_hubs(provinces: list[dict], adjacency: list[dict]) -> None:
+    """
+    Sets is_supply_hub on each province in place. Playable nations get 4 hubs (the capital
+    province is always one; the other 3 are chosen greedily by maximum shortest-hop-distance,
+    over the province-level adjacency graph, from the nearest already-picked hub, spreading
+    them across the nation's territory rather than clustering them). Non-playable nations get
+    exactly 1 hub, their capital.
+
+    Deterministic: hop-distance ties are broken by province_id, ascending.
+    """
+    by_nation: dict[str, list[dict]] = defaultdict(list)
+    for p in provinces:
+        by_nation[p["nation_id"]].append(p)
+
+    neighbors: dict[str, set[str]] = defaultdict(set)
+    for edge in adjacency:
+        a, b = edge["from_province"], edge["to_province"]
+        neighbors[a].add(b)
+        neighbors[b].add(a)
+
+    def bfs_distances(start: str, within: set[str]) -> dict[str, int]:
+        dist = {start: 0}
+        queue = [start]
+        while queue:
+            cur = queue.pop(0)
+            for nxt in sorted(neighbors[cur]):
+                if nxt not in within or nxt in dist:
+                    continue
+                dist[nxt] = dist[cur] + 1
+                queue.append(nxt)
+        return dist
+
+    for nation_id, provs in by_nation.items():
+        provs.sort(key=lambda p: p["province_id"])
+        province_ids = {p["province_id"] for p in provs}
+
+        capital = next((p for p in provs if p["is_capital"]), None)
+        if capital is None:
+            print(f"  [WARN] nation {nation_id} has no capital province — skipping hub assignment",
+                  file=sys.stderr)
+            continue
+
+        hub_ids = [capital["province_id"]]
+        is_playable = any(p["is_playable"] for p in provs)
+        if is_playable:
+            for _ in range(3):
+                # Minimum hop-distance from each not-yet-picked province to any picked hub.
+                min_dist: dict[str, int] = {}
+                for hub_id in hub_ids:
+                    for pid, d in bfs_distances(hub_id, province_ids).items():
+                        if pid in hub_ids:
+                            continue
+                        if pid not in min_dist or d < min_dist[pid]:
+                            min_dist[pid] = d
+                if not min_dist:
+                    break  # disconnected/too-small nation; take fewer than 4 hubs rather than fail
+                # Maximum distance first (spread hubs out), ties broken by the alphabetically
+                # smallest province_id — sort ascending by (-distance, province_id) and take the
+                # first entry, since negating an int (not a string) is valid.
+                best = min(min_dist.items(), key=lambda kv: (-kv[1], kv[0]))
+                hub_ids.append(best[0])
+
+        for p in provs:
+            p["is_supply_hub"] = p["province_id"] in hub_ids
 
 
 # ── adjacency building ────────────────────────────────────────────────────────
@@ -1825,6 +1893,16 @@ def main() -> None:
         polygons, adjacency, succeeded, failed = run_full_map_subprovince_generation(
             sources, subprovince_config, output_dir)
         if polygons:
+            province_adjacency = build_adjacency(sources)
+            polygons_by_province: dict[str, list] = {}
+            for polygon in polygons:
+                polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            cross_province_adjacency = build_cross_province_adjacency(
+                polygons_by_province, province_adjacency, subprovince_config.geometry_tolerance)
+            for cell_id, neighbor_ids in cross_province_adjacency.items():
+                existing = set(adjacency.get(cell_id, []))
+                adjacency[cell_id] = sorted(existing | set(neighbor_ids))
+            print(f"  cross-province subprovince edges: {sum(len(v) for v in cross_province_adjacency.values()) // 2}")
             publish_subprovince_outputs(output_dir, polygons, adjacency)
             print(f"  subprovinces.geojson: {len(polygons)} cells")
             print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
@@ -1841,6 +1919,20 @@ def main() -> None:
         polygons, adjacency, succeeded, failed = run_subprovince_retry(
             sources, subprovince_config, output_dir)
         if polygons:
+            # Recompute cross-province edges against the FULL merged cell set, not just the
+            # retried subset — a retried province's new geometry may not line up cell-for-cell
+            # with its neighbor's already-published cells, and a neighbor that wasn't retried
+            # still needs its cross-province edges refreshed against the retried province's cells.
+            province_adjacency = build_adjacency(sources)
+            polygons_by_province: dict[str, list] = {}
+            for polygon in polygons:
+                polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            cross_province_adjacency = build_cross_province_adjacency(
+                polygons_by_province, province_adjacency, subprovince_config.geometry_tolerance)
+            for cell_id, neighbor_ids in cross_province_adjacency.items():
+                existing = set(adjacency.get(cell_id, []))
+                adjacency[cell_id] = sorted(existing | set(neighbor_ids))
+            print(f"  cross-province subprovince edges: {sum(len(v) for v in cross_province_adjacency.values()) // 2}")
             publish_subprovince_outputs(output_dir, polygons, adjacency)
             print(f"  subprovinces.geojson: {len(polygons)} cells")
             print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
@@ -1902,6 +1994,10 @@ def main() -> None:
     print("Building adjacency graph...")
     adjacency = build_adjacency(sources)
     print(f"  {len(adjacency)} edges detected")
+
+    assign_supply_hubs(provinces, adjacency)
+    hub_count = sum(1 for p in provinces if p["is_supply_hub"])
+    print(f"  {hub_count} supply hubs assigned")
 
     # Write all output files
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@ import {
   loadSubprovinceGraphForRoom,
   buildSubprovinceSpatialIndex,
   findSubprovinceAtPoint,
+  loadSupplyHubProvinces,
   type SubprovincePIPEntry,
 } from "../data/subprovince_loader.js";
 import type { SubprovinceGraph, SubprovinceDefinition } from "../data/map_loader.js";
@@ -66,6 +67,12 @@ export class SubprovinceSystem {
    * province" and trigger a false revert of every captured cell in it.
    */
   private provincePipEntries: ProvincePIPEntry[] = [];
+  /**
+   * Resolved subprovince ids for every statically-authored hub province (Task A of the
+   * supply-hub plan: is_supply_hub in map_data.json, not inferred from cell kind at runtime).
+   * Static for the room's lifetime — a hub province's city_position never moves.
+   */
+  private hubSubprovinceIds: Set<string> = new Set();
 
   /** Loads the subprovince graph and spatial index for the given map. Must be called before any other method. */
   loadForRoom(mapId: string): void {
@@ -73,6 +80,16 @@ export class SubprovinceSystem {
     this.spatialIndex = buildSubprovinceSpatialIndex(this.graph);
     this.defsById = this.graph.nodes;
     this.provincePipEntries = loadProvincePIPData(mapId);
+
+    this.hubSubprovinceIds = new Set();
+    for (const [provinceId, [lng, lat]] of loadSupplyHubProvinces(mapId)) {
+      const subprovinceId = this.getSubprovinceAtPosition({ lng, lat });
+      if (subprovinceId === null) {
+        console.warn(`[SubprovinceSystem] hub province ${provinceId}'s city_position resolved to no subprovince cell — skipping`);
+        continue;
+      }
+      this.hubSubprovinceIds.add(subprovinceId);
+    }
   }
 
   /** Exposes the loaded subprovince graph (nodes + adjacency) for supply-graph consumers (Task 8). */
@@ -208,13 +225,16 @@ export class SubprovinceSystem {
     return pairs;
   }
 
-  /** Batch 5 hook: friendly-or-allied-owned capital-kind cells count as supply hubs. */
+  /**
+   * Batch 5 hook: friendly-or-allied-owned hub cells count as supply hubs. Hub status itself is
+   * static, authored map data (this.hubSubprovinceIds, resolved once in loadForRoom from
+   * is_supply_hub provinces) — never inferred from cell kind at runtime.
+   */
   getHubSubprovinceIds(state: GameRoomState, isFriendly: (ownerId: string) => boolean): Set<string> {
     const hubs = new Set<string>();
-    for (const def of this.defsById.values()) {
-      if (def.kind !== "capital") continue;
-      const sp = state.subprovinces.get(def.id);
-      if (sp && isFriendly(sp.owner_id)) hubs.add(def.id);
+    for (const id of this.hubSubprovinceIds) {
+      const sp = state.subprovinces.get(id);
+      if (sp && isFriendly(sp.owner_id)) hubs.add(id);
     }
     return hubs;
   }
