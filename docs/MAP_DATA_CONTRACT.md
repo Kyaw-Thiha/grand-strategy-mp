@@ -802,10 +802,10 @@ existing cover, elevation, road, and river layers. Never hand-edited, same as
 ```json
 {
   "type": "Feature",
-  "geometry": { "type": "Polygon", "coordinates": [[...]] },
+  "geometry": { "type": "MultiPolygon", "coordinates": [[...]] },
   "properties": {
-    "subprovince_id": "eur_france_01_sp_0142",
-    "province_id":    "eur_france_01",
+    "subprovince_id": "we6_germany_01_sp_0",
+    "province_id":    "we6_germany_01",
     "kind":           "hinterland",      // "road" | "hinterland" | "town" | "capital"
     "cover_combat":   "dense_forest",    // inherited from the source patch; null for road/capital
     "elevation_type": "hills",           // dominant value inside this cell
@@ -816,7 +816,16 @@ existing cover, elevation, road, and river layers. Never hand-edited, same as
 
 **subprovince_id naming convention:** `{province_id}_sp_{index}`, index assigned
 sequentially per province at generation time. Never reassigned — same retirement rule as
-`province_id`.
+`province_id`. **IDs are not fixed-width** — do not zero-pad, sort by width, or parse the
+index numerically; treat IDs as opaque strings everywhere.
+
+**Geometry:** a cell's `geometry` is a `Polygon` or `MultiPolygon` (the generator emits
+both; the loader must accept multi-part cells and expose one outer ring per part). The
+vast majority of cells are simple `Polygon`s; `MultiPolygon` cells are fragmented slivers
+from sliver/terrain carving. Consuming code (point-in-polygon, rendering) must iterate all
+rings. A tiny number of cells (observed: 2 in 6,140 on `western_europe_6`) serialize as
+zero-area `LineString`/`MultiLineString` artifacts — valid graph nodes in the adjacency
+file but with no area, so they should never match a point-in-polygon query or render.
 
 **Format:** `subprovince_adjacency.geojson` (or an embedded flat adjacency list inside
 `subprovinces.geojson` — pipeline implementation detail, not a contract requirement either
@@ -824,8 +833,8 @@ way)
 
 ```json
 {
-  "subprovince_id": "eur_france_01_sp_0142",
-  "neighbors": ["eur_france_01_sp_0141", "eur_france_01_sp_0150", "eur_france_01_sp_0089"]
+  "subprovince_id": "we6_germany_01_sp_0",
+  "neighbors": ["we6_germany_01_sp_1", "we6_germany_01_sp_2"]
 }
 ```
 
@@ -851,8 +860,12 @@ largest neighbor. Complete coverage (`province.difference(union(all_cells))` wit
 is asserted at build time and again after the WGS84 transform, not assumed.
 
 **Reference implementation:** `map/tools/map_pipeline/subprovince_generator.py` (generation),
-`subprovince_io.py` (real-map adapters and WGS84 serialization). Run one province with
-`pipeline.py --map <id> --skip-dem --subprovince-province <province_id> --subprovince-only`.
+`subprovince_io.py` (real-map adapters and WGS84 serialization). Run the full map with
+`pipeline.py --map <id> --skip-dem --subprovince-all-provinces` (per-province failures are
+skipped to `subprovince_generation_report.json` and retried with
+`--subprovince-retry-failed`), or one province with `--subprovince-province
+<province_id> --subprovince-only`. A `subprovince_generation_report.json` manifest
+(`{"succeeded": [...], "failed": [{"province_id", "error"}]}`) is written on full-map runs.
 
 ---
 
