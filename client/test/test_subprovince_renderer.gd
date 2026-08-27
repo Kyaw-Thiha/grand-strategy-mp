@@ -147,6 +147,61 @@ func _ready() -> void:
 	_assert_true(not color_immediately_after_restart.is_equal_approx(interrupted_target),
 		"interrupted transition must not snap to the first (interrupted) target color")
 
+	# Contested tint: a division entering active combat ("engaged"/"suppressed") tints its
+	# subprovince cell without touching GameState.subprovinces' recorded owner, and clearing
+	# combat reverts the fill to the CURRENT recorded owner color (read live, not cached).
+	var contested_id := String(capture_ids[2]) if capture_ids.size() > 2 else capture_id_1
+	GameState.subprovinces[contested_id] = {"province_id": "", "owner_id": "france"}
+	GameState.divisions["d_test_contested"] = {
+		"combat_state": "engaged", "subprovince_id": contested_id, "province_id": "",
+	}
+	var fill_contested: Polygon2D = renderer.get_fill_node(contested_id)
+	var pre_contest_color: Color = fill_contested.color
+	EventBus.division_updated.emit("d_test_contested")
+	await get_tree().process_frame
+	_assert_true(fill_contested.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		"engaged division must tint its subprovince with the contested color, got %s" % fill_contested.color)
+	_assert_true(not fill_contested.color.is_equal_approx(pre_contest_color),
+		"contested tint must differ from the pre-contest fill color")
+
+	# Combat resolves ("idle") -> tint clears and reverts to the CURRENT recorded owner color.
+	GameState.subprovinces[contested_id]["owner_id"] = "united_kingdom"
+	GameState.divisions["d_test_contested"]["combat_state"] = "idle"
+	EventBus.division_updated.emit("d_test_contested")
+	await get_tree().process_frame
+	var expected_reverted: Color = renderer.get_owner_color("united_kingdom")
+	_assert_true(fill_contested.color.is_equal_approx(expected_reverted),
+		("tint must clear and revert to the CURRENT owner color (%s), got %s" %
+			[expected_reverted, fill_contested.color]))
+
+	# Contested tint takes precedence over an in-flight capture fade: start a fade, then make
+	# the same cell contested mid-flight; the tint must apply immediately, interrupting the fade.
+	var fade_contest_id := capture_id_2
+	var fill_fade_contest: Polygon2D = renderer.get_fill_node(fade_contest_id)
+	GameState.subprovinces[fade_contest_id] = {"province_id": "", "owner_id": "france"}
+	EventBus.subprovince_captured.emit(fade_contest_id, "", "germany")
+	await get_tree().create_timer(0.1).timeout
+	await get_tree().process_frame
+	_assert_true(not fill_fade_contest.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		"sanity: mid-fade color must not already equal the contested tint")
+	GameState.divisions["d_test_fade_contest"] = {
+		"combat_state": "suppressed", "subprovince_id": fade_contest_id, "province_id": "",
+	}
+	EventBus.division_updated.emit("d_test_fade_contest")
+	await get_tree().process_frame
+	_assert_true(fill_fade_contest.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		"contested tint must interrupt an in-flight capture fade and apply immediately, got %s"
+			% fill_fade_contest.color)
+	# Wait past the original fade duration to confirm the killed tween never resumes writing.
+	await get_tree().create_timer(SubprovinceRenderer.CAPTURE_FADE_DURATION).timeout
+	_assert_true(fill_fade_contest.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		"tint must remain stable after the interrupted fade's original duration elapses")
+
+	GameState.divisions.erase("d_test_contested")
+	GameState.divisions.erase("d_test_fade_contest")
+	GameState.subprovinces.erase(contested_id)
+	GameState.subprovinces.erase(fade_contest_id)
+
 	renderer.queue_free()
 	loader.queue_free()
 	await get_tree().process_frame

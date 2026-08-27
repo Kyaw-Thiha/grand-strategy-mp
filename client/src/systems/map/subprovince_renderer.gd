@@ -21,6 +21,7 @@ const BORDER_COLOR := Color(0.21, 0.21, 0.21, 0.30)
 const BORDER_WIDTH := 0.6
 const UNOWNED_COLOR := Color(0.55, 0.55, 0.55)
 const CAPTURE_FADE_DURATION := 0.4 # tunable, HANDOFF.md proposes 300-500ms
+const CONTESTED_TINT_COLOR: Color = Color(0.85, 0.75, 0.15, 0.55) # tunable
 
 var _map_loader: MapLoader = null
 var _data_source: Object = null
@@ -37,6 +38,7 @@ var _province_visible: Dictionary = {} # province_id → bool (last culled state
 var _fill_node_count := 0
 var _border_node_count := 0
 var _fade_tweens: Dictionary = {}      # subprovince_id → Tween (in-flight capture fade)
+var _frozen_subprovince_ids: Dictionary = {} # subprovince_id → true (currently contested)
 
 
 ## Prepares the two drawable sub-layers and wires one-time signal connections.
@@ -52,6 +54,7 @@ func _init() -> void:
 	_border_layer.modulate.a = 0.0
 	add_child(_border_layer)
 	_connect_capture_signal()
+	_connect_combat_state_signal()
 
 
 ## Registers the MapLoader and the ownership data source.
@@ -168,6 +171,7 @@ func _rebuild() -> void:
 		if tween != null and (tween as Tween).is_valid():
 			(tween as Tween).kill()
 	_fade_tweens.clear()
+	_frozen_subprovince_ids.clear()
 	if _map_loader == null or _data_source == null:
 		return
 
@@ -319,6 +323,77 @@ func _on_subprovince_captured(
 ## Returns: nothing.
 func _apply_fade_color(color: Color, subprovince_id: String) -> void:
 	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	for fill: Polygon2D in fills:
+		fill.color = color
+
+
+## Connects the division-update signal exactly once per renderer instance (wired from
+## _init, mirroring _connect_capture_signal). GameState.divisions applies server
+## DIVISION_UPDATES via a generic key-copy loop and always emits `division_updated` after,
+## so this fires for combat_state transitions too (no dedicated combat-state signal exists
+## or is needed).
+## Parameters: none.
+## Returns: nothing.
+func _connect_combat_state_signal() -> void:
+	if not EventBus.division_updated.is_connected(_on_division_updated):
+		EventBus.division_updated.connect(_on_division_updated)
+
+
+## Reacts to any division update by checking whether the division's combat_state now
+## implies (or no longer implies) an active fight on its subprovince cell, tinting or
+## un-tinting that cell accordingly. Ownership itself never changes here; this only
+## overlays a visual tint on top of the recorded owner color.
+## Parameters:
+## - division_id: the division whose GameState entry changed.
+## Returns: nothing.
+func _on_division_updated(division_id: String) -> void:
+	var division: Dictionary = GameState.divisions.get(division_id, {})
+	var subprovince_id: String = String(division.get("subprovince_id", ""))
+	if subprovince_id.is_empty():
+		return
+	var is_active_combat: bool = division.get("combat_state", "") in ["engaged", "suppressed"]
+	var was_frozen: bool = _frozen_subprovince_ids.has(subprovince_id)
+	if is_active_combat and not was_frozen:
+		_frozen_subprovince_ids[subprovince_id] = true
+		_apply_contested_tint(subprovince_id)
+	elif not is_active_combat and was_frozen:
+		_frozen_subprovince_ids.erase(subprovince_id)
+		_clear_contested_tint(subprovince_id)
+
+
+## Tints a cell's fill(s) with CONTESTED_TINT_COLOR, taking precedence over any in-flight
+## capture fade. Resolved edge case: rather than let the fade continue animating toward its
+## target underneath (or race it), the in-flight tween is killed outright and the tint is
+## set immediately — simplest to implement correctly, and ownership hasn't actually changed
+## so there is no fade target being abandoned that still needs to be honored later; clearing
+## the tint re-reads the live owner color at that time instead.
+## Parameters:
+## - subprovince_id: the cell entering active combat.
+## Returns: nothing.
+func _apply_contested_tint(subprovince_id: String) -> void:
+	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	if fills.is_empty():
+		return
+	var tween: Tween = _fade_tweens.get(subprovince_id)
+	if tween != null and tween.is_valid():
+		tween.kill()
+	_fade_tweens.erase(subprovince_id)
+	for fill: Polygon2D in fills:
+		fill.color = CONTESTED_TINT_COLOR
+
+
+## Clears a cell's contested tint once its last active-combat division resolves, restoring
+## the CURRENT recorded owner color (read live from GameState.subprovinces, not whatever
+## color/target predates the contest) since ownership may have changed while tinted.
+## Parameters:
+## - subprovince_id: the cell whose combat has resolved.
+## Returns: nothing.
+func _clear_contested_tint(subprovince_id: String) -> void:
+	var fills: Array = _fill_by_id.get(subprovince_id, [])
+	if fills.is_empty():
+		return
+	var owner_id: String = GameState.subprovinces.get(subprovince_id, {}).get("owner_id", "")
+	var color: Color = get_owner_color(owner_id)
 	for fill: Polygon2D in fills:
 		fill.color = color
 
