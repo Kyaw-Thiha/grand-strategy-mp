@@ -7,6 +7,7 @@ extends Node
 const VisionRenderLayers := preload("res://src/systems/map/vision_render_layers.gd")
 
 var _nation_definitions_by_id: Dictionary = {}
+var _subprovince_renderer: SubprovinceRenderer = null
 
 @onready var _map_loader: Node = $MapLoader
 @onready var _map_renderer: Node = $MapRenderer
@@ -38,6 +39,8 @@ func _ready() -> void:
 	_camera_system.setup(_camera, _map_loader)
 	_camera_system.zoom_changed.connect(_map_renderer.on_zoom_changed)
 	_camera_system.right_click_requested.connect(_on_camera_right_click_requested)
+	_subprovince_renderer = SubprovinceRenderer.new()
+	add_child(_subprovince_renderer)
 	if not EventBus.chat_input_focus_changed.is_connected(_on_chat_input_focus_changed):
 		EventBus.chat_input_focus_changed.connect(_on_chat_input_focus_changed)
 	if not EventBus.ui_pointer_blocking_changed.is_connected(_on_ui_pointer_blocking_changed):
@@ -115,6 +118,13 @@ func _create_map_data_source() -> Object:
 	return _RuntimeProvinceDataSource.new(_map_loader)
 
 
+## Provides subprovince ownership to SubprovinceRenderer.
+## Preview seed: each cell's owner is its province's GameState owner (Batch 4 will later
+## drive the renderer with server-synced subprovince ownership instead).
+func _create_subprovince_owner_source() -> Object:
+	return _RuntimeSubprovinceOwnerSource.new(_map_loader)
+
+
 func _on_ui_pointer_blocking_changed(blocking: bool) -> void:
 	_ui_pointer_blocked = blocking
 	if blocking:
@@ -139,6 +149,10 @@ func _on_map_loaded(province_count: int) -> void:
 	_prepare_map_state()
 	_map_renderer.setup(_map_loader, _create_map_data_source())
 	_map_renderer.on_map_loaded(province_count)
+
+	if _subprovince_renderer != null:
+		_subprovince_renderer.setup(_map_loader as MapLoader, _create_subprovince_owner_source())
+		_subprovince_renderer.on_map_loaded(province_count)
 
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)
@@ -311,3 +325,21 @@ class _RuntimeProvinceDataSource:
 		if not owner_id.is_empty():
 			province_data["nation_id"] = owner_id
 		return province_data
+
+
+class _RuntimeSubprovinceOwnerSource:
+	extends RefCounted
+
+	var _loader: Node
+
+	func _init(loader: Node) -> void:
+		_loader = loader
+
+	## Resolves a cell's owner for the preview renderer: the province owner from GameState.
+	func get_subprovince_owner(subprovince_id: String) -> String:
+		var cell: Dictionary = _loader.get_subprovince_data(subprovince_id)
+		var province_id: String = cell.get("province_id", "")
+		if province_id.is_empty():
+			return ""
+		var province: Dictionary = GameState.get_province(province_id)
+		return String(province.get("owner_id", province.get("nation_id", "")))
