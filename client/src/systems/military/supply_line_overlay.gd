@@ -11,9 +11,13 @@ extends Node2D
 ## ring / cut-off badge from the live, different `DivisionState.supply_status` field; this
 ## overlay must not duplicate that.
 ##
-## Foreign-division lines are gated by the same fog-of-war reveal/hide signals
-## `military_system.gd` uses for division icons; an own division's line persists regardless
-## of fog. This node reads `GameState` only — it never writes to it.
+## Own-division lines are gated by selection: only a division currently in
+## `EventBus.division_selection_changed`'s multi-selection shows a line, and deselecting it
+## removes the line immediately — but once selected, it persists regardless of fog (own units
+## are never hidden from their own player). Foreign-division lines are instead gated by the
+## same fog-of-war reveal/hide signals `military_system.gd` uses for division icons, tracked
+## locally in `_visible_foreign_ids` rather than assumed from the server. This node reads
+## `GameState` only — it never writes to it.
 
 ## Route line color/pulse table, mirroring `map_renderer.gd`'s `NATION_PALETTE` convention:
 ## a centralized style Dictionary instead of inline magic numbers. Values are illustrative/
@@ -69,6 +73,10 @@ var _route_lines: Dictionary = {}
 
 var _active_division_id: String = ""
 var _selected_division_ids: Array[String] = []
+# division_id → true for every foreign (non-own) division currently known-visible via
+# division_revealed/division_appeared and not yet re-hidden. Own-unit display is instead
+# gated by selection membership (_selected_division_ids) — see _should_display().
+var _visible_foreign_ids: Dictionary = {}
 
 
 ## Configures the draw layer and connects the one-time signal wiring. Godot only calls
@@ -143,7 +151,25 @@ func _on_supply_route_updated(division_id: String, route: Dictionary) -> void:
 		return
 	if _map_loader == null:
 		return
+	if not _should_display(division_id):
+		return
 	_apply_route(division_id, route)
+
+
+## Whether a division's supply line should currently be drawn at all, independent of its
+## route status. Own units are gated by selection: only divisions in the current multi-
+## selection show a line (deselecting an own division removes its line). Foreign units are
+## gated by locally-tracked fog visibility (`_visible_foreign_ids`), set from
+## division_revealed/division_appeared and cleared on division_hidden/division_vanishing —
+## the client must not assume the server only sends supply_route_updated for divisions it
+## already knows are visible.
+## Parameters:
+## - division_id: the division to check.
+## Returns: true if a line should be created/kept for this division right now.
+func _should_display(division_id: String) -> bool:
+	if _is_own_unit(division_id):
+		return _selected_division_ids.has(division_id)
+	return _visible_foreign_ids.has(division_id)
 
 
 func _apply_route(division_id: String, route: Dictionary) -> void:
@@ -248,17 +274,19 @@ func _is_own_unit(division_id: String) -> bool:
 
 
 ## A foreign division came into view (air/vision reveal, or newly appeared on the map).
-## Adds its line if GameState already has a cached route for it and that route's status is
-## displayable. Own divisions already have their line regardless, so this is a no-op for
-## them beyond the redundant (harmless) refresh.
+## Marks it locally-visible, then adds its line if GameState already has a cached route for
+## it and that route's status is displayable. Only meaningful for foreign divisions (own
+## divisions are gated by selection, not this dict), but harmless to set either way.
 ## Parameters:
 ## - division_id: the division that became visible.
 ## Returns: nothing.
 func _on_division_revealed(division_id: String) -> void:
+	_visible_foreign_ids[division_id] = true
 	_sync_division_line(division_id)
 
 
 func _on_division_appeared(division_id: String) -> void:
+	_visible_foreign_ids[division_id] = true
 	_sync_division_line(division_id)
 
 
@@ -268,27 +296,48 @@ func _sync_division_line(division_id: String) -> void:
 	_on_supply_route_updated(division_id, GameState.supply_routes[division_id])
 
 
-## A foreign division left view (fog reclaimed it, or it vanished). Removes its line —
-## but only for foreign divisions; an own unit's supply line persists regardless of fog.
+## A foreign division left view (fog reclaimed it, or it vanished). Clears its local
+## visibility tracking and removes its line — but only for foreign divisions; an own unit's
+## supply line is instead governed by selection membership and persists regardless of fog.
 ## Parameters:
 ## - division_id: the division that left visibility.
 ## Returns: nothing.
 func _on_division_hidden(division_id: String) -> void:
 	if _is_own_unit(division_id):
 		return
+	_visible_foreign_ids.erase(division_id)
 	_remove_route_line(division_id)
 
 
 func _on_division_vanishing(division_id: String) -> void:
 	if _is_own_unit(division_id):
 		return
+	_visible_foreign_ids.erase(division_id)
 	_remove_route_line(division_id)
 
 
 # ── Selection emphasis ───────────────────────────────────────────────────────
 
+## Reconciles displayed lines against the new multi-selection (own units only — foreign
+## divisions never appear in `division_ids`, per military_system.gd's existing selection
+## filter). A newly-selected own division with a cached, displayable route gets a line
+## created; a division that was selected and no longer is loses its line immediately
+## (distinct from the fog-persistence rule, which only protects against
+## division_hidden/division_vanishing, not against deselection).
+## Parameters:
+## - division_ids: the full new multi-selection.
+## Returns: nothing.
 func _on_division_selection_changed(division_ids: Array[String]) -> void:
+	var previous_ids: Array[String] = _selected_division_ids
 	_selected_division_ids = division_ids.duplicate()
+
+	for division_id: String in _selected_division_ids:
+		if not previous_ids.has(division_id):
+			_sync_division_line(division_id)
+
+	for division_id: String in previous_ids:
+		if not _selected_division_ids.has(division_id):
+			_remove_route_line(division_id)
 
 
 func _on_division_active_changed(division_id: String) -> void:
