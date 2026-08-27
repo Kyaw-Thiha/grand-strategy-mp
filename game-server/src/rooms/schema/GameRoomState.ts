@@ -42,6 +42,11 @@ export class ProvinceState extends Schema {
   @type("number") naval_base_level: number = 0;
 }
 
+export class SubprovinceState extends Schema {
+  @type("string") province_id: string = "";
+  @type("string") owner_id: string = "";
+}
+
 // ── Phase 4: Division (replaces skeleton UnitState) ───────────────────────────
 
 export class DivisionState extends Schema {
@@ -97,6 +102,7 @@ export class GameRoomState extends Schema {
   @type({ map: PlayerState })   players   = new MapSchema<PlayerState>();
   @type({ map: NationState })   nations   = new MapSchema<NationState>();
   @type({ map: ProvinceState }) provinces = new MapSchema<ProvinceState>();
+  @type({ map: SubprovinceState }) subprovinces = new MapSchema<SubprovinceState>();
   @type({ map: DivisionState }) divisions = new MapSchema<DivisionState>();
   @type({ map: RelationState }) relations  = new MapSchema<RelationState>();
   @type({ map: ProposalState }) proposals  = new MapSchema<ProposalState>();
