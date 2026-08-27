@@ -116,6 +116,15 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   async onCreate() {
+    // Wire the shared SubprovinceSystem instance into CombatSystem so _checkProvinceCapture can
+    // trigger the city-capture cascade (cell-level ownership fallout) right after a province
+    // flips, along with the filtered-broadcast primitive so the cascade's SUBPROVINCE_CAPTURED
+    // events are scoped to belligerent nations just like every other subprovince capture event.
+    this.combatSystem.setSubprovinceSystem(
+      this.subprovinceSystem,
+      (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
+    );
+
     this.setState(new GameRoomState());
 
     this.nationIds = await getMapNationIds(this.state.map_id);

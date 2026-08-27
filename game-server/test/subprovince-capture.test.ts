@@ -97,6 +97,7 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
   let capitalCell: { id: string; lng: number; lat: number };
   let awayFromProvinceCell: { id: string; lng: number; lat: number };
   let germanyCityPosition: { lng: number; lat: number };
+  let germanyCapitalCityPosition: { lng: number; lat: number };
 
   before(async () => {
     const graph = loadSubprovinceGraph(MAP_ID);
@@ -145,6 +146,16 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
     const germanyProvinceData = mapData.provinces.find((p) => p.province_id === GERMANY_PROVINCE);
     if (!germanyProvinceData?.city_position) throw new Error(`no city_position found for ${GERMANY_PROVINCE}`);
     germanyCityPosition = { lng: germanyProvinceData.city_position[0], lat: germanyProvinceData.city_position[1] };
+
+    // Same trick, for GERMANY_CAPITAL_PROVINCE — needed by the capital-cell test below now that
+    // Batch 5's city cascade actually flips subprovince ownership when a province is captured,
+    // making that unrelated legacy whole-province path newly relevant to block there too.
+    const germanyCapitalProvinceData = mapData.provinces.find((p) => p.province_id === GERMANY_CAPITAL_PROVINCE);
+    if (!germanyCapitalProvinceData?.city_position) throw new Error(`no city_position found for ${GERMANY_CAPITAL_PROVINCE}`);
+    germanyCapitalCityPosition = {
+      lng: germanyCapitalProvinceData.city_position[0],
+      lat: germanyCapitalProvinceData.city_position[1],
+    };
 
     colyseus = await boot(appConfig, getTestPort());
   });
@@ -224,6 +235,20 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
     const before = room.state.subprovinces.get(capitalCell.id).owner_id;
     assert.strictEqual(before, DEFENDER, "sanity check: capital cell starts owned by its province owner");
 
+    // Block the unrelated legacy whole-province auto-capture (which, since Batch 5's city
+    // cascade, would otherwise also flip this same capital cell as a side effect of capturing
+    // GERMANY_CAPITAL_PROVINCE outright) the same way the "revert" test below does: declare war
+    // and station a defender exactly at the province's city so _checkProvinceCapture sees it as
+    // contested. This isolates the thing this test actually checks — that merely standing inside
+    // the capital cell (checkCaptureAfterMovement) never captures it by itself.
+    clients[ATTACKER].send("SET_RELATION", { nation_a: ATTACKER, nation_b: DEFENDER, stance: "war" });
+    await room.waitForNextPatch();
+    await spawnDivision(clients[ATTACKER], room, {
+      division_id: "defender",
+      nation_id: DEFENDER,
+      position_lng: germanyCapitalCityPosition.lng,
+      position_lat: germanyCapitalCityPosition.lat,
+    });
     await spawnDivision(clients[ATTACKER], room, {
       division_id: "d1",
       position_lng: capitalCell.lng,
@@ -231,6 +256,11 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
     });
     await tickRoom(room);
 
+    assert.strictEqual(
+      room.state.provinces.get(GERMANY_CAPITAL_PROVINCE).owner_id,
+      DEFENDER,
+      "sanity check: the province itself must not have been captured this tick",
+    );
     const sp = room.state.subprovinces.get(capitalCell.id);
     assert.strictEqual(sp.owner_id, DEFENDER, "capital cells only flip via the city cascade, not literal occupancy");
   });
@@ -346,6 +376,20 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
 
   it("combat freeze prevents capture, and capture proceeds once combat resolves", async () => {
     const { room, clients } = await joinNations([ATTACKER]);
+    // Block the unrelated legacy whole-province auto-capture the same way the "revert" test
+    // above does — since Batch 5's city cascade, an uncontested province capture would flip
+    // freezeCell too (there being no defender anywhere to preserve it), independent of this
+    // test's own freeze/engaged mechanic. Declaring war and stationing a defender far from
+    // freezeCell, at the province's city, keeps the province contested throughout without
+    // interacting with d1's own engagement state.
+    clients[ATTACKER].send("SET_RELATION", { nation_a: ATTACKER, nation_b: DEFENDER, stance: "war" });
+    await room.waitForNextPatch();
+    await spawnDivision(clients[ATTACKER], room, {
+      division_id: "city-defender",
+      nation_id: DEFENDER,
+      position_lng: germanyCityPosition.lng,
+      position_lat: germanyCityPosition.lat,
+    });
     await spawnDivision(clients[ATTACKER], room, {
       division_id: "d1",
       position_lng: freezeCell.lng,
@@ -374,6 +418,15 @@ describe("lane:subprovince | Batch 4 — Basic Server Capture", () => {
     const { room, clients } = await joinNations([ATTACKER, DEFENDER]);
     clients[ATTACKER].send("SET_RELATION", { nation_a: ATTACKER, nation_b: DEFENDER, stance: "war" });
     await room.waitForNextPatch();
+    // Block the unrelated legacy whole-province auto-capture (see the "combat freeze" test
+    // above) — without a defender anywhere, it would otherwise also cascade-flip the rest of the
+    // province, well beyond the two cells this test cares about.
+    await spawnDivision(clients[ATTACKER], room, {
+      division_id: "city-defender",
+      nation_id: DEFENDER,
+      position_lng: germanyCityPosition.lng,
+      position_lat: germanyCityPosition.lat,
+    });
 
     const events: any[] = [];
     clients[ATTACKER].onMessage("SUBPROVINCE_CAPTURED", (msg: any) => events.push(msg));

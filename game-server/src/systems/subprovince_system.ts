@@ -8,6 +8,7 @@ import type { SubprovinceGraph, SubprovinceDefinition } from "../data/map_loader
 import type { GameRoomState, DivisionState } from "../rooms/schema/GameRoomState.js";
 import { SubprovinceState } from "../rooms/schema/GameRoomState.js";
 import { areNationsAtWar } from "./combat_system.js";
+import { findSupplyRoute } from "./supply_graph.js";
 
 export type CaptureDelta = { subprovinceId: string; newOwner: string | null };
 type BroadcastFn = (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void;
@@ -198,6 +199,73 @@ export class SubprovinceSystem {
     return hubs;
   }
 
+  /**
+   * Batch 5 hook: called from combat_system.ts's `_checkProvinceCapture` immediately after a
+   * province's `owner_id` flips to `newOwner`. Cascades that flip down to the subprovince
+   * (city-cell) level, except for:
+   *   1. The capital cell itself, whose owner is synced here (this is the ONLY place a capital
+   *      cell's owner ever changes — the generic `checkCaptureAfterMovement` path skips capitals).
+   *   2. Cells still occupied by a surviving `oldOwner` division ("former defenders").
+   *   3. Cells on one preserved supply route from a surviving-defender cell to another
+   *      `oldOwner`-friendly hub, if such a route exists (evaluated against ownership AFTER the
+   *      capital sync, so the just-captured capital no longer counts as an `oldOwner` hub/friendly
+   *      cell). Candidate route starts are tried in deterministic sorted-ID order; the first
+   *      "open" or "degraded" result is kept.
+   * If no such route exists, only directly-occupied cells (case 2) are preserved.
+   */
+  cascadeCityCapture(
+    provinceId: string, oldOwner: string, newOwner: string, state: GameRoomState, broadcast: BroadcastFn,
+  ): void {
+    // Step 1: sync the capital cell's owner to the new province owner.
+    for (const def of this.defsById.values()) {
+      if (def.provinceId !== provinceId || def.kind !== "capital") continue;
+      const capitalSp = state.subprovinces.get(def.id);
+      if (capitalSp && capitalSp.owner_id !== newOwner) {
+        capitalSp.owner_id = newOwner;
+      }
+    }
+
+    // Step 2: cells still occupied by a surviving former-defender (oldOwner) division.
+    const occupiedByDefender = new Set<string>();
+    for (const division of state.divisions.values()) {
+      if (division.nation_id !== oldOwner || division.combat_state === "destroyed") continue;
+      const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+      if (subprovinceId === null) continue;
+      const def = this.defsById.get(subprovinceId);
+      if (def?.provinceId === provinceId) occupiedByDefender.add(subprovinceId);
+    }
+
+    // Step 3: select at most one preserved supply route for oldOwner, evaluated post-capital-sync.
+    const isFriendlyToOldOwner = makeIsFriendly(oldOwner, state.relations);
+    const hubs = this.getHubSubprovinceIds(state, isFriendlyToOldOwner);
+    const ownership = new Map<string, { ownerId: string; provinceId: string }>();
+    for (const [id, sp] of state.subprovinces) ownership.set(id, { ownerId: sp.owner_id, provinceId: sp.province_id });
+
+    let preservedRoute: string[] = [];
+    const graph = this.getGraph();
+    const candidateStarts = [...occupiedByDefender].filter((id) => graph.nodes.has(id)).sort();
+    for (const startId of candidateStarts) {
+      const route = findSupplyRoute(graph, ownership, hubs, startId, oldOwner, isFriendlyToOldOwner, () => false, "cascade-probe");
+      if (route.status === "open" || route.status === "degraded") {
+        preservedRoute = route.subprovinceIds;
+        break;
+      }
+    }
+    const preservedSet = new Set([...occupiedByDefender, ...preservedRoute]);
+
+    // Step 4: flip everything else in the province still owned by oldOwner.
+    const deltas: CaptureDelta[] = [];
+    for (const [subprovinceId, sp] of state.subprovinces) {
+      if (sp.province_id !== provinceId) continue;
+      if (sp.owner_id !== oldOwner) continue;
+      if (preservedSet.has(subprovinceId)) continue;
+      sp.owner_id = newOwner;
+      deltas.push({ subprovinceId, newOwner });
+    }
+
+    this._emitCaptureEvents(deltas, state, broadcast, oldOwner);
+  }
+
   private _nationHasLivingDivisionInProvince(nationId: string, provinceId: string, state: GameRoomState): boolean {
     for (const division of state.divisions.values()) {
       if (division.nation_id !== nationId) continue;
@@ -210,30 +278,32 @@ export class SubprovinceSystem {
     return false;
   }
 
-  private _emitCaptureEvents(deltas: CaptureDelta[], state: GameRoomState, broadcast: BroadcastFn): void {
+  /**
+   * `otherOwnerOverride` lets a caller supply the "other side" of the capture explicitly instead
+   * of reading it live from `state.provinces`. This is required by cascadeCityCapture: by the
+   * time it runs, `_checkProvinceCapture` has already reassigned the province's own owner_id to
+   * the NEW owner, so a live lookup would see the new owner on both sides of the belligerency
+   * check (silently dropping the actual old owner) — the generic per-subprovince capture/revert
+   * paths never mutate `state.provinces.owner_id`, so they're unaffected and keep the live lookup.
+   */
+  private _emitCaptureEvents(
+    deltas: CaptureDelta[], state: GameRoomState, broadcast: BroadcastFn, otherOwnerOverride?: string,
+  ): void {
     for (const delta of deltas) {
       const sp = state.subprovinces.get(delta.subprovinceId);
       if (!sp) continue;
       const provinceId = sp.province_id;
+      const otherOwner = otherOwnerOverride ?? state.provinces.get(provinceId)?.owner_id ?? "";
+      const isBelligerent = (nationId: string): boolean =>
+        areNationsAtWar(nationId, delta.newOwner ?? "", state.relations) ||
+        areNationsAtWar(nationId, otherOwner, state.relations);
       broadcast(
-        (nationId) => {
-          const province = state.provinces.get(provinceId);
-          const oldOrNewBelligerent =
-            areNationsAtWar(nationId, delta.newOwner ?? "", state.relations) ||
-            areNationsAtWar(nationId, province?.owner_id ?? "", state.relations);
-          return oldOrNewBelligerent;
-        },
+        isBelligerent,
         "SUBPROVINCE_CAPTURED",
         { subprovince_id: delta.subprovinceId, province_id: provinceId, new_owner_id: delta.newOwner, captured_by: delta.newOwner },
       );
       broadcast(
-        (nationId) => {
-          const province = state.provinces.get(provinceId);
-          const belligerent =
-            areNationsAtWar(nationId, delta.newOwner ?? "", state.relations) ||
-            areNationsAtWar(nationId, province?.owner_id ?? "", state.relations);
-          return !belligerent;
-        },
+        (nationId) => !isBelligerent(nationId),
         "PROVINCE_CONTEST_UPDATE",
         { province_id: provinceId, contested: this._provinceIsContested(provinceId, state) },
       );

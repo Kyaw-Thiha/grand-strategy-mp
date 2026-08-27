@@ -5,6 +5,7 @@ import { getCachedFile } from "../data/map_cache.js";
 import { randomUUID } from "crypto";
 import type { GameRoomState, DivisionState, GridCellState, RelationState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
+import type { SubprovinceSystem } from "./subprovince_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
 import {
@@ -262,6 +263,17 @@ export class CombatSystem {
   private activePairs = new Map<string, ActivePair>(); // sorted "idA|idB" → data
   private movementSystem: MovementSystem;
   private _resolveCombatTickCount = 0;
+  /** Set by GameRoom right after both systems are constructed; drives the city-capture cascade. */
+  private subprovinceSystem: SubprovinceSystem | null = null;
+  /**
+   * Set by GameRoom alongside subprovinceSystem. _checkProvinceCapture's own broadcast
+   * parameter is the plain, unfiltered `(type, msg) => void` shape (matching PROVINCE_CAPTURED's
+   * own broadcast-to-everyone semantics) — but cascadeCityCapture's SUBPROVINCE_CAPTURED events
+   * must respect the same per-nation belligerency filtering as every other subprovince capture
+   * event (see subprovince_system.ts's _emitCaptureEvents), so a separate filtered-broadcast
+   * reference is required here rather than reusing the plain one.
+   */
+  private filteredBroadcast: ((sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void) | null = null;
 
   // Test-only: lightweight synthetic engagements (bypass activePairs entirely)
   private _syntheticEngagements = new Map<string, {
@@ -275,6 +287,20 @@ export class CombatSystem {
 
   constructor(movementSystem: MovementSystem) {
     this.movementSystem = movementSystem;
+  }
+
+  /**
+   * Wires the room's shared SubprovinceSystem instance so _checkProvinceCapture can cascade
+   * province flips down to the cell level, plus a filtered-broadcast callback (GameRoom's
+   * `_broadcastToFilteredNations`-shaped function) so the cascade's own SUBPROVINCE_CAPTURED
+   * events reach only belligerent nations, matching every other subprovince capture event.
+   */
+  setSubprovinceSystem(
+    sys: SubprovinceSystem,
+    filteredBroadcast: (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void,
+  ): void {
+    this.subprovinceSystem = sys;
+    this.filteredBroadcast = filteredBroadcast;
   }
 
   /**
@@ -1161,12 +1187,23 @@ export class CombatSystem {
         if (contested) continue;
 
         // Capture
+        const oldOwnerId = stateProvince.owner_id;
         stateProvince.owner_id = div.nation_id;
         broadcast("PROVINCE_CAPTURED", {
           province_id,
           new_owner_id:  div.nation_id,
           captured_by:   div.division_id,
         });
+
+        // Cascade the province-level flip down to individual subprovince (city) cells, preserving
+        // surviving former-defender cells and one supply route per the Decisions doc. This is the
+        // only place a capital cell's owner_id ever changes. Unlike PROVINCE_CAPTURED itself
+        // (broadcast to everyone above), the cascade's own SUBPROVINCE_CAPTURED events must
+        // respect per-nation belligerency filtering, so the dedicated filtered-broadcast
+        // reference is used here instead of the plain `broadcast` parameter.
+        if (this.subprovinceSystem && this.filteredBroadcast) {
+          this.subprovinceSystem.cascadeCityCapture(province_id, oldOwnerId, div.nation_id, state, this.filteredBroadcast);
+        }
       }
     }
   }
