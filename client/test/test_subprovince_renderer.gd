@@ -21,10 +21,13 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 
-	# The renderer is map-load-free; stub an owner source returning "france" everywhere.
+	# The renderer is map-load-free; stub an owner source returning "france" everywhere
+	# unless a per-cell override is set (used to drive the contested-tint reversion tests
+	# through the same data-source path the production renderer resolves through).
+	var owner_source := _StubOwnerSource.new("france")
 	var renderer := SubprovinceRenderer.new()
 	add_child(renderer)
-	renderer.setup(loader, _StubOwnerSource.new("france"))
+	renderer.setup(loader, owner_source)
 	renderer.on_map_loaded(loader.get_subprovince_count())
 
 	# Node counts must match the loader geometry exactly.
@@ -148,10 +151,11 @@ func _ready() -> void:
 		"interrupted transition must not snap to the first (interrupted) target color")
 
 	# Contested tint: a division entering active combat ("engaged"/"suppressed") tints its
-	# subprovince cell without touching GameState.subprovinces' recorded owner, and clearing
-	# combat reverts the fill to the CURRENT recorded owner color (read live, not cached).
+	# subprovince cell, and clearing combat reverts the fill to the CURRENT owner color
+	# resolved live through the SAME data-source path `_rebuild()` uses (not a cached value,
+	# and not read directly from GameState.subprovinces -- see Finding 2 fix).
 	var contested_id := String(capture_ids[2]) if capture_ids.size() > 2 else capture_id_1
-	GameState.subprovinces[contested_id] = {"province_id": "", "owner_id": "france"}
+	owner_source.set_owner(contested_id, "france")
 	GameState.divisions["d_test_contested"] = {
 		"combat_state": "engaged", "subprovince_id": contested_id, "province_id": "",
 	}
@@ -164,8 +168,9 @@ func _ready() -> void:
 	_assert_true(not fill_contested.color.is_equal_approx(pre_contest_color),
 		"contested tint must differ from the pre-contest fill color")
 
-	# Combat resolves ("idle") -> tint clears and reverts to the CURRENT recorded owner color.
-	GameState.subprovinces[contested_id]["owner_id"] = "united_kingdom"
+	# Combat resolves ("idle") -> tint clears and reverts to the CURRENT owner color, resolved
+	# live through the data source (changing mid-contest to prove it isn't cached).
+	owner_source.set_owner(contested_id, "united_kingdom")
 	GameState.divisions["d_test_contested"]["combat_state"] = "idle"
 	EventBus.division_updated.emit("d_test_contested")
 	await get_tree().process_frame
@@ -173,6 +178,48 @@ func _ready() -> void:
 	_assert_true(fill_contested.color.is_equal_approx(expected_reverted),
 		("tint must clear and revert to the CURRENT owner color (%s), got %s" %
 			[expected_reverted, fill_contested.color]))
+	GameState.divisions.erase("d_test_contested")
+
+	# Finding 1 regression: two divisions sharing the same subprovince cell. One leaves
+	# active combat while the other stays engaged -- the tint must NOT clear (a single
+	# per-cell flag toggled by whichever division's update fires last would incorrectly
+	# clear it here, flashing the wrong color for up to a tick while the fight continues).
+	# Only once BOTH divisions have left active combat does the tint clear.
+	var shared_id := contested_id
+	owner_source.set_owner(shared_id, "france")
+	GameState.divisions["d_test_shared_a"] = {
+		"combat_state": "engaged", "subprovince_id": shared_id, "province_id": "",
+	}
+	GameState.divisions["d_test_shared_b"] = {
+		"combat_state": "engaged", "subprovince_id": shared_id, "province_id": "",
+	}
+	var fill_shared: Polygon2D = renderer.get_fill_node(shared_id)
+	EventBus.division_updated.emit("d_test_shared_a")
+	await get_tree().process_frame
+	EventBus.division_updated.emit("d_test_shared_b")
+	await get_tree().process_frame
+	_assert_true(fill_shared.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		"both divisions engaged on a shared cell must tint it, got %s" % fill_shared.color)
+
+	# Division A leaves active combat; B is still engaged on the same cell -> must stay tinted.
+	GameState.divisions["d_test_shared_a"]["combat_state"] = "idle"
+	EventBus.division_updated.emit("d_test_shared_a")
+	await get_tree().process_frame
+	_assert_true(fill_shared.color.is_equal_approx(SubprovinceRenderer.CONTESTED_TINT_COLOR),
+		("tint must remain while a second division is still engaged on the same cell, got %s" %
+			fill_shared.color))
+
+	# Division B also leaves active combat -> now the tint must clear.
+	owner_source.set_owner(shared_id, "germany")
+	GameState.divisions["d_test_shared_b"]["combat_state"] = "idle"
+	EventBus.division_updated.emit("d_test_shared_b")
+	await get_tree().process_frame
+	var expected_shared_reverted: Color = renderer.get_owner_color("germany")
+	_assert_true(fill_shared.color.is_equal_approx(expected_shared_reverted),
+		("tint must clear once the LAST engaged division on a shared cell resolves (%s), got %s" %
+			[expected_shared_reverted, fill_shared.color]))
+	GameState.divisions.erase("d_test_shared_a")
+	GameState.divisions.erase("d_test_shared_b")
 
 	# Contested tint takes precedence over an in-flight capture fade: start a fade, then make
 	# the same cell contested mid-flight; the tint must apply immediately, interrupting the fade.
@@ -280,10 +327,17 @@ func _assert_true(condition: bool, message: String) -> void:
 class _StubOwnerSource:
 	extends RefCounted
 
-	var _owner: String
+	var _default_owner: String
+	var _overrides: Dictionary = {} # subprovince_id → owner_id
 
 	func _init(owner_id: String) -> void:
-		_owner = owner_id
+		_default_owner = owner_id
 
-	func get_subprovince_owner(_subprovince_id: String) -> String:
-		return _owner
+	func get_subprovince_owner(subprovince_id: String) -> String:
+		return _overrides.get(subprovince_id, _default_owner)
+
+	## Sets the owner this source reports for one cell, independent of the default. Lets
+	## tests exercise the renderer's live data-source resolution path (the same path
+	## `_rebuild()` and `_clear_contested_tint()` use) without touching GameState directly.
+	func set_owner(subprovince_id: String, owner_id: String) -> void:
+		_overrides[subprovince_id] = owner_id

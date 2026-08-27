@@ -38,7 +38,12 @@ var _province_visible: Dictionary = {} # province_id → bool (last culled state
 var _fill_node_count := 0
 var _border_node_count := 0
 var _fade_tweens: Dictionary = {}      # subprovince_id → Tween (in-flight capture fade)
-var _frozen_subprovince_ids: Dictionary = {} # subprovince_id → true (currently contested)
+# subprovince_id → Dictionary[division_id, true]: every division currently keeping that cell
+# frozen (engaged/suppressed). Reference-counted per cell rather than a single flag, because
+# multiple divisions (secondary attackers, meeting battles, stacks) can occupy the same cell
+# simultaneously and their DIVISION_UPDATES can arrive in separate batches.
+var _frozen_divisions_by_cell: Dictionary = {}
+var _last_known_cell_by_division: Dictionary = {} # division_id → subprovince_id it last tinted
 
 
 ## Prepares the two drawable sub-layers and wires one-time signal connections.
@@ -171,7 +176,8 @@ func _rebuild() -> void:
 		if tween != null and (tween as Tween).is_valid():
 			(tween as Tween).kill()
 	_fade_tweens.clear()
-	_frozen_subprovince_ids.clear()
+	_frozen_divisions_by_cell.clear()
+	_last_known_cell_by_division.clear()
 	if _map_loader == null or _data_source == null:
 		return
 
@@ -186,8 +192,7 @@ func _rebuild() -> void:
 		var fill_group := _ensure_group(_fill_layer, _fill_groups, province_id)
 		var border_group := _ensure_group(_border_layer, _border_groups, province_id)
 
-		var owner_id: String = String(_data_source.get_subprovince_owner(subprovince_id))
-		var fill_color: Color = _color_for_owner(owner_id)
+		var fill_color: Color = _resolve_current_fill_color(subprovince_id)
 		var largest_ring := PackedVector2Array()
 		var cell_fills: Array[Polygon2D] = []
 		for ring: PackedVector2Array in rings:
@@ -253,6 +258,19 @@ func _expand_province_bounds(province_id: String, ring: PackedVector2Array) -> v
 		_province_bounds[province_id] = (_province_bounds[province_id] as Rect2).merge(ring_rect)
 	else:
 		_province_bounds[province_id] = ring_rect
+
+
+## Resolves a cell's CURRENT true render color by asking the injected data source for its
+## live owner, the same resolution `_rebuild()` uses for every fill it builds. Shared by
+## `_rebuild()` and `_clear_contested_tint()` so a contest-cleared cell always lands on
+## exactly the color a full rebuild would have produced for it, never a divergent source
+## (e.g. reading GameState directly, which may disagree with the configured data source).
+## Parameters:
+## - subprovince_id: the cell to resolve.
+## Returns: the resolved fill Color (preview alpha applied).
+func _resolve_current_fill_color(subprovince_id: String) -> Color:
+	var owner_id: String = String(_data_source.get_subprovince_owner(subprovince_id))
+	return _color_for_owner(owner_id)
 
 
 func _color_for_owner(owner_id: String) -> Color:
@@ -343,22 +361,56 @@ func _connect_combat_state_signal() -> void:
 ## implies (or no longer implies) an active fight on its subprovince cell, tinting or
 ## un-tinting that cell accordingly. Ownership itself never changes here; this only
 ## overlays a visual tint on top of the recorded owner color.
+##
+## Tracking is reference-counted per cell (`_frozen_divisions_by_cell`), not a single
+## per-cell flag: multiple divisions (secondary attackers, meeting battles, stacks) can
+## occupy the same subprovince cell simultaneously, and their DIVISION_UPDATES can arrive in
+## separate batches. A cell's tint must only clear once every engaged/suppressed division on
+## it has resolved, not just the one whose update happened to fire last. `_last_known_cell_by
+## _division` records which cell each division's membership was last tracked under, so a
+## division that changed cell or combat_state between updates is removed from its OLD cell
+## (not just the new one).
 ## Parameters:
 ## - division_id: the division whose GameState entry changed.
 ## Returns: nothing.
 func _on_division_updated(division_id: String) -> void:
 	var division: Dictionary = GameState.divisions.get(division_id, {})
-	var subprovince_id: String = String(division.get("subprovince_id", ""))
-	if subprovince_id.is_empty():
-		return
+	var current_cell: String = String(division.get("subprovince_id", ""))
 	var is_active_combat: bool = division.get("combat_state", "") in ["engaged", "suppressed"]
-	var was_frozen: bool = _frozen_subprovince_ids.has(subprovince_id)
-	if is_active_combat and not was_frozen:
-		_frozen_subprovince_ids[subprovince_id] = true
-		_apply_contested_tint(subprovince_id)
-	elif not is_active_combat and was_frozen:
-		_frozen_subprovince_ids.erase(subprovince_id)
+
+	var previous_cell: String = String(_last_known_cell_by_division.get(division_id, ""))
+	if not previous_cell.is_empty() and previous_cell != current_cell:
+		_untrack_division_from_cell(previous_cell, division_id)
+
+	if is_active_combat and not current_cell.is_empty():
+		_last_known_cell_by_division[division_id] = current_cell
+		var divisions_on_cell: Dictionary = _frozen_divisions_by_cell.get(current_cell, {})
+		divisions_on_cell[division_id] = true
+		_frozen_divisions_by_cell[current_cell] = divisions_on_cell
+		_apply_contested_tint(current_cell)
+	else:
+		_last_known_cell_by_division.erase(division_id)
+		if not current_cell.is_empty():
+			_untrack_division_from_cell(current_cell, division_id)
+
+
+## Removes a division from a cell's frozen-tracking set, clearing that cell's contested tint
+## once no other division keeps it frozen (the set becomes empty). No-op if the division
+## wasn't tracked under that cell (e.g. it never entered active combat there).
+## Parameters:
+## - subprovince_id: the cell to untrack the division from.
+## - division_id: the division no longer contributing to that cell's frozen state.
+## Returns: nothing.
+func _untrack_division_from_cell(subprovince_id: String, division_id: String) -> void:
+	var divisions_on_cell: Dictionary = _frozen_divisions_by_cell.get(subprovince_id, {})
+	if not divisions_on_cell.has(division_id):
+		return
+	divisions_on_cell.erase(division_id)
+	if divisions_on_cell.is_empty():
+		_frozen_divisions_by_cell.erase(subprovince_id)
 		_clear_contested_tint(subprovince_id)
+	else:
+		_frozen_divisions_by_cell[subprovince_id] = divisions_on_cell
 
 
 ## Tints a cell's fill(s) with CONTESTED_TINT_COLOR, taking precedence over any in-flight
@@ -383,8 +435,9 @@ func _apply_contested_tint(subprovince_id: String) -> void:
 
 
 ## Clears a cell's contested tint once its last active-combat division resolves, restoring
-## the CURRENT recorded owner color (read live from GameState.subprovinces, not whatever
-## color/target predates the contest) since ownership may have changed while tinted.
+## the CURRENT true render color via the same resolution path `_rebuild()` uses (the
+## configured data source), not whatever color/target predates the contest, since ownership
+## may have changed while tinted.
 ## Parameters:
 ## - subprovince_id: the cell whose combat has resolved.
 ## Returns: nothing.
@@ -392,8 +445,7 @@ func _clear_contested_tint(subprovince_id: String) -> void:
 	var fills: Array = _fill_by_id.get(subprovince_id, [])
 	if fills.is_empty():
 		return
-	var owner_id: String = GameState.subprovinces.get(subprovince_id, {}).get("owner_id", "")
-	var color: Color = get_owner_color(owner_id)
+	var color: Color = _resolve_current_fill_color(subprovince_id)
 	for fill: Polygon2D in fills:
 		fill.color = color
 
