@@ -96,6 +96,14 @@ func _ready() -> void:
 	_assert_true(_all_fills_below_province_z(fills), "all subprovince fills must have z_index < 0 (province fill z)")
 	_assert_true(_all_borders_below_fog(borders), "all subprovince borders must have z_index < FOG_OVERLAY_Z")
 
+	# Paint-order: fills and borders share the same z_index, so the border layer must be a
+	# later sibling than the fill layer for borders to draw on top. This reads the live node
+	# tree rather than asserting a hardcoded assumption, so a reordered/interleaved add_child
+	# in _init()/_rebuild() would fail this check.
+	_assert_true(fills.get_index() < borders.get_index(),
+		"SubprovinceFills (index %d) must precede SubprovinceBorders (index %d) so borders paint on top"
+		% [fills.get_index(), borders.get_index()])
+
 	renderer.queue_free()
 	loader.queue_free()
 	await get_tree().process_frame
@@ -136,6 +144,8 @@ func _all_fills_below_province_z(fills_layer: Node2D) -> bool:
 func _all_borders_below_fog(borders_layer: Node2D) -> bool:
 	for border: CanvasItem in _get_all_layer_nodes(borders_layer):
 		if border.z_index >= VisionRenderLayers.FOG_OVERLAY_Z:
+			return false
+		if border.z_index >= 0 or border.z_as_relative:
 			return false
 	return true
 
