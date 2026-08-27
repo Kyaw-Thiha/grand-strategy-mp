@@ -97,6 +97,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"SUPPLY_HUB_COMPLETED":
 			GameState._apply_supply_hub_completed(data)
 
+		"SUPPLY_ROUTE_UPDATE":
+			GameState._apply_supply_route_update(data)
+
 		"STACK_FORMED":
 			GameState._apply_stack_formed(data)
 
