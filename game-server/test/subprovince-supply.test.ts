@@ -4,7 +4,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { SupplySystem } from "../src/systems/supply_system.js";
+import { SupplySystem, ring } from "../src/systems/supply_system.js";
 import { SubprovinceSystem, makeIsFriendly } from "../src/systems/subprovince_system.js";
 import { GameRoomState, ProvinceState, DivisionState, RelationState } from "../src/rooms/schema/GameRoomState.js";
 import { loadSubprovinceGraph, type SubprovinceDefinition } from "../src/data/map_loader.js";
@@ -233,6 +233,57 @@ describe("lane:subprovince | supply system integration", () => {
       state.relations.set("germany|france", rel);
       const isFriendly = makeIsFriendly("germany", state.relations);
       assert.equal(isFriendly("france"), false);
+    });
+  });
+
+  describe("SupplySystem.tick — one-tier-at-a-time cascade", () => {
+    it("steps through out_of_supply and cut_off before reaching encircled, never jumping directly from normal", () => {
+      const subSys = new SubprovinceSystem();
+      subSys.loadForRoom(MAP_ID);
+      const graph = subSys.getGraph();
+
+      const state = new GameRoomState();
+      const province = new ProvinceState();
+      province.province_id = GERMANY_PROVINCE;
+      province.owner_id = "germany";
+      state.provinces.set(GERMANY_PROVINCE, province);
+      subSys.initializeOwnership(state);
+
+      // Force ring(1) and ring(2) around germanyCell to be entirely non-friendly (regardless of
+      // real map province boundaries), and leave no reachable hub — this makes the *computed*
+      // tier "encircled" on the very first recalculation, so the only thing that can produce
+      // out_of_supply/cut_off along the way is tick()'s pre-existing one-tier-per-recalculation
+      // cascade in supply_system.ts, not any property of this fixture.
+      for (const id of [...ring(graph, germanyCell.id, 1), ...ring(graph, germanyCell.id, 2)]) {
+        const sp = state.subprovinces.get(id);
+        if (sp) sp.owner_id = "france";
+      }
+
+      const division = new DivisionState();
+      division.division_id = "d1";
+      division.nation_id = "germany";
+      division.combat_state = "idle";
+      division.position_lng = germanyCell.lng;
+      division.position_lat = germanyCell.lat;
+      state.divisions.set("d1", division);
+
+      const supplySys = new SupplySystem();
+      const noopBroadcast = () => {};
+
+      assert.equal(division.supply_status, "normal");
+
+      supplySys.tick(state, 5, noopBroadcast, subSys);
+      assert.equal(division.supply_status, "out_of_supply");
+
+      supplySys.tick(state, 10, noopBroadcast, subSys);
+      assert.equal(division.supply_status, "cut_off");
+
+      supplySys.tick(state, 15, noopBroadcast, subSys);
+      assert.equal(division.supply_status, "encircled");
+
+      // Further recalculation ticks must not escalate past encircled — it's the terminal tier.
+      supplySys.tick(state, 20, noopBroadcast, subSys);
+      assert.equal(division.supply_status, "encircled");
     });
   });
 });

@@ -81,6 +81,7 @@
       "source_prefixes": [
         "src/systems/subprovince_system.ts",
         "src/systems/supply_graph.ts",
+        "src/systems/supply_system.ts",
         "src/data/subprovince_loader.ts"
       ],
       "tests": [

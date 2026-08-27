@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { findSupplyRoute } from "../src/systems/supply_graph.js";
+import { ring, computeSupplyTier } from "../src/systems/supply_system.js";
 import type { SubprovinceGraph } from "../src/data/map_loader.js";
 
 function def(id: string, provinceId: string, kind: "road" | "hinterland" | "capital") {
@@ -101,5 +102,114 @@ describe("lane:subprovince | supply graph core", () => {
     ]);
     const route = findSupplyRoute(graph, ownership, new Set(["hubFar", "hubNear"]), "start", "fr", () => true, () => false, "d1");
     assert.equal(route.sourceHubId, "hubNear");
+  });
+});
+
+describe("lane:subprovince | ring-based supply tier", () => {
+  const isFriendlyUs = (owner: string) => owner === "us";
+
+  describe("ring", () => {
+    it("returns nodes at exact hop-distance n, not within-n", () => {
+      // s -> {a,b,c} (ring 1) -> {d,e} (ring 2, reachable only via a/b)
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a", "p1", "hinterland"), def("b", "p1", "hinterland"),
+         def("c", "p1", "hinterland"), def("d", "p1", "hinterland"), def("e", "p1", "hinterland")],
+        [["s", "a"], ["s", "b"], ["s", "c"], ["a", "d"], ["b", "e"]],
+      );
+      assert.deepEqual([...ring(graph, "s", 1)].sort(), ["a", "b", "c"]);
+      assert.deepEqual([...ring(graph, "s", 2)].sort(), ["d", "e"]);
+    });
+
+    it("returns an empty array once n exceeds the graph's radius from start", () => {
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a", "p1", "hinterland")],
+        [["s", "a"]],
+      );
+      assert.deepEqual(ring(graph, "s", 5), []);
+    });
+
+    it("excludes the start node and closer rings from a farther ring", () => {
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a", "p1", "hinterland"), def("b", "p1", "hinterland")],
+        [["s", "a"], ["a", "b"]],
+      );
+      assert.deepEqual(ring(graph, "s", 2), ["b"]);
+      assert.ok(!ring(graph, "s", 2).includes("s"));
+      assert.ok(!ring(graph, "s", 2).includes("a"));
+    });
+  });
+
+  describe("computeSupplyTier", () => {
+    it("is encircled when ring(1) and ring(2) are entirely non-friendly, regardless of ring(3)", () => {
+      // s -[a1,a2: enemy, ring1]- -[b1,b2: enemy, ring2]- -[c1,c2: friendly, ring3]
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a1", "p1", "hinterland"), def("a2", "p1", "hinterland"),
+         def("b1", "p1", "hinterland"), def("b2", "p1", "hinterland"),
+         def("c1", "p1", "hinterland"), def("c2", "p1", "hinterland")],
+        [["s", "a1"], ["s", "a2"], ["a1", "b1"], ["a2", "b2"], ["b1", "c1"], ["b2", "c2"]],
+      );
+      const ownership = new Map([
+        ["s", { ownerId: "us", provinceId: "p1" }],
+        ["a1", { ownerId: "de", provinceId: "p1" }], ["a2", { ownerId: "de", provinceId: "p1" }],
+        ["b1", { ownerId: "de", provinceId: "p1" }], ["b2", { ownerId: "de", provinceId: "p1" }],
+        ["c1", { ownerId: "us", provinceId: "p1" }], ["c2", { ownerId: "us", provinceId: "p1" }],
+      ]);
+      const tier = computeSupplyTier(graph, ownership, new Set(), isFriendlyUs, "s");
+      assert.equal(tier, "encircled");
+    });
+
+    it("is cut_off when only ring(3) is entirely non-friendly and ring(1)/(2) still have friendly presence", () => {
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a1", "p1", "hinterland"), def("a2", "p1", "hinterland"),
+         def("b1", "p1", "hinterland"), def("b2", "p1", "hinterland"),
+         def("c1", "p1", "hinterland"), def("c2", "p1", "hinterland")],
+        [["s", "a1"], ["s", "a2"], ["a1", "b1"], ["a2", "b2"], ["b1", "c1"], ["b2", "c2"]],
+      );
+      const ownership = new Map([
+        ["s", { ownerId: "us", provinceId: "p1" }],
+        ["a1", { ownerId: "us", provinceId: "p1" }], ["a2", { ownerId: "us", provinceId: "p1" }],
+        ["b1", { ownerId: "us", provinceId: "p1" }], ["b2", { ownerId: "us", provinceId: "p1" }],
+        ["c1", { ownerId: "de", provinceId: "p1" }], ["c2", { ownerId: "de", provinceId: "p1" }],
+      ]);
+      // No hubs reachable, so pathExists is false even though ring(1)/(2) are friendly-owned —
+      // findSupplyRoute-style throughput/hub-reachability is a separate concern from this test.
+      const tier = computeSupplyTier(graph, ownership, new Set(), isFriendlyUs, "s");
+      assert.equal(tier, "cut_off");
+    });
+
+    it("is normal for an off-road-only but fully friendly-connected path to a hub (Tier 1 Correction)", () => {
+      // Every hop is "hinterland" (off-road) — the Tier 1 Correction says this still counts as
+      // connected for reachability; only throughput (a Batch 5 concern) would be reduced.
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("mid", "p1", "hinterland"), def("hub", "p1", "hinterland")],
+        [["s", "mid"], ["mid", "hub"]],
+      );
+      const ownership = new Map([
+        ["s", { ownerId: "us", provinceId: "p1" }],
+        ["mid", { ownerId: "us", provinceId: "p1" }],
+        ["hub", { ownerId: "us", provinceId: "p1" }],
+      ]);
+      const tier = computeSupplyTier(graph, ownership, new Set(["hub"]), isFriendlyUs, "s");
+      assert.equal(tier, "normal");
+    });
+
+    it("is out_of_supply when no ring(1)/(2)/(3) is entirely non-friendly, but no path to a hub exists", () => {
+      // Friendly presence survives in every ring (a1, b2, c1), but no hub is reachable at all
+      // (hubs is empty), so the division is loosely disconnected rather than sealed at any ring.
+      const graph = graphOf(
+        [def("s", "p1", "hinterland"), def("a1", "p1", "hinterland"), def("a2", "p1", "hinterland"),
+         def("b1", "p1", "hinterland"), def("b2", "p1", "hinterland"),
+         def("c1", "p1", "hinterland"), def("c2", "p1", "hinterland")],
+        [["s", "a1"], ["s", "a2"], ["a1", "b1"], ["a2", "b2"], ["b1", "c1"], ["b2", "c2"]],
+      );
+      const ownership = new Map([
+        ["s", { ownerId: "us", provinceId: "p1" }],
+        ["a1", { ownerId: "us", provinceId: "p1" }], ["a2", { ownerId: "de", provinceId: "p1" }],
+        ["b1", { ownerId: "de", provinceId: "p1" }], ["b2", { ownerId: "us", provinceId: "p1" }],
+        ["c1", { ownerId: "us", provinceId: "p1" }], ["c2", { ownerId: "de", provinceId: "p1" }],
+      ]);
+      const tier = computeSupplyTier(graph, ownership, new Set(), isFriendlyUs, "s");
+      assert.equal(tier, "out_of_supply");
+    });
   });
 });
