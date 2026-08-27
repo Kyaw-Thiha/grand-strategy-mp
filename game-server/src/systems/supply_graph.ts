@@ -138,6 +138,12 @@ export type RetreatPath = {
  *     supply hub" — a hub is not defined by `kind === "road"` (e.g. capitals), so the target
  *     set cannot be expressed from `ownership`/`isFriendly`/`graph` alone. findSupplyRoute
  *     already takes `hubs` as an explicit snapshot for the same reason; mirrored here.
+ *     CALLER CONTRACT: unlike the friendly-road branch of the target-set check, membership in
+ *     `hubs` is trusted unconditionally (no ownership re-check inside this function) — callers
+ *     MUST pre-filter `hubs` to friendly-or-allied ownership before calling, e.g. via
+ *     `SubprovinceSystem.getHubSubprovinceIds(state, isFriendly)`, the same helper
+ *     findSupplyRoute's callers already use. Passing an unfiltered hub set (including
+ *     enemy-held hubs) would let a division "retreat" onto enemy soil.
  *   - `isCombatFrozen`: this is a pure function operating on plain snapshots (no
  *     SubprovinceSystem instance is passed in, matching findSupplyRoute's pattern of taking
  *     `ownership`/`hubs` as plain data rather than a system reference), so the contested-tier
