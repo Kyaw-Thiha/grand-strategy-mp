@@ -155,6 +155,23 @@ const STACK_ROTATE_THRESHOLD = 50;
 // When the LAST stack position hits retreat threshold it actually retreats (no more rotation)
 const STACK_LAST_RETREAT_THRESHOLD = 60;
 
+// ─── Fighting-withdrawal constants (Batch 8 Task 3) ────────────────────────
+// A Tier 2 (cut_off) division ordered to retreat pays a one-time HP cost proportional to
+// how much of its chosen graph-based retreat path (Task 2's findRetreatPath) crosses
+// non-friendly ground (`blockedFraction`, 0..1). At blockedFraction 1 (path is entirely
+// non-friendly) the division pays the full FIGHTING_WITHDRAWAL_MAX_DAMAGE; at 0 (clean path,
+// which cut_off should rarely produce, but the formula is defined for the full range) it pays
+// nothing. 15 HP was picked as a noticeable-but-survivable one-time cost — roughly one supply
+// tick's worth of ENCIRCLED_HP_DRAIN_PER_TICK-scale attrition (see supply_system.ts), not a
+// unit-destroying amount on its own.
+const FIGHTING_WITHDRAWAL_MAX_DAMAGE = 15;
+// Movement-speed multiplier applied to a division for the remainder of its retreat after a
+// Tier 2 fighting-withdrawal is triggered (via DivisionState.retreat_speed_mult, consumed by
+// movement_system.ts). 0.5 halves movement speed — a real cost for disorganized withdrawal
+// under fire, without being so severe (e.g. 0.1) that a cut_off division effectively never
+// reaches safety before supply-tick attrition or renewed engagement catches it.
+const RETREAT_SPEED_PENALTY_MULT = 0.5;
+
 // ─── Terrain modifier tables ────────────────────────────────────────────────
 // Each entry: [attacker_penalty, defender_bonus] as fractions of 1.0
 
@@ -1071,6 +1088,7 @@ export class CombatSystem {
     for (const [, div] of state.divisions) {
       if (div.combat_state === "retreating" && div.move_order.length === 0) {
         div.combat_state = "idle";
+        div.retreat_speed_mult = 1; // Batch 8 Task 3: fighting-withdrawal penalty ends with retreat
         changed.add(div.division_id);
       }
     }
@@ -1411,13 +1429,46 @@ export class CombatSystem {
       if (opponent) this._finalizeEngagementXp(opponent, true, state);
     }
 
-    // Find nearest waypoint and set as retreat target
-    const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations);
-    if (waypoint) {
+    // Find a retreat target and set it as the move order (Batch 8 Task 3): graph-based,
+    // ownership-aware pathing via MovementSystem.computeRetreatTarget when subprovinceSystem is
+    // wired up (the normal case). Falls back to the pre-existing distance-based
+    // getNearestNonNeutralWaypoint, using the enemy-centroid-avoidance direction computed above,
+    // if subprovinceSystem hasn't been set yet (e.g. a room very early in initialization) — this
+    // mirrors this method's exact pre-Task-3 behavior for that case rather than guessing at a
+    // new fallback.
+    let waypointId: string | null = null;
+    let blockedFraction = 0;
+    if (this.subprovinceSystem) {
+      const target = this.movementSystem.computeRetreatTarget(div, state, this.subprovinceSystem);
+      waypointId = target.waypointId;
+      blockedFraction = target.blockedFraction;
+    } else {
+      const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations);
+      waypointId = waypoint?.id ?? null;
+    }
+
+    if (waypointId) {
       div.move_order.splice(0, div.move_order.length);
-      div.move_order.push(waypoint.id);
+      div.move_order.push(waypointId);
     }
     // If null (no waypoints loaded), division stops in place
+
+    // Fighting-withdrawal damage (Batch 8 Task 3): only a Tier 2 "cut_off" division retreating
+    // pays a one-time HP cost, proportional to how much of the chosen retreat path crosses
+    // non-friendly ground, plus a reduced-speed penalty for the remainder of the retreat. Tier 0
+    // "normal" and Tier 1 "out_of_supply" retreat cleanly (no damage, no speed penalty) — Tier 1
+    // retreat is explicitly clean per STRATEGIC_COMBAT.md, only Tier 2 triggers fighting-
+    // withdrawal. Tier 3 "encircled" never reaches this method: the pre-existing gate in
+    // _checkAutoRetreatOrRotate blocks it before _initiateRetreat is called on the auto-retreat
+    // path (the manual RETREAT command path has no equivalent gate — see GameRoom.handleRetreat
+    // — a pre-existing gap outside this task's scope, not introduced or closed here).
+    if (div.supply_status === "cut_off") {
+      div.hp = Math.max(0, div.hp - FIGHTING_WITHDRAWAL_MAX_DAMAGE * blockedFraction);
+      div.retreat_speed_mult = RETREAT_SPEED_PENALTY_MULT;
+    } else {
+      div.retreat_speed_mult = 1;
+    }
+    changed.add(div.division_id);
   }
 
   // ---------------------------------------------------------------------------

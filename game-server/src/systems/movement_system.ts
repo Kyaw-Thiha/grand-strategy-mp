@@ -5,6 +5,10 @@ import { getCachedFile } from "../data/map_cache.js";
 import type { GameRoomState, DivisionState, RelationState } from "../rooms/schema/GameRoomState.js";
 import { UNIT_TERRAIN_COSTS, TERRAIN_KEYS } from "../data/unit_terrain_costs.js";
 import type { TemplateCell } from "../data/maps/western_europe_6/default_template.js";
+import type { SubprovinceSystem } from "./subprovince_system.js";
+import { makeIsFriendly } from "./subprovince_system.js";
+import { findRetreatPath } from "./supply_graph.js";
+import type { SubprovinceDefinition } from "../data/map_loader.js";
 
 type RelationLookup = {
   get(key: string): RelationState | undefined;
@@ -304,6 +308,81 @@ export class MovementSystem {
     return best ?? this.getNearestWaypoint(lng, lat); // fallback if all neutral
   }
 
+  /**
+   * Batch 8 Task 3 — graph-based, ownership-aware retreat targeting. Replaces the purely
+   * distance-based `getNearestNonNeutralWaypoint` at the retreat-target-selection call site in
+   * `combat_system.ts`'s `_initiateRetreat`: instead of the nearest non-neutral waypoint in raw
+   * distance, this resolves the division's current subprovince and runs Task 2's
+   * `findRetreatPath` (Dijkstra with ownership-tiered edge costs) to find the cheapest path to a
+   * friendly-or-allied road-corridor cell or supply hub, then translates that path's destination
+   * subprovince into the nearest waypoint via the existing `getNearestWaypoint` lookup — keeping
+   * ordinary move-order execution (which only understands waypoint IDs) untouched.
+   *
+   * Fallback (division's position resolves to no known subprovince, e.g. off-map or mid-strait):
+   * behaves like the old `getNearestNonNeutralWaypoint`, using the division's raw lng/lat —
+   * there is no subprovince to graph-search from, so distance-based targeting is the only
+   * option left, exactly as it was before this method existed.
+   */
+  computeRetreatTarget(
+    division: DivisionState,
+    state: GameRoomState,
+    subprovinceSystem: SubprovinceSystem,
+  ): { waypointId: string | null; blockedFraction: number } {
+    const startId = subprovinceSystem.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+    if (startId === null) {
+      const fallback = this.getNearestNonNeutralWaypoint(
+        division.position_lng, division.position_lat, division.nation_id, state.relations,
+      );
+      return { waypointId: fallback?.id ?? null, blockedFraction: 0 };
+    }
+
+    const graph = subprovinceSystem.getGraph();
+    const ownership = new Map<string, { ownerId: string; provinceId: string }>();
+    for (const [id, sp] of state.subprovinces) {
+      ownership.set(id, { ownerId: sp.owner_id, provinceId: sp.province_id });
+    }
+    const isFriendly = makeIsFriendly(division.nation_id, state.relations);
+    const hubs = subprovinceSystem.getHubSubprovinceIds(state, isFriendly);
+
+    const retreatPath = findRetreatPath(
+      graph,
+      ownership,
+      hubs,
+      startId,
+      division.nation_id,
+      isFriendly,
+      subprovinceSystem.isCombatFrozen.bind(subprovinceSystem),
+    );
+
+    const destinationId = retreatPath.subprovinceIds[retreatPath.subprovinceIds.length - 1];
+    const destinationDef = graph.nodes.get(destinationId);
+    const destinationPoint = destinationDef
+      ? this._centroidOf(destinationDef)
+      : { lng: division.position_lng, lat: division.position_lat };
+
+    const waypoint = this.getNearestWaypoint(destinationPoint.lng, destinationPoint.lat);
+    return { waypointId: waypoint?.id ?? null, blockedFraction: retreatPath.blockedFraction };
+  }
+
+  /**
+   * Centroid of a subprovince cell's outer ring, excluding a duplicated closing vertex if
+   * present. `SubprovinceDefinition` carries no stored centroid/representative point (confirmed
+   * against `map_loader.ts`), so this ports the exact ring-closing-vertex-aware algorithm
+   * already used by `test/subprovince-capture.test.ts`'s `centroidOf` helper rather than
+   * inventing new geometry. Used only to translate a retreat path's destination subprovince into
+   * a representative point for `getNearestWaypoint` — not a general-purpose PIP tool.
+   */
+  private _centroidOf(def: SubprovinceDefinition): { lng: number; lat: number } {
+    const ring = def.polygon[0];
+    if (!ring || ring.length === 0) return { lng: 0, lat: 0 };
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    const pts = (first[0] === last[0] && first[1] === last[1]) ? ring.slice(0, -1) : ring;
+    let lng = 0, lat = 0;
+    for (const [x, y] of pts) { lng += x; lat += y; }
+    return { lng: lng / pts.length, lat: lat / pts.length };
+  }
+
   tick(state: GameRoomState): void {
     const speedMult = state.game_speed;
 
@@ -381,8 +460,11 @@ export class MovementSystem {
       }
       kmh = OFFROAD_SPEED_KMH / cost;
     }
-    // degrees per tick (1 tick = speedMult game hours)
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult;
+    // degrees per tick (1 tick = speedMult game hours). Retreating divisions carrying a
+    // fighting-withdrawal penalty (Batch 8 Task 3) move at retreat_speed_mult of normal speed —
+    // applied here (own movement) but deliberately NOT in _advanceReposition, which is
+    // in-combat repositioning, not retreat movement.
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
 
     if (advanceDeg >= distDeg) {
       division.position_lng = nextNode.lng;
@@ -438,7 +520,7 @@ export class MovementSystem {
       }
     }
 
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult;
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
     if (advanceDeg >= distDeg) {
       division.position_lng = division.final_position_lng;
       division.position_lat = division.final_position_lat;
