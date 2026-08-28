@@ -42,6 +42,7 @@ func _ready() -> void:
 	GameState.nations.clear()
 	AuthManager.user_id = ""
 	loader.queue_free()
+	await get_tree().process_frame
 
 	if _failed:
 		print("TESTS FAILED - see errors above")
