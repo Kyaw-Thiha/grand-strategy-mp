@@ -870,9 +870,9 @@ Fail the build otherwise.
 - **Combat freezes color.** A subprovince with an active tactical-combat instance keeps
   showing whichever nation held it before the fight started until that instance resolves —
   no flip mid-fight, regardless of which side currently has units standing on it.
-- **(Open — confirm before implementing)** Whether recon-classified units should be excluded
-  from triggering a flip, as they were excluded from contributing to the old influence
-  system. Current default: no exclusion, any unit type flips a cell it occupies.
+- **Resolved.** Recon-classified units are not excluded from triggering a flip — any unit
+  type, including recon, flips a cell it occupies by literal polygon presence. Implemented as
+  specified in `subprovince_system.ts`'s capture check.
 - **Urban capture cascade (finalized).** When an urban/city subprovince changes ownership,
   ownership cascades a bounded number of graph hops rather than flipping the whole mosaic:
 
@@ -914,10 +914,11 @@ influence-blend shader math, no distance-falloff computation, no ownership-bonus
 There is no frontline "line" to compute or smooth anymore — the visible boundary between two
 differently-colored adjacent subprovince polygons *is* the front line.
 
-**(Open — confirm before implementing)** Should the "combat in progress" frozen-color state
-render identically to the fade-transition's neutral-gray hold, so an active fight reads
-visually the same as "undecided"? Or should it stay the pre-combat solid color throughout
-the fight? Both were discussed, not resolved.
+**Resolved.** The "combat in progress" frozen-color state renders as its own distinct amber
+contested tint (`subprovince_renderer.gd`'s `CONTESTED_TINT_COLOR`), separate from both the
+pre-combat solid owner color and any in-flight fade transition — it takes precedence over a
+fade in progress so an active fight always reads as "contested," not as "undecided" or as its
+pre-fight owner.
 
 ### City Capture and Ownership Transfer
 

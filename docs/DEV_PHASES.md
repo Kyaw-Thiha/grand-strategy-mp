@@ -369,30 +369,33 @@ Unit tests for movement profile computation and A* path validity.
             at that instant, which then holds until the next division joins or one departs
       - [x] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification, including
             which pair of divisions produced the winning (maximum) angle
-- [ ] Subprovince capture and ownership sync — **replaces the earlier 128×128 influence-grid
+- [x] Subprovince capture and ownership sync — **replaces the earlier 128×128 influence-grid
       plan; see `STRATEGIC_COMBAT.md` — Subprovince Capture System for full design.** That
       influence-grid approach was implemented once, in an earlier draft of this project, and
       found not to work well in practice — this is not a deferred item being picked back up,
       it's a deliberate replacement:
-      - [ ] Load `subprovinces.geojson` + `subprovince_adjacency.geojson` at game start
+      - [x] Load `subprovinces.geojson` + `subprovince_adjacency.geojson` at game start
             (see MAP_DATA_CONTRACT.md), build the in-memory adjacency graph once
-      - [ ] `checkSubprovinceCapture()` in `GameRoom.ts`, run on division movement (not on a
-            grid tick): a subprovince flips to a nation's ownership the instant a unit of
-            that nation's polygon-occupancy test succeeds against it. No radius, no
-            distance-falloff — literal occupancy only
-      - [ ] Province-wide sticky ownership: captured subprovinces stay captured as long as
+      - [x] `checkCaptureAfterMovement()` in `subprovince_system.ts` (named differently
+            from this doc's original `checkSubprovinceCapture()`, same behavior), run on
+            division movement (not on a grid tick): a subprovince flips to a nation's
+            ownership the instant a unit of that nation's polygon-occupancy test succeeds
+            against it. No radius, no distance-falloff — literal occupancy only
+      - [x] Province-wide sticky ownership: captured subprovinces stay captured as long as
             the attacking nation has ≥1 living unit anywhere in the province; reverting the
             whole set happens in one pass when that count hits zero, not per-cell
-      - [ ] Combat-freeze: a subprovince with an active tactical-combat instance does not
+      - [x] Combat-freeze: a subprovince with an active tactical-combat instance does not
             change owner until that instance resolves, regardless of current occupancy
-      - [ ] Broadcast `SUBPROVINCE_CAPTURED { subprovince_id, new_owner }` per flip — a
+      - [x] Broadcast `SUBPROVINCE_CAPTURED { subprovince_id, new_owner }` per flip — a
             small delta event, not a full-grid payload every tick. Client applies the fade
             tween locally (see Godot section below) on receipt
-      - [ ] City capture cascade behaviour is an open question (see STRATEGIC_COMBAT.md's
-            Open Questions) — do not hardcode either resolution without confirming first
-      - [ ] `FRONTLINE_UPDATE`'s old binary-grid payload is gone; `SUBPROVINCE_CAPTURED`
+      - [x] City capture cascade behaviour resolved: preserves occupied former-defender
+            cells and one valid supply route to another owned hub; see
+            `STRATEGIC_COMBAT.md`'s Subprovince Capture System for the finalized design
+      - [x] `FRONTLINE_UPDATE`'s old binary-grid payload is gone; `SUBPROVINCE_CAPTURED`
             replaces it entirely, alongside the existing `PROVINCE_CAPTURED` event for the
-            city-capture case
+            city-capture case (the old Dynamic Frontline System server broadcast, client
+            state, and dead overlay renderer were fully removed this session)
 - [x] `COMBAT_STARTED`, `COMBAT_RESULT`, `COMBAT_ENDED`, `PROVINCE_CAPTURED`,
       `UNIT_DESTROYED`, `STACK_FORMED`, `STACK_ROTATION`, `STACK_DISSOLVED` events broadcast.
       Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the
@@ -492,18 +495,19 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] `SubprovinceRenderer` — flat per-polygon fill, not a shader blend (this got much
       simpler than the influence-grid plan it replaces; see `STRATEGIC_COMBAT.md` —
       Subprovince Capture System, Rendering — Fade Transition):
-      - [ ] Load `subprovinces.geojson` once at map load; one `Polygon2D` per subprovince
-            (or a batched `MultiMesh` if per-polygon node count becomes a profiling concern
-            at full-map density — start with the simple version)
-      - [ ] On `SUBPROVINCE_CAPTURED` receipt: tween that polygon's fill color, old nation
-            color → neutral gray → new nation color, ~300–500ms per half (values from
-            STRATEGIC_COMBAT.md's Open Questions — not yet confirmed by playtesting)
-      - [ ] Re-flip mid-tween restarts the tween from the current interpolated color; does
+      - [x] Load `subprovinces.geojson` once at map load; one `Polygon2D` per subprovince
+            (implemented as the simple per-polygon version; no `MultiMesh` batching needed
+            at current map density)
+      - [x] On `SUBPROVINCE_CAPTURED` receipt: tween that polygon's fill color — implemented
+            as a direct old-nation-color → new-nation-color interpolation, not through a
+            neutral-gray midpoint (the neutral-gray-hold design in this doc's earlier draft
+            was superseded; see the corrected combat-frozen note below), tunable duration
+      - [x] Re-flip mid-tween restarts the tween from the current interpolated color; does
             not queue the new target behind the old one
-      - [ ] Combat-frozen subprovinces (active tactical-combat instance) do not tween at
-            all until the instance resolves — whether they render the neutral-gray hold or
-            stay solid pre-combat color during the fight is an open question, implement
-            behind a flag so either is a one-line switch
+      - [x] Combat-frozen subprovinces (active tactical-combat instance) do not tween at
+            all until the instance resolves — resolved: they render a distinct amber
+            contested tint (`CONTESTED_TINT_COLOR`), separate from both the neutral-gray
+            hold and the solid pre-combat color, taking precedence over any in-flight fade
       - [ ] Frontline only renders between nations marked `at_war = true`; a subprovince
             between two not-at-war nations renders as plain baseline color, no fill contest
       - [ ] Province borders remain static (political map layer, never changes) — drawn
@@ -973,19 +977,19 @@ ensures it can be tested and tuned in isolation before the other layers depend o
       over the subprovince adjacency graph — **the influence-percentage version referenced
       in earlier drafts of this doc is gone; see `STRATEGIC_COMBAT.md`'s Supply and
       encirclement section for the current design, this checklist mirrors it exactly:**
-      - [ ] `FRIENDLY(sp)` / `BLOCKED(sp)` helpers: friendly = self or ally owner, blocked =
+      - [x] `FRIENDLY(sp)` / `BLOCKED(sp)` helpers: friendly = self or ally owner, blocked =
             everything else including neutral-owned subprovinces
-      - [ ] `ring(n, subprovince)`: bounded BFS over subprovince_adjacency to exact
+      - [x] `ring(n, subprovince)`: bounded BFS over subprovince_adjacency to exact
             hop-distance n; cap at n=3, this never needs to search further
-      - [ ] Tier 1 — Out of Supply: no path exists from the division's subprovince to any
+      - [x] Tier 1 — Out of Supply: no path exists from the division's subprovince to any
             friendly/allied supply hub through friendly/allied road-corridor subprovinces;
             debuffs: no HP recovery, slow suppression threshold decay, reduced movement
             speed; clean retreat still available; `OUT_OF_SUPPLY` event fires
-      - [ ] Tier 2 — Cut Off (checked only if Out of Supply): `ring(3)`, `ring(2)`, or
+      - [x] Tier 2 — Cut Off (checked only if Out of Supply): `ring(3)`, `ring(2)`, or
             `ring(1)` — checked outermost first — has zero friendly/allied subprovinces; all
             Tier 1 debuffs plus fighting withdrawal on retreat (HP damage proportional to
             `BLOCKED` density along the escape path); `CUT_OFF` event fires
-      - [ ] Tier 3 — Encircled (checked only if Cut Off): `ring(2)` or `ring(1)` has zero
+      - [x] Tier 3 — Encircled (checked only if Cut Off): `ring(2)` or `ring(1)` has zero
             friendly/allied subprovinces; retreat command disabled; all Tier 2 debuffs plus:
             - Armoured units: damage output decays per tick → 0 after N ticks
             - Infantry units: slower degradation than armour
@@ -994,13 +998,13 @@ ensures it can be tested and tuned in isolation before the other layers depend o
             1–2 vs rings 1–3) — verify the implementation actually relies on that subset
             relationship for the "cannot skip Tier 2" guarantee below, rather than adding a
             separate explicit ordering check that could drift out of sync with it
-      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
+      - [x] Status degrades one tier at a time — cannot jump directly to Tier 3
       - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
             → destroyed (not retreated); experience and template lost permanently
       - [ ] Stack-level encirclement: the check applies to the whole stack at its shared
             position, not per-division — rotation (Phase 4's stack mechanic) does not
             protect a stack that is, as a whole, surrounded
-      - [ ] Retreat pathing (used here and elsewhere): cheapest path over the subprovince
+      - [x] Retreat pathing (used here and elsewhere): cheapest path over the subprovince
             graph, edge cost cheap for friendly/allied cells, medium for contested, expensive
             for enemy/neutral — replaces any separate "retreat along supply road" logic
 - [ ] `SUPPLY_DISRUPTED`, `SUPPLY_RESTORED`, `OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED` events
@@ -1013,7 +1017,7 @@ ensures it can be tested and tuned in isolation before the other layers depend o
 ### Godot
 - [ ] `SupplySystem` — road segment throughput visualisation; truck sprites on active
       segments; dim/broken visual for disrupted segments
-- [ ] Supply status indicator on division icons — subtle colour shift when out of supply;
+- [x] Supply status indicator on division icons — subtle colour shift when out of supply;
       distinct visual treatment per tier (Out of Supply / Cut Off / Encircled), not a single
       generic "low supply" indicator, since the three tiers carry meaningfully different
       player consequences and should read differently on the map at a glance

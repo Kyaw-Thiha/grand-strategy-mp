@@ -12,7 +12,6 @@ import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
-import { FrontlineSystem } from "../systems/frontline_system.js";
 import { SubprovinceSystem, makeIsFriendly } from "../systems/subprovince_system.js";
 import { SupplyHubConstructionSystem } from "../systems/supply_hub_construction_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
@@ -93,7 +92,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private movementSystem   = new MovementSystem();
   private combatSystem     = new CombatSystem(this.movementSystem);
   private supplySystem     = new SupplySystem();
-  private frontlineSystem  = new FrontlineSystem();
   private subprovinceSystem = new SubprovinceSystem();
   private supplyHubConstructionSystem = new SupplyHubConstructionSystem();
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
@@ -1302,7 +1300,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.movementSystem.loadMapData(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
-    this.frontlineSystem.loadMapData(this.state.map_id);
     this.subprovinceSystem.loadForRoom(this.state.map_id);
     this._initProvinces(this.state.map_id);
     // Must run after _initProvinces populates province.owner_id, since subprovince ownership
@@ -1640,8 +1637,6 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           );
         }
       }
-
-      this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
 
       this.airDetectionSystem.tick(
         this.state,

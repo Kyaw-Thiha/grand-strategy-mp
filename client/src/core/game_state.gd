@@ -22,8 +22,6 @@ var provinces: Dictionary = {}
 var subprovinces: Dictionary = {}
 # divisions: { division_id → DivisionState dict (mirrors server DivisionState) }
 var divisions: Dictionary = {}
-# frontline: { province_id → { nation_id: float share, ... } }
-var frontline: Dictionary = {}
 # relations: { "from_id:to_id" → { stance: String } }
 var relations: Dictionary = {}
 # proposals: { proposal_id → { from_id, to_id, stance, resolved } }
@@ -59,7 +57,6 @@ func reset_session_state() -> void:
 	provinces.clear()
 	subprovinces.clear()
 	divisions.clear()
-	frontline.clear()
 	relations.clear()
 	proposals.clear()
 	stacks.clear()
@@ -159,16 +156,6 @@ func _apply_unit_destroyed(data: Dictionary) -> void:
 		divisions.erase(div_id)
 		EventBus.division_removed.emit(div_id)
 	)
-
-
-## Called by SessionManager when server sends FRONTLINE_UPDATED.
-func _apply_frontline_updated(data: Dictionary) -> void:
-	var province_id: String = data.get("province_id", "")
-	var shares: Dictionary = data.get("nation_shares", {})
-	if province_id.is_empty():
-		return
-	frontline[province_id] = shares
-	EventBus.frontline_updated.emit(province_id, shares)
 
 
 ## Called by SessionManager when server sends PROVINCE_INIT (once at game start).
