@@ -67,6 +67,12 @@ export class DivisionState extends Schema {
   @type("number") suppression: number = 0;      // 0–100
   @type("string") combat_state: string = "idle"; // "idle"|"engaged"|"suppressed"|"retreating"|"destroyed"
   @type("string") supply_status: string = "normal"; // "normal"|"out_of_supply"|"cut_off"|"encircled"
+  // Batch 8 Task 3: per-division speed penalty for a Tier 2 (cut_off) fighting-withdrawal
+  // retreat. 1 = no penalty (default/normal movement). Reset to 1 once the retreat completes
+  // (combat_system.ts's _checkRetreatCompletion). Applied only to the division's own movement
+  // (movement_system.ts's _advanceDivision/_advanceFinalPosition), never to in-combat
+  // repositioning (_advanceReposition).
+  @type("number") retreat_speed_mult: number = 1;
   @type("number") observation_radius: number = 100; // km
   @type("number") engagement_radius: number = 50;   // km, computed from template
   @type("number") recon_value: number = 0;    // 0.0–1.0; accumulated per engagement round

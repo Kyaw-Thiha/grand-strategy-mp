@@ -81,7 +81,10 @@
       "source_prefixes": [
         "src/systems/subprovince_system.ts",
         "src/systems/supply_graph.ts",
-        "src/data/subprovince_loader.ts"
+        "src/systems/supply_system.ts",
+        "src/data/subprovince_loader.ts",
+        "src/systems/combat_system.ts",
+        "src/systems/movement_system.ts"
       ],
       "tests": [
         "test/subprovince-loader.test.ts",
@@ -91,7 +94,8 @@
         "test/subprovince-capture.test.ts",
         "test/subprovince-supply-graph.test.ts",
         "test/subprovince-supply.test.ts",
-        "test/subprovince-city-cascade.test.ts"
+        "test/subprovince-city-cascade.test.ts",
+        "test/subprovince-retreat.test.ts"
       ]
     }
   },

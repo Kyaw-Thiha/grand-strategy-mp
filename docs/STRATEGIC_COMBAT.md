@@ -480,12 +480,14 @@ ring(n) := subprovinces at exact hop-distance n from the division's current
 path_exists = subprovince_graph_search(
     start      = division.subprovince,
     goal       = any friendly-or-allied-owned supply hub,
-    valid_edge = lambda sp: FRIENDLY(sp) and sp.kind == "road"
+    valid_edge = lambda sp: FRIENDLY(sp)   # off-road cells also count toward Tier 1 connectivity
 )
 if not path_exists: status = OUT_OF_SUPPLY
 ```
-No path exists to any friendly-or-allied supply hub walking only through friendly-or-allied
-**road-corridor** subprovinces. The division can still move and retreat freely.
+No path exists to any friendly-or-allied supply hub walking through friendly-or-allied
+subprovinces (both road and off-road cells count toward this connectivity check). Road-vs-off-road
+preference affects only route throughput and selection in supply routing (a separate system concern),
+not this binary Tier 1 connectivity trigger. The division can still move and retreat freely.
 
 *Debuffs:*
 - HP recovery rate → 0 (no supply reaching the division; wounds do not heal)
@@ -494,7 +496,7 @@ No path exists to any friendly-or-allied supply hub walking only through friendl
 
 *Can retreat:* Yes — clean retreat on friendly-or-allied ground is still possible.
 
-*Player window:* Push a relief force to reopen a road-corridor path, or order a retreat
+*Player window:* Push a relief force to restore a supply path through friendly territory, or order a retreat
 before the situation worsens. The notification "Supply route severed — [division]" fires
 immediately when this status is triggered.
 

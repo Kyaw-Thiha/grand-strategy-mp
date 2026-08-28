@@ -34,8 +34,9 @@ import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_w
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 
 // How many game ticks between subprovince-graph supply route recomputation/broadcast.
-// Matches the (unexported) SUPPLY_TICK_INTERVAL used by the disabled legacy SupplySystem.tick()
-// cadence in supply_system.ts, kept in sync deliberately rather than sharing an import.
+// Matches the (unexported) SUPPLY_TICK_INTERVAL used by SupplySystem.tick()'s ring-based
+// tier recalculation cadence in supply_system.ts, kept in sync deliberately rather than
+// sharing an import.
 const SUPPLY_TICK_INTERVAL = 5;
 
 interface JwtPayload {
@@ -1617,7 +1618,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           this._handleAirbaseCapture(evt);
         }
       }
-      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg), this.subprovinceSystem);
 
       // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
       // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
