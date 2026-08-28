@@ -11,6 +11,7 @@ signal province_contest_updated(province_id: String, contested: bool)
 signal frontline_updated(province_id: String, nation_shares: Dictionary)
 signal vision_visibility_changed(visible_provinces: Dictionary)
 signal supply_hub_completed(province_id: String)
+signal supply_route_updated(division_id: String, route: Dictionary)
 
 # ── Military ─────────────────────────────────────────────────────────────────
 signal unit_changed(unit_id: String)

@@ -37,6 +37,8 @@ var air_wings: Dictionary = {}
 # air_wing_paths: { wing_id → AIR_WING_PATH payload } — cached so the hydration loop
 # can replay paths that arrived before air_wing_system was set up (GAME_STARTED race).
 var air_wing_paths: Dictionary = {}
+# supply_routes: { division_id → last-received SupplyRoute dict }
+var supply_routes: Dictionary = {}
 # naval_contact_markers: { marker_id → {marker_id, nation_id, position_lng, position_lat, ...} }
 var naval_contact_markers: Dictionary = {}
 
@@ -63,6 +65,7 @@ func reset_session_state() -> void:
 	stacks.clear()
 	air_wings.clear()
 	air_wing_paths.clear()
+	supply_routes.clear()
 	naval_contact_markers.clear()
 
 
@@ -384,6 +387,14 @@ func _apply_air_wing_path(data: Dictionary) -> void:
 	if id.is_empty():
 		return
 	air_wing_paths[id] = data
+
+## Stores the latest server-authoritative supply route for one division and notifies
+## listeners. GameState never recomputes route/supply data — this is a straight cache
+## write of what the server sent.
+func _apply_supply_route_update(data: Dictionary) -> void:
+	var division_id: String = data.get("divisionId", "")
+	supply_routes[division_id] = data
+	EventBus.supply_route_updated.emit(division_id, data)
 
 func _apply_air_wing_destroyed(data: Dictionary) -> void:
 	var id: String = data.get("wing_id", "")

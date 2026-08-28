@@ -21,6 +21,8 @@ const SUBPROVINCE_FILL_Z: int = 0
 ## layer borders still draw above fills via canvas-item tree order.
 const SUBPROVINCE_BORDER_Z: int = 0
 const CARTOGRAPHY_MAX_Z: int = 20
+## Supply-route visualization overlay draw layer.
+const SUPPLY_ROUTE_Z: int = 22
 const FOG_OVERLAY_Z: int = 25
 const WORLD_MARKER_Z: int = 30
 
