@@ -295,34 +295,36 @@ Local roads and tracks are NOT on this layer; local connectivity is captured by
     "road_id":      "eur_road_autobahn_a1",
     "corridor_id":  "autobahn_a1",           // groups segments for corridor upgrades
     "name":         "Autobahn A1",
-    "road_level":   3,                        // 1=dirt track, 2=paved road, 3=highway
+    "road_level":   3,                        // 1=dirt track, 2=paved road, 3=highway; cosmetic only, see below
     "map_id":       "europe_1939"
   }
 }
 ```
 
-**Road levels and movement:**
-
-| road_level | Name | On-road speed | Supply throughput |
-|---|---|---|---|
-| 1 | Dirt track | 1.5× base | Low |
-| 2 | Paved road | 2.5× base | Medium |
-| 3 | Highway | 4.0× base | High |
+**Road levels are cosmetic only.** `road_level` is retained purely for descriptive/rendering
+purposes (e.g. line width in the offline map-editor tool). All roads are equal for
+pathfinding cost and on-road movement speed — a division moves at the same flat on-road
+speed regardless of `road_level`, and A* assigns the same flat low cost to every road edge.
+This was evaluated as a future design (differentiated speed/throughput per tier) and
+deliberately rejected to keep road-network strategy about corridor upgrades and connectivity,
+not per-tile speed bookkeeping.
 
 **Corridor upgrades:** Roads are upgraded at corridor level, not segment level.
 All segments sharing a `corridor_id` upgrade together when the player invests in that corridor.
 This prevents per-segment micromanagement while preserving meaningful strategic investment.
 A Europe map should have 15–30 named corridors. Each corridor = one upgrade decision.
+Corridor upgrades affect supply throughput, not `road_level`/movement speed.
 
 **Supply flows exclusively along roads.** Off-road movement produces no supply flow.
 A division that advances off-road immediately begins drawing down its carried supply reserves.
 
 **QGIS authoring steps:**
 1. Load OSM roads layer (Geofabrik extract, filter to motorway, trunk, primary)
-2. Load OSM railways layer (cross-reference — major rail = road_level 2 for supply purposes)
+2. Load OSM railways layer (cross-reference — major rail counts as a road for supply purposes)
 3. Manually trace and simplify onto the road layer, snapping endpoints to province borders
 4. Assign corridor_id by grouping connected segments that form a strategic axis
-5. Set road_level by historical classification (Autobahn = 3, Route Nationale = 2, etc.)
+5. Set road_level by historical classification (Autobahn = 3, Route Nationale = 2, etc.) —
+   cosmetic labeling only, does not affect gameplay
 6. Export as `roads.geojson`
 
 ---
