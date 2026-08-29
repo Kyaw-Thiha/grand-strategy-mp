@@ -68,8 +68,18 @@ describe("lane:subprovince | retreat trigger and fighting-withdrawal damage", ()
   before(() => {
     const graph = loadSubprovinceGraph(MAP_ID);
     const spatialIndex = buildSubprovinceSpatialIndex(graph);
+    // Pinned to a specific real cell (verified via a one-off probe script, same convention as
+    // subprovince-system-unit.test.ts's ALBANIA_CELL_*/AUSTRIA_CAPITAL_CELL), rather than "first
+    // centroid-verified hinterland cell in iteration order": with distance+terrain-weighted
+    // retreat costs (supply_graph.ts), an arbitrary hinterland cell can be surrounded by harsh
+    // terrain (e.g. dense_forest_mountains, impassable for the terrain-cost profile retreat
+    // pathing uses) with no fully-friendly off-road detour at all, or have a neighbor topology
+    // that doesn't match the "exactly two ring(1) neighbors" fixture below — this specific cell
+    // is plains/flat with exactly two ring(1) neighbors, confirmed via the probe script to work
+    // for every test in this file.
+    const GERMANY_FIXTURE_CELL_ID = "we6_germany_01_sp_127";
     const hinterlandDefs = [...graph.nodes.values()].filter(
-      (d) => d.provinceId === GERMANY_PROVINCE && d.kind === "hinterland",
+      (d) => d.id === GERMANY_FIXTURE_CELL_ID,
     );
     germanyCell = pickVerifiedHinterlandCell(spatialIndex, hinterlandDefs);
 
@@ -252,6 +262,26 @@ describe("lane:subprovince | retreat trigger and fighting-withdrawal damage", ()
       assert.equal(div.hp, 100);
       assert.equal(div.retreat_speed_mult, 1);
     });
+
+    it("the manual RETREAT command path (public initiateRetreat) also refuses an encircled division", () => {
+      // Fix for a gap this batch's earlier planning flagged: _checkAutoRetreatOrRotate already
+      // blocked auto-retreat for encircled divisions, but GameRoom.handleRetreat calls the public
+      // CombatSystem.initiateRetreat() directly and had no equivalent guard, so a manually-issued
+      // RETREAT command could let an encircled division escape when auto-retreat couldn't.
+      const { combatSystem, state } = freshSystems();
+      const div = spawnDivision(state, "d1", "germany", germanyCell.lng, germanyCell.lat, {
+        hp: 100, supply_status: "encircled", combat_state: "engaged", suppression: 100,
+      });
+      const enemy = spawnDivision(state, "e1", "france", germanyCell.lng + 1, germanyCell.lat + 1);
+
+      const changed = new Set<string>();
+      combatSystem.initiateRetreat(div, [enemy], state, changed, noopBroadcast);
+
+      assert.equal(div.combat_state, "engaged", "manual retreat must not move an encircled division toward retreating");
+      assert.equal(div.move_order.length, 0);
+      assert.equal(div.hp, 100);
+      assert.equal(div.retreat_speed_mult, 1);
+    });
   });
 
   describe("retreat targets ownership-aware ground, not pure nearest-distance", () => {
@@ -259,18 +289,21 @@ describe("lane:subprovince | retreat trigger and fighting-withdrawal damage", ()
       const { subSys, state: baselineState } = freshSystems();
       const graph = subSys.getGraph();
 
-      const ring1 = ring(graph, germanyCell.id, 1);
-      const nearRoadId = ring1.find((id) => graph.nodes.get(id)?.kind === "road");
-      assert.ok(nearRoadId, "fixture requires a ring(1) road cell adjacent to germanyCell");
-
       const isFriendlyBaseline = makeIsFriendly("germany", baselineState.relations);
       const hubsBaseline = subSys.getHubSubprovinceIds(baselineState, isFriendlyBaseline);
       const ownershipBaseline = new Map<string, { ownerId: string; provinceId: string }>();
       for (const [id, sp] of baselineState.subprovinces) ownershipBaseline.set(id, { ownerId: sp.owner_id, provinceId: sp.province_id });
 
       const baselinePath = findRetreatPath(graph, ownershipBaseline, hubsBaseline, germanyCell.id, "germany", isFriendlyBaseline, () => false);
-      // Sanity check: with everything friendly, the nearest ring(1) road cell IS the natural pick.
-      assert.equal(baselinePath.subprovinceIds[baselinePath.subprovinceIds.length - 1], nearRoadId);
+      // Sanity check: with everything friendly, the actual cheapest retreat destination is a road
+      // cell — derived from the real cost-based pathfinder itself (not a naive "first ring(1) road
+      // cell found" guess, which only coincidentally matched the real algorithm before the
+      // subprovince-adjacency cross-province-edge fix; a richer, more complete graph can have
+      // multiple ring(1) road candidates, so "first found" and "actually cheapest" are no longer
+      // guaranteed to agree, nor should they be).
+      const nearRoadId = baselinePath.subprovinceIds[baselinePath.subprovinceIds.length - 1];
+      assert.equal(graph.nodes.get(nearRoadId)?.kind, "road",
+        "fixture requires the baseline retreat destination to be a road cell");
 
       // Now flip that nearest road cell to enemy ownership and re-run.
       const { subSys: subSys2, combatSystem: combatSystem2, state } = freshSystems();

@@ -31,17 +31,34 @@ describe("lane:subprovince | supply graph core", () => {
     assert.equal(route.status, "open");
   });
 
-  it("accepts an off-road-only route with reduced throughputRatio strictly between full-road and full-off-road", () => {
-    const graph = graphOf(
-      [def("start", "p1", "hinterland"), def("mid", "p1", "hinterland"), def("hub", "p1", "capital")],
-      [["start", "mid"], ["mid", "hub"]],
-    );
-    const ownership = new Map([
-      ["start", { ownerId: "fr", provinceId: "p1" }], ["mid", { ownerId: "fr", provinceId: "p1" }], ["hub", { ownerId: "fr", provinceId: "p1" }],
-    ]);
+  it("throughputRatio decays with accumulated off-road distance alone (a long-enough off-road chain reads degraded)", () => {
+    // No centroids on these synthetic nodes, so edgeDistanceKm falls back to a flat 1.0 per hop —
+    // 50 off-road hops therefore accumulates 50km of offRoadKm, comfortably past the 30km "open"
+    // cutoff (OPEN_THROUGHPUT_THRESHOLD 0.9 against OFFROAD_DEGRADE_DISTANCE_KM 300) but nowhere
+    // near the 300km "fully severe" floor, landing strictly between 0 and 1.
+    const chainIds = Array.from({ length: 50 }, (_, i) => `mid${i}`);
+    const nodes = [def("start", "p1", "hinterland"), ...chainIds.map((id) => def(id, "p1", "hinterland")), def("hub", "p1", "capital")];
+    const path = ["start", ...chainIds, "hub"];
+    const edges: Array<[string, string]> = path.slice(0, -1).map((id, i) => [id, path[i + 1]]);
+    const graph = graphOf(nodes, edges);
+    const ownership = new Map(path.map((id) => [id, { ownerId: "fr", provinceId: "p1" }]));
     const route = findSupplyRoute(graph, ownership, new Set(["hub"]), "start", "fr", () => true, () => false, "d1");
     assert.ok(route.throughputRatio < 1.0 && route.throughputRatio > 0, `expected 0 < ratio < 1, got ${route.throughputRatio}`);
     assert.equal(route.status, "degraded");
+  });
+
+  it("a long road stretch with only a single off-road hop reads open (road distance no longer factors into throughputRatio at all)", () => {
+    // Old (road-fraction) model: 1 off-road hop vs. 5 road hops -> ratio 5/6 ≈ 0.83, "degraded".
+    // New model: only offRoadKm matters, and it's a single ~1km fallback hop, so this reads "open".
+    const roadIds = Array.from({ length: 5 }, (_, i) => `road${i}`);
+    const nodes = [def("start", "p1", "hinterland"), def("off1", "p1", "hinterland"),
+      ...roadIds.map((id) => def(id, "p1", "road")), def("hub", "p1", "capital")];
+    const path = ["start", "off1", ...roadIds, "hub"];
+    const edges: Array<[string, string]> = path.slice(0, -1).map((id, i) => [id, path[i + 1]]);
+    const graph = graphOf(nodes, edges);
+    const ownership = new Map(path.map((id) => [id, { ownerId: "fr", provinceId: "p1" }]));
+    const route = findSupplyRoute(graph, ownership, new Set(["hub"]), "start", "fr", () => true, () => false, "d1");
+    assert.equal(route.status, "open", `expected open for a route with only one short off-road hop, got throughputRatio ${route.throughputRatio}`);
   });
 
   it("enemy-occupied cell is traversable only for the occupying division's own search", () => {

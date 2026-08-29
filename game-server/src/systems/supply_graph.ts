@@ -1,10 +1,21 @@
-import type { SubprovinceGraph } from "../data/map_loader.js";
+import type { SubprovinceDefinition, SubprovinceGraph } from "../data/map_loader.js";
+import { haversineKm } from "../data/map_loader.js";
+import { UNIT_TERRAIN_COSTS } from "../data/unit_terrain_costs.js";
 
 /**
  * Pure supply-routing core: given a subprovince adjacency graph, ownership snapshot, and a
  * set of hub cells, finds the cheapest path from a division's location to the nearest
  * reachable friendly (or requester-occupied) hub. Contains no caching, no mutation of its
  * inputs, and no I/O — callers own the graph/ownership snapshot and any memoization.
+ *
+ * Edge cost is real-world time-to-traverse (distanceKm / speedKmh), not hop count — cell sizes
+ * vary widely, so a flat "1 hop = 1 unit" cost was a poor proxy for actual supply-line length and
+ * didn't make roads matter enough. Off-road speed is further graded by terrain harshness via
+ * UNIT_TERRAIN_COSTS.standard_infantry (a generic stand-in — supply convoys aren't tied to any
+ * one unit type, and exact accuracy isn't required here), so routes naturally hug roads and avoid
+ * harsh terrain (mountains/swamp/dense forest) wherever an easier alternative exists, without any
+ * special-cased "prefer road in this section" logic — that behavior falls straight out of
+ * Dijkstra once edge weights reflect real cost.
  *
  * NOTE: this module never assigns SupplyRoute.status === "encircled" — that requires a
  * ring-based Tier 3 check that is a later batch's responsibility (city cascade / siege logic).
@@ -19,12 +30,50 @@ export type SupplyRoute = {
   blockedSubprovinceId: string | null;
 };
 
-const ROAD_THROUGHPUT = 1.0;
-const OFF_ROAD_THROUGHPUT = 0.5; // tunable
+const SUPPLY_ROAD_SPEED_KMH = 60;
+const SUPPLY_OFFROAD_SPEED_KMH = 20;
 const OPEN_THROUGHPUT_THRESHOLD = 0.9; // tunable: at/above this ratio -> "open", else "degraded"
+// throughputRatio decays purely from accumulated off-road distance — road distance is deliberately
+// excluded entirely (not just weighted small), matching "roads are fast, so supply on them should
+// feel unpenalized." OFFROAD_DEGRADE_DISTANCE_KM is the off-road km at which a route reads fully
+// "severe" (ratio 0); with OPEN_THROUGHPUT_THRESHOLD at 0.9, a route stays "open" up to 10% of that
+// distance and degrades linearly from there.
+//
+// 300 (not the original 150) is calibrated to this map's actual cell scale, measured directly
+// against western_europe_6's real graph: a single hinterland-to-hinterland hop is commonly 30-75km
+// (hinterland cells are generated at a ~5,000km^2 target size — subprovince_generator.py's
+// hinterland_target_area), with some hops over 200km. At 150 an ordinary single off-road hop right
+// next to a hub already blew past the "open" budget, making routes read "degraded" even when the
+// unit was genuinely one field away from the road network. At 300, one typical hop (~30km) lands
+// right at the open/degraded boundary, and only a longer cross-country trek (multiple hops or one
+// very large one) reads as meaningfully degraded.
+const OFFROAD_DEGRADE_DISTANCE_KM = 300;
 
-function hopThroughput(kind: string): number {
-  return kind === "road" ? ROAD_THROUGHPUT : OFF_ROAD_THROUGHPUT;
+// Supply convoys have no single unit type; standard_infantry's terrain-cost row is used as a
+// generic proxy for off-road terrain harshness (doesn't need to be exact).
+const SUPPLY_TERRAIN_PROFILE: Record<string, number> = UNIT_TERRAIN_COSTS.standard_infantry;
+
+/** Effective speed (km/h) for traversing a cell of the given definition. */
+function hopSpeedKmh(def: SubprovinceDefinition): number {
+  if (def.kind === "road") return SUPPLY_ROAD_SPEED_KMH;
+  const terrainKey = def.coverCombat && def.elevationType ? `${def.coverCombat}_${def.elevationType}` : null;
+  const terrainCost = terrainKey ? SUPPLY_TERRAIN_PROFILE[terrainKey] ?? 1.0 : 1.0;
+  return SUPPLY_OFFROAD_SPEED_KMH / terrainCost; // terrainCost === Infinity -> 0 kmh -> Infinity edge cost (impassable)
+}
+
+/** Real-world distance (km) between two adjacent cells, via centroid haversine. Falls back to a
+ *  flat 1.0 when either cell lacks geometry (e.g. synthetic test fixtures), preserving relative
+ *  road/off-road speed preference without fabricating a distance. */
+function edgeDistanceKm(graph: SubprovinceGraph, fromId: string, toId: string): number {
+  const a = graph.nodes.get(fromId)?.centroid;
+  const b = graph.nodes.get(toId)?.centroid;
+  if (!a || !b) return 1.0;
+  return haversineKm(a, b);
+}
+
+/** Time cost (hours) to traverse into `neighborId` from `fromId`. */
+function hopCost(graph: SubprovinceGraph, fromId: string, neighborId: string, neighborDef: SubprovinceDefinition): number {
+  return edgeDistanceKm(graph, fromId, neighborId) / hopSpeedKmh(neighborDef);
 }
 
 /**
@@ -79,7 +128,7 @@ export function findSupplyRoute(
       if (!validEdge(neighborId)) continue;
       const def = graph.nodes.get(neighborId);
       if (!def) continue;
-      const edgeCost = 1 / hopThroughput(def.kind);
+      const edgeCost = hopCost(graph, currentId, neighborId, def);
       const candidate = currentCost + edgeCost;
       const existing = cost.get(neighborId);
       if (existing === undefined || candidate < existing || (candidate === existing && _tieBreakPrefers(neighborId, prev, currentId, graph))) {
@@ -108,15 +157,15 @@ function _tieBreakPrefers(_neighborId: string, _prev: Map<string, string>, _curr
 // expensive". That is a difference in the edge-validity predicate itself, not just a cost
 // tweak, so it is implemented as a sibling search rather than a flag on findSupplyRoute.
 //
-// Cost tiers (all built on the same 1/throughput inversion findSupplyRoute already uses, so
-// road cells keep their natural speed advantage in every tier with no special-casing):
-//   friendly (isFriendly(owner))         -> 1 / hopThroughput(kind)            [1.0 .. 2.0]
-//   contested (combat-frozen, non-friendly) -> RETREAT_CONTESTED_COST_MULTIPLIER * that  [5.0 .. 10.0]
-//   enemy/neutral (everything else)      -> RETREAT_ENEMY_NEUTRAL_COST_MULTIPLIER * that [20.0 .. 40.0]
-// The multipliers are chosen so the *ranges* never overlap (friendly max 2.0 < contested min
-// 5.0 < contested max 10.0 < enemy/neutral min 20.0): the tier ordering (friendly < contested
-// < enemy/neutral) holds regardless of road/off-road mix, so "retreat prefers friendly ground"
-// is true by construction, not just true on average.
+// Cost tiers (all built on the same distance/speed time cost findSupplyRoute already uses, so
+// road cells and easy terrain keep their natural speed advantage in every tier with no
+// special-casing):
+//   friendly (isFriendly(owner))            -> hopCost(...)                                  [base]
+//   contested (combat-frozen, non-friendly) -> RETREAT_CONTESTED_COST_MULTIPLIER * that       [5x]
+//   enemy/neutral (everything else)         -> RETREAT_ENEMY_NEUTRAL_COST_MULTIPLIER * that   [20x]
+// The multipliers are large enough that the tier ordering (friendly < contested < enemy/neutral)
+// holds regardless of road/off-road/terrain mix, so "retreat prefers friendly ground" is true by
+// construction, not just true on average.
 const RETREAT_CONTESTED_COST_MULTIPLIER = 5;
 const RETREAT_ENEMY_NEUTRAL_COST_MULTIPLIER = 20;
 
@@ -180,9 +229,9 @@ export function findRetreatPath(
     return graph.nodes.get(subprovinceId)?.kind === "road";
   };
 
-  const edgeCost = (subprovinceId: string): number => {
+  const edgeCost = (fromId: string, subprovinceId: string): number => {
     const def = graph.nodes.get(subprovinceId);
-    const base = 1 / hopThroughput(def?.kind ?? "hinterland");
+    const base = def ? hopCost(graph, fromId, subprovinceId, def) : edgeDistanceKm(graph, fromId, subprovinceId) / SUPPLY_OFFROAD_SPEED_KMH;
     if (isFriendlyCell(subprovinceId)) return base;
     if (isCombatFrozen(subprovinceId)) return base * RETREAT_CONTESTED_COST_MULTIPLIER;
     return base * RETREAT_ENEMY_NEUTRAL_COST_MULTIPLIER;
@@ -213,7 +262,7 @@ export function findRetreatPath(
     for (const neighborId of neighborIds) {
       if (visited.has(neighborId)) continue;
       if (!graph.nodes.has(neighborId)) continue;
-      const candidate = currentCost + edgeCost(neighborId);
+      const candidate = currentCost + edgeCost(currentId, neighborId);
       const existing = cost.get(neighborId);
       // Tie-break mirrors findSupplyRoute's _tieBreakPrefers: on an exact cost tie, keep the
       // first-found predecessor so the result depends only on sorted neighbor iteration order.
@@ -284,18 +333,19 @@ function _buildRoute(
   }
   path.reverse();
 
-  let roadHops = 0, offRoadHops = 0, blockedSubprovinceId: string | null = null;
-  for (const id of path) {
+  let offRoadKm = 0, blockedSubprovinceId: string | null = null;
+  for (let i = 1; i < path.length; i++) {
+    const id = path[i];
     // The start cell isn't traversed, and the hub itself is the destination — its own kind
-    // (typically "capital", never "road") must not count as an off-road hop, or a route made
+    // (typically "capital", never "road") must not count as off-road distance, or a route made
     // entirely of road hops could never reach throughputRatio 1.0 / status "open".
     if (id === startId || id === hubId) continue;
     if (isOccupiedByRequester(id)) { blockedSubprovinceId = id; continue; }
     const def = graph.nodes.get(id);
-    if (def?.kind === "road") roadHops++; else offRoadHops++;
+    if (def?.kind === "road") continue;
+    offRoadKm += edgeDistanceKm(graph, path[i - 1], id);
   }
-  const totalHops = roadHops + offRoadHops;
-  const throughputRatio = totalHops === 0 ? 1 : (roadHops * ROAD_THROUGHPUT + offRoadHops * OFF_ROAD_THROUGHPUT) / totalHops;
+  const throughputRatio = Math.min(1, Math.max(0, 1 - offRoadKm / OFFROAD_DEGRADE_DISTANCE_KM));
   const status: SupplyRoute["status"] = throughputRatio >= OPEN_THROUGHPUT_THRESHOLD ? "open" : "degraded";
 
   return { divisionId, sourceHubId: hubId, subprovinceIds: path, status, throughputRatio, blockedSubprovinceId };

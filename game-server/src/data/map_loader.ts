@@ -43,6 +43,58 @@ export interface SubprovinceDefinition {
   /** Outer ring(s) of the cell's geometry — one ring for a simple Polygon, several for a
    *  MultiPolygon. Interior holes are ignored, matching province-level handling. */
   polygon: Array<Array<[number, number]>>;
+  /** [lng, lat] centroid of the outer ring(s), used for distance-weighted supply-route costs
+   *  (`supply_graph.ts`). Null when the cell has no ring at all (e.g. synthetic test fixtures). */
+  centroid: [number, number] | null;
+}
+
+/**
+ * Signed-area (shoelace) centroid of a cell's outer ring(s). Multiple rings (MultiPolygon) are
+ * combined by area-weighted average. Falls back to a simple vertex average for degenerate
+ * (zero-area, e.g. near-collinear or single-point artifact) rings, and returns null when there
+ * are no rings at all.
+ */
+export function centroidOf(rings: Array<Array<[number, number]>>): [number, number] | null {
+  let cx = 0, cy = 0, totalArea = 0;
+  let vx = 0, vy = 0, vCount = 0;
+  for (const ring of rings) {
+    let area = 0, ringCx = 0, ringCy = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const [x0, y0] = ring[i];
+      const [x1, y1] = ring[(i + 1) % ring.length];
+      const cross = x0 * y1 - x1 * y0;
+      area += cross;
+      ringCx += (x0 + x1) * cross;
+      ringCy += (y0 + y1) * cross;
+      vx += x0; vy += y0; vCount++;
+    }
+    area /= 2;
+    if (area !== 0) {
+      ringCx /= 6 * area;
+      ringCy /= 6 * area;
+      cx += ringCx * Math.abs(area);
+      cy += ringCy * Math.abs(area);
+      totalArea += Math.abs(area);
+    }
+  }
+  if (totalArea > 0) return [cx / totalArea, cy / totalArea];
+  if (vCount > 0) return [vx / vCount, vy / vCount];
+  return null;
+}
+
+const EARTH_RADIUS_KM = 6371;
+
+/** Great-circle distance in km between two [lng, lat] points (degrees). */
+export function haversineKm(a: [number, number], b: [number, number]): number {
+  const [lng1, lat1] = a;
+  const [lng2, lat2] = b;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h = sinDLat * sinDLat + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * sinDLng * sinDLng;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 export interface SubprovinceGraph {
@@ -158,6 +210,7 @@ export function parseSubprovinceGraph(
       elevationType: typeof props?.elevation_type === "string" ? props.elevation_type : null,
       isCapital,
       polygon: rings,
+      centroid: centroidOf(rings),
     });
   }
 
