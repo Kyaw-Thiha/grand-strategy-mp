@@ -360,6 +360,7 @@ export class CombatSystem {
       const [idA, idB] = key.split("|");
       const divA = state.divisions.get(idA);
       const divB = state.divisions.get(idB);
+      const pair = this.activePairs.get(key);
       this.activePairs.delete(key);
       if (!divA || !divB) continue;
 
@@ -375,6 +376,7 @@ export class CombatSystem {
         reason: "diplomacy",
         division_a: divA.division_id,
         division_b: divB.division_id,
+        engagement_id: pair?.engagement_id ?? "",
       });
     }
   }
