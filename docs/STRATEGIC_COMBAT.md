@@ -120,8 +120,9 @@ Client-side bidirectional A* over a two-level unified graph. Server validates th
 path. Full implementation reference: `docs/PATHFINDING.md`.
 
 **Level 1 — Road graph:** Road network from `roads.geojson`. Road edges have a fixed low
-cost (0.05/deg); road_level governs animation speed, not pathfinding cost. All division
-types use the road graph identically.
+cost (0.05/deg) and a fixed on-road speed, regardless of `road_level` — road tiers are
+cosmetic only (see `docs/MAP_DATA_CONTRACT.md`). All division types use the road graph
+identically.
 
 **Level 2 — Waypoint graph:** A non-uniform terrain grid pre-baked by the pipeline,
 stored in `waypoints.json`. Three density tiers: open terrain (~22 km spacing), medium
@@ -385,58 +386,97 @@ by committing a supporting force that pulls the flanker's attention away.
 
 ## Supply System
 
-### Model: Road Segment Flow Rate
+### Model: Shortest-Path Routing Over the Subprovince Graph
 
-Supply is modelled as a flow rate per road segment, not as discrete individual entities.
-This keeps server simulation load manageable while preserving full strategic meaning.
+> **Status: Active — supersedes the road-segment flow-rate design this section originally
+> described.** That design modelled supply as a continuous flow rate per road segment, with
+> per-tick graph-flow math and animated truck sprites. It was never built; what shipped
+> instead is a per-division shortest-path search, run each supply tick, from the division's
+> subprovince to the nearest reachable friendly-or-allied supply hub. This reuses the same
+> subprovince adjacency graph capture, retreat, and encirclement already depend on, instead of
+> a fourth data structure, and is simpler to reason about and tune.
 
-**Supply hub:**
-- A building constructed in a province
-- Defines the rate at which supply is generated (supply/tick)
-- Feeds into the road network from its node outward
-- Capturing an enemy supply hub forces them onto longer, thinner supply lines — a primary
-  strategic objective
+**Supply hub:** currently, every subprovince cell at a friendly-or-allied-owned province's
+city position (`SubprovinceSystem.getHubSubprovinceIds`, resolved from `provinceCityPositions`).
+There is no supply-hub *building* requirement yet, despite `bld_supply_hub` existing in
+MAP_DATA_CONTRACT.md's building list — every owned capital is unconditionally a hub today.
+Capturing an enemy capital removes it as a hub for them (and, once subprovince ownership
+flips to the capturer, adds it as one for the capturer) — forcing the loser onto longer,
+thinner supply lines remains the intended strategic pressure, just realized via hub-set
+membership rather than a constructed building.
 
-**Flow mechanics:**
-- Each road segment between two nodes has a current supply throughput capacity
-- Supply flows from hub → road graph → divisions drawing from their current segment
-- Divisions draw supply from whatever segment they occupy
-- If a road segment is cut (enemy captures a node, air interdiction, enemy unit physically
-  blocks the road), flow to everything downstream is reduced or stopped
+**Routing (`findSupplyRoute`, `game-server/src/systems/supply_graph.ts`):** a Dijkstra search
+over the subprovince adjacency graph from the division's cell to the nearest reachable hub,
+restricted to friendly-or-allied-owned cells (plus cells the requesting division's own nation
+currently occupies). Edge cost is real time-to-traverse, not hop count — cell sizes vary
+enormously (hinterland cells especially, generated at a ~5,000km² target size — see
+Subprovince Generation, below — so a single off-road hop is commonly 30–75km and can exceed
+250km), and a flat per-hop cost badly misrepresented actual route length:
 
-**Visual representation:**
-- Truck sprites animated along roads as a client-side cosmetic effect driven by segment
-  throughput value
-- Lit roads = active supply flow. Dim/broken roads = supply disrupted
-- Simulation is pure graph flow math — sprites are display only
+```
+edgeCost(cell) = realDistanceKm(fromCentroid, toCentroid) / effectiveSpeedKmh(cell)
+effectiveSpeedKmh(cell) = SUPPLY_ROAD_SPEED_KMH                          if cell.kind == "road"
+                        = SUPPLY_OFFROAD_SPEED_KMH / terrainCost(cell)   otherwise
+```
 
-**Air interdiction of supply:**
-- Air units attack road segments, not individual trucks
-- A successful logistics strike reduces that segment's throughput capacity for N ticks
-- Visually: segment dims, supply flow to downstream divisions drops
-- Low-altitude logistics strike: does not depend on recon. Direct effect.
-- High-altitude logistics strike: damage proportional to recon value
-- Divisions undersupplied: take increased attrition, strength degrades over time
+`terrainCost` is read from the same per-terrain-type cost table unit movement uses
+(`UNIT_TERRAIN_COSTS.standard_infantry` — a generic stand-in, since a supply convoy has no
+single unit type), so genuinely impassable off-road terrain (dense forest in mountains,
+glaciers, etc.) is impassable for supply too, and a route naturally hugs roads and prefers
+easier terrain wherever an alternative exists — no special-cased "prefer road" logic is
+needed, since that behavior falls straight out of shortest-path search once edge weights
+reflect real cost. This also resolves the model's original open question of whether supply
+should fall back onto non-road subprovinces at reduced throughput: yes, and the fallback
+speed is further graded by terrain harshness rather than a single flat off-road number.
+
+**Route status (`SupplyRoute.status` / `throughputRatio`):** decays purely from **accumulated
+off-road distance** along the resolved route — road distance is excluded from the calculation
+entirely, not merely weighted small, matching "a route that's mostly fast road should read as
+fully open regardless of how long it is":
+
+```
+throughputRatio = clamp(1 - offRoadKm / OFFROAD_DEGRADE_DISTANCE_KM, 0, 1)
+status = "open" if throughputRatio >= OPEN_THROUGHPUT_THRESHOLD (0.9) else "degraded"
+```
+
+`OFFROAD_DEGRADE_DISTANCE_KM` defaults to 300 — calibrated against this map's actual
+hinterland-hop distances (see above); a smaller constant made an ordinary single off-road hop
+right next to a hub already read as degraded, which felt wrong. A route with no path at all to
+any hub reads `"cut_off"`. This is a route-level display concept, independent of the
+Tier 1/2/3 division `supply_status` field described in the three-tier section below, which is
+computed by a different, binary connectivity check — a route can show `"degraded"` while the
+division is still fully in normal supply status, and vice versa is not possible (no path ⇒
+both the route and the tier check agree the division is unsupplied).
+
+**Visual representation (`client/src/systems/military/supply_line_overlay.gd`):** one polyline
+per division with a currently-displayable route, colored/pulsed by status (open = blue,
+degraded = a continuous mild-to-severe amber-to-red gradient driven by `throughputRatio`;
+`cut_off`/`encircled` render nothing here — the division icon's own badge covers those). While
+the route crosses a road-kind cell with resolved geometry, the drawn line follows the literal
+road centerline (`road_subprovince_geometry.geojson`, clipped per cell at map-build time from
+the same road source used for the static road layer); off-road stretches instead get a small
+deterministic per-cell wander offset plus a centripetal Catmull-Rom spline, so they read as a
+natural trail rather than a rigid centroid-to-centroid zigzag. This replaces the originally-
+planned truck-sprite/lit-road cosmetic entirely — no sprite animation, no per-segment dim/
+broken visual.
+
+**Air interdiction of supply — still planned, not yet implemented.** The original design's
+"attack road segments to reduce throughput for N ticks" doesn't map cleanly onto per-division
+shortest-path routing — there is no persistent per-segment throughput value left to reduce.
+A future implementation needs its own mechanism (e.g. temporarily excluding a struck cell from
+`findSupplyRoute`'s valid-edge set for N ticks) rather than reusing the flow-capacity idea
+verbatim.
 
 **Upstream source — production and Reserve (RESOURCE_ECONOMY.md):** what a division
-actually draws through this flow graph is a *resource-mix vector* sourced from the
+actually draws through this routing is a *resource-mix vector* sourced from the
 national unit-type Reserve, not an abstract "supply points" scalar. When Reserve is
-empty for a needed unit type, this road-segment flow rate is no longer the only
-bottleneck — the effective draw becomes `min(production_rate, road_segment_flow_rate)`,
-since the delivery channel and the factory line producing what it's carrying are now in
-series, not parallel. A newly-raising division uses the same `min()` logic but against
-a flat national Marshalling rate instead of this road-segment flow rate until it
-deploys — see RESOURCE_ECONOMY.md's Reserve and Marshalling sections, and the Division
-Representation section below for the deployment-state distinction this implies.
-
-**Relationship to subprovinces (see Subprovince Capture System, below):** "road segment"
-here continues to mean the road graph itself, not the road-corridor *subprovince* cells that
-now also exist along the same roads — they're two views of the same physical corridor, not
-two competing graphs. The open question is whether supply flow should stay gated to
-friendly/allied-owned road-corridor subprovinces exclusively (matching the existing
-"exclusively along roads" rule in MAP_DATA_CONTRACT.md), or whether it should be allowed to
-fall back onto non-road subprovinces at reduced throughput when a division is off-road. Not
-yet decided — see that section's open question.
+empty for a needed unit type, route throughput is no longer the only bottleneck — the
+effective draw becomes `min(production_rate, route_throughput)`, since the delivery channel
+and the factory line producing what it's carrying are now in series, not parallel. A
+newly-raising division uses the same `min()` logic but against a flat national Marshalling
+rate instead of route throughput until it deploys — see RESOURCE_ECONOMY.md's Reserve and
+Marshalling sections, and the Division Representation section below for the deployment-state
+distinction this implies.
 
 ### Supply and encirclement — three-tier status system
 
@@ -571,9 +611,11 @@ high-HP, high-experience divisions collapse under stacking Tier 3 debuffs.
 ---
 
 **Retreat pathing** (also used outside these three checks, whenever a division retreats):
-cheapest path from the division's subprovince to a friendly-or-allied road-corridor cell or
-supply hub, cost-weighted by ownership — friendly/allied cells cheap, contested cells medium,
-enemy/neutral cells expensive (and only traversable under the Tier 2 fighting-withdrawal
+cheapest path (`findRetreatPath`, `supply_graph.ts`) from the division's subprovince to a
+friendly-or-allied road-corridor cell or supply hub, built on the same real-distance/effective-
+speed base cost the Supply System's routing uses (see Model: Shortest-Path Routing, above),
+then multiplied by an ownership tier — friendly/allied cells at the base cost, contested cells
+at 5×, enemy/neutral cells at 20× (and only traversable under the Tier 2 fighting-withdrawal
 rule). Road-corridor cells keep their natural speed advantage with no special-casing needed,
 since they're already the cheap edges in this same graph.
 
@@ -826,8 +868,9 @@ hand-edited. See MAP_DATA_CONTRACT.md's Subprovinces section for the file format
    town cell (kind `town`). Only oversized urban patches are subdivided; normal ones stay whole.
    These flip under the normal capture rule; only the city cell is locked.
 3. **Road corridor.** Buffer every road centerline by one fixed width, identical for every
-   `road_level` — `road_level` continues to govern movement/animation speed only, never corridor
-   geometry. Both longitudinal corridor edges receive **coherent, bounded lateral noise** (width
+   `road_level` — `road_level` is cosmetic labeling only (see `docs/MAP_DATA_CONTRACT.md`) and
+   affects neither movement speed nor corridor geometry. Both longitudinal corridor edges
+   receive **coherent, bounded lateral noise** (width
    varies a few percent) and segment cut positions are jittered, so roads read as worn natural
    corridors rather than perfectly straight strips; the centerline and junction anchors stay fixed.
    Corridors are clipped against the already-carved city/urban geometry (so roads never overlap
@@ -873,32 +916,27 @@ Fail the build otherwise.
 - **Resolved.** Recon-classified units are not excluded from triggering a flip — any unit
   type, including recon, flips a cell it occupies by literal polygon presence. Implemented as
   specified in `subprovince_system.ts`'s capture check.
-- **Urban capture cascade (finalized).** When an urban/city subprovince changes ownership,
-  ownership cascades a bounded number of graph hops rather than flipping the whole mosaic:
+- **Whole-province capture cascade (implemented — not the bounded-hop design this bullet
+  originally specified).** `SubprovinceSystem.cascadeCityCapture`, called immediately after a
+  province's owner flips (`combat_system.ts`'s province-capture check, below), does not stop
+  at one or two hops from the urban cell. In a single pass it flips **every remaining
+  `oldOwner`-held subprovince in the province** to the new owner, except:
 
-  ```text
-  captured urban/city cell
-      -> capture its adjacent road cells
-      -> capture the hinterland cells adjacent to the captured urban cell
-      -> capture the hinterland cells adjacent to those newly captured road cells
-  ```
+  - The capital cell's own owner is synced first — the only place a capital cell's `owner_id`
+    ever changes (the generic occupancy-based `checkCaptureAfterMovement` path always skips
+    capitals).
+  - Cells still physically occupied by a surviving `oldOwner` division ("former defenders").
+  - Cells on **one** preserved `oldOwner` supply route, if some surviving-defender cell has an
+    `"open"` or `"degraded"` route (per `findSupplyRoute`) to another `oldOwner`-friendly hub —
+    candidate start cells are tried in deterministic sorted-ID order, first success kept.
 
-  Rules to be enforced by the authoritative server (planned, not yet implemented):
-
-  - Expansion is **exactly one graph hop** from the urban cell, plus one further hop from
-    the road cells captured by that first hop. There is no hinterland-to-hinterland chaining
-    and no road-to-road chaining.
-  - "Adjacent" means shared-edge subprovince adjacency from `subprovince_adjacency.geojson`,
-    never geographic radius.
-  - Enemy-occupied cells and combat-frozen cells are never captured by the cascade.
-  - Surviving former-defender-occupied cells and one preserved supply route keep the
-    existing city-capture preservation exceptions.
-  - Every changed cell emits one `SUBPROVINCE_CAPTURED` event; the existing
-    `PROVINCE_CAPTURED` event is unchanged and separate.
-
-  This produces a natural invasion seam — capturing a city's urban core pulls in the roads
-  and the land immediately around them, while untouched hinterland stays contested until it
-  is physically entered.
+  If no such route exists, only directly-occupied cells are preserved. An earlier draft of
+  this design proposed a bounded expansion instead (exactly one graph hop from the urban cell,
+  plus one further hop from the road cells that hop captured, with no hinterland-to-hinterland
+  or road-to-road chaining) — that was never built; the shipped mechanism is simpler and far
+  more sweeping (nearly the whole province, not a local ring around the city). Every changed
+  cell emits one `SUBPROVINCE_CAPTURED` event; `PROVINCE_CAPTURED` itself is unchanged and
+  separate.
 
 ### Rendering — Fade Transition
 
@@ -922,15 +960,14 @@ pre-fight owner.
 
 ### City Capture and Ownership Transfer
 
-**Currently implemented (province-level):** a division that physically occupies the city
-node (within `CAPTURE_RADIUS_KM = 40`, with no enemy unit within `CONTEST_RADIUS_KM = 20` of
-the city) flips the whole province's owner immediately and fires `PROVINCE_CAPTURED`. There
-is no server-side subprovince ownership yet, so no cell-level cascade runs today.
-
-**Planned (see urban capture cascade above):** when subprovince ownership lands, capturing an
-urban/city cell starts the bounded one-hop cascade to adjacent road and hinterland cells.
-This is what changes for the rest of the subprovince mosaic at capture time; the province-
-level trigger itself is unchanged.
+**Implemented:** a division that physically occupies the city node — within
+`CONTEST_RADIUS_KM = 20`km of the city, with no enemy unit within that same
+`CONTEST_RADIUS_KM = 20`km of the city — flips the whole province's owner immediately and
+fires `PROVINCE_CAPTURED`. Immediately after, the whole-province capture cascade (see Urban
+capture cascade, above) flips subprovince ownership for the rest of the province in the same
+tick — this is not a future item, it runs today. (`CAPTURE_RADIUS_KM = 40` also exists in
+`combat_system.ts`, but gates an unrelated proximity check elsewhere, not this capture
+trigger's own radius.)
 
 ### Frontline Visibility by Player Type
 

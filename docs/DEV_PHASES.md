@@ -260,7 +260,8 @@ Unit tests for movement profile computation and A* path validity.
       (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
       cached server-side for path validation
 - [ ] Division movement tick — advance toward player-set target waypoints each server tick;
-      speed = road_level speed on roads; slowest-unit speed off-road from movement profile
+      speed = flat road speed on roads (road_level is cosmetic only, does not affect speed);
+      slowest-unit speed off-road from movement profile
 - [x] Engagement area collision detection — circular areas, radius by division type;
       full overlap triggers COMBAT_STARTED
 - [ ] Attacker/defender determination at combat initiation:
@@ -398,8 +399,9 @@ Unit tests for movement profile computation and A* path validity.
             state, and dead overlay renderer were fully removed this session)
 - [x] `COMBAT_STARTED`, `COMBAT_RESULT`, `COMBAT_ENDED`, `PROVINCE_CAPTURED`,
       `UNIT_DESTROYED`, `STACK_FORMED`, `STACK_ROTATION`, `STACK_DISSOLVED` events broadcast.
-      Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the
-      full three-tier system in Phase 7, not by this phase. `FRONTLINE_UPDATED` deferred to Phse 7.
+      Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `DIVISION_ENCIRCLED`) are emitted
+      by the full three-tier system in Phase 7, not by this phase. `FRONTLINE_UPDATED` deferred
+      to Phase 7.
 - [ ] Basic supply placeholder — **none needed.** Earlier drafts of this phase had a
       simplified "out of supply = increased attrition" placeholder here, on the assumption
       Phase 7 was far enough away to need a stand-in. It is not: Phase 7 directly follows
@@ -516,9 +518,10 @@ Unit tests for movement profile computation and A* path validity.
       - [ ] Neutral player receives `owned_subprovince_count / total` per nation per
             province (see STRATEGIC_COMBAT.md — Frontline Visibility by Player Type), not
             individual `SUBPROVINCE_CAPTURED` events or division-level detail
-- [ ] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`; whether
-      remaining subprovinces cascade-flip at that moment or stay as individually captured is
-      the same open cascade question noted above — implement both branches behind a flag
+- [x] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`. Resolved: the
+      whole-province capture cascade (`cascadeCityCapture`, see Urban capture cascade above)
+      flips remaining subprovinces at that same moment, not later or individually — no flag
+      needed, only one branch was ever built
 - [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,
       stack rotation, encirclement, division destroyed, supply severed via subprovince toasts
 
@@ -957,23 +960,44 @@ for that unit type.
 
 ## Phase 7 — Supply System
 
-**Goal:** Full road-segment graph supply replaces the simplified Phase 4 supply model.
-Encirclement via supply cut is a reliable, satisfying outcome. Air interdiction of roads works.
+**Goal:** Subprovince-graph supply replaces the simplified Phase 4 supply model. Encirclement
+via supply cut is a reliable, satisfying outcome. Air interdiction of supply routes is the one
+remaining unimplemented piece (see Air interdiction integration, below).
 
-**Why its own phase:** Supply is architecturally complex (graph flow on the adjacency data from
-MAP_DATA_CONTRACT.md) and interacts with the military, economy, and air layers. Separating it
-ensures it can be tested and tuned in isolation before the other layers depend on it.
+**Why its own phase:** Supply is architecturally complex (routing over the subprovince
+adjacency graph from MAP_DATA_CONTRACT.md) and interacts with the military, economy, and air
+layers. Separating it ensures it can be tested and tuned in isolation before the other layers
+depend on it.
 
-**Testing:** Unit tests for graph flow math. Bot clients testing encirclement scenarios.
+**Status note:** the originally-planned road-segment flow-rate model (segments carrying a
+throughput capacity, hub buildings feeding it outward each tick, trucks drawing from whatever
+segment they occupy) was never built. What shipped instead — and is what the checklist below
+now reflects — is a per-division Dijkstra shortest-path search each supply tick, from the
+division's subprovince to the nearest reachable friendly/allied hub, with real distance/
+terrain-weighted edge cost. See `STRATEGIC_COMBAT.md`'s Supply System section for the full
+design.
+
+**Testing:** `lane:subprovince` unit tests (`game-server/test/subprovince-supply-graph.test.ts`,
+`subprovince-supply.test.ts`, `subprovince-retreat.test.ts`). Bot clients testing encirclement
+scenarios.
 
 ### Colyseus
-- [ ] Supply graph — road segments from adjacency data carry throughput capacity per road level
-- [ ] Supply hub building generates supply at a rate that flows outward from its node through
-      the graph each tick
-- [ ] Divisions draw supply from the segment they currently occupy
-- [ ] Segment cut detection — enemy unit physically occupying a node, or province capture
-      breaking a supply path, reduces downstream throughput
-- [ ] Three-tier supply/encirclement status system (checked each supply tick), now computed
+- [x] Supply routing — `findSupplyRoute` (`supply_graph.ts`): Dijkstra over the subprovince
+      adjacency graph, restricted to friendly/allied-owned (or requester-occupied) cells; edge
+      cost is real distanceKm / effective speed, not a flat per-hop or per-segment-capacity
+      value — road cells at `SUPPLY_ROAD_SPEED_KMH`, off-road cells at
+      `SUPPLY_OFFROAD_SPEED_KMH` graded down by `UNIT_TERRAIN_COSTS.standard_infantry`
+- [x] Supply hub — currently every friendly/allied-owned province's city subprovince
+      (`SubprovinceSystem.getHubSubprovinceIds`); no supply-hub *building* requirement is
+      implemented yet, despite `bld_supply_hub` existing in the map data contract
+- [x] Route status/openness — `SupplyRoute.status` (`"open"` / `"degraded"` / `"cut_off"`) and
+      `throughputRatio` decay purely from accumulated off-road distance along the resolved
+      route (`OFFROAD_DEGRADE_DISTANCE_KM`, default 300km, calibrated to this map's actual
+      hinterland-hop scale) — independent of the Tier 1/2/3 division `supply_status` below
+- [ ] Route/segment interdiction via enemy action beyond ownership already gating the valid-edge
+      set (e.g. a struck cell temporarily excluded from routing) — not implemented; see Air
+      interdiction integration, below
+- [x] Three-tier supply/encirclement status system (checked each supply tick), now computed
       over the subprovince adjacency graph — **the influence-percentage version referenced
       in earlier drafts of this doc is gone; see `STRATEGIC_COMBAT.md`'s Supply and
       encirclement section for the current design, this checklist mirrors it exactly:**
@@ -994,7 +1018,7 @@ ensures it can be tested and tuned in isolation before the other layers depend o
             - Armoured units: damage output decays per tick → 0 after N ticks
             - Infantry units: slower degradation than armour
             - All units: suppression threshold lowered further per tick
-            `ENCIRCLED` event fires. Note this check is a strict subset of Tier 2's (rings
+            `DIVISION_ENCIRCLED` event fires. Note this check is a strict subset of Tier 2's (rings
             1–2 vs rings 1–3) — verify the implementation actually relies on that subset
             relationship for the "cannot skip Tier 2" guarantee below, rather than adding a
             separate explicit ordering check that could drift out of sync with it
@@ -1004,19 +1028,30 @@ ensures it can be tested and tuned in isolation before the other layers depend o
       - [ ] Stack-level encirclement: the check applies to the whole stack at its shared
             position, not per-division — rotation (Phase 4's stack mechanic) does not
             protect a stack that is, as a whole, surrounded
-      - [x] Retreat pathing (used here and elsewhere): cheapest path over the subprovince
-            graph, edge cost cheap for friendly/allied cells, medium for contested, expensive
-            for enemy/neutral — replaces any separate "retreat along supply road" logic
-- [ ] `SUPPLY_DISRUPTED`, `SUPPLY_RESTORED`, `OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED` events
-      (an earlier draft also named `DIVISION_ENCIRCLED` separately — dropped here as a
-      duplicate of `ENCIRCLED`, the actual Tier 3 transition event)
+      - [x] Retreat pathing (used here and elsewhere): `findRetreatPath` (`supply_graph.ts`),
+            built on the same real distance/effective-speed base cost the Supply System's
+            routing uses, multiplied by an ownership tier — friendly/allied at base cost,
+            contested at 5×, enemy/neutral at 20× — replaces any separate "retreat along
+            supply road" logic
+- [x] `OUT_OF_SUPPLY`, `CUT_OFF`, `DIVISION_ENCIRCLED`, `SUPPLY_RESTORED` events (the actual
+      implemented set — `SUPPLY_DISRUPTED` and a bare `ENCIRCLED` event were never built;
+      an earlier draft of this doc had the naming backwards, claiming `DIVISION_ENCIRCLED`
+      was the dropped duplicate when it's actually the one that shipped as the Tier 3
+      transition event)
 
 ### Hono
-- [ ] Supply hub building persisted via `/internal/game-end` in player results
+- [ ] Supply hub building persisted via `/internal/game-end` in player results — blocked on
+      the supply-hub *building* itself not existing yet (see Colyseus's Supply hub item above)
 
 ### Godot
-- [ ] `SupplySystem` — road segment throughput visualisation; truck sprites on active
-      segments; dim/broken visual for disrupted segments
+- [x] `SupplyLineOverlay` (`client/src/systems/military/supply_line_overlay.gd`) — one polyline
+      per division with a displayable route, colour/pulse driven by status and `throughputRatio`
+      (open = blue, degraded = continuous amber-to-red gradient); replaces the originally-
+      planned truck-sprite/lit-road segment visualisation entirely. While on a road-kind cell
+      with resolved geometry the line follows the literal road centerline
+      (`road_subprovince_geometry.geojson`); off-road stretches get a deterministic per-cell
+      wander offset plus a centripetal Catmull-Rom spline instead of a straight
+      centroid-to-centroid line
 - [x] Supply status indicator on division icons — subtle colour shift when out of supply;
       distinct visual treatment per tier (Out of Supply / Cut Off / Encircled), not a single
       generic "low supply" indicator, since the three tiers carry meaningfully different
@@ -1025,9 +1060,13 @@ ensures it can be tested and tuned in isolation before the other layers depend o
       distinct notification types matching the three tiers, not one generic warning)
 
 ### Air interdiction integration
-- [ ] Colyseus logistics strike handler reduces segment throughput for N ticks
+- [ ] Not implemented. The originally-planned "reduce segment throughput for N ticks" doesn't
+      map onto per-division shortest-path routing (there is no persistent per-segment
+      throughput value to reduce) — needs its own mechanism, e.g. temporarily excluding a
+      struck cell from `findSupplyRoute`'s valid-edge set for N ticks, per
+      `STRATEGIC_COMBAT.md`'s Supply System section
 - [ ] Both low-altitude (direct, no recon) and high-altitude (recon-proportional) variants
-      resolve against the supply graph correctly
+      resolve against whatever that mechanism turns out to be
 
 ### Verification gate
 Division advances beyond friendly road-corridor reach, no path to any supply hub remains →
@@ -1040,7 +1079,7 @@ search; retreat now triggers a fighting withdrawal (HP damage proportional to bl
 density along the escape path) rather than a clean retreat → `CUT_OFF` fires. Enemy closes
 ring(2) and ring(1) around the division too → Tier 3 Encircled: retreat command disabled
 entirely, armoured units' damage output decays toward zero over several ticks, infantry
-degrades slower → `ENCIRCLED` fires. Confirm Tier 3 never fires on a tick where Tier 2's
+degrades slower → `DIVISION_ENCIRCLED` fires. Confirm Tier 3 never fires on a tick where Tier 2's
 condition wasn't also true in that same evaluation — this should fall out automatically from
 the subset relationship between the two ring checks; if it doesn't, that's a bug in the
 implementation, not an edge case to special-case around. Set up a case where ring(3) is
@@ -1048,9 +1087,10 @@ hostile but ring(1)/ring(2) still have friendly cells → confirm this reads as 
 Encircled — the outer ring alone doesn't get you all the way to Tier 3. Stack of three
 divisions, fully encircled → confirm encirclement applies to the stack as a whole, not reset
 by Phase 4's stack-rotation mechanic. Last division in a Tier 3 stack hits its suppression
-threshold → destroyed outright (not retreated) → experience and template lost permanently. Air logistics strike dims a road segment and reduces downstream division supply
-for the correct duration, and can independently push a division from normal into Tier 1 if
-the strike cuts its only connection to a supply hub.
+threshold → destroyed outright (not retreated) → experience and template lost permanently.
+Air interdiction of supply is not yet implemented (see Air interdiction integration, above) —
+its verification (a logistics strike temporarily blocking a route and independently pushing a
+division into Tier 1) remains outstanding until that mechanism is built.
 
 ---
 
