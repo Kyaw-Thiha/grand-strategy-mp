@@ -40,6 +40,19 @@ export class ProvinceState extends Schema {
   @type("number") infrastructure:      number = 50;
   @type("number") oil_bombed_until_ms: number = 0;
   @type("number") naval_base_level: number = 0;
+  /** Player-built supply hub, separate from the static, map-authored is_supply_hub provinces
+   *  SubprovinceSystem loads at room start. */
+  @type("boolean") has_supply_hub: boolean = false;
+  /** Reserved for future upgrade tiers — no gameplay effect yet. */
+  @type("number") supply_hub_level: number = 0;
+  /** 0 = not under construction; otherwise a server clock timestamp (Date.now()-based, same
+   *  pattern as oil_bombed_until_ms) at which construction completes. */
+  @type("number") supply_hub_construction_ends_at_ms: number = 0;
+}
+
+export class SubprovinceState extends Schema {
+  @type("string") province_id: string = "";
+  @type("string") owner_id: string = "";
 }
 
 // ── Phase 4: Division (replaces skeleton UnitState) ───────────────────────────
@@ -54,6 +67,12 @@ export class DivisionState extends Schema {
   @type("number") suppression: number = 0;      // 0–100
   @type("string") combat_state: string = "idle"; // "idle"|"engaged"|"suppressed"|"retreating"|"destroyed"
   @type("string") supply_status: string = "normal"; // "normal"|"out_of_supply"|"cut_off"|"encircled"
+  // Batch 8 Task 3: per-division speed penalty for a Tier 2 (cut_off) fighting-withdrawal
+  // retreat. 1 = no penalty (default/normal movement). Reset to 1 once the retreat completes
+  // (combat_system.ts's _checkRetreatCompletion). Applied only to the division's own movement
+  // (movement_system.ts's _advanceDivision/_advanceFinalPosition), never to in-combat
+  // repositioning (_advanceReposition).
+  @type("number") retreat_speed_mult: number = 1;
   @type("number") observation_radius: number = 100; // km
   @type("number") engagement_radius: number = 50;   // km, computed from template
   @type("number") recon_value: number = 0;    // 0.0–1.0; accumulated per engagement round
@@ -68,6 +87,7 @@ export class DivisionState extends Schema {
   @type("number") final_position_lng: number = -999; // exact click target (-999 = none)
   @type("number") final_position_lat: number = -999;
   @type("string")          template_id: string = "";
+  @type("string") subprovince_id: string = ""; // resolved each tick by SubprovinceSystem.checkCaptureAfterMovement
   grid: DivisionGridState = new DivisionGridState(); // server-side only — not schema-synced
 }
 
@@ -97,6 +117,7 @@ export class GameRoomState extends Schema {
   @type({ map: PlayerState })   players   = new MapSchema<PlayerState>();
   @type({ map: NationState })   nations   = new MapSchema<NationState>();
   @type({ map: ProvinceState }) provinces = new MapSchema<ProvinceState>();
+  @type({ map: SubprovinceState }) subprovinces = new MapSchema<SubprovinceState>();
   @type({ map: DivisionState }) divisions = new MapSchema<DivisionState>();
   @type({ map: RelationState }) relations  = new MapSchema<RelationState>();
   @type({ map: ProposalState }) proposals  = new MapSchema<ProposalState>();

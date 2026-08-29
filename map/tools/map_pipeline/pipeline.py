@@ -32,6 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 sys.path.insert(0, str(Path(__file__).parent))
 from validate import validate_all
+from subprovince_generator import SubprovinceConfig, default_config
+from subprovince_io import generate_real_province, publish_subprovince_outputs
+from subprovince_validation import build_cross_province_adjacency
+from road_subprovince_geometry import build_road_subprovince_geometry, serialize_road_subprovince_geometry
 
 # Pass-through files copied unchanged to the output directory
 PASSTHROUGH_FILES = [
@@ -83,8 +87,23 @@ def parse_args() -> argparse.Namespace:
                         help="Skip DEM mosaicing and heightmap export")
     parser.add_argument("--resource-preset", choices=["playtest"], default=None,
                         help="Override res_* values with a named preset instead of reading "
-                             "the source geojson (see docstring above). Omit for the default "
-                             "authored-from-geojson behavior.")
+                         "the source geojson (see docstring above). Omit for the default "
+                         "authored-from-geojson behavior.")
+    parser.add_argument("--subprovince-province", default=None,
+                        help="Generate subprovince outputs for exactly one province ID")
+    parser.add_argument("--subprovince-all-provinces", action="store_true",
+                        help="Generate subprovince outputs for every province in the map. "
+                             "Failures are skipped and logged to a report manifest instead of "
+                             "aborting the run; provinces that succeed are still published. "
+                             "Mutually exclusive with --subprovince-province.")
+    parser.add_argument("--subprovince-retry-failed", action="store_true",
+                        help="Read subprovince_generation_report.json from a previous full-map run "
+                             "and regenerate only the provinces listed as failed, merging the "
+                             "newly-succeeding output into the existing published files.")
+    parser.add_argument("--subprovince-only", action="store_true",
+                        help="When combined with --subprovince-province, publish only the "
+                             "subprovince outputs and skip map_data, passthrough, waypoint, "
+                             "terrain-grid, and DEM generation")
     return parser.parse_args()
 
 
@@ -211,7 +230,10 @@ def build_provinces(
             "name":              props["name"],
             "map_id":            props["map_id"],
             "nation_id":         props["nation_id"],
-            "is_capital":        bool(props.get("is_capital", False)),
+            # provinces.geojson's own is_capital is never authored (always False) — the real
+            # flag lives on the matching cities.geojson feature, the same source the subprovince
+            # generator already uses to mark a cell's kind as "capital".
+            "is_capital":        bool(city_props.get("is_capital", False)),
             "is_playable":       bool(props.get("is_playable", True)),
             "is_core":           _parse_is_core(props.get("is_core")),
             "city_name":         props["city_name"],
@@ -227,6 +249,7 @@ def build_provinces(
             "resources":         resources,
             "vp_value":          props.get("vp_value", 0),
             "is_objective":      bool(props.get("is_objective", False)),
+            "is_supply_hub":     False,
         })
 
     if resource_preset == "playtest":
@@ -263,6 +286,72 @@ def _apply_playtest_resource_preset(provinces_out: list[dict]) -> None:
             p["resources"] = {r: 0 for r in RESOURCE_TYPES}
         for i, res_type in enumerate(RESOURCE_TYPES):
             provs[i % len(provs)]["resources"][res_type] = PLAYTEST_RESOURCE_ABUNDANCE
+
+
+def assign_supply_hubs(provinces: list[dict], adjacency: list[dict]) -> None:
+    """
+    Sets is_supply_hub on each province in place. Playable nations get 4 hubs (the capital
+    province is always one; the other 3 are chosen greedily by maximum shortest-hop-distance,
+    over the province-level adjacency graph, from the nearest already-picked hub, spreading
+    them across the nation's territory rather than clustering them). Non-playable nations get
+    exactly 1 hub, their capital.
+
+    Deterministic: hop-distance ties are broken by province_id, ascending.
+    """
+    by_nation: dict[str, list[dict]] = defaultdict(list)
+    for p in provinces:
+        by_nation[p["nation_id"]].append(p)
+
+    neighbors: dict[str, set[str]] = defaultdict(set)
+    for edge in adjacency:
+        a, b = edge["from_province"], edge["to_province"]
+        neighbors[a].add(b)
+        neighbors[b].add(a)
+
+    def bfs_distances(start: str, within: set[str]) -> dict[str, int]:
+        dist = {start: 0}
+        queue = [start]
+        while queue:
+            cur = queue.pop(0)
+            for nxt in sorted(neighbors[cur]):
+                if nxt not in within or nxt in dist:
+                    continue
+                dist[nxt] = dist[cur] + 1
+                queue.append(nxt)
+        return dist
+
+    for nation_id, provs in by_nation.items():
+        provs.sort(key=lambda p: p["province_id"])
+        province_ids = {p["province_id"] for p in provs}
+
+        capital = next((p for p in provs if p["is_capital"]), None)
+        if capital is None:
+            print(f"  [WARN] nation {nation_id} has no capital province — skipping hub assignment",
+                  file=sys.stderr)
+            continue
+
+        hub_ids = [capital["province_id"]]
+        is_playable = any(p["is_playable"] for p in provs)
+        if is_playable:
+            for _ in range(3):
+                # Minimum hop-distance from each not-yet-picked province to any picked hub.
+                min_dist: dict[str, int] = {}
+                for hub_id in hub_ids:
+                    for pid, d in bfs_distances(hub_id, province_ids).items():
+                        if pid in hub_ids:
+                            continue
+                        if pid not in min_dist or d < min_dist[pid]:
+                            min_dist[pid] = d
+                if not min_dist:
+                    break  # disconnected/too-small nation; take fewer than 4 hubs rather than fail
+                # Maximum distance first (spread hubs out), ties broken by the alphabetically
+                # smallest province_id — sort ascending by (-distance, province_id) and take the
+                # first entry, since negating an int (not a string) is valid.
+                best = min(min_dist.items(), key=lambda kv: (-kv[1], kv[0]))
+                hub_ids.append(best[0])
+
+        for p in provs:
+            p["is_supply_hub"] = p["province_id"] in hub_ids
 
 
 # ── adjacency building ────────────────────────────────────────────────────────
@@ -1549,6 +1638,235 @@ def copy_passthrough_files(map_dir: Path, output_dir: Path) -> None:
             print(f"  [WARN] Passthrough file not found: {src}", file=sys.stderr)
 
 
+# ── subprovince full-map orchestration ──────────────────────────────────────
+
+MANIFEST_NAME = "subprovince_generation_report.json"
+
+
+def build_subprovince_config(map_config: dict) -> SubprovinceConfig:
+    """Build SubprovinceConfig from map.json's subprovince section, falling back to defaults."""
+    subprovince_values = map_config.get("subprovince", {})
+    field_defaults = default_config().__dict__
+    return SubprovinceConfig(
+        city_radius=float(subprovince_values.get("city_radius", field_defaults["city_radius"])),
+        city_noise_amplitude=float(subprovince_values.get("city_noise_amplitude", field_defaults["city_noise_amplitude"])),
+        city_noise_wavelength=float(subprovince_values.get("city_noise_wavelength", field_defaults["city_noise_wavelength"])),
+        urban_min_area=float(subprovince_values.get("urban_min_area", field_defaults["urban_min_area"])),
+        urban_target_area=float(subprovince_values.get("urban_target_area", field_defaults["urban_target_area"])),
+        road_width=float(subprovince_values.get("road_width", field_defaults["road_width"])),
+        road_segment_length=float(subprovince_values.get("road_segment_length", field_defaults["road_segment_length"])),
+        hinterland_target_area=float(subprovince_values.get("hinterland_target_area", field_defaults["hinterland_target_area"])),
+        hinterland_max_area=float(subprovince_values.get("hinterland_max_area", field_defaults["hinterland_max_area"])),
+        min_area=float(subprovince_values.get("min_area", field_defaults["min_area"])),
+        road_min_area=float(subprovince_values.get("road_min_area", field_defaults["road_min_area"])),
+        hinterland_tiny_grid_cells=float(subprovince_values.get("hinterland_tiny_grid_cells", field_defaults["hinterland_tiny_grid_cells"])),
+        hinterland_split_grid_cells=float(subprovince_values.get("hinterland_split_grid_cells", field_defaults["hinterland_split_grid_cells"])),
+        natural_noise_amplitude=float(subprovince_values.get("natural_noise_amplitude", field_defaults["natural_noise_amplitude"])),
+        natural_noise_wavelength=float(subprovince_values.get("natural_noise_wavelength", field_defaults["natural_noise_wavelength"])),
+        geometry_tolerance=float(subprovince_values.get("geometry_tolerance", field_defaults["geometry_tolerance"])),
+        seed=int(subprovince_values.get("seed", field_defaults["seed"])),
+    )
+
+
+def _reconstruct_polygons(path: Path) -> list:
+    """Rebuild SubprovincePolygon objects from a published subprovinces.geojson file."""
+    from shapely.geometry import shape as to_shape
+    from subprovince_generator import SubprovincePolygon
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("type") != "FeatureCollection":
+        raise ValueError(f"not a FeatureCollection: {path}")
+    polygons = []
+    for feature in data.get("features", []):
+        props = feature.get("properties") or {}
+        required = ("subprovince_id", "province_id", "kind", "cover_combat", "elevation_type", "is_capital")
+        if not all(key in props for key in required) or feature.get("geometry") is None:
+            raise ValueError(f"malformed subprovince feature in {path}")
+        polygons.append(SubprovincePolygon(
+            subprovince_id=props["subprovince_id"],
+            province_id=props["province_id"],
+            geometry=to_shape(feature["geometry"]),
+            kind=props["kind"],
+            cover_combat=props["cover_combat"],
+            elevation_type=props["elevation_type"],
+            is_capital=props["is_capital"],
+        ))
+    return polygons
+
+
+def _reconstruct_adjacency(path: Path) -> dict[str, list[str]]:
+    """Rebuild the adjacency mapping from a published subprovince_adjacency.geojson file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("type") != "FeatureCollection":
+        raise ValueError(f"not a FeatureCollection: {path}")
+    adjacency = {}
+    for feature in data.get("features", []):
+        props = feature.get("properties") or {}
+        if "subprovince_id" not in props or "neighbors" not in props:
+            raise ValueError(f"malformed adjacency feature in {path}")
+        adjacency[props["subprovince_id"]] = list(props["neighbors"])
+    return adjacency
+
+
+def merge_subprovince_outputs(existing_polygons: list, existing_adjacency: dict[str, list[str]],
+                              new_polygons: list, new_adjacency: dict[str, list[str]],
+                              replaced_province_ids: set[str]) -> tuple[list, dict[str, list[str]]]:
+    """
+    Merge newly generated provinces into existing full-map output.
+
+    Drops every existing polygon belonging to a replaced province (their cells were
+    regenerated), drops adjacent/neighbor references to now-absent cells, then adds the
+    new polygons/adjacency. Neighbor lists are pruned to the final cell ID set so the
+    merged file never references missing cells.
+    """
+    kept_polygons = [p for p in existing_polygons if p.province_id not in replaced_province_ids]
+    kept_polygons = kept_polygons + list(new_polygons)
+    final_ids = {p.subprovince_id for p in kept_polygons}
+    merged_adjacency = dict(existing_adjacency)
+    for key in [key for key in merged_adjacency if key not in final_ids]:
+        del merged_adjacency[key]
+    for key, neighbors in new_adjacency.items():
+        merged_adjacency[key] = [n for n in neighbors if n in final_ids]
+    for key in merged_adjacency:
+        merged_adjacency[key] = [n for n in merged_adjacency[key] if n in final_ids]
+    return kept_polygons, merged_adjacency
+
+
+def write_subprovince_manifest(output_dir: Path, succeeded: list[str],
+                               failed: list[dict]) -> Path:
+    """Write the full-map generation report manifest, returning its path."""
+    manifest_path = output_dir / MANIFEST_NAME
+    manifest = {"succeeded": sorted(succeeded), "failed": sorted(failed, key=lambda item: item["province_id"])}
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return manifest_path
+
+
+def run_full_map_subprovince_generation(sources: dict, config: SubprovinceConfig,
+                                        output_dir: Path) -> tuple[list, dict[str, list[str]], list[str], list[dict]]:
+    """
+    Generate subprovinces for every province in sources['provinces'].
+
+    Per-province failures are caught, recorded, and logged instead of aborting the run.
+    Returns (merged_polygons, adjacency, succeeded_ids, failed_records). Does not publish —
+    the caller publishes once after all provinces are processed (atomic publish).
+    """
+    succeeded: list[str] = []
+    failed: list[dict] = []
+    merged_polygons: list = []
+    merged_adjacency: dict[str, list[str]] = {}
+    province_features = list(sources["provinces"])
+    print(f"Building subprovinces for {len(province_features)} provinces...")
+    for feature in province_features:
+        province_id = (feature.get("properties") or {}).get("province_id")
+        if not province_id:
+            failed.append({"province_id": "<missing_id>", "error": "feature without province_id"})
+            continue
+        try:
+            polygons, adjacency = generate_real_province(feature, sources, config)
+        except Exception as exc:
+            failed.append({"province_id": province_id, "error": str(exc)})
+            print(f"  [subprovince] FAIL {province_id}: {exc}", file=sys.stderr)
+            continue
+        succeeded.append(province_id)
+        merged_polygons.extend(polygons)
+        merged_adjacency.update(adjacency)
+        print(f"  [subprovince] ok {province_id}: {len(polygons)} cells")
+    return merged_polygons, merged_adjacency, succeeded, failed
+
+
+def run_subprovince_retry(sources: dict, config: SubprovinceConfig,
+                          output_dir: Path) -> tuple[list, dict[str, list[str]], list[str], list[dict]]:
+    """
+    Regenerate only previously-failed provinces and merge them into existing output.
+
+    Reads subprovince_generation_report.json for the failed list, regenerates each, drops
+    their stale cells from the published files, merges the fresh cells, and republishes.
+    Returns the merged (polygons, adjacency, succeeded, failed_after_retry).
+    """
+    manifest_path = output_dir / MANIFEST_NAME
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"no {MANIFEST_NAME} found in {output_dir} — run --subprovince-all-provinces first")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    failed_ids = [item["province_id"] for item in manifest.get("failed", [])]
+    if not failed_ids:
+        print("  No failed provinces to retry — output left untouched.")
+        existing_polygons = _reconstruct_polygons(output_dir / "subprovinces.geojson")
+        existing_adjacency = _reconstruct_adjacency(output_dir / "subprovince_adjacency.geojson")
+        # Re-write the same manifest so the file is consistent even though output is a no-op.
+        write_subprovince_manifest(output_dir, manifest.get("succeeded", []), [])
+        return existing_polygons, existing_adjacency, manifest.get("succeeded", []), []
+
+    existing_polygons = _reconstruct_polygons(output_dir / "subprovinces.geojson")
+    existing_adjacency = _reconstruct_adjacency(output_dir / "subprovince_adjacency.geojson")
+    province_features = {f["properties"]["province_id"]: f for f in sources["provinces"]
+                         if (f.get("properties") or {}).get("province_id")}
+    still_failed: list[dict] = []
+    succeeded = list(manifest.get("succeeded", []))
+    new_polygons: list = []
+    new_adjacency: dict[str, list[str]] = {}
+    print(f"Retrying {len(failed_ids)} failed provinces...")
+    for province_id in failed_ids:
+        feature = province_features.get(province_id)
+        if feature is None:
+            still_failed.append({"province_id": province_id, "error": "province no longer in source data"})
+            print(f"  [subprovince] FAIL {province_id}: missing from source data", file=sys.stderr)
+            continue
+        try:
+            polygons, adjacency = generate_real_province(feature, sources, config)
+        except Exception as exc:
+            still_failed.append({"province_id": province_id, "error": str(exc)})
+            print(f"  [subprovince] FAIL {province_id}: {exc}", file=sys.stderr)
+            continue
+        succeeded.append(province_id)
+        new_polygons.extend(polygons)
+        new_adjacency.update(adjacency)
+        print(f"  [subprovince] retry ok {province_id}: {len(polygons)} cells")
+    merged_polygons, merged_adjacency = merge_subprovince_outputs(
+        existing_polygons, existing_adjacency, new_polygons, new_adjacency, set(failed_ids))
+    return merged_polygons, merged_adjacency, sorted(set(succeeded)), still_failed
+
+
+def _warn_if_overwriting_full_map(output_dir: Path) -> None:
+    """Warn when a single-province run would replace published full-map subprovince output."""
+    manifest_path = output_dir / MANIFEST_NAME
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    succeeded = manifest.get("succeeded", [])
+    if not isinstance(succeeded, list) or len(succeeded) < 2:
+        return
+    print(f"[WARN] {len(succeeded)} provinces have full-map subprovince output published "
+          f"({MANIFEST_NAME}); a single-province run will REPLACE them. Re-run "
+          f"--subprovince-all-provinces afterwards to restore full-map output.",
+          file=sys.stderr)
+
+
+def _print_subprovince_summary(succeeded: list[str], failed: list[dict],
+                               polygons: list, adjacency: dict[str, list[str]]) -> None:
+    print()
+    print("── Summary ──────────────────────────────────")
+    print(f"  Subprovince provinces: {len(succeeded)} succeeded, {len(failed)} failed")
+    print(f"  Subprovince cells: {len(polygons)}")
+    print(f"  Subprovince adjacency:{len(adjacency):>5}")
+    print("  Subprovince validation: passed for generated provinces")
+    print("─────────────────────────────────────────────")
+
+
+def _publish_road_geometry(output_dir: Path, polygons: list, sources: dict) -> None:
+    """Clips each real road-kind subprovince cell to its source road LineString (roads.geojson)
+    and publishes road_subprovince_geometry.geojson — a best-effort visual aid the client uses to
+    draw supply lines that follow the literal road curve instead of a straight line through the
+    cell's centroid. Never load-bearing (client soft-fails if this file is absent/incomplete), so
+    a low match rate here is a visual regression, not a pipeline failure."""
+    road_cells = [{"subprovince_id": polygon.subprovince_id, "geometry": polygon.geometry}
+                  for polygon in polygons if polygon.kind == "road"]
+    geometry_by_id = build_road_subprovince_geometry(road_cells, sources.get("roads", []), 1e-8)
+    serialize_road_subprovince_geometry(output_dir / "road_subprovince_geometry.geojson", geometry_by_id)
+    print(f"  road_subprovince_geometry.geojson: {len(geometry_by_id)}/{len(road_cells)} road cells matched")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1580,6 +1898,126 @@ def main() -> None:
     # Validate all source files — exits on any error
     sources = validate_all(map_dir)
 
+    if args.subprovince_all_provinces and args.subprovince_province:
+        print("[ERROR] --subprovince-all-provinces and --subprovince-province are mutually exclusive",
+              file=sys.stderr)
+        sys.exit(1)
+
+    subprovince_config = build_subprovince_config(map_config)
+
+    if args.subprovince_all_provinces:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        polygons, adjacency, succeeded, failed = run_full_map_subprovince_generation(
+            sources, subprovince_config, output_dir)
+        if polygons:
+            province_adjacency = build_adjacency(sources)
+            polygons_by_province: dict[str, list] = {}
+            for polygon in polygons:
+                polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            # NOTE: `polygons` here are generate_real_province()'s output — already reprojected to
+            # WGS84 degrees (subprovince_io.py's to_wgs84/snap transforms), NOT the working CRS
+            # `subprovince_config` was built for. `geometry_tolerance` (default 1.0, meters) is the
+            # wrong unit for a degree-space shared-boundary-length test: `shared.length > tolerance`
+            # would require a shared border longer than a full degree (~111km) to register at all,
+            # which is why cross-province adjacency was silently almost-never generated. Use the
+            # same WGS84-degree tolerance subprovince_io.py's own post-reprojection adjacency
+            # rebuild already uses (1e-8), not the working-CRS config value.
+            cross_province_adjacency = build_cross_province_adjacency(
+                polygons_by_province, province_adjacency, 1e-8)
+            for cell_id, neighbor_ids in cross_province_adjacency.items():
+                existing = set(adjacency.get(cell_id, []))
+                adjacency[cell_id] = sorted(existing | set(neighbor_ids))
+            print(f"  cross-province subprovince edges: {sum(len(v) for v in cross_province_adjacency.values()) // 2}")
+            publish_subprovince_outputs(output_dir, polygons, adjacency)
+            print(f"  subprovinces.geojson: {len(polygons)} cells")
+            print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
+            _publish_road_geometry(output_dir, polygons, sources)
+        write_subprovince_manifest(output_dir, succeeded, failed)
+        _print_subprovince_summary(succeeded, failed, polygons, adjacency)
+        print("Done.")
+        if failed:
+            print(f"[WARN] {len(failed)} province(s) failed — see {MANIFEST_NAME}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if args.subprovince_retry_failed:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        polygons, adjacency, succeeded, failed = run_subprovince_retry(
+            sources, subprovince_config, output_dir)
+        if polygons:
+            # Recompute cross-province edges against the FULL merged cell set, not just the
+            # retried subset — a retried province's new geometry may not line up cell-for-cell
+            # with its neighbor's already-published cells, and a neighbor that wasn't retried
+            # still needs its cross-province edges refreshed against the retried province's cells.
+            province_adjacency = build_adjacency(sources)
+            polygons_by_province: dict[str, list] = {}
+            for polygon in polygons:
+                polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            # NOTE: `polygons` here are generate_real_province()'s output — already reprojected to
+            # WGS84 degrees (subprovince_io.py's to_wgs84/snap transforms), NOT the working CRS
+            # `subprovince_config` was built for. `geometry_tolerance` (default 1.0, meters) is the
+            # wrong unit for a degree-space shared-boundary-length test: `shared.length > tolerance`
+            # would require a shared border longer than a full degree (~111km) to register at all,
+            # which is why cross-province adjacency was silently almost-never generated. Use the
+            # same WGS84-degree tolerance subprovince_io.py's own post-reprojection adjacency
+            # rebuild already uses (1e-8), not the working-CRS config value.
+            cross_province_adjacency = build_cross_province_adjacency(
+                polygons_by_province, province_adjacency, 1e-8)
+            for cell_id, neighbor_ids in cross_province_adjacency.items():
+                existing = set(adjacency.get(cell_id, []))
+                adjacency[cell_id] = sorted(existing | set(neighbor_ids))
+            print(f"  cross-province subprovince edges: {sum(len(v) for v in cross_province_adjacency.values()) // 2}")
+            publish_subprovince_outputs(output_dir, polygons, adjacency)
+            print(f"  subprovinces.geojson: {len(polygons)} cells")
+            print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
+            _publish_road_geometry(output_dir, polygons, sources)
+        write_subprovince_manifest(output_dir, succeeded, failed)
+        _print_subprovince_summary(succeeded, failed, polygons, adjacency)
+        print("Done.")
+        if failed:
+            print(f"[WARN] {len(failed)} province(s) still failing — see {MANIFEST_NAME}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    selected_subprovinces = None
+    selected_subprovince_adjacency = None
+    if args.subprovince_province is not None:
+        _warn_if_overwriting_full_map(output_dir)
+        province_feature = next(
+            (feature for feature in sources["provinces"]
+             if (feature.get("properties") or {}).get("province_id") == args.subprovince_province),
+            None,
+        )
+        if province_feature is None:
+            print(f"[ERROR] Selected subprovince province not found: {args.subprovince_province}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Building subprovinces for {args.subprovince_province}...")
+        try:
+            selected_subprovinces, selected_subprovince_adjacency = generate_real_province(
+                province_feature, sources, subprovince_config
+            )
+        except Exception as exc:
+            print(f"[ERROR] Subprovince generation failed for {args.subprovince_province}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.subprovince_only:
+        if selected_subprovinces is None or selected_subprovince_adjacency is None:
+            print("[ERROR] --subprovince-only requires --subprovince-province", file=sys.stderr)
+            sys.exit(1)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        publish_subprovince_outputs(output_dir, selected_subprovinces, selected_subprovince_adjacency)
+        print(f"  subprovinces.geojson: {len(selected_subprovinces)} cells")
+        print(f"  subprovince_adjacency.geojson: {len(selected_subprovince_adjacency)} nodes")
+        print()
+        print("── Summary ──────────────────────────────────")
+        print(f"  Subprovince province: {args.subprovince_province}")
+        print(f"  Subprovince cells: {len(selected_subprovinces)}")
+        print(f"  Subprovince adjacency:{len(selected_subprovince_adjacency):>5}")
+        print("  Subprovince validation: passed")
+        print("─────────────────────────────────────────────")
+        print("Done.")
+        return
+
     # Build province and adjacency data
     print("Building provinces...")
     if args.resource_preset:
@@ -1592,12 +2030,20 @@ def main() -> None:
     adjacency = build_adjacency(sources)
     print(f"  {len(adjacency)} edges detected")
 
+    assign_supply_hubs(provinces, adjacency)
+    hub_count = sum(1 for p in provinces if p["is_supply_hub"])
+    print(f"  {hub_count} supply hubs assigned")
+
     # Write all output files
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Writing output to {output_dir.relative_to(REPO_ROOT)}/")
 
     write_map_data(output_dir, map_config, provinces, adjacency)
     copy_passthrough_files(map_dir, output_dir)
+    if selected_subprovinces is not None and selected_subprovince_adjacency is not None:
+        publish_subprovince_outputs(output_dir, selected_subprovinces, selected_subprovince_adjacency)
+        print(f"  subprovinces.geojson: {len(selected_subprovinces)} cells")
+        print(f"  subprovince_adjacency.geojson: {len(selected_subprovince_adjacency)} nodes")
 
     print("Building waypoint graph (roads)...")
     generate_waypoints(sources, output_dir)
@@ -1690,6 +2136,13 @@ def main() -> None:
         print(f"    {btype:<14} {count}")
     print(f"  Road crossings: {road_edges}")
     print(f"  Waypoint nodes: {wp_count}")
+    if selected_subprovinces is None:
+        print("  Subprovinces: not generated (no province selected)")
+    else:
+        print(f"  Subprovince province: {args.subprovince_province}")
+        print(f"  Subprovince cells: {len(selected_subprovinces)}")
+        print(f"  Subprovince adjacency:{len(selected_subprovince_adjacency):>5}")
+        print("  Subprovince validation: passed")
     print("─────────────────────────────────────────────")
     print("Done.")
 

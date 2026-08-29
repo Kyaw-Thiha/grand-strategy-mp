@@ -572,6 +572,36 @@ FILE: src/systems/military/military_system.gd
 
 ---
 
+### SupplyLineOverlay `[MVP]`
+
+```
+MODULE: SupplyLineOverlay
+PURPOSE: Renders GameState.supply_routes as a polyline per selected/visible division —
+         the "Supply line visualisation and out-of-supply display" module once listed under
+         Later/Optional; implemented (Batch 7 and follow-ups), not deferred. Recomputes no
+         route data itself — every visual field (points, color, pulse) is derived purely from
+         the server-authoritative SupplyRoute last received for that division.
+OWNS: One Line2D per division with a currently-displayable route. No GameState writes.
+EXPOSES:
+  methods:
+    setup(loader: MapLoader, military_system: Node)
+CONSUMES:
+  signals:
+    EventBus.supply_route_updated, division_revealed, division_hidden,
+    division_appeared, division_vanishing, division_selection_changed,
+    division_active_changed
+  reads:
+    GameState.supply_routes, GameState.divisions
+    MapLoader.get_subprovince_data/get_subprovince_polygon/get_road_geometry_points
+    MilitarySystem.get_division_world_position (keeps the line's start point glued to a
+      moving division between server broadcasts)
+FORBIDDEN FROM: recomputing route data, writing GameState
+AUTOLOAD: no
+FILE: src/systems/military/supply_line_overlay.gd
+```
+
+---
+
 ### CombatSystem `[MVP]`
 
 ```
@@ -952,7 +982,6 @@ These are defined by name and priority. Full contracts written when implementati
 |---|---|---|
 | `PoliticsSystem` | `[LATER]` | Nation ideology, government type, political decisions |
 | `TechSystem` | `[LATER]` | Research tree display and queue management |
-| `SupplySystem` | `[LATER]` | Supply line visualisation and out-of-supply display |
 | `CosmeticSystem` | `[LATER]` | Apply owned cosmetics (skins, themes) to game visuals |
 | `ShopSystem` | `[LATER]` | In-game cosmetic store, purchase flow |
 | `MinimapSystem` | `[LATER]` | Small viewport minimap, click to pan camera |

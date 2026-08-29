@@ -1,8 +1,7 @@
 # Grand Strategy Multiplayer — Map Data Contract
 
 > Defines all map layers, data schemas, authoring workflow (QGIS), pipeline, and Godot import.
-> Authoritative map contract. Read it with [Architecture](ARCHITECTURE.md) when work
-> changes map source data, generation, runtime loading, rendering, or simulation consumers.
+> Feed this file to Claude Code alongside ARCHITECTURE.md when working on any map, pipeline, or rendering system.
 > Last updated: May 2026.
 
 ---
@@ -36,6 +35,10 @@ Plus two raster inputs used only during authoring and rendering, never by the se
 DEM raster (SRTM/Copernicus)  — elevation source for terrain classification and heightmap export
 Heightmap export (GeoTIFF)    — sent to Godot for terrain shading and visual rendering
 ```
+
+A further **derived** layer, `subprovinces.geojson`, is generated from layers 2–5 at build
+time (see the Subprovinces section below) — it is not hand-authored in QGIS, the same as
+`waypoints.json`.
 
 ---
 
@@ -292,34 +295,36 @@ Local roads and tracks are NOT on this layer; local connectivity is captured by
     "road_id":      "eur_road_autobahn_a1",
     "corridor_id":  "autobahn_a1",           // groups segments for corridor upgrades
     "name":         "Autobahn A1",
-    "road_level":   3,                        // 1=dirt track, 2=paved road, 3=highway
+    "road_level":   3,                        // 1=dirt track, 2=paved road, 3=highway; cosmetic only, see below
     "map_id":       "europe_1939"
   }
 }
 ```
 
-**Road levels and movement:**
-
-| road_level | Name | On-road speed | Supply throughput |
-|---|---|---|---|
-| 1 | Dirt track | 1.5× base | Low |
-| 2 | Paved road | 2.5× base | Medium |
-| 3 | Highway | 4.0× base | High |
+**Road levels are cosmetic only.** `road_level` is retained purely for descriptive/rendering
+purposes (e.g. line width in the offline map-editor tool). All roads are equal for
+pathfinding cost and on-road movement speed — a division moves at the same flat on-road
+speed regardless of `road_level`, and A* assigns the same flat low cost to every road edge.
+This was evaluated as a future design (differentiated speed/throughput per tier) and
+deliberately rejected to keep road-network strategy about corridor upgrades and connectivity,
+not per-tile speed bookkeeping.
 
 **Corridor upgrades:** Roads are upgraded at corridor level, not segment level.
 All segments sharing a `corridor_id` upgrade together when the player invests in that corridor.
 This prevents per-segment micromanagement while preserving meaningful strategic investment.
 A Europe map should have 15–30 named corridors. Each corridor = one upgrade decision.
+Corridor upgrades affect supply throughput, not `road_level`/movement speed.
 
 **Supply flows exclusively along roads.** Off-road movement produces no supply flow.
 A division that advances off-road immediately begins drawing down its carried supply reserves.
 
 **QGIS authoring steps:**
 1. Load OSM roads layer (Geofabrik extract, filter to motorway, trunk, primary)
-2. Load OSM railways layer (cross-reference — major rail = road_level 2 for supply purposes)
+2. Load OSM railways layer (cross-reference — major rail counts as a road for supply purposes)
 3. Manually trace and simplify onto the road layer, snapping endpoints to province borders
 4. Assign corridor_id by grouping connected segments that form a strategic axis
-5. Set road_level by historical classification (Autobahn = 3, Route Nationale = 2, etc.)
+5. Set road_level by historical classification (Autobahn = 3, Route Nationale = 2, etc.) —
+   cosmetic labeling only, does not affect gameplay
 6. Export as `roads.geojson`
 
 ---
@@ -533,6 +538,16 @@ Whoever controls the **city point** controls the parent province.
 - Capturing an enemy city captures the province (and all its resource income).
 - `is_capital = true` marks the nation's capital city — losing it applies a national morale penalty (exact value defined in game rules, not here).
 
+**Current implementation:** province-level only. A unit within `CAPTURE_RADIUS_KM` of the
+city (no enemy within `CONTEST_RADIUS_KM`) flips `owner_id` and fires `PROVINCE_CAPTURED`.
+There is no cell-level ownership yet.
+
+**Planned subprovince cascade (see `STRATEGIC_COMBAT.md` — Capture Rule):** the generated
+`kind` and shared-edge adjacency files are the inputs the server will use to cascade one
+graph hop when an urban/city cell is captured:
+`urban/city -> adjacent roads -> adjacent hinterland of the urban cell and of those roads`.
+Metadata above is generated data; runtime ownership remains server-authoritative.
+
 ### Authoring notes
 
 - Exactly **one city per province** — no provinces without a city.
@@ -678,10 +693,17 @@ The DEM raster serves double duty:
 - Source data for terrain classification (slope analysis → terrain vector polygons)
 - Visual reference when drawing province borders (follow ridgelines, valleys)
 
-**In Godot (runtime):**
+**In Godot (runtime, default 2D mode):**
 - Loaded as a GeoTIFF texture alongside the map
 - Used for terrain shading: elevation → surface normal → directional light shading
 - Creates the physical relief feel of a WW2-era topographic map
+
+**In Godot (runtime, optional 3D mode):** the same `heightmap.tif` is also the
+displacement source for the 3D terrain mesh — see `TERRAIN_3D_RENDERING.md` for the
+full shader pipeline (vertex displacement, texture splatting via `splatmap.png`, fog,
+cloud shadow, AO). The 3D renderer is an opt-in, cosmetic-tier alternative to this
+default 2D hillshade mode, not a replacement for it — see `UI_UX_DESIGN.md` §2 for the
+functional-parity constraint governing it.
 
 The heightmap is **never read by the server**. It is client-side rendering data only.
 
@@ -765,6 +787,87 @@ for road_endpoint in road_graph.endpoints():
 
 The graph is rebuilt from scratch any time the terrain or road layers are re-exported.
 It is never edited by hand. The `godot/assets/data/` folder is always derived output.
+
+---
+
+## Subprovinces — subprovinces.geojson
+
+**Purpose:** Pre-baked partition of every province into small polygons — the substrate for
+capture, supply connectivity, retreat, and encirclement. Replaces the deferred Dynamic
+Frontline System's continuous influence approach. Full mechanics reference:
+`STRATEGIC_COMBAT.md` — Subprovince Capture System. Generated by the pipeline from the
+existing cover, elevation, road, and river layers. Never hand-edited, same as
+`waypoints.json`.
+
+**Format:** `subprovinces.geojson`
+
+```json
+{
+  "type": "Feature",
+  "geometry": { "type": "MultiPolygon", "coordinates": [[...]] },
+  "properties": {
+    "subprovince_id": "we6_germany_01_sp_0",
+    "province_id":    "we6_germany_01",
+    "kind":           "hinterland",      // "road" | "hinterland" | "town" | "capital"
+    "cover_combat":   "dense_forest",    // inherited from the source patch; null for road/capital
+    "elevation_type": "hills",           // dominant value inside this cell
+    "is_capital":     false              // true only for the one locked capital-ring cell
+  }
+}
+```
+
+**subprovince_id naming convention:** `{province_id}_sp_{index}`, index assigned
+sequentially per province at generation time. Never reassigned — same retirement rule as
+`province_id`. **IDs are not fixed-width** — do not zero-pad, sort by width, or parse the
+index numerically; treat IDs as opaque strings everywhere.
+
+**Geometry:** a cell's `geometry` is a `Polygon` or `MultiPolygon` (the generator emits
+both; the loader must accept multi-part cells and expose one outer ring per part). The
+vast majority of cells are simple `Polygon`s; `MultiPolygon` cells are fragmented slivers
+from sliver/terrain carving. Consuming code (point-in-polygon, rendering) must iterate all
+rings. A tiny number of cells (observed: 2 in 6,140 on `western_europe_6`) serialize as
+zero-area `LineString`/`MultiLineString` artifacts — valid graph nodes in the adjacency
+file but with no area, so they should never match a point-in-polygon query or render.
+
+**Format:** `subprovince_adjacency.geojson` (or an embedded flat adjacency list inside
+`subprovinces.geojson` — pipeline implementation detail, not a contract requirement either
+way)
+
+```json
+{
+  "subprovince_id": "we6_germany_01_sp_0",
+  "neighbors": ["we6_germany_01_sp_1", "we6_germany_01_sp_2"]
+}
+```
+
+Computed once at build time (shared-edge test between generated polygons). This is what the
+server's ring-BFS (Cut Off / Encircled checks), retreat pathing, the Out of Supply path
+search, and the **urban capture cascade** all run over — see `STRATEGIC_COMBAT.md`'s Supply
+System and Capture Rule sections.
+
+**Generation summary** (full detail in `STRATEGIC_COMBAT.md` — Subprovince Capture System):
+city cell generated first (uses the connected urban agglomeration containing the city, otherwise
+a configured radius with natural boundary noise) → remaining urban terrain grouped into connected
+agglomerations and carved as town cells (oversized agglomerations split into a controlled count
+of natural cells) → road centerlines buffered at one uniform width regardless of
+`road_level`, split into natural segments with bounded longitudinal edge noise (jittered cut
+positions, fixed centerline/junction anchors) that never overlap urban/city → the
+remaining land divided into large hinterland blobs by dominant `cover_combat` + `elevation_type`
+majority — **a hinterland blob may cross source cover/elevation boundaries when one combination
+remains dominant** (minority terrain inside a blob is allowed; only oversized blobs are
+subdivided, tiny fragments and same-majority neighbours are merged) → shared non-road borders
+naturalized with bounded deterministic noise so they look like real province borders (neither
+smooth nor pixel-jagged); roads and city/urban borders stay clean → slivers merged into their
+largest neighbor. Complete coverage (`province.difference(union(all_cells))` within tolerance)
+is asserted at build time and again after the WGS84 transform, not assumed.
+
+**Reference implementation:** `map/tools/map_pipeline/subprovince_generator.py` (generation),
+`subprovince_io.py` (real-map adapters and WGS84 serialization). Run the full map with
+`pipeline.py --map <id> --skip-dem --subprovince-all-provinces` (per-province failures are
+skipped to `subprovince_generation_report.json` and retried with
+`--subprovince-retry-failed`), or one province with `--subprovince-province
+<province_id> --subprovince-only`. A `subprovince_generation_report.json` manifest
+(`{"succeeded": [...], "failed": [{"province_id", "error"}]}`) is written on full-map runs.
 
 ---
 
@@ -939,6 +1042,9 @@ Example Claude Code prompt for map authoring:
 - `rivers.geojson` — passed through (for Godot visual layer)
 - `roads.geojson` — passed through (for Godot visual layer)
 - `heightmap.tif` — copied from source (for Godot terrain shader)
+- `splatmap.png` — cover-derived texture blend weights (for Godot 3D terrain shader, Tier 1)
+- `ao.png` — precomputed curvature ambient occlusion (for Godot 3D terrain shader, Tier 1)
+- `coast_distance.png` — water depth proxy (for Godot 3D water shader, Tier 2)
 
 **Pipeline steps:**
 
@@ -955,8 +1061,17 @@ Example Claude Code prompt for map authoring:
     assign cover_combat + elevation to each node, compute raw edge costs from composable
     modifiers (cover_move × elevation_move), flag river-crossing edges with river_size,
     connect road graph endpoints to nearest waypoint nodes. Write waypoints.json.
-10. Copy through terrain, rivers, roads, heightmap
-11. Print summary: province count, adjacency edge count, waypoint node count, validation warnings
+10. Rasterize cover.geojson → splatmap.png — per-pixel blend weights across the ~7
+    ground-texture groups used by the 3D terrain shader (own cover_visual→texture_group
+    lookup, kept separate from terrain_lookup.json since it's rendering-only, not
+    gameplay). See TERRAIN_3D_RENDERING.md — Tier 1.
+11. Compute curvature AO from heightmap.tif → ao.png — Sobel-style curvature operator,
+    darker in valleys/forest-floor depressions, precomputed so it's free at runtime.
+    See TERRAIN_3D_RENDERING.md — Tier 1.
+12. Rasterize base_water.geojson → coast_distance.png — distance-to-shore, used as a
+    depth proxy by the 3D water shader. See TERRAIN_3D_RENDERING.md — Tier 2.
+13. Copy through terrain, rivers, roads, heightmap
+14. Print summary: province count, adjacency edge count, waypoint node count, validation warnings
 ```
 
 Run: `python tools/map_pipeline/pipeline.py --map europe_1939`
@@ -1040,12 +1155,17 @@ map/
 godot/assets/data/europe_1939/   ← pipeline output, NOT hand-edited
 ├── map_data.json
 ├── waypoints.json
+├── subprovinces.geojson         ← subprovince capture/supply/encirclement substrate
+├── subprovince_adjacency.geojson
 ├── cover.geojson
 ├── elevation.geojson
 ├── terrain_lookup.json
 ├── rivers.geojson
 ├── roads.geojson
-└── heightmap.tif
+├── heightmap.tif
+├── splatmap.png          ← 3D terrain texture blend weights (see TERRAIN_3D_RENDERING.md)
+├── ao.png                ← precomputed curvature ambient occlusion, 3D terrain shading
+└── coast_distance.png    ← water depth proxy for 3D water shader
 ```
 
 The `godot/assets/data/` folder is generated output. If it conflicts in git, regenerate from source.

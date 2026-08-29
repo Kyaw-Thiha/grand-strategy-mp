@@ -5,6 +5,10 @@ import { getCachedFile } from "../data/map_cache.js";
 import type { GameRoomState, DivisionState, RelationState } from "../rooms/schema/GameRoomState.js";
 import { UNIT_TERRAIN_COSTS, TERRAIN_KEYS } from "../data/unit_terrain_costs.js";
 import type { TemplateCell } from "../data/maps/western_europe_6/default_template.js";
+import type { SubprovinceSystem } from "./subprovince_system.js";
+import { makeIsFriendly } from "./subprovince_system.js";
+import { findRetreatPath } from "./supply_graph.js";
+import type { SubprovinceDefinition } from "../data/map_loader.js";
 
 type RelationLookup = {
   get(key: string): RelationState | undefined;
@@ -13,6 +17,11 @@ type RelationLookup = {
 // 1° latitude ≈ 111 km. Used for speed conversion only (approximate, not haversine).
 const KM_PER_DEG_LAT = 111.0;
 
+// Same temporary diagnostic switch as combat_system.ts's STUCK_UNIT_DEBUG (see its doc comment) —
+// duplicated here rather than imported to keep each file's debug logging independent of the
+// other's module graph; both are gated by the same env var so one flag toggles both.
+const STUCK_UNIT_DEBUG = process.env.STUCK_UNIT_DEBUG === "true";
+
 // Km/h at which divisions move on roads (game hours = ticks at speed 1).
 const ROAD_SPEED_KMH = 60;
 const OFFROAD_SPEED_KMH = 20;
@@ -20,6 +29,20 @@ const OFFROAD_SPEED_KMH = 20;
 // Reposition constants
 const REPOSITION_MAX_KM   = 12;
 const REPOSITION_SPEED    = 0.30; // 30% of normal movement speed
+
+// Last-mile ("exact click target") straight-line hop bounds — see resolveFinalPosition's doc
+// comment. Tunable, illustrative, no playtesting basis yet, same convention as other density/
+// timing constants elsewhere in this codebase.
+/** Cap = (longest direct edge from the chain's last waypoint) × this multiplier — leeway on top of
+ *  the graph's own local density, not an exact/harsh cutoff at the raw spacing. */
+const LAST_MILE_CAP_SLACK_MULT = 1.5;
+/** Fallback cap (degrees) only for the edge case of an isolated last-waypoint node with no
+ *  neighbors to measure local density from. */
+const FALLBACK_LAST_MILE_CAP_DEG = 0.05; // ~5.5km at KM_PER_DEG_LAT
+/** Sample step (degrees) for the last-mile segment's neutral/terrain validity sweep — mirrors
+ *  subprovince_system.ts's SWEEP_STEP_DEG capture-sweep constant (same rationale: fine enough that
+ *  a blocking cell can't be skipped between samples). */
+const LAST_MILE_SWEEP_STEP_DEG = 0.02;
 
 // Units considered "armoured" for type classification and engagement radius.
 const ARMOURED_UNIT_TYPES = new Set(["light_tank", "heavy_tank", "medium_tank"]);
@@ -56,10 +79,19 @@ export class MovementSystem {
   private edgeSet: Set<string> = new Set();
   // Cached parsed movement profiles per division
   private profileCache: Map<string, Record<string, number>> = new Map();
-  // waypointId → nationId for territory checks (built by loadMapData)
-  private waypointNation: Map<string, string> = new Map();
   // River segments collected from waypoint edges for combat crossing checks
   private riverSegments: Array<{ x1: number; y1: number; x2: number; y2: number; size: string }> = [];
+  /**
+   * division_id -> position at the start of this tick's movement advancement, recorded only for
+   * divisions that actually attempt to move this tick (cleared and rebuilt every tick(), not
+   * carried over). Lets GameRoom.gameTick() pass a full start->end segment into
+   * SubprovinceSystem.checkCaptureAfterMovement() instead of only the post-move end position — a
+   * single division can cross more than one subprovince cell in one tick (see _advanceDivision's
+   * leftover-budget recursion), so sampling only the end position silently skips cells crossed
+   * along the way. A division with no entry here didn't move this tick, so the caller should treat
+   * start == end (a degenerate, zero-length segment) for it.
+   */
+  private tickStartPositions: Map<string, { lng: number; lat: number }> = new Map();
 
   loadWaypoints(mapId: string): void {
     const __dir = dirname(fileURLToPath(import.meta.url));
@@ -148,78 +180,50 @@ export class MovementSystem {
     return true;
   }
 
-  /** Build waypointId → nationId mapping via point-in-polygon against map_data.json. */
-  loadMapData(mapId: string): void {
-    const __dir = dirname(fileURLToPath(import.meta.url));
-    const gameServerRoot = join(__dir, "../..");
-    const dataPath = join(gameServerRoot, "..", "client", "assets", "data", mapId, "map_data.json");
-
-    let raw: { provinces: Array<{ nation_id: string; polygons: number[][][] }> };
-    try {
-      raw = getCachedFile(dataPath);
-    } catch {
-      console.warn(`[MovementSystem] map_data.json not found — territory checks disabled`);
-      return;
-    }
-
-    // Pre-compute bounding boxes for each province to reduce point-in-polygon checks
-    interface BBox { minLng: number; maxLng: number; minLat: number; maxLat: number; nationId: string; polygons: number[][][] }
-    const bboxes: BBox[] = [];
-    for (const province of raw.provinces) {
-      let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
-      for (const ring of province.polygons) {
-        for (const coord of ring) {
-          if (coord[0] < minLng) minLng = coord[0];
-          if (coord[0] > maxLng) maxLng = coord[0];
-          if (coord[1] < minLat) minLat = coord[1];
-          if (coord[1] > maxLat) maxLat = coord[1];
-        }
-      }
-      bboxes.push({ minLng, maxLng, minLat, maxLat, nationId: province.nation_id, polygons: province.polygons });
-    }
-
-    for (const [waypointId, node] of this.graph.nodes) {
-      for (const bb of bboxes) {
-        if (node.lng < bb.minLng || node.lng > bb.maxLng) continue;
-        if (node.lat < bb.minLat || node.lat > bb.maxLat) continue;
-        // Waypoint is within bounding box — check actual polygon
-        let found = false;
-        for (const ring of bb.polygons) {
-          if (this._pointInPolygon(node.lng, node.lat, ring)) {
-            this.waypointNation.set(waypointId, bb.nationId);
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
-      }
-    }
-    console.log(`[MovementSystem] built waypoint→nation mapping: ${this.waypointNation.size} nodes mapped`);
-  }
-
-  /** Returns true if (px, py) is inside the given polygon ring using ray casting. */
-  private _pointInPolygon(px: number, py: number, polygon: number[][]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i][0], yi = polygon[i][1];
-      const xj = polygon[j][0], yj = polygon[j][1];
-      if (((yi > py) !== (yj > py)) && (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  }
-
-  /** Returns true if the waypoint belongs to a nation that is neither at war nor allied with divNationId. */
+  /**
+   * Returns true if the waypoint belongs to a nation that is neither at war nor allied with
+   * divNationId. Ownership is resolved LIVE via SubprovinceSystem/state.subprovinces rather than
+   * from a frozen map-boot-time snapshot — subprovince geometry is static once generated, but
+   * `owner_id` changes constantly at runtime (capture, revert, city cascade), and this used to read
+   * a one-time province-polygon snapshot (`loadMapData`/`waypointNation`, since removed) that went
+   * stale the moment the first subprovince capture happened. This runs once per submitted waypoint
+   * path (not per tick), so a live per-call lookup is cheap enough — no cache needed here, unlike
+   * the client's Pathfinder, which touches many more nodes per A* search (see pathfinder.gd).
+   */
   private _isNeutralFor(
     waypointId: string,
     divNationId: string,
     relations: RelationLookup,
+    subprovinceSystem: SubprovinceSystem | null,
+    subprovinces: GameRoomState["subprovinces"] | null,
   ): boolean {
-    const wpNation = this.waypointNation.get(waypointId) ?? "";
-    if (wpNation === "" || wpNation === divNationId) return false; // unmapped/sea or own territory
-    const rel = relations.get(`${divNationId}|${wpNation}`)
-            ?? relations.get(`${wpNation}|${divNationId}`);
+    const node = this.graph.nodes.get(waypointId);
+    if (!node) return false;
+    return this._isPositionNeutralFor(node.lng, node.lat, divNationId, relations, subprovinceSystem, subprovinces);
+  }
+
+  /**
+   * Position-based core of _isNeutralFor, factored out so resolveFinalPosition's segment sweep
+   * (last-mile straight-line validation) can reuse the exact same live-ownership logic against
+   * arbitrary sampled points, not just waypoint-graph nodes.
+   */
+  private _isPositionNeutralFor(
+    lng: number,
+    lat: number,
+    divNationId: string,
+    relations: RelationLookup,
+    subprovinceSystem: SubprovinceSystem | null,
+    subprovinces: GameRoomState["subprovinces"] | null,
+  ): boolean {
+    // No live ownership data available (e.g. getNearestNonNeutralWaypoint's very-early-
+    // initialization / subprovinceSystem-not-yet-wired fallback) — fail open, same convention as
+    // the unmapped/sea case below rather than blocking on data we don't have.
+    if (!subprovinceSystem || !subprovinces) return false;
+    const subprovinceId = subprovinceSystem.getSubprovinceAtPosition({ lng, lat });
+    const posNation = subprovinceId ? (subprovinces.get(subprovinceId)?.owner_id ?? "") : "";
+    if (posNation === "" || posNation === divNationId) return false; // unmapped/sea or own territory
+    const rel = relations.get(`${divNationId}|${posNation}`)
+            ?? relations.get(`${posNation}|${divNationId}`);
     const stance = rel?.stance ?? "neutral";
     return stance !== "war" && stance !== "alliance";
   }
@@ -236,13 +240,93 @@ export class MovementSystem {
     waypointIds: string[],
     divNationId: string,
     relations: RelationLookup,
+    subprovinceSystem: SubprovinceSystem,
+    subprovinces: GameRoomState["subprovinces"],
   ): string[] {
     const allowed: string[] = [];
     for (const id of waypointIds) {
-      if (this._isNeutralFor(id, divNationId, relations)) break;
+      if (this._isNeutralFor(id, divNationId, relations, subprovinceSystem, subprovinces)) break;
       allowed.push(id);
     }
     return allowed;
+  }
+
+  /**
+   * Validates and clamps a player's exact-click "final position" against the waypoint chain's
+   * neutral-territory guard and terrain passability — the "last mile" straight-line hop
+   * (_advanceFinalPosition) used to accept this raw click coordinate completely unchecked, letting
+   * a division cut an arbitrarily long straight line across borders/impassable terrain once its
+   * waypoint chain ran out. Called once at move-order submission time (GameRoom.handleSubmitMoveOrder),
+   * not per-tick — mirrors trimToAllowedTerritory's own "decide once, walk toward a known-safe point
+   * afterward" design.
+   *
+   * Two independent checks, both measured from `lastWaypointId` (the chain's last surviving node —
+   * guaranteed non-null by the caller, since an all-neutral chain is already rejected outright
+   * before final position is ever considered):
+   *
+   * 1. Distance cap: the requested point is clamped to at most
+   *    `(longest direct edge from lastWaypointId) × LAST_MILE_CAP_SLACK_MULT` — scaled to the local
+   *    waypoint graph's own density rather than a flat radius, with slack so a legitimate click a
+   *    bit past the nearest node isn't harshly clipped. Falls back to FALLBACK_LAST_MILE_CAP_DEG
+   *    only if the node has no neighbors to measure density from.
+   * 2. Segment sweep: samples the clamped straight-line segment (LAST_MILE_SWEEP_STEP_DEG apart,
+   *    same technique as subprovince_system.ts's capture-sweep) and truncates at the first sample
+   *    that's either neutral territory or impassable terrain — "advance as far as allowed," same
+   *    philosophy as trimToAllowedTerritory.
+   *
+   * Returns the resolved, safe point, or null if even the first sample beyond lastWaypointId is
+   * blocked (caller should then leave final_position unset — the division simply stops at the last
+   * waypoint).
+   */
+  resolveFinalPosition(
+    lastWaypointId: string,
+    requestedLng: number,
+    requestedLat: number,
+    division: DivisionState,
+    relations: RelationLookup,
+    subprovinceSystem: SubprovinceSystem,
+    subprovinces: GameRoomState["subprovinces"],
+  ): { lng: number; lat: number } | null {
+    const lastNode = this.graph.nodes.get(lastWaypointId);
+    if (!lastNode) return null;
+
+    // 1. Distance cap from local graph density, with slack.
+    const neighborIds = this.graph.adjacency.get(lastWaypointId) ?? [];
+    let maxEdgeDeg = 0;
+    for (const neighborId of neighborIds) {
+      const neighbor = this.graph.nodes.get(neighborId);
+      if (!neighbor) continue;
+      const d = Math.sqrt((neighbor.lng - lastNode.lng) ** 2 + (neighbor.lat - lastNode.lat) ** 2);
+      if (d > maxEdgeDeg) maxEdgeDeg = d;
+    }
+    const capDeg = (maxEdgeDeg > 0 ? maxEdgeDeg : FALLBACK_LAST_MILE_CAP_DEG) * LAST_MILE_CAP_SLACK_MULT;
+
+    const dx = requestedLng - lastNode.lng;
+    const dy = requestedLat - lastNode.lat;
+    const requestedDistDeg = Math.sqrt(dx * dx + dy * dy);
+    const clampRatio = Math.min(1, capDeg / Math.max(requestedDistDeg, 1e-9));
+    const targetLng = lastNode.lng + dx * clampRatio;
+    const targetLat = lastNode.lat + dy * clampRatio;
+
+    // 2. Segment sweep for neutral-territory/terrain validity, truncating at the first blocked
+    // sample. Starts sampling at i=1 (excludes lastNode itself, already validated by
+    // trimToAllowedTerritory) through the (possibly distance-clamped) target, inclusive.
+    const sweepDistDeg = Math.sqrt((targetLng - lastNode.lng) ** 2 + (targetLat - lastNode.lat) ** 2);
+    const steps = Math.max(1, Math.ceil(sweepDistDeg / LAST_MILE_SWEEP_STEP_DEG));
+    let resolvedLng = lastNode.lng;
+    let resolvedLat = lastNode.lat;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const lng = lastNode.lng + (targetLng - lastNode.lng) * t;
+      const lat = lastNode.lat + (targetLat - lastNode.lat) * t;
+      if (this._isPositionNeutralFor(lng, lat, division.nation_id, relations, subprovinceSystem, subprovinces)) break;
+      if (!isFinite(this._terrainCostAtPosition(lng, lat, division))) break;
+      resolvedLng = lng;
+      resolvedLat = lat;
+    }
+
+    if (resolvedLng === lastNode.lng && resolvedLat === lastNode.lat) return null; // blocked immediately
+    return { lng: resolvedLng, lat: resolvedLat };
   }
 
   checkRiverCrossing(lng1: number, lat1: number, lng2: number, lat2: number): string {
@@ -285,17 +369,21 @@ export class MovementSystem {
     return Math.sqrt((aLng - bLng) ** 2 + (aLat - bLat) ** 2) * KM_PER_DEG_LAT;
   }
 
-  /** Like getNearestWaypoint but filters out waypoints in neutral territory. */
+  /** Like getNearestWaypoint but filters out waypoints in neutral territory. Pass null for
+   *  subprovinceSystem/subprovinces when live ownership data isn't available (see _isNeutralFor's
+   *  fail-open doc comment) — this fails open rather than blocking on missing data. */
   getNearestNonNeutralWaypoint(
     lng: number,
     lat: number,
     divNationId: string,
     relations: RelationLookup,
+    subprovinceSystem: SubprovinceSystem | null,
+    subprovinces: GameRoomState["subprovinces"] | null,
   ): WaypointNode | null {
     let best: WaypointNode | null = null;
     let bestDist = Infinity;
     for (const [id, node] of this.graph.nodes) {
-      if (this._isNeutralFor(id, divNationId, relations)) continue;
+      if (this._isNeutralFor(id, divNationId, relations, subprovinceSystem, subprovinces)) continue;
       const dx = node.lng - lng;
       const dy = node.lat - lat;
       const d = dx * dx + dy * dy;
@@ -304,13 +392,111 @@ export class MovementSystem {
     return best ?? this.getNearestWaypoint(lng, lat); // fallback if all neutral
   }
 
+  /**
+   * Batch 8 Task 3 — graph-based, ownership-aware retreat targeting. Replaces the purely
+   * distance-based `getNearestNonNeutralWaypoint` at the retreat-target-selection call site in
+   * `combat_system.ts`'s `_initiateRetreat`: instead of the nearest non-neutral waypoint in raw
+   * distance, this resolves the division's current subprovince and runs Task 2's
+   * `findRetreatPath` (Dijkstra with ownership-tiered edge costs) to find the cheapest path to a
+   * friendly-or-allied road-corridor cell or supply hub, then translates that path's destination
+   * subprovince into the nearest waypoint via the existing `getNearestWaypoint` lookup — keeping
+   * ordinary move-order execution (which only understands waypoint IDs) untouched.
+   *
+   * Fallback (division's position resolves to no known subprovince, e.g. off-map or mid-strait):
+   * behaves like the old `getNearestNonNeutralWaypoint`, using the division's raw lng/lat —
+   * there is no subprovince to graph-search from, so distance-based targeting is the only
+   * option left, exactly as it was before this method existed.
+   */
+  /**
+   * Returns the position a division occupied at the start of this tick's movement advancement, or
+   * null if the division didn't move this tick (in which case a caller should treat its movement
+   * segment as a zero-length point at its current position). See tickStartPositions' doc comment.
+   */
+  getTickStartPosition(divisionId: string): { lng: number; lat: number } | null {
+    return this.tickStartPositions.get(divisionId) ?? null;
+  }
+
+  computeRetreatTarget(
+    division: DivisionState,
+    state: GameRoomState,
+    subprovinceSystem: SubprovinceSystem,
+  ): { waypointId: string | null; blockedFraction: number } {
+    const startId = subprovinceSystem.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
+    if (startId === null) {
+      const fallback = this.getNearestNonNeutralWaypoint(
+        division.position_lng, division.position_lat, division.nation_id, state.relations,
+        subprovinceSystem, state.subprovinces,
+      );
+      return { waypointId: fallback?.id ?? null, blockedFraction: 0 };
+    }
+
+    const graph = subprovinceSystem.getGraph();
+    const ownership = new Map<string, { ownerId: string; provinceId: string }>();
+    for (const [id, sp] of state.subprovinces) {
+      ownership.set(id, { ownerId: sp.owner_id, provinceId: sp.province_id });
+    }
+    const isFriendly = makeIsFriendly(division.nation_id, state.relations);
+    const hubs = subprovinceSystem.getHubSubprovinceIds(state, isFriendly);
+
+    const retreatPath = findRetreatPath(
+      graph,
+      ownership,
+      hubs,
+      startId,
+      division.nation_id,
+      isFriendly,
+      subprovinceSystem.isCombatFrozen.bind(subprovinceSystem),
+    );
+
+    const destinationId = retreatPath.subprovinceIds[retreatPath.subprovinceIds.length - 1];
+    const destinationDef = graph.nodes.get(destinationId);
+    const destinationPoint = destinationDef
+      ? this._centroidOf(destinationDef)
+      : { lng: division.position_lng, lat: division.position_lat };
+
+    const waypoint = this.getNearestWaypoint(destinationPoint.lng, destinationPoint.lat);
+    return { waypointId: waypoint?.id ?? null, blockedFraction: retreatPath.blockedFraction };
+  }
+
+  /**
+   * Centroid of a subprovince cell's outer ring, excluding a duplicated closing vertex if
+   * present. `SubprovinceDefinition` carries no stored centroid/representative point (confirmed
+   * against `map_loader.ts`), so this ports the exact ring-closing-vertex-aware algorithm
+   * already used by `test/subprovince-capture.test.ts`'s `centroidOf` helper rather than
+   * inventing new geometry. Used only to translate a retreat path's destination subprovince into
+   * a representative point for `getNearestWaypoint` — not a general-purpose PIP tool.
+   */
+  private _centroidOf(def: SubprovinceDefinition): { lng: number; lat: number } {
+    const ring = def.polygon[0];
+    if (!ring || ring.length === 0) return { lng: 0, lat: 0 };
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    const pts = (first[0] === last[0] && first[1] === last[1]) ? ring.slice(0, -1) : ring;
+    let lng = 0, lat = 0;
+    for (const [x, y] of pts) { lng += x; lat += y; }
+    return { lng: lng / pts.length, lat: lat / pts.length };
+  }
+
   tick(state: GameRoomState): void {
     const speedMult = state.game_speed;
+    this.tickStartPositions.clear();
 
     for (const division of state.divisions.values()) {
       const hasFinalPos = division.final_position_lng > -998;
       if (division.move_order.length === 0 && !hasFinalPos) continue;
-      if (division.combat_state === "engaged" || division.combat_state === "suppressed") continue;
+      if (division.combat_state === "engaged" || division.combat_state === "suppressed") {
+        if (STUCK_UNIT_DEBUG && division.move_order.length > 0) {
+          console.log(`[STUCK_UNIT_DEBUG] movement-skipped: ${division.division_id}(${division.nation_id}, `
+            + `combat_state=${division.combat_state}, supply=${division.supply_status}) has a `
+            + `pending move_order but is frozen by combat this tick`);
+        }
+        continue;
+      }
+
+      this.tickStartPositions.set(division.division_id, {
+        lng: division.position_lng,
+        lat: division.position_lat,
+      });
 
       // Reset consumed_waypoint_ids before each tick
       division.consumed_waypoint_ids.splice(0, division.consumed_waypoint_ids.length);
@@ -381,8 +567,11 @@ export class MovementSystem {
       }
       kmh = OFFROAD_SPEED_KMH / cost;
     }
-    // degrees per tick (1 tick = speedMult game hours)
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult;
+    // degrees per tick (1 tick = speedMult game hours). Retreating divisions carrying a
+    // fighting-withdrawal penalty (Batch 8 Task 3) move at retreat_speed_mult of normal speed —
+    // applied here (own movement) but deliberately NOT in _advanceReposition, which is
+    // in-combat repositioning, not retreat movement.
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
 
     if (advanceDeg >= distDeg) {
       division.position_lng = nextNode.lng;
@@ -417,28 +606,27 @@ export class MovementSystem {
       return;
     }
 
-    // Use nearest graph node's terrain type to determine last-mile speed
+    // Use nearest graph node's terrain type to determine last-mile speed. The destination/segment
+    // itself was already validated once at submission time (see resolveFinalPosition) — this
+    // per-tick check is defense-in-depth against the division's current tile changing underneath it
+    // (e.g. mid-walk combat interruption), not the only validation.
     const nearestId = this._findNearestNode(division.position_lng, division.position_lat);
-    const nearestNode = nearestId !== null ? this.graph.nodes.get(nearestId) : undefined;
-    let kmh = OFFROAD_SPEED_KMH;
-    if (nearestNode) {
-      if (this.graph.road_node_ids.has(nearestId!)) {
-        kmh = ROAD_SPEED_KMH;
-      } else {
-        const profile = this._getProfile(division);
-        const terrainKey = `${nearestNode.cover_combat}_${nearestNode.elevation}`;
-        const cost = profile[terrainKey] ?? 1.0;
-        if (!isFinite(cost) || cost <= 0) {
-          // Impassable — abort final position
-          division.final_position_lng = -999;
-          division.final_position_lat = -999;
-          return;
-        }
-        kmh = OFFROAD_SPEED_KMH / cost;
+    const onRoad = nearestId !== null && this.graph.road_node_ids.has(nearestId);
+    let kmh: number;
+    if (onRoad) {
+      kmh = ROAD_SPEED_KMH;
+    } else {
+      const cost = this._terrainCostAtPosition(division.position_lng, division.position_lat, division);
+      if (!isFinite(cost)) {
+        // Impassable — abort final position
+        division.final_position_lng = -999;
+        division.final_position_lat = -999;
+        return;
       }
+      kmh = OFFROAD_SPEED_KMH / cost;
     }
 
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult;
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
     if (advanceDeg >= distDeg) {
       division.position_lng = division.final_position_lng;
       division.position_lat = division.final_position_lat;
@@ -461,6 +649,26 @@ export class MovementSystem {
       if (d < bestDist) { bestDist = d; bestId = id; }
     }
     return bestId;
+  }
+
+  /**
+   * Terrain movement cost at an arbitrary point, keyed off the nearest graph node's terrain type —
+   * the same "look up my current tile's cost" approximation _advanceFinalPosition already used
+   * inline, factored out so resolveFinalPosition's segment sweep (last-mile straight-line
+   * validation) can reuse it against arbitrary sampled points, not just the division's own position.
+   * Road nodes always cost 1.0 (never impassable). Returns Infinity when off-road terrain is
+   * impassable for the division's profile; fails open (1.0) when there's no nearby graph node at
+   * all, matching this codebase's existing "no data → don't block" convention.
+   */
+  private _terrainCostAtPosition(lng: number, lat: number, division: DivisionState): number {
+    const nearestId = this._findNearestNode(lng, lat);
+    const nearestNode = nearestId !== null ? this.graph.nodes.get(nearestId) : undefined;
+    if (!nearestNode) return 1.0;
+    if (this.graph.road_node_ids.has(nearestId!)) return 1.0;
+    const profile = this._getProfile(division);
+    const terrainKey = `${nearestNode.cover_combat}_${nearestNode.elevation}`;
+    const cost = profile[terrainKey] ?? 1.0;
+    return (!isFinite(cost) || cost <= 0) ? Infinity : cost;
   }
 
   private _advanceReposition(division: DivisionState, speedMult: number): void {

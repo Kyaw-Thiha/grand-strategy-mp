@@ -5,6 +5,7 @@ import { getCachedFile } from "../data/map_cache.js";
 import { randomUUID } from "crypto";
 import type { GameRoomState, DivisionState, GridCellState, RelationState } from "../rooms/schema/GameRoomState.js";
 import type { MovementSystem } from "./movement_system.js";
+import type { SubprovinceSystem } from "./subprovince_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
 import {
@@ -43,11 +44,37 @@ import {
 // Kilometres represented by one degree of lat/lng (approximate, matches movement_system)
 const KM_PER_DEG = 111.0;
 
+/**
+ * Temporary diagnostic switch for tracing the "unit appears stuck after entering enemy territory"
+ * visual-review report — not a permanent feature. Enable with STUCK_UNIT_DEBUG=true to log the
+ * state transitions most relevant to that report (entering engaged combat, the encircled-retreat
+ * block firing, and — in movement_system.ts — the engaged/suppressed movement skip) so a live
+ * repro can be captured and the true trigger confirmed before any further combat-logic change is
+ * attempted. Safe to strip once the report is resolved or confirmed non-reproducible.
+ */
+const STUCK_UNIT_DEBUG = process.env.STUCK_UNIT_DEBUG === "true";
+
 // Engagement detection is skipped for this many ticks so players can issue starting
 // orders before border divisions auto-engage each other.
 let COMBAT_GRACE_TICKS = 10;
 
 export function setCombatGraceTicksForTesting(n: number): void { COMBAT_GRACE_TICKS = n; }
+
+/**
+ * Determines whether two nations are currently at war, based on their relation record.
+ * Standalone (not a class method) so both CombatSystem and SubprovinceSystem can call it
+ * without a circular instance dependency.
+ */
+export function areNationsAtWar(
+  nationA: string,
+  nationB: string,
+  relations: { get(key: string): RelationState | undefined },
+): boolean {
+  if (nationA === nationB) return false;
+  const rel = relations.get(`${nationA}|${nationB}`)
+    ?? relations.get(`${nationB}|${nationA}`);
+  return (rel?.stance ?? "neutral") === "war";
+}
 
 import {
   BASE_ATTRITION,
@@ -137,6 +164,23 @@ const STACK_THRESHOLD_KM = 15.0;
 const STACK_ROTATE_THRESHOLD = 50;
 // When the LAST stack position hits retreat threshold it actually retreats (no more rotation)
 const STACK_LAST_RETREAT_THRESHOLD = 60;
+
+// ─── Fighting-withdrawal constants (Batch 8 Task 3) ────────────────────────
+// A Tier 2 (cut_off) division ordered to retreat pays a one-time HP cost proportional to
+// how much of its chosen graph-based retreat path (Task 2's findRetreatPath) crosses
+// non-friendly ground (`blockedFraction`, 0..1). At blockedFraction 1 (path is entirely
+// non-friendly) the division pays the full FIGHTING_WITHDRAWAL_MAX_DAMAGE; at 0 (clean path,
+// which cut_off should rarely produce, but the formula is defined for the full range) it pays
+// nothing. 15 HP was picked as a noticeable-but-survivable one-time cost — roughly one supply
+// tick's worth of ENCIRCLED_HP_DRAIN_PER_TICK-scale attrition (see supply_system.ts), not a
+// unit-destroying amount on its own.
+const FIGHTING_WITHDRAWAL_MAX_DAMAGE = 15;
+// Movement-speed multiplier applied to a division for the remainder of its retreat after a
+// Tier 2 fighting-withdrawal is triggered (via DivisionState.retreat_speed_mult, consumed by
+// movement_system.ts). 0.5 halves movement speed — a real cost for disorganized withdrawal
+// under fire, without being so severe (e.g. 0.1) that a cut_off division effectively never
+// reaches safety before supply-tick attrition or renewed engagement catches it.
+const RETREAT_SPEED_PENALTY_MULT = 0.5;
 
 // ─── Terrain modifier tables ────────────────────────────────────────────────
 // Each entry: [attacker_penalty, defender_bonus] as fractions of 1.0
@@ -246,6 +290,19 @@ export class CombatSystem {
   private activePairs = new Map<string, ActivePair>(); // sorted "idA|idB" → data
   private movementSystem: MovementSystem;
   private _resolveCombatTickCount = 0;
+  /** Current tick number, for STUCK_UNIT_DEBUG log correlation only. */
+  private _debugTickCount = 0;
+  /** Set by GameRoom right after both systems are constructed; drives the city-capture cascade. */
+  private subprovinceSystem: SubprovinceSystem | null = null;
+  /**
+   * Set by GameRoom alongside subprovinceSystem. _checkProvinceCapture's own broadcast
+   * parameter is the plain, unfiltered `(type, msg) => void` shape (matching PROVINCE_CAPTURED's
+   * own broadcast-to-everyone semantics) — but cascadeCityCapture's SUBPROVINCE_CAPTURED events
+   * must respect the same per-nation belligerency filtering as every other subprovince capture
+   * event (see subprovince_system.ts's _emitCaptureEvents), so a separate filtered-broadcast
+   * reference is required here rather than reusing the plain one.
+   */
+  private filteredBroadcast: ((sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void) | null = null;
 
   // Test-only: lightweight synthetic engagements (bypass activePairs entirely)
   private _syntheticEngagements = new Map<string, {
@@ -259,6 +316,20 @@ export class CombatSystem {
 
   constructor(movementSystem: MovementSystem) {
     this.movementSystem = movementSystem;
+  }
+
+  /**
+   * Wires the room's shared SubprovinceSystem instance so _checkProvinceCapture can cascade
+   * province flips down to the cell level, plus a filtered-broadcast callback (GameRoom's
+   * `_broadcastToFilteredNations`-shaped function) so the cascade's own SUBPROVINCE_CAPTURED
+   * events reach only belligerent nations, matching every other subprovince capture event.
+   */
+  setSubprovinceSystem(
+    sys: SubprovinceSystem,
+    filteredBroadcast: (sessionFilter: (nationId: string) => boolean, type: string, msg: unknown) => void,
+  ): void {
+    this.subprovinceSystem = sys;
+    this.filteredBroadcast = filteredBroadcast;
   }
 
   /**
@@ -280,7 +351,7 @@ export class CombatSystem {
         pairsToRemove.push(key);
         continue;
       }
-      if (!this._areNationsAtWar(divA.nation_id, divB.nation_id, state.relations)) {
+      if (!areNationsAtWar(divA.nation_id, divB.nation_id, state.relations)) {
         pairsToRemove.push(key);
       }
     }
@@ -353,6 +424,7 @@ export class CombatSystem {
     tickCount: number,
     broadcast: (type: string, msg: unknown) => void,
   ): Set<string> {
+    this._debugTickCount = tickCount;
     const changed = new Set<string>();
     this._handleDestroyed(state, changed, broadcast);
     this._dissolveInvalidStacks(state, changed, broadcast);
@@ -386,7 +458,7 @@ export class CombatSystem {
 
         // Skip same-nation, non-enemies, destroyed
         if (a.nation_id === b.nation_id) continue;
-        if (!this._areNationsAtWar(a.nation_id, b.nation_id, state.relations)) continue;
+        if (!areNationsAtWar(a.nation_id, b.nation_id, state.relations)) continue;
         if (
         a.combat_state === "destroyed" ||
         a.combat_state === "retreating" ||
@@ -476,6 +548,11 @@ export class CombatSystem {
             // Update division states
             a.combat_state = "engaged";
             b.combat_state = "engaged";
+            if (STUCK_UNIT_DEBUG) {
+              console.log(`[STUCK_UNIT_DEBUG] tick=${this._debugTickCount} engaged: `
+                + `${a.division_id}(${a.nation_id}, supply=${a.supply_status}) vs `
+                + `${b.division_id}(${b.nation_id}, supply=${b.supply_status})`);
+            }
 
             if (!a.engaged_with.includes(b.division_id)) a.engaged_with.push(b.division_id);
             if (!b.engaged_with.includes(a.division_id)) b.engaged_with.push(a.division_id);
@@ -1029,6 +1106,7 @@ export class CombatSystem {
     for (const [, div] of state.divisions) {
       if (div.combat_state === "retreating" && div.move_order.length === 0) {
         div.combat_state = "idle";
+        div.retreat_speed_mult = 1; // Batch 8 Task 3: fighting-withdrawal penalty ends with retreat
         changed.add(div.division_id);
       }
     }
@@ -1129,12 +1207,19 @@ export class CombatSystem {
         // Must be physically inside the province polygon
         if (!this._inProvince(div.position_lng, div.position_lat, prov)) continue;
 
+        // Must control the city itself, not just be somewhere uncontested in the province —
+        // otherwise a division wandering into an empty corner of enemy territory instantly
+        // flips the whole province (and, via cascadeCityCapture below, nearly every subprovince
+        // cell in it) despite never approaching the actual city.
+        const distToCity = this._distKm(div.position_lng, div.position_lat, prov.city_lng, prov.city_lat);
+        if (distToCity > CONTEST_RADIUS_KM) continue;
+
         // Capture is contested only if an enemy is physically at the city (within CONTEST_RADIUS_KM).
         // Using engagement_radius (50 km) was too strict — any frontline unit blocked every nearby city.
         let contested = false;
         for (const enemy of divList) {
           if (enemy.nation_id === div.nation_id) continue;
-          if (!this._areNationsAtWar(div.nation_id, enemy.nation_id, state.relations)) continue;
+          if (!areNationsAtWar(div.nation_id, enemy.nation_id, state.relations)) continue;
           if (enemy.combat_state === "destroyed") continue;
           const enemyToCity = this._distKm(enemy.position_lng, enemy.position_lat, prov.city_lng, prov.city_lat);
           if (enemyToCity <= CONTEST_RADIUS_KM) {
@@ -1145,12 +1230,23 @@ export class CombatSystem {
         if (contested) continue;
 
         // Capture
+        const oldOwnerId = stateProvince.owner_id;
         stateProvince.owner_id = div.nation_id;
         broadcast("PROVINCE_CAPTURED", {
           province_id,
           new_owner_id:  div.nation_id,
           captured_by:   div.division_id,
         });
+
+        // Cascade the province-level flip down to individual subprovince (city) cells, preserving
+        // surviving former-defender cells and one supply route per the Decisions doc. This is the
+        // only place a capital cell's owner_id ever changes. Unlike PROVINCE_CAPTURED itself
+        // (broadcast to everyone above), the cascade's own SUBPROVINCE_CAPTURED events must
+        // respect per-nation belligerency filtering, so the dedicated filtered-broadcast
+        // reference is used here instead of the plain `broadcast` parameter.
+        if (this.subprovinceSystem && this.filteredBroadcast) {
+          this.subprovinceSystem.cascadeCityCapture(province_id, oldOwnerId, div.nation_id, state, this.filteredBroadcast);
+        }
       }
     }
   }
@@ -1168,17 +1264,6 @@ export class CombatSystem {
       }
       // "engaged" and "suppressed" divisions do NOT decay suppression
     }
-  }
-
-  private _areNationsAtWar(
-    nationA: string,
-    nationB: string,
-    relations: { get(key: string): RelationState | undefined },
-  ): boolean {
-    if (nationA === nationB) return false;
-    const rel = relations.get(`${nationA}|${nationB}`)
-      ?? relations.get(`${nationB}|${nationA}`);
-    return (rel?.stance ?? "neutral") === "war";
   }
 
   private _removeEngagedOpponent(division: DivisionState, opponentId: string): void {
@@ -1256,7 +1341,12 @@ export class CombatSystem {
   // _initiateRetreat
   // ---------------------------------------------------------------------------
 
-  /** Public — called by GameRoom for manual RETREAT commands. */
+  /**
+   * Public — called by GameRoom for manual RETREAT commands. Applies the same
+   * `supply_status === "encircled"` block the auto-retreat path already enforces in
+   * _checkAutoRetreatOrRotate, so a manually-issued retreat can't do what auto-retreat refuses to:
+   * an encircled division is trapped regardless of which path requested the retreat.
+   */
   initiateRetreat(
     div:       DivisionState,
     enemies:   DivisionState[],
@@ -1264,6 +1354,7 @@ export class CombatSystem {
     changed:   Set<string>,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
+    if (div.supply_status === "encircled") return;
     this._initiateRetreat(div, enemies, state, changed, broadcast);
   }
 
@@ -1362,13 +1453,45 @@ export class CombatSystem {
       if (opponent) this._finalizeEngagementXp(opponent, true, state);
     }
 
-    // Find nearest waypoint and set as retreat target
-    const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations);
-    if (waypoint) {
+    // Find a retreat target and set it as the move order (Batch 8 Task 3): graph-based,
+    // ownership-aware pathing via MovementSystem.computeRetreatTarget when subprovinceSystem is
+    // wired up (the normal case). Falls back to the pre-existing distance-based
+    // getNearestNonNeutralWaypoint, using the enemy-centroid-avoidance direction computed above,
+    // if subprovinceSystem hasn't been set yet (e.g. a room very early in initialization) — this
+    // mirrors this method's exact pre-Task-3 behavior for that case rather than guessing at a
+    // new fallback.
+    let waypointId: string | null = null;
+    let blockedFraction = 0;
+    if (this.subprovinceSystem) {
+      const target = this.movementSystem.computeRetreatTarget(div, state, this.subprovinceSystem);
+      waypointId = target.waypointId;
+      blockedFraction = target.blockedFraction;
+    } else {
+      const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations, null, null);
+      waypointId = waypoint?.id ?? null;
+    }
+
+    if (waypointId) {
       div.move_order.splice(0, div.move_order.length);
-      div.move_order.push(waypoint.id);
+      div.move_order.push(waypointId);
     }
     // If null (no waypoints loaded), division stops in place
+
+    // Fighting-withdrawal damage (Batch 8 Task 3): only a Tier 2 "cut_off" division retreating
+    // pays a one-time HP cost, proportional to how much of the chosen retreat path crosses
+    // non-friendly ground, plus a reduced-speed penalty for the remainder of the retreat. Tier 0
+    // "normal" and Tier 1 "out_of_supply" retreat cleanly (no damage, no speed penalty) — Tier 1
+    // retreat is explicitly clean per STRATEGIC_COMBAT.md, only Tier 2 triggers fighting-
+    // withdrawal. Tier 3 "encircled" never reaches this method: _checkAutoRetreatOrRotate blocks it
+    // on the auto-retreat path, and the public initiateRetreat() wrapper above applies the same
+    // guard for the manual RETREAT command path (GameRoom.handleRetreat), so both paths agree.
+    if (div.supply_status === "cut_off") {
+      div.hp = Math.max(0, div.hp - FIGHTING_WITHDRAWAL_MAX_DAMAGE * blockedFraction);
+      div.retreat_speed_mult = RETREAT_SPEED_PENALTY_MULT;
+    } else {
+      div.retreat_speed_mult = 1;
+    }
+    changed.add(div.division_id);
   }
 
   // ---------------------------------------------------------------------------
@@ -1444,7 +1567,14 @@ export class CombatSystem {
     if (div.suppression < threshold) return;
 
     // Encircled divisions cannot retreat — they are trapped
-    if (div.supply_status === "encircled") return;
+    if (div.supply_status === "encircled") {
+      if (STUCK_UNIT_DEBUG) {
+        console.log(`[STUCK_UNIT_DEBUG] tick=${this._debugTickCount} encircled-retreat-blocked: `
+          + `${div.division_id}(${div.nation_id}, combat_state=${div.combat_state}, `
+          + `suppression=${div.suppression}, hp=${div.hp})`);
+      }
+      return;
+    }
 
     // First time threshold is crossed: mark as "suppressed" for one tick so the
     // client can display the intermediate state before the retreat fires.

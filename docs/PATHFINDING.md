@@ -81,9 +81,14 @@ to a road node uses terrain-cost edges — it does not inherit road speed.
 (goal→start) run simultaneously. Terminates when `mu` (best complete path found via a
 shared node) < sum of both frontier priorities.
 
-**Heuristic:** `sqrt(dx² + dy²) × ROAD_COST_BASE × 10.0` — intentionally inadmissible
-(10× multiplier) to accelerate convergence. Road preference is handled by cost structure,
-not heuristic admissibility.
+**Heuristic:** `sqrt(dx² + dy²) × ROAD_COST_BASE` — admissible and consistent: `ROAD_COST_BASE`
+is a true global lower bound on cost-per-degree (roads are always the cheapest edge type; every
+off-road edge costs at least `1.0 × dist_deg`). An earlier `× 10.0` weighting was tried to
+accelerate convergence but was inadmissible — it could make the bidirectional meet-in-the-middle
+termination check settle on a costlier off-road detour before exploring a cheaper nearby road
+route. Reverted; see `client/tests/test_pathfinder_admissible_heuristic.gd` for the regression
+test. Road preference itself is still driven by the cost structure (0.05 vs 1.0+ per degree),
+not by heuristic weighting.
 
 **Edge cost at query time:**
 

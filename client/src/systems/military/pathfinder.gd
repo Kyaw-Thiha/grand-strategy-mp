@@ -20,6 +20,14 @@ const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
 const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
 const SYNTHETIC_GOAL_ID := "_synthetic_goal"
 
+## Last-mile ("exact click target") straight-line hop bounds — see resolve_final_position's doc
+## comment. Client-local tunables; deliberately not required to match movement_system.ts's
+## server-side constants exactly, since this is only a coarser prediction the server's own
+## resolveFinalPosition remains authoritative over.
+const LAST_MILE_CAP_SLACK_MULT := 1.5
+const FALLBACK_LAST_MILE_CAP_DEG := 0.05
+const LAST_MILE_SWEEP_STEP_DEG := 0.02
+
 const MAX_SPLINE_DEV_DEG: float = 0.0067
 const SPLINE_SUBDIVISIONS: int = 8
 const MAX_FALLBACK_CANDIDATES := 5
@@ -741,11 +749,36 @@ func _dist(a: Dictionary, b: Dictionary) -> float:
 	return sqrt(dx*dx + dy*dy)
 
 
+## Resolves which nation owns a waypoint node for the neutral-territory check below. Prefers LIVE
+## subprovince ownership (`GameState.subprovinces`, kept current by SUBPROVINCE_CAPTURED events)
+## over the node's static, map-generation-time `nation_id` field — the static field goes stale the
+## moment any subprovince capture happens, which is now a frequent, granular event rather than the
+## rare province-level flip it used to track. `node["subprovince_id"]` is tagged once per node at
+## map-load time by `MapLoader._tag_waypoints_with_subprovince_ids()` (geometry is static; only
+## ownership changes, so the tag itself never needs refreshing). Falls back to the static field when
+## no tag/live entry exists — e.g. this Pathfinder's own synthetic-graph tests, which build nodes
+## directly without going through MapLoader.
+func _resolve_node_nation(node: Dictionary) -> Variant:
+	var subprovince_id: String = str(node.get("subprovince_id", ""))
+	if not subprovince_id.is_empty() and GameState.subprovinces.has(subprovince_id):
+		var sp: Dictionary = GameState.subprovinces[subprovince_id]
+		var owner_id: String = str(sp.get("owner_id", ""))
+		if not owner_id.is_empty():
+			return owner_id
+	return node.get("nation_id", null)
+
+
 func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dictionary) -> bool:
+	var node: Dictionary = _nodes.get(node_id, {})
+	return _is_nation_neutral_for(_resolve_node_nation(node), player_nation_id, relations)
+
+
+## Stance-check core of _is_neutral_for, factored out so resolve_final_position's segment sweep
+## (last-mile straight-line validation) can reuse it against a nation resolved from an arbitrary
+## sampled point's nearest node, not just a real waypoint-graph node's own ID.
+func _is_nation_neutral_for(nation: Variant, player_nation_id: String, relations: Dictionary) -> bool:
 	if player_nation_id.is_empty():
 		return false
-	var node: Dictionary = _nodes.get(node_id, {})
-	var nation = node.get("nation_id", null)
 	if nation == null or str(nation).is_empty() or str(nation) == player_nation_id:
 		return false
 	if relations.is_empty():
@@ -757,6 +790,89 @@ func _is_neutral_for(node_id: String, player_nation_id: String, relations: Dicti
 			var stance: String = rel_entry.get("stance", "neutral")
 			return stance != "war" and stance != "alliance"
 	return true  # relations loaded but nation absent → treat as neutral (blocked)
+
+
+## Terrain movement cost at an arbitrary point, keyed off the nearest graph node's terrain type —
+## mirrors movement_system.ts's _terrainCostAtPosition. Road nodes always cost 1.0 (never
+## impassable). Returns INF when off-road terrain is impassable for the given profile; fails open
+## (1.0) when there's no nearby graph node at all.
+func _terrain_cost_at(lng: float, lat: float, movement_profile: Dictionary) -> float:
+	var nearest_id: String = find_nearest(lng, lat)
+	if nearest_id.is_empty():
+		return 1.0
+	if is_road_node(nearest_id):
+		return 1.0
+	var node: Dictionary = get_node(nearest_id)
+	var terrain_key: String = str(node.get("cover_combat", "")) + "_" + str(node.get("elevation", ""))
+	var raw_cost: Variant = movement_profile.get(terrain_key, 1.0)
+	if raw_cost == null:
+		return INF
+	var cost: float = float(raw_cost)
+	if not is_finite(cost) or cost <= 0.0:
+		return INF
+	return cost
+
+
+## Validates and clamps a player's exact-click "final position" against the same neutral-territory
+## and terrain-passability rules the waypoint chain's A* search already applies — see
+## movement_system.ts's resolveFinalPosition (the server-authoritative counterpart) for the full
+## rationale. This client-side mirror exists only to keep prediction from overshooting what the
+## server will accept (avoiding a visible snap-back), so it's intentionally coarser: nation lookups
+## for swept points use the NEAREST graph node's resolved ownership rather than a true
+## point-in-polygon test, which is precise enough for this purpose.
+##
+## Returns the resolved, safe point, or Vector2.INF if even the first sample beyond
+## last_waypoint_id is blocked (caller should then submit the move order with no final position —
+## the division simply stops at the last waypoint), matching this codebase's existing "INF = no
+## value" sentinel convention (e.g. MilitarySystem.get_division_world_position).
+func resolve_final_position(
+		last_waypoint_id: String, requested_lng: float, requested_lat: float,
+		movement_profile: Dictionary, player_nation_id: String, relations: Dictionary) -> Vector2:
+	var last_node: Dictionary = get_node(last_waypoint_id)
+	if last_node.is_empty():
+		return Vector2.INF
+	var last_lng := float(last_node.get("lng", 0.0))
+	var last_lat := float(last_node.get("lat", 0.0))
+
+	# 1. Distance cap from local graph density, with slack.
+	var max_edge_deg := 0.0
+	for edge: Dictionary in (_adjacency.get(last_waypoint_id, []) as Array):
+		var d: float = float(edge.get("dist_deg", 0.0))
+		if d > max_edge_deg:
+			max_edge_deg = d
+	var cap_deg: float = (max_edge_deg if max_edge_deg > 0.0 else FALLBACK_LAST_MILE_CAP_DEG) * LAST_MILE_CAP_SLACK_MULT
+
+	var dx := requested_lng - last_lng
+	var dy := requested_lat - last_lat
+	var requested_dist_deg := sqrt(dx * dx + dy * dy)
+	var clamp_ratio: float = minf(1.0, cap_deg / maxf(requested_dist_deg, 1e-9))
+	var target_lng: float = last_lng + dx * clamp_ratio
+	var target_lat: float = last_lat + dy * clamp_ratio
+
+	# 2. Segment sweep for neutral-territory/terrain validity, truncating at the first blocked
+	# sample (excludes last_node itself — already validated by the waypoint chain's own A* search).
+	var sweep_dist_deg: float = sqrt((target_lng - last_lng) ** 2 + (target_lat - last_lat) ** 2)
+	var steps: int = maxi(1, ceili(sweep_dist_deg / LAST_MILE_SWEEP_STEP_DEG))
+	var resolved_lng := last_lng
+	var resolved_lat := last_lat
+	for i: int in range(1, steps + 1):
+		var t: float = float(i) / float(steps)
+		var lng: float = last_lng + (target_lng - last_lng) * t
+		var lat: float = last_lat + (target_lat - last_lat) * t
+		var nearest_id: String = find_nearest(lng, lat)
+		var nation: Variant = null
+		if not nearest_id.is_empty():
+			nation = _resolve_node_nation(get_node(nearest_id))
+		if _is_nation_neutral_for(nation, player_nation_id, relations):
+			break
+		if not is_finite(_terrain_cost_at(lng, lat, movement_profile)):
+			break
+		resolved_lng = lng
+		resolved_lat = lat
+
+	if is_equal_approx(resolved_lng, last_lng) and is_equal_approx(resolved_lat, last_lat):
+		return Vector2.INF
+	return Vector2(resolved_lng, resolved_lat)
 
 
 func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
@@ -833,10 +949,7 @@ func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary,
 func _heuristic(a: Dictionary, b: Dictionary) -> float:
 	var dx := float(a["lng"]) - float(b["lng"])
 	var dy := float(a["lat"]) - float(b["lat"])
-	# Weighted heuristic: 10× ROAD_COST_BASE. Inadmissible but A* converges
-	# much faster on 128K nodes. Road preference is preserved by the cost model
-	# (road 0.05/deg vs CT 1.0/deg), not by heuristic admissibility.
-	return sqrt(dx * dx + dy * dy) * ROAD_COST_BASE * 10.0
+	return sqrt(dx * dx + dy * dy) * ROAD_COST_BASE
 
 
 func _reconstruct(came_from: Dictionary, to_id: String) -> Array:

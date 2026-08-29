@@ -12,7 +12,8 @@ import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
 import type { RoundResolvedPayload } from "../types/tactical_types.js";
-import { FrontlineSystem } from "../systems/frontline_system.js";
+import { SubprovinceSystem, makeIsFriendly } from "../systems/subprovince_system.js";
+import { SupplyHubConstructionSystem } from "../systems/supply_hub_construction_system.js";
 import { getAirUnitStats } from "../data/air_unit_stats.js";
 import { AirWingLifecycleSystem, FUEL_DECAY_TRANSIT, FUEL_RTB_THRESHOLD } from "../systems/air_wing_lifecycle_system.js";
 import { AirDetectionSystem } from "../systems/air_detection_system.js";
@@ -30,6 +31,12 @@ import { loadProvincePIPData }    from "../utils/geo_utils.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
+
+// How many game ticks between subprovince-graph supply route recomputation/broadcast.
+// Matches the (unexported) SUPPLY_TICK_INTERVAL used by SupplySystem.tick()'s ring-based
+// tier recalculation cadence in supply_system.ts, kept in sync deliberately rather than
+// sharing an import.
+const SUPPLY_TICK_INTERVAL = 5;
 
 interface JwtPayload {
   sub: string;
@@ -85,7 +92,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private movementSystem   = new MovementSystem();
   private combatSystem     = new CombatSystem(this.movementSystem);
   private supplySystem     = new SupplySystem();
-  private frontlineSystem  = new FrontlineSystem();
+  private subprovinceSystem = new SubprovinceSystem();
+  private supplyHubConstructionSystem = new SupplyHubConstructionSystem();
   private airWingLifecycleSystem = new AirWingLifecycleSystem();
   private airDetectionSystem = new AirDetectionSystem();
   private airDubinsPathfinder = new DubinsPathfinder();
@@ -114,6 +122,15 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   async onCreate() {
+    // Wire the shared SubprovinceSystem instance into CombatSystem so _checkProvinceCapture can
+    // trigger the city-capture cascade (cell-level ownership fallout) right after a province
+    // flips, along with the filtered-broadcast primitive so the cascade's SUBPROVINCE_CAPTURED
+    // events are scoped to belligerent nations just like every other subprovince capture event.
+    this.combatSystem.setSubprovinceSystem(
+      this.subprovinceSystem,
+      (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
+    );
+
     this.setState(new GameRoomState());
 
     this.nationIds = await getMapNationIds(this.state.map_id);
@@ -130,6 +147,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.onMessage("VOTE_SPEED",       (client, msg) => this.handleVoteSpeed(client, msg));
     this.onMessage("END_GAME",         (client, _msg) => this.handleEndGame(client));
     this.onMessage("SUBMIT_MOVE_ORDER",(client, msg) => this.handleSubmitMoveOrder(client, msg));
+    this.onMessage("BUILD_SUPPLY_HUB", (client, msg) => this.handleBuildSupplyHub(client, msg));
     this.onMessage("HOLD",             (client, msg) => this.handleHold(client, msg));
     this.onMessage("RETREAT",          (client, msg) => this.handleRetreat(client, msg));
     this.onMessage("REPOSITION",       (client, msg) => this.handleReposition(client, msg));
@@ -926,6 +944,27 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.checkAutoStart();
   }
 
+  private handleBuildSupplyHub(client: Client, msg: { province_id?: string }) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const nation = this.getNationForPlayer(player.userId);
+    if (!nation) {
+      client.send("ERROR", { message: "Select a nation before building a supply hub" });
+      return;
+    }
+    const provinceId = msg.province_id;
+    if (!provinceId) {
+      client.send("ERROR", { message: "province_id is required" });
+      return;
+    }
+    const result = this.supplyHubConstructionSystem.startConstruction(
+      nation.nation_id, provinceId, this.state, this.subprovinceSystem, Date.now(),
+    );
+    if (result.ok === false) {
+      client.send("ERROR", { message: result.error });
+    }
+  }
+
   private handleSendChat(client: Client, msg: { message?: string }) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
@@ -1100,7 +1139,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     // Trim path at first neutral-territory waypoint
     const allowedWaypoints = this.movementSystem.trimToAllowedTerritory(
-      waypoints, division.nation_id, this.state.relations,
+      waypoints, division.nation_id, this.state.relations, this.subprovinceSystem, this.state.subprovinces,
     );
     if (allowedWaypoints.length === 0) {
       client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "neutral_territory" });
@@ -1113,9 +1152,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       division.move_order.push(wpId);
     }
 
-    // Store exact click target for last-mile advancement (-999 = none)
-    division.final_position_lng = (typeof msg.final_lng === "number") ? msg.final_lng : -999;
-    division.final_position_lat = (typeof msg.final_lat === "number") ? msg.final_lat : -999;
+    // Store exact click target for last-mile advancement (-999 = none) — resolved/clamped against
+    // the same neutral-territory guard and terrain passability the waypoint chain just went
+    // through, plus a distance cap scaled to the local waypoint graph's own density. Without this,
+    // _advanceFinalPosition would walk an unchecked, unbounded straight line toward the raw click
+    // coordinate regardless of what trimToAllowedTerritory decided about the chain above it.
+    division.final_position_lng = -999;
+    division.final_position_lat = -999;
+    if (typeof msg.final_lng === "number" && typeof msg.final_lat === "number") {
+      const resolved = this.movementSystem.resolveFinalPosition(
+        allowedWaypoints[allowedWaypoints.length - 1],
+        msg.final_lng, msg.final_lat,
+        division, this.state.relations, this.subprovinceSystem, this.state.subprovinces,
+      );
+      if (resolved) {
+        division.final_position_lng = resolved.lng;
+        division.final_position_lat = resolved.lat;
+      }
+    }
   }
 
   private handleHold(client: Client, msg: { division_id?: string }) {
@@ -1256,18 +1310,23 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.state.phase = "running";
     this.gameStartedAt = new Date();
 
-    // Load waypoints for movement and map data for combat + supply
+    // Load waypoints for movement and map data for combat + supply. Movement's own neutral-
+    // territory check no longer needs a loadMapData snapshot — it resolves ownership live via
+    // SubprovinceSystem/state.subprovinces instead (see movement_system.ts's _isNeutralFor).
     this.movementSystem.loadWaypoints(this.state.map_id);
-    this.movementSystem.loadMapData(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
-    this.frontlineSystem.loadMapData(this.state.map_id);
+    this.subprovinceSystem.loadForRoom(this.state.map_id);
     this._initProvinces(this.state.map_id);
+    // Must run after _initProvinces populates province.owner_id, since subprovince ownership
+    // is seeded from each subprovince's parent province's current owner_id.
+    this.subprovinceSystem.initializeOwnership(this.state);
     this.airStrategicBombingSystem = new AirStrategicBombingSystem(
       this._provinceCityPositionLookup,
     );
     this.serverVisibilitySystem = new ServerVisibilitySystem(
       loadProvincePIPData(this.state.map_id),
+      this.subprovinceSystem,
     );
     this._initRelations();
     this.broadcastRelations();
@@ -1292,6 +1351,14 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (province.owner_id) provinceOwners[pid] = province.owner_id;
     }
     this.broadcast("PROVINCE_INIT", { provinces: provinceOwners });
+
+    // Send initial subprovince ownership snapshot (owner_id only — geometry/kind/province_id
+    // are already static client data loaded from the map pipeline in Batch 3).
+    const subprovinceSnapshot: Record<string, string> = {};
+    for (const [id, sp] of this.state.subprovinces) {
+      subprovinceSnapshot[id] = sp.owner_id;
+    }
+    this.broadcast("SUBPROVINCE_INIT", { subprovinces: subprovinceSnapshot });
 
     // Send full initial division state — profile sent once at top level (shared by all divisions)
     const sharedProfileJson = this.state.divisions.values().next().value?.movement_profile_json ?? "";
@@ -1453,6 +1520,25 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
   }
 
+  /**
+   * Sends a message to each client whose resolved nation_id passes sessionFilter. Used as the
+   * BroadcastFn callback shape SubprovinceSystem's capture/revert methods expect, modeled on the
+   * existing broadcastToNation/broadcastFilteredAirWingUpdates per-client resolution pattern.
+   */
+  private _broadcastToFilteredNations(
+    sessionFilter: (nationId: string) => boolean,
+    type: string,
+    msg: unknown,
+  ): void {
+    for (const c of this.clients) {
+      const p = this.state.players.get(c.sessionId);
+      if (!p) continue;
+      const n = this.getNationForPlayer(p.userId);
+      if (!n || !sessionFilter(n.nation_id)) continue;
+      c.send(type, msg);
+    }
+  }
+
   private broadcastFilteredAirWingUpdates(msg: { wings: unknown[] }): void {
     if (!this.serverVisibilitySystem) {
       this.broadcast("AIR_WING_UPDATES", msg);
@@ -1507,6 +1593,33 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     try {
       this.movementSystem.tick(this.state);
+
+      // Subprovince capture check — must run in this exact order: reset freeze tracking, then
+      // one full scan marking every engaged/suppressed division's cell frozen, THEN per-division
+      // capture checks, THEN per-(attacker,province) revert checks. See subprovince_system.ts's
+      // scanCombatFreeze/resetFreezeTracking doc comments for why this order is load-bearing.
+      this.subprovinceSystem.resetFreezeTracking();
+      this.subprovinceSystem.scanCombatFreeze(this.state.divisions.values());
+      for (const division of this.state.divisions.values()) {
+        const startPosition = this.movementSystem.getTickStartPosition(division.division_id);
+        this.subprovinceSystem.checkCaptureAfterMovement(
+          division,
+          this.state,
+          (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
+          startPosition,
+        );
+      }
+      for (const { nationId, provinceId } of this.subprovinceSystem.getTrackedAttackerProvincePairs()) {
+        this.subprovinceSystem.revertNationCaptureIfProvinceEmpty(nationId, provinceId, this.state, (sessionFilter, type, msg) =>
+          this._broadcastToFilteredNations(sessionFilter, type, msg),
+        );
+      }
+
+      this.supplyHubConstructionSystem.tick(this.state, Date.now(), (provinceId) => {
+        this.subprovinceSystem.registerDynamicHub(provinceId);
+        this.broadcast("SUPPLY_HUB_COMPLETED", { province_id: provinceId });
+      });
+
       const pendingCaptures: Array<{ province_id: string; new_owner_id: string }> = [];
       const combatChanged = this.combatSystem.tick(this.state, this.tickCount, (type, msg) => {
         this.broadcast(type, msg);
@@ -1522,8 +1635,28 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           this._handleAirbaseCapture(evt);
         }
       }
-      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
-      this.frontlineSystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg));
+      const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg), this.subprovinceSystem);
+
+      // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
+      // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
+      // (own nation always, allied nation always, otherwise gated by fog-of-war visibility) so they
+      // are sent as a client event rather than synced through the Colyseus schema, which can't
+      // express per-viewer filtering.
+      if (this.tickCount % SUPPLY_TICK_INTERVAL === 0) {
+        const routes = this.supplySystem.computeSubprovinceRoutes(this.state, this.subprovinceSystem);
+        for (const route of routes) {
+          const division = this.state.divisions.get(route.divisionId);
+          if (!division) continue;
+          const isFriendly = makeIsFriendly(division.nation_id, this.state.relations);
+          this._broadcastToFilteredNations(
+            (nationId) =>
+              isFriendly(nationId) ||
+              this.serverVisibilitySystem.canNationSeeDivision(nationId, division.division_id),
+            "SUPPLY_ROUTE_UPDATE",
+            route,
+          );
+        }
+      }
 
       this.airDetectionSystem.tick(
         this.state,
@@ -2198,6 +2331,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       observation_radius: div.observation_radius,
       engagement_radius: div.engagement_radius,
       template_id: div.template_id,
+      subprovince_id: div.subprovince_id,
       move_order: [...div.move_order],
       consumed_waypoint_ids: [...div.consumed_waypoint_ids],
       final_position_lng: div.final_position_lng,

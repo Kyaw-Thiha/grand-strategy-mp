@@ -18,10 +18,10 @@ var players: Dictionary = {}
 # ── In-game state (populated from Phase 4+ events) ───────────────────────────
 # provinces: { province_id → { owner_id: String, ... } }
 var provinces: Dictionary = {}
+# subprovinces: { subprovince_id → { province_id: String, owner_id: String } }
+var subprovinces: Dictionary = {}
 # divisions: { division_id → DivisionState dict (mirrors server DivisionState) }
 var divisions: Dictionary = {}
-# frontline: { province_id → { nation_id: float share, ... } }
-var frontline: Dictionary = {}
 # relations: { "from_id:to_id" → { stance: String } }
 var relations: Dictionary = {}
 # proposals: { proposal_id → { from_id, to_id, stance, resolved } }
@@ -35,6 +35,8 @@ var air_wings: Dictionary = {}
 # air_wing_paths: { wing_id → AIR_WING_PATH payload } — cached so the hydration loop
 # can replay paths that arrived before air_wing_system was set up (GAME_STARTED race).
 var air_wing_paths: Dictionary = {}
+# supply_routes: { division_id → last-received SupplyRoute dict }
+var supply_routes: Dictionary = {}
 # naval_contact_markers: { marker_id → {marker_id, nation_id, position_lng, position_lat, ...} }
 var naval_contact_markers: Dictionary = {}
 
@@ -53,13 +55,14 @@ func reset_session_state() -> void:
 	nations.clear()
 	players.clear()
 	provinces.clear()
+	subprovinces.clear()
 	divisions.clear()
-	frontline.clear()
 	relations.clear()
 	proposals.clear()
 	stacks.clear()
 	air_wings.clear()
 	air_wing_paths.clear()
+	supply_routes.clear()
 	naval_contact_markers.clear()
 
 
@@ -155,16 +158,6 @@ func _apply_unit_destroyed(data: Dictionary) -> void:
 	)
 
 
-## Called by SessionManager when server sends FRONTLINE_UPDATED.
-func _apply_frontline_updated(data: Dictionary) -> void:
-	var province_id: String = data.get("province_id", "")
-	var shares: Dictionary = data.get("nation_shares", {})
-	if province_id.is_empty():
-		return
-	frontline[province_id] = shares
-	EventBus.frontline_updated.emit(province_id, shares)
-
-
 ## Called by SessionManager when server sends PROVINCE_INIT (once at game start).
 func _apply_province_init(data: Dictionary) -> void:
 	for pid: String in data.get("provinces", {}):
@@ -184,6 +177,48 @@ func _apply_province_captured(data: Dictionary) -> void:
 	provinces[province_id]["owner_id"]  = new_owner
 	provinces[province_id]["nation_id"] = new_owner
 	EventBus.province_captured.emit(province_id, new_owner)
+
+
+## Called by SessionManager when server sends SUPPLY_HUB_COMPLETED.
+func _apply_supply_hub_completed(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	if province_id.is_empty():
+		return
+	if not provinces.has(province_id):
+		provinces[province_id] = {}
+	provinces[province_id]["has_supply_hub"] = true
+	EventBus.supply_hub_completed.emit(province_id)
+
+
+## Called by SessionManager when server sends SUBPROVINCE_INIT (once at game start).
+func _apply_subprovince_init(data: Dictionary) -> void:
+	for sp_id: String in data.get("subprovinces", {}):
+		if not subprovinces.has(sp_id):
+			subprovinces[sp_id] = {}
+		subprovinces[sp_id]["owner_id"] = data["subprovinces"][sp_id]
+
+
+## Called by SessionManager when server sends SUBPROVINCE_CAPTURED.
+func _apply_subprovince_captured(data: Dictionary) -> void:
+	var subprovince_id: String = data.get("subprovince_id", "")
+	var province_id: String = data.get("province_id", "")
+	var new_owner: String = data.get("new_owner_id", "")
+	if subprovince_id.is_empty():
+		return
+	if not subprovinces.has(subprovince_id):
+		subprovinces[subprovince_id] = {}
+	subprovinces[subprovince_id]["province_id"] = province_id
+	subprovinces[subprovince_id]["owner_id"] = new_owner
+	EventBus.subprovince_captured.emit(subprovince_id, province_id, new_owner)
+
+
+## Called by SessionManager when server sends PROVINCE_CONTEST_UPDATE.
+func _apply_province_contest_updated(data: Dictionary) -> void:
+	var province_id: String = data.get("province_id", "")
+	var contested: bool = data.get("contested", false)
+	if province_id.is_empty():
+		return
+	EventBus.province_contest_updated.emit(province_id, contested)
 
 
 ## Called by SessionManager when server sends COMBAT_STARTED.
@@ -339,6 +374,14 @@ func _apply_air_wing_path(data: Dictionary) -> void:
 	if id.is_empty():
 		return
 	air_wing_paths[id] = data
+
+## Stores the latest server-authoritative supply route for one division and notifies
+## listeners. GameState never recomputes route/supply data — this is a straight cache
+## write of what the server sent.
+func _apply_supply_route_update(data: Dictionary) -> void:
+	var division_id: String = data.get("divisionId", "")
+	supply_routes[division_id] = data
+	EventBus.supply_route_updated.emit(division_id, data)
 
 func _apply_air_wing_destroyed(data: Dictionary) -> void:
 	var id: String = data.get("wing_id", "")

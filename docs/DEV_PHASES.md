@@ -1,9 +1,11 @@
 # Grand Strategy Multiplayer — Development Phases
 
 > Development roadmap and sequencing reference.
-> Last updated: August 2026 — Phase 12 air combat checklist reconciled with Branch L
-> (`feat/air-mission-ai`) implementation: mission auto-targeting (new subsection), damage
-> patterns, patrol behaviour, and escort rebuild.
+> Last updated: August 2026 — added Phase 16 (3D Terrain Rendering, cosmetic tier,
+> non-blocking; see `TERRAIN_3D_RENDERING.md`), renumbering the former Phase 16
+> ("Later Modules") to Phase 17. Prior update: Phase 12 air combat checklist reconciled
+> with Branch L (`feat/air-mission-ai`) implementation: mission auto-targeting (new
+> subsection), damage patterns, patrol behaviour, and escort rebuild.
 
 ---
 
@@ -189,7 +191,7 @@ Launch Godot → map renders → can click provinces → camera pans and zooms s
 ### Testing
 - [x] `scripts/e2e-session-loop.sh` + `game-server/test/session-loop.e2e.ts` — 11-step bot
       E2E test
-- [x] `docs/LOCAL_TESTING.md` — two-instance Godot testing guide with debugging gotchas
+- [x] `wiki/docs/LOCAL_TESTING.md` — two-instance Godot testing guide with debugging gotchas
 
 ### Verification gate
 Player A creates lobby → bot joins → both pick nations → start → bot sends a VOTE_SPEED →
@@ -198,7 +200,7 @@ game ends cleanly → results posted to Hono.
 > **Phase 3 completed 2026-06-02.** E2E bot test passes all 11 steps
 > (`bash scripts/e2e-session-loop.sh`). Two Godot instances verified in local play: login →
 > create lobby → join by code → select nations → ready up → start → both transition to game
-> scene. See `docs/LOCAL_TESTING.md` for setup instructions and a record of debugging gotchas
+> scene. See `wiki/docs/LOCAL_TESTING.md` for setup instructions and a record of debugging gotchas
 > (Colyseus 0.17 protocol, GDScript lambda closures, `.tscn` unique_name_in_owner syntax).
 
 ---
@@ -233,11 +235,11 @@ Unit tests for movement profile computation and A* path validity.
       cluster, pre-compute and cache optimal path cost between every pair of border nodes
       (nodes connecting to a neighbouring cluster); output an abstract graph (one node per
       border crossing) alongside the existing `waypoints.json`, not replacing it; see
-      `docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
+      `wiki/docs/PATHFINDING.md` — Hierarchical Layer for the full approach and query-time
       behaviour. Client-side HPA* routing is code-complete but the synthetic goal bypass
       (to_cluster is always empty for right-click moves) means only non-synthetic targets
       (group moves) use HPA* acceleration currently
-- See `docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
+- See `wiki/docs/PATHFINDING.md` for the full waypoint graph generation spec and terrain cost tables
 
 ### Colyseus (server-side simulation)
 - [x] Division spawning at game start (from starting positions config per nation)
@@ -258,7 +260,8 @@ Unit tests for movement profile computation and A* path validity.
       (min_cost × 0.4) + (mean_cost × 0.6) per terrain; impassable if any unit has ∞ cost;
       cached server-side for path validation
 - [ ] Division movement tick — advance toward player-set target waypoints each server tick;
-      speed = road_level speed on roads; slowest-unit speed off-road from movement profile
+      speed = flat road speed on roads (road_level is cosmetic only, does not affect speed);
+      slowest-unit speed off-road from movement profile
 - [x] Engagement area collision detection — circular areas, radius by division type;
       full overlap triggers COMBAT_STARTED
 - [ ] Attacker/defender determination at combat initiation:
@@ -287,7 +290,7 @@ Unit tests for movement profile computation and A* path validity.
       - [x] River crossing penalty applied at engagement creation and re-checked each round
       - [x] `reposition_order` cleared on all combat-end paths (retreat, destroy, disengage)
       - [x] Hold broadcast fix: `handleHold()` broadcasts `DIVISION_UPDATES` after clearing `move_order`
-      - [x] Contextual Reposition action in `land_selection_popover.tscn`
+      - [x] Reposition button (Row3/BtnReposition) in `friendly_division_panel.tscn`
       - [x] `unit_reposition` keybind (B), button label shows `[B]`
       - [x] Reposition mode: `_enter_reposition_mode()`, map click → path compute → `REPOSITION` command
       - [x] Client-side ghost path truncation at engagement boundary (waypoint graph distance)
@@ -335,10 +338,10 @@ Unit tests for movement profile computation and A* path validity.
       map_data.json; move orders trimmed at first neutral-territory waypoint; outright rejection
       when first waypoint is neutral; retreat targets avoid neutral territory via
       `getNearestNonNeutralWaypoint()`
-- [x] Combat state label displayed in the contextual land inspector and updated live via
-      `division_updated` events
-- [x] Live HP/suppression dual bars rendered directly on division counters and refreshed from
-      `division_updated` state
+- [x] Combat state label: "STATE · IDLE/ENGAGED/SUPPRESSED/RETREATING" displayed in the bottom
+      selection panel's IdentityBlock, updated live via `division_updated` events
+- [x] Live HP/suppression panel: friendly_division_panel re-reads division data on
+      `division_updated` events, updating HP bar and suppression bar without re-creating buttons
 - [ ] Positional stack mechanics:
       - [x] Allied divisions at same position form ordered stack; player can reorder
       - [x] Only first division engages enemy; on suppression threshold → rotates to back
@@ -367,26 +370,38 @@ Unit tests for movement profile computation and A* path validity.
             at that instant, which then holds until the next division joins or one departs
       - [x] `FLANK_ATTACK` and `REAR_ATTACK` events broadcast on classification, including
             which pair of divisions produced the winning (maximum) angle
-- [ ] Dynamic frontline influence computation — **128×128 grid, per supply tick**:
-      - [ ] `computeInfluenceGrid()` in `GameRoom.ts`: for each division, add
-            hp_fraction × distance_falloff contribution to cells within influence radius
-            (falloff_radius = engagement_radius × 2.5 in grid cells); recon units excluded
-      - [ ] Ownership bonus: add `OWNERSHIP_BONUS` constant to province owner's cells
-            (covers cells within province boundaries at grid resolution)
-      - [ ] Serialize to `dominant[Uint8Array]` + `advantage[Float32Array]` — leading
-            nation per cell and its margin over second-place nation
-      - [ ] Broadcast `FRONTLINE_UPDATE` with binary payload every supply tick (~5s);
-            all players receive same grid; division visibility is filtered separately
-      - [ ] Only compute/include influence for nations where `at_war == true` against
-            at least one other present nation; neutral-vs-neutral pairs produce no contest
-      - [ ] City capture: ownership bonus cell coverage updates immediately on
-            `PROVINCE_CAPTURED`; next `FRONTLINE_UPDATE` reflects new ownership
-      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for algorithm design
-      - [ ] `FRONTLINE_UPDATE` event replaces old per-province broadcast approach
+- [x] Subprovince capture and ownership sync — **replaces the earlier 128×128 influence-grid
+      plan; see `STRATEGIC_COMBAT.md` — Subprovince Capture System for full design.** That
+      influence-grid approach was implemented once, in an earlier draft of this project, and
+      found not to work well in practice — this is not a deferred item being picked back up,
+      it's a deliberate replacement:
+      - [x] Load `subprovinces.geojson` + `subprovince_adjacency.geojson` at game start
+            (see MAP_DATA_CONTRACT.md), build the in-memory adjacency graph once
+      - [x] `checkCaptureAfterMovement()` in `subprovince_system.ts` (named differently
+            from this doc's original `checkSubprovinceCapture()`, same behavior), run on
+            division movement (not on a grid tick): a subprovince flips to a nation's
+            ownership the instant a unit of that nation's polygon-occupancy test succeeds
+            against it. No radius, no distance-falloff — literal occupancy only
+      - [x] Province-wide sticky ownership: captured subprovinces stay captured as long as
+            the attacking nation has ≥1 living unit anywhere in the province; reverting the
+            whole set happens in one pass when that count hits zero, not per-cell
+      - [x] Combat-freeze: a subprovince with an active tactical-combat instance does not
+            change owner until that instance resolves, regardless of current occupancy
+      - [x] Broadcast `SUBPROVINCE_CAPTURED { subprovince_id, new_owner }` per flip — a
+            small delta event, not a full-grid payload every tick. Client applies the fade
+            tween locally (see Godot section below) on receipt
+      - [x] City capture cascade behaviour resolved: preserves occupied former-defender
+            cells and one valid supply route to another owned hub; see
+            `STRATEGIC_COMBAT.md`'s Subprovince Capture System for the finalized design
+      - [x] `FRONTLINE_UPDATE`'s old binary-grid payload is gone; `SUBPROVINCE_CAPTURED`
+            replaces it entirely, alongside the existing `PROVINCE_CAPTURED` event for the
+            city-capture case (the old Dynamic Frontline System server broadcast, client
+            state, and dead overlay renderer were fully removed this session)
 - [x] `COMBAT_STARTED`, `COMBAT_RESULT`, `COMBAT_ENDED`, `PROVINCE_CAPTURED`,
       `UNIT_DESTROYED`, `STACK_FORMED`, `STACK_ROTATION`, `STACK_DISSOLVED` events broadcast.
-      Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED`) are emitted by the
-      full three-tier system in Phase 7, not by this phase. `FRONTLINE_UPDATED` deferred to Phse 7.
+      Supply/encirclement events (`OUT_OF_SUPPLY`, `CUT_OFF`, `DIVISION_ENCIRCLED`) are emitted
+      by the full three-tier system in Phase 7, not by this phase. `FRONTLINE_UPDATED` deferred
+      to Phase 7.
 - [ ] Basic supply placeholder — **none needed.** Earlier drafts of this phase had a
       simplified "out of supply = increased attrition" placeholder here, on the assumption
       Phase 7 was far enough away to need a stand-in. It is not: Phase 7 directly follows
@@ -400,12 +415,12 @@ Unit tests for movement profile computation and A* path validity.
       graph; movement profile applied at query time per selected division
 - [x] Pathfinding uses **two-phase routing** (bidirectional A*): off-road purity pre-check;
       road entry pre-check (nearest road within 0.015°²/~1.5km → route to road then
-      road-only to goal); full graph fallback (see `docs/PATHFINDING.md` — Two-Phase Routing)
+      road-only to goal); full graph fallback (see `wiki/docs/PATHFINDING.md` — Two-Phase Routing)
 - [x] **String-pulling post-processor** applied to raw A* output — greedy forward skip
-      to furthest passable node within 0.05°²/~5km (see `docs/PATHFINDING.md` — String-Pulling)
+      to furthest passable node within 0.05°²/~5km (see `wiki/docs/PATHFINDING.md` — String-Pulling)
 - [x] Shift-move road avoidance heuristic — activates from segment 2 onward; road crossing
       check at 200m intervals; continuous avoidance multiplier 1.0–13.0 based on off-road
-      depth (see `docs/PATHFINDING.md` — Shift-Move Road Avoidance)
+      depth (see `wiki/docs/PATHFINDING.md` — Shift-Move Road Avoidance)
 - [x] Hierarchical query added on top of the existing two-phase routing above: cheap
       abstract-graph search across clusters first, identifying which clusters the route
       crosses; full two-phase A* (unchanged) runs only within those clusters, always at
@@ -417,9 +432,9 @@ Unit tests for movement profile computation and A* path validity.
       waypoint list, client-side, before handing to dead reckoning; deviation from the
       original straight-line polyline clamped to ~750m so the curve cannot cut across
       terrain the route deliberately avoided; falls back to a straight segment if the
-      clamp would be exceeded (see `docs/PATHFINDING.md` — Path Smoothing)
+      clamp would be exceeded (see `wiki/docs/PATHFINDING.md` — Path Smoothing)
 - [x] Infinity-cost edges excluded from A* search; river crossing penalty on flagged
-      edges; server validates path (see `docs/PATHFINDING.md` — Core A*)
+      edges; server validates path (see `wiki/docs/PATHFINDING.md` — Core A*)
 - [x] `MilitarySystem` — division dot rendering, selection, move orders, stack badge display,
       meeting battle icon (purple border + inward arrows), stack count badge, dead reckoning
       movement, ghost overlay, multi-waypoint chain building, drag-box selection
@@ -448,12 +463,12 @@ Unit tests for movement profile computation and A* path validity.
 - [x] Movement rendering uses **dead reckoning** — client drives animation locally
       using the pre-validated waypoint list and terrain speed; no waiting for server
       per-waypoint acknowledgements. Server broadcasts `consumed_waypoint_ids` each tick;
-      client trims local DR order via suffix-match (see `docs/PATHFINDING.md` — Dead Reckoning).
+      client trims local DR order via suffix-match (see `wiki/docs/PATHFINDING.md` — Dead Reckoning).
       Last-mile DR advances frame-by-frame toward the exact click position with weighted
       speed averaging between last waypoint and destination terrain. Server correction via
       `DIVISION_UPDATES` patches with suffix-match divergence detection.
       Dead reckoning implementation in `client/src/systems/military/military_system.gd`;
-      see `docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
+      see `wiki/docs/PATHFINDING.md` — Dead Reckoning for speed constants and correction logic.
 - [ ] Observation radius computed as max recon unit range in template; baseline radius
       for divisions with no recon units; updates when movement profile recomputes
 - [x] Move order UX:
@@ -466,34 +481,10 @@ Unit tests for movement profile computation and A* path validity.
       - [x] Ghost dot at each waypoint: faded division icon + faded engagement circle;
             observation radius shown on hover only
       - [x] Ghost dots and paths visible to owner and allies
-- [x] Box Selection — drag over empty map space with no move mode active draws a selection
+- [ ] Box Selection — drag over empty map space with no move mode active draws a selection
       rectangle; on release, every division dot inside it is added to the selection;
       `Shift+drag` adds to existing selection, `Ctrl+drag` removes from it; does not create
       or modify a saved control group on its own
-- [x] Single owned-land selection visuals — hollow connected screen-space tactical-glass surround
-      tracks the projected active counter without covering its status indicators; ordinary visible
-      friendly/enemy land counters use smooth, slight opacity differentiation; committed yellow ring
-      and owned hover preview removed; icon-only Composition and Center Camera actions preserve
-      selection, with camera centering using a short smooth pan that toggles between close and
-      strategic zoom levels; new single selections retain the former ring's quick ease-out pop
-- [x] Moving-state Hold action — implemented, automated-verified, and manually approved; an owned idle division with an
-      active waypoint route or final-position target adds Hold after the universal surround actions;
-      tray and remappable keyboard paths share MilitarySystem eligibility, while the server clears
-      both route and final target
-- [ ] Combat-state Retreat action — implemented and client-verified; owned engaged/suppressed
-      divisions add Retreat after the universal surround actions using the approved running-person
-      icon, tray and remappable keyboard paths share MilitarySystem eligibility, and the server
-      revalidates a live opposing engagement before visibility-filtering updates. Core server test
-      execution remains blocked by Node 26's workerpool incompatibility; manual interaction and visual
-      approval are complete
-- [ ] Single-selection hardening — implemented and automated-verified; the connected surround uses
-      stable top-right, top-left, lower-right, and lower-left fallbacks with bounded inward sliding,
-      avoids the top bar, left dock, map-mode controls, and chat, suspends for managed panels, and
-      safely handles off-screen units, interpolation, rapid selection, removal, and adjacent map
-      input. Automated coverage includes `960x540`, `1280x720`, and `1920x1080`; targeted physical
-      interaction, tooltip, and visual approval remain open
-- [x] Existing 2+ owned-land selection inspector remains available as a collapsed chip and roster
-      pending the later multi-selection surround redesign
 - [ ] Formation Move — move order issued to 2+ selected divisions spreads them into a grid
       formation around the destination point rather than converging on one point; adjacent
       division spacing derived from each division's own engagement radius (sum of the two
@@ -503,33 +494,36 @@ Unit tests for movement profile computation and A* path validity.
 - [ ] Stack UI — ordered stack panel; drag to reorder; first/reserve indicators
 - [ ] `CombatSystem` — combat icon rendering (standard Engaged vs Meeting Battle icons),
       HP bar, suppression pulse, round phase indicator
-- [ ] `FrontlineRenderer` — GPU shader approach (not CPU polygon per tick):
-      - [ ] Server sends 128×128 influence grid as two binary arrays: `dominant[Uint8]`
-            (leading nation per cell) and `advantage[Float32]` (dominance margin) every
-            ~5 seconds; ~80KB payload total
-      - [ ] Client uploads arrays as two `ImageTexture` uniforms (`FORMAT_R8` and
-            `FORMAT_RF`) on `FRONTLINE_UPDATE` receipt
-      - [ ] `advantage` texture lerps smoothly over 2 seconds between updates;
-            `dominant` texture snaps immediately (discrete ownership change)
-      - [ ] `frontline.gdshader` fragment shader on a `MeshInstance2D` covering full
-            map bounds: blends nation colours by dominant/advantage; renders edge glow
-            at zero-crossing of advantage; `political_view` uniform toggles fill vs
-            line-only rendering; z-index above base map, below unit dots
-      - [ ] `set_political_view(bool)` function toggles shader uniform
-      - [ ] Frontline only renders between nations marked `at_war = true` in game state;
-            `at_war` uniform is a 6×6 bool matrix sent once at game start
-      - [ ] Province borders remain static (political map, never changes)
+- [ ] `SubprovinceRenderer` — flat per-polygon fill, not a shader blend (this got much
+      simpler than the influence-grid plan it replaces; see `STRATEGIC_COMBAT.md` —
+      Subprovince Capture System, Rendering — Fade Transition):
+      - [x] Load `subprovinces.geojson` once at map load; one `Polygon2D` per subprovince
+            (implemented as the simple per-polygon version; no `MultiMesh` batching needed
+            at current map density)
+      - [x] On `SUBPROVINCE_CAPTURED` receipt: tween that polygon's fill color — implemented
+            as a direct old-nation-color → new-nation-color interpolation, not through a
+            neutral-gray midpoint (the neutral-gray-hold design in this doc's earlier draft
+            was superseded; see the corrected combat-frozen note below), tunable duration
+      - [x] Re-flip mid-tween restarts the tween from the current interpolated color; does
+            not queue the new target behind the old one
+      - [x] Combat-frozen subprovinces (active tactical-combat instance) do not tween at
+            all until the instance resolves — resolved: they render a distinct amber
+            contested tint (`CONTESTED_TINT_COLOR`), separate from both the neutral-gray
+            hold and the solid pre-combat color, taking precedence over any in-flight fade
+      - [ ] Frontline only renders between nations marked `at_war = true`; a subprovince
+            between two not-at-war nations renders as plain baseline color, no fill contest
+      - [ ] Province borders remain static (political map layer, never changes) — drawn
+            separately from and above the subprovince fill
       - [ ] City node marker changes to capturing nation's icon on `PROVINCE_CAPTURED`
-      - [ ] Neutral player receives same influence grid broadcast; sees colour wash;
-            does not see enemy division dots outside their own observation radius
-      - [ ] Intensity of colour wash proportional to division HP fraction (baked into
-            server influence computation) — fading regions indicate weakening fronts
-      - [ ] See `STRATEGIC_COMBAT.md` — Dynamic Frontline System (deferred) for shader
-            design and server computation approach
-- [ ] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`; shader
-      continues to apply influence wash on top of new baseline colour
+      - [ ] Neutral player receives `owned_subprovince_count / total` per nation per
+            province (see STRATEGIC_COMBAT.md — Frontline Visibility by Player Type), not
+            individual `SUBPROVINCE_CAPTURED` events or division-level detail
+- [x] `MapRenderer` update — recolour province baseline on `PROVINCE_CAPTURED`. Resolved: the
+      whole-province capture cascade (`cascadeCityCapture`, see Urban capture cascade above)
+      flips remaining subprovinces at that same moment, not later or individually — no flag
+      needed, only one branch was ever built
 - [ ] `NotificationSystem` — combat started, meeting battle, suppression threshold,
-      stack rotation, encirclement, division destroyed, supply severed via frontline toasts
+      stack rotation, encirclement, division destroyed, supply severed via subprovince toasts
 
 ### Verification gate
 Move division → pathfinding finds road route automatically → manually draw off-road route
@@ -585,15 +579,18 @@ entering it. Flanking angle: two units attack defender from 85° → no bonus; r
 second unit to 95° → FLANK_ATTACK fires → standard bonus applied; reposition to 140°
 → REAR_ATTACK fires → enhanced bonus. Angle classification locked at first contact —
 minor drift during combat does not change the bonus tier.
-Frontline: advance division into contested province → province interior colour begins
-washing toward advancing nation’s predefined colour → recon unit advance does not shift
-colour. Both attacking and defending units contribute influence simultaneously → frontline
-sits where forces balance. Division takes HP damage → colour intensity fades. Division
-captures city node → ownership
-bonus flips to new owner immediately → previous owner’s unit influence persists where
-their units are → frontline shifts but does not snap fully → province border unchanged.
-Friendly colour persists along roads still defended by retreating forces. Neutral observer
-sees colour wash shifting but not enemy division dots outside their observation radius.
+Subprovinces: advance division into a contested province → the subprovinces it physically
+enters flip to the advancing nation's colour, tweening through the neutral-gray hold rather
+than snapping → subprovinces it does not enter stay the defender's colour regardless of how
+close the fighting is. Division retreats out of the province entirely, no other friendly
+unit remains there → every subprovince it had captured reverts to the defender in one pass.
+A second friendly division stays behind in the province after the first retreats → captured
+ground stays captured — sticky ownership is province-wide, not per-cell. Division captures
+city node → province ownership flips immediately per the existing rule; whichever cascade
+behaviour was chosen for remaining subprovinces (see STRATEGIC_COMBAT.md's open question) is
+what fires, and only that behaviour — confirm it's not doing both. Neutral observer sees
+`owned_subprovince_count / total` shift per province but not individual subprovince flips or
+enemy division dots outside their observation radius.
 (Supply/encirclement behaviour — out-of-supply attrition, cut-off fighting withdrawal,
 full encirclement and its armour-damage decay — is verified in Phase 7, where that system
 is actually implemented; nothing in this phase's gate exercises it.)
@@ -651,8 +648,8 @@ All Godot items below are implemented:
 - [x] Reusable two-column layout shell (§6.1)
 - [x] `UnitProfile` scaffolded (§6.6)
 - [x] Side-dock vs. full-center overlay modes (§5.3)
-- [x] Contextual owned-land popover plus bottom panels for FriendlyProvince, EnemyDivision,
-      and FriendlyAirWing states (§5.6)
+- [x] Bottom selection panel container — FriendlyDivision, FriendlyProvince,
+      FriendlyStack, EnemyDivision states (§5.6)
 - [x] `InputMap` with finalized keybind scheme (per UI_UX_DESIGN.md §9)
 - [x] Left-handed mirror preset (§9.1)
 - [x] Settings keybind remapping UI — list/rebind/reset, persisted to `user://keybinds.cfg`
@@ -665,7 +662,7 @@ Key files produced:
 - `src/ui/settings/settings_keybind.gd` — rebind UI with close_callback hook
 - `src/core/keybind_manager.gd` — InputMap registry + config persistence
 - `src/core/keybind_presets.gd` — DEFAULT + LEFT_HANDED presets
-- `scenes/game/panels/land_selection_popover.tscn|.gd`
+- `scenes/game/panels/friendly_division_panel.tscn|.gd`
 - `scenes/game/panels/friendly_province_panel.tscn|.gd`
 - `scenes/game/panels/enemy_division_panel.tscn|.gd`
 - `scenes/game/panels/friendly_stack_panel.tscn|.gd`
@@ -834,14 +831,14 @@ for all attack pattern logic before any Godot work.
 - [x] `template_id` added to `serializeDivision()` so client receives it in DIVISION_UPDATES broadcasts
 - [x] Default template (`preset_combined_arms`) assigned to pre-spawned divisions with grid cell population
 - [x] `DIVISION_UPDATES` broadcast after `ASSIGN_TEMPLATE` so client GameState stays in sync
-- [x] Mini 5×5 composition grid in `LandSelectionPopover` — 25 ColorRect cells colored by unit class
+- [x] Mini 5×5 composition grid (CompBlock) in `FriendlyDivisionPanel` — 25 ColorRect cells colored by unit class
       (olive infantry / steel-blue armour / dark-red artillery / teal recon / dark-brown empty)
-- [x] Composition thumbnail is a full clickable control with hover treatment and tooltip
+- [x] CompBlock hover effect (subtle darkening on mouse enter, reverts on exit)
 - [x] `DivisionTemplateViewerPanel` — FULL_CENTER overlay with read-only 5×5 grid (left) and View/Select states (right)
       - View state: current template name, division type, engagement radius, fill & role balance bars
       - Select state: scrollable template list with hover-preview in left grid, click-to-select, Confirm button
       - Locked state: hides [Change Template →] when division is engaged/retreating/suppressed
-- [x] Viewer panel wired into `GameHUD`; opening it preserves the active land selection
+- [x] Viewer panel wired into `GameHUD` with division deselect on open (matching DivisionBuilderPanel pattern)
 - [x] `game-server/test/6-assign-template.test.ts` — 6 tests (sets template_id, populates cells, clears prior cells,
       recomputes division_type, rejects when engaged, no-op for missing division)
 
@@ -963,57 +960,99 @@ for that unit type.
 
 ## Phase 7 — Supply System
 
-**Goal:** Full road-segment graph supply replaces the simplified Phase 4 supply model.
-Encirclement via supply cut is a reliable, satisfying outcome. Air interdiction of roads works.
+**Goal:** Subprovince-graph supply replaces the simplified Phase 4 supply model. Encirclement
+via supply cut is a reliable, satisfying outcome. Air interdiction of supply routes is the one
+remaining unimplemented piece (see Air interdiction integration, below).
 
-**Why its own phase:** Supply is architecturally complex (graph flow on the adjacency data from
-MAP_DATA_CONTRACT.md) and interacts with the military, economy, and air layers. Separating it
-ensures it can be tested and tuned in isolation before the other layers depend on it.
+**Why its own phase:** Supply is architecturally complex (routing over the subprovince
+adjacency graph from MAP_DATA_CONTRACT.md) and interacts with the military, economy, and air
+layers. Separating it ensures it can be tested and tuned in isolation before the other layers
+depend on it.
 
-**Testing:** Unit tests for graph flow math. Bot clients testing encirclement scenarios.
+**Status note:** the originally-planned road-segment flow-rate model (segments carrying a
+throughput capacity, hub buildings feeding it outward each tick, trucks drawing from whatever
+segment they occupy) was never built. What shipped instead — and is what the checklist below
+now reflects — is a per-division Dijkstra shortest-path search each supply tick, from the
+division's subprovince to the nearest reachable friendly/allied hub, with real distance/
+terrain-weighted edge cost. See `STRATEGIC_COMBAT.md`'s Supply System section for the full
+design.
+
+**Testing:** `lane:subprovince` unit tests (`game-server/test/subprovince-supply-graph.test.ts`,
+`subprovince-supply.test.ts`, `subprovince-retreat.test.ts`). Bot clients testing encirclement
+scenarios.
 
 ### Colyseus
-- [ ] Supply graph — road segments from adjacency data carry throughput capacity per road level
-- [ ] Supply hub building generates supply at a rate that flows outward from its node through
-      the graph each tick
-- [ ] Divisions draw supply from the segment they currently occupy
-- [ ] Segment cut detection — enemy unit physically occupying a node, or province capture
-      breaking a supply path, reduces downstream throughput
-- [ ] Three-tier supply/encirclement status system (checked each supply tick) — **moved
-      here from an earlier draft of Phase 4**, which only ever had a simplified placeholder;
-      this is the real system, not an upgrade of something already implemented:
-      - [ ] Tier 1 — Out of Supply: supply connectivity check fails (<50% friendly
-            influence on waypoint path to any supply hub); debuffs: no HP recovery,
-            slow suppression threshold decay, reduced movement speed; clean retreat
-            still available; `OUT_OF_SUPPLY` event fires
-      - [ ] Tier 2 — Cut Off: no retreat path through ≥50% friendly-influenced
-            waypoints in any direction; all Tier 1 debuffs plus fighting withdrawal
-            on retreat (division takes HP damage proportional to enemy influence
-            density along escape path); `CUT_OFF` event fires
-      - [ ] Tier 3 — Encircled: 8-direction check from division centre — all 8
-            directions blocked by enemy division engagement area overlap OR ≥70%
-            enemy influence; retreat command disabled; all Tier 2 debuffs plus:
+- [x] Supply routing — `findSupplyRoute` (`supply_graph.ts`): Dijkstra over the subprovince
+      adjacency graph, restricted to friendly/allied-owned (or requester-occupied) cells; edge
+      cost is real distanceKm / effective speed, not a flat per-hop or per-segment-capacity
+      value — road cells at `SUPPLY_ROAD_SPEED_KMH`, off-road cells at
+      `SUPPLY_OFFROAD_SPEED_KMH` graded down by `UNIT_TERRAIN_COSTS.standard_infantry`
+- [x] Supply hub — currently every friendly/allied-owned province's city subprovince
+      (`SubprovinceSystem.getHubSubprovinceIds`); no supply-hub *building* requirement is
+      implemented yet, despite `bld_supply_hub` existing in the map data contract
+- [x] Route status/openness — `SupplyRoute.status` (`"open"` / `"degraded"` / `"cut_off"`) and
+      `throughputRatio` decay purely from accumulated off-road distance along the resolved
+      route (`OFFROAD_DEGRADE_DISTANCE_KM`, default 300km, calibrated to this map's actual
+      hinterland-hop scale) — independent of the Tier 1/2/3 division `supply_status` below
+- [ ] Route/segment interdiction via enemy action beyond ownership already gating the valid-edge
+      set (e.g. a struck cell temporarily excluded from routing) — not implemented; see Air
+      interdiction integration, below
+- [x] Three-tier supply/encirclement status system (checked each supply tick), now computed
+      over the subprovince adjacency graph — **the influence-percentage version referenced
+      in earlier drafts of this doc is gone; see `STRATEGIC_COMBAT.md`'s Supply and
+      encirclement section for the current design, this checklist mirrors it exactly:**
+      - [x] `FRIENDLY(sp)` / `BLOCKED(sp)` helpers: friendly = self or ally owner, blocked =
+            everything else including neutral-owned subprovinces
+      - [x] `ring(n, subprovince)`: bounded BFS over subprovince_adjacency to exact
+            hop-distance n; cap at n=3, this never needs to search further
+      - [x] Tier 1 — Out of Supply: no path exists from the division's subprovince to any
+            friendly/allied supply hub through friendly/allied road-corridor subprovinces;
+            debuffs: no HP recovery, slow suppression threshold decay, reduced movement
+            speed; clean retreat still available; `OUT_OF_SUPPLY` event fires
+      - [x] Tier 2 — Cut Off (checked only if Out of Supply): `ring(3)`, `ring(2)`, or
+            `ring(1)` — checked outermost first — has zero friendly/allied subprovinces; all
+            Tier 1 debuffs plus fighting withdrawal on retreat (HP damage proportional to
+            `BLOCKED` density along the escape path); `CUT_OFF` event fires
+      - [x] Tier 3 — Encircled (checked only if Cut Off): `ring(2)` or `ring(1)` has zero
+            friendly/allied subprovinces; retreat command disabled; all Tier 2 debuffs plus:
             - Armoured units: damage output decays per tick → 0 after N ticks
             - Infantry units: slower degradation than armour
             - All units: suppression threshold lowered further per tick
-            `ENCIRCLED` event fires
-      - [ ] Status degrades one tier at a time — cannot jump directly to Tier 3
+            `DIVISION_ENCIRCLED` event fires. Note this check is a strict subset of Tier 2's (rings
+            1–2 vs rings 1–3) — verify the implementation actually relies on that subset
+            relationship for the "cannot skip Tier 2" guarantee below, rather than adding a
+            separate explicit ordering check that could drift out of sync with it
+      - [x] Status degrades one tier at a time — cannot jump directly to Tier 3
       - [ ] Destruction: last stack division in Tier 3 hits suppression threshold
             → destroyed (not retreated); experience and template lost permanently
       - [ ] Stack-level encirclement: the check applies to the whole stack at its shared
             position, not per-division — rotation (Phase 4's stack mechanic) does not
             protect a stack that is, as a whole, surrounded
-- [ ] `SUPPLY_DISRUPTED`, `SUPPLY_RESTORED`, `OUT_OF_SUPPLY`, `CUT_OFF`, `ENCIRCLED` events
-      (an earlier draft also named `DIVISION_ENCIRCLED` separately — dropped here as a
-      duplicate of `ENCIRCLED`, the actual Tier 3 transition event)
+      - [x] Retreat pathing (used here and elsewhere): `findRetreatPath` (`supply_graph.ts`),
+            built on the same real distance/effective-speed base cost the Supply System's
+            routing uses, multiplied by an ownership tier — friendly/allied at base cost,
+            contested at 5×, enemy/neutral at 20× — replaces any separate "retreat along
+            supply road" logic
+- [x] `OUT_OF_SUPPLY`, `CUT_OFF`, `DIVISION_ENCIRCLED`, `SUPPLY_RESTORED` events (the actual
+      implemented set — `SUPPLY_DISRUPTED` and a bare `ENCIRCLED` event were never built;
+      an earlier draft of this doc had the naming backwards, claiming `DIVISION_ENCIRCLED`
+      was the dropped duplicate when it's actually the one that shipped as the Tier 3
+      transition event)
 
 ### Hono
-- [ ] Supply hub building persisted via `/internal/game-end` in player results
+- [ ] Supply hub building persisted via `/internal/game-end` in player results — blocked on
+      the supply-hub *building* itself not existing yet (see Colyseus's Supply hub item above)
 
 ### Godot
-- [ ] `SupplySystem` — road segment throughput visualisation; truck sprites on active
-      segments; dim/broken visual for disrupted segments
-- [ ] Supply status indicator on division icons — subtle colour shift when out of supply;
+- [x] `SupplyLineOverlay` (`client/src/systems/military/supply_line_overlay.gd`) — one polyline
+      per division with a displayable route, colour/pulse driven by status and `throughputRatio`
+      (open = blue, degraded = continuous amber-to-red gradient); replaces the originally-
+      planned truck-sprite/lit-road segment visualisation entirely. While on a road-kind cell
+      with resolved geometry the line follows the literal road centerline
+      (`road_subprovince_geometry.geojson`); off-road stretches get a deterministic per-cell
+      wander offset plus a centripetal Catmull-Rom spline instead of a straight
+      centroid-to-centroid line
+- [x] Supply status indicator on division icons — subtle colour shift when out of supply;
       distinct visual treatment per tier (Out of Supply / Cut Off / Encircled), not a single
       generic "low supply" indicator, since the three tiers carry meaningfully different
       player consequences and should read differently on the map at a glance
@@ -1021,28 +1060,37 @@ ensures it can be tested and tuned in isolation before the other layers depend o
       distinct notification types matching the three tiers, not one generic warning)
 
 ### Air interdiction integration
-- [ ] Colyseus logistics strike handler reduces segment throughput for N ticks
+- [ ] Not implemented. The originally-planned "reduce segment throughput for N ticks" doesn't
+      map onto per-division shortest-path routing (there is no persistent per-segment
+      throughput value to reduce) — needs its own mechanism, e.g. temporarily excluding a
+      struck cell from `findSupplyRoute`'s valid-edge set for N ticks, per
+      `STRATEGIC_COMBAT.md`'s Supply System section
 - [ ] Both low-altitude (direct, no recon) and high-altitude (recon-proportional) variants
-      resolve against the supply graph correctly
+      resolve against whatever that mechanism turns out to be
 
 ### Verification gate
-Division advances beyond supply hub range, connectivity check drops below 50% friendly
-influence → Tier 1 Out of Supply: HP recovery stops, movement speed reduced, retreat still
-clean → `OUT_OF_SUPPLY` fires. Player pushes a relief force restoring the influence chain →
-status returns to normal, `SUPPLY_RESTORED` fires. Enemy advance removes every retreat path
-through friendly-influenced ground → Tier 2 Cut Off: retreat now triggers a fighting
-withdrawal (HP damage proportional to enemy influence density along the escape path) rather
-than a clean retreat → `CUT_OFF` fires. Enemy closes all 8 directions around the division
-(engagement-area overlap or ≥70% enemy influence in every direction) → Tier 3 Encircled:
-retreat command disabled entirely, armoured units' damage output decays toward zero over
-several ticks, infantry degrades slower → `ENCIRCLED` fires. Status never jumps directly
-from normal to Tier 3 — confirm it always passes through Tier 1 and Tier 2 first. Stack of
-three divisions, fully encircled → confirm encirclement applies to the stack as a whole, not
-reset by Phase 4's stack-rotation mechanic. Last division in a Tier 3 stack hits its
-suppression threshold → destroyed outright (not retreated) → experience and template lost
-permanently. Air logistics strike dims a road segment and reduces downstream division supply
-for the correct duration, and can independently push a division from normal into Tier 1 if
-the strike cuts its only connection to a supply hub.
+Division advances beyond friendly road-corridor reach, no path to any supply hub remains →
+Tier 1 Out of Supply: HP recovery stops, movement speed reduced, retreat still clean →
+`OUT_OF_SUPPLY` fires. Player pushes a relief force that recaptures enough road-corridor
+subprovinces to reopen a path → status returns to normal, `SUPPLY_RESTORED` fires. Enemy
+advance leaves ring(3) around the division with zero friendly/allied subprovinces (rings 1–2
+still have some) → Tier 2 Cut Off fires from the outermost-ring check, not a full-map path
+search; retreat now triggers a fighting withdrawal (HP damage proportional to blocked-cell
+density along the escape path) rather than a clean retreat → `CUT_OFF` fires. Enemy closes
+ring(2) and ring(1) around the division too → Tier 3 Encircled: retreat command disabled
+entirely, armoured units' damage output decays toward zero over several ticks, infantry
+degrades slower → `DIVISION_ENCIRCLED` fires. Confirm Tier 3 never fires on a tick where Tier 2's
+condition wasn't also true in that same evaluation — this should fall out automatically from
+the subset relationship between the two ring checks; if it doesn't, that's a bug in the
+implementation, not an edge case to special-case around. Set up a case where ring(3) is
+hostile but ring(1)/ring(2) still have friendly cells → confirm this reads as Cut Off, not
+Encircled — the outer ring alone doesn't get you all the way to Tier 3. Stack of three
+divisions, fully encircled → confirm encirclement applies to the stack as a whole, not reset
+by Phase 4's stack-rotation mechanic. Last division in a Tier 3 stack hits its suppression
+threshold → destroyed outright (not retreated) → experience and template lost permanently.
+Air interdiction of supply is not yet implemented (see Air interdiction integration, above) —
+its verification (a logistics strike temporarily blocking a route and independently pushing a
+division into Tier 1) remains outstanding until that mechanism is built.
 
 ---
 
@@ -1251,7 +1299,7 @@ against) and for standing trade routes (needs a second nation to negotiate with)
 - [ ] `BuildingUI` — per-building detail view showing current level, active perks, and the
       building's own perk tree (adjacency web rendering shared with the unit-research panel's
       tree-rendering component where the underlying shape matches — see
-      `docs/UI_UX_DESIGN.md` for the shared adjacency-web widget)
+      `wiki/docs/UI_UX_DESIGN.md` for the shared adjacency-web widget)
 - [ ] `MarketUI` — spot market order book (post buy/sell, view standing orders, see fills);
       separate `TradeRouteUI` for establishing/viewing standing routes, distinct panel since
       barter (resource-for-resource) only applies here, not on the spot market
@@ -1974,7 +2022,66 @@ see Steam achievement unlock.
 
 ---
 
-## Phase 16 — Later Modules
+## Phase 16 — 3D Terrain Rendering (Cosmetic Tier, Non-Blocking)
+
+**Goal:** Optional 3D terrain rendering mode alongside the existing 2D painted map,
+satisfying the functional-parity constraint in `UI_UX_DESIGN.md` §2. Tier 1
+(displacement mesh, texture splatting, distance fog, cloud shadow, curvature AO) and
+Tier 2 (water shader, LUT grading) build the full "pretty and legible" renderer.
+Tier 3 (art-directed textures) and Tier 4 (instanced clutter) are deferred. Full spec:
+`TERRAIN_3D_RENDERING.md`.
+
+**Why non-blocking:** Purely a client-side rendering alternative to the existing 2D
+mode — no server changes, no gameplay changes, no new fields on `map_data.json`. 2D
+remains default and fully functional throughout; nothing else in the roadmap depends
+on this phase landing, so it can run whenever capacity allows.
+
+### Mapping pipeline (`map/tools/map_pipeline/pipeline.py`)
+- [ ] `rasterize_splatmap()` — `cover.geojson` → `splatmap.png`, own
+      `cover_visual → texture_group` lookup (kept separate from `terrain_lookup.json`,
+      which stays gameplay-only)
+- [ ] `compute_curvature_ao()` — `heightmap.tif` → `ao.png`, Sobel-style curvature
+      operator, precomputed so it's free at runtime
+- [ ] `rasterize_coast_distance()` — `base_water.geojson` → `coast_distance.png`,
+      distance-to-shore used as a water depth proxy
+- [ ] Insert as pipeline steps 10–12 (after waypoint graph generation, before
+      copy-through) — see updated numbered list in `MAP_DATA_CONTRACT.md`
+
+### Godot modules — Tier 1
+- [ ] `terrain_3d_renderer.gd` — subdivided mesh (512×512 starting point for a
+      Europe-sized map), vertex displacement sampled from `heightmap.tif`
+- [ ] `terrain.gdshader` — `vertical_exaggeration` uniform (default `1.6`, tunable
+      `1.4–1.8`), splatmap texture blending across ~7 placeholder ground textures,
+      triplanar mapping on steep slopes, distance fog toward a horizon color,
+      scrolling procedural-noise cloud-shadow layer, `ao.png` multiply
+
+### Godot modules — Tier 2
+- [ ] `water.gdshader` — `coast_distance.png` shallow→deep color gradient, scrolling
+      normal-map shimmer, shoreline foam threshold
+- [ ] `lut_grading.gdshader` — single LUT post-process pass targeting the existing
+      "aged dossier" palette from `UI_UX_DESIGN.md` §2; must run **before** the
+      political overlay composite — ownership color and unit state stay outside the
+      LUT, same rule as the existing 2D desaturation constraint
+
+### Deferred — do not start without a separate go-ahead
+- [ ] **Tier 3** — art-directed/stylized ground texture set replacing the Tier 1
+      placeholder textures. Blocked on a human design decision, not engineering.
+- [ ] **Tier 4** — instanced billboard trees (`MultiMeshInstance3D`) in
+      `dense_forest`/`jungle`/`boreal_forest` cover, and low-poly urban clutter props
+      in `urban`/`town` cover.
+
+### Verification gate
+Load a map in 3D mode → mountains visibly rise above plains, hills a visible
+intermediate step → forest cover reads as a distinct texture from plains/farmland and
+roughly tracks `cover.geojson` polygon edges → distant terrain fades toward horizon
+color → cloud-shadow pattern visibly moves across terrain over time → coastal water
+shows a shallow→deep gradient with shoreline foam → toggle to 2D mode → identical
+province ownership, identical unit positions, no information differs between modes →
+political overlay colors stay fully saturated in 3D (confirm they bypass the LUT pass).
+
+---
+
+## Phase 17 — Later Modules
 
 Full contracts written when implementation begins. Prioritise based on playtester feedback.
 
@@ -1991,7 +2098,7 @@ Full contracts written when implementation begins. Prioritise based on playteste
 | `AchievementSystem` | `[LATER]` | Steam achievement unlocks from game events |
 | `AIPlayerSystem` | `[LATER]` | Server-side AI for unfilled nation slots (Colyseus module) |
 | `LobbyTimerSystem` | `[LATER]` | Auto-start lobby after configurable countdown. Requires `AIPlayerSystem`. |
-| `NetworkScalingSystem` | `[LATER]` | Binary schema sync + StateView AOI. The server already mutates `@type()`-decorated schema objects at runtime — Colyseus generates binary deltas but the client discards them (see `# Phase 4+` in `net_manager.gd`). Migration: (1) write a GDScript `@colyseus/schema` binary decoder for packets 14/15 in `net_manager.gd`; (2) rewrite `session_manager.gd` + `game_state.gd` from JSON message handlers to schema `listen()`/`onAdd`/`onRemove` callbacks; (3) assign `client.view = new StateView()` per client and wire `ServerVisibilitySystem` to call `client.view.add(entity)`/`remove(entity)` instead of the manual `broadcastToNationSet()` filtering introduced in Branch J. Covers all entity types: divisions, air wings, ships. `@filter`/`@filterChildren` were removed in Colyseus 0.16 — StateView is the replacement. **Do after Phase 14 (Economy Integration)** so all major schema classes (divisions, wings, ships, economy buildings on ProvinceState) are stable before migrating once. See `docs/future-works/binary-schema-sync.md` for full design notes. |
+| `NetworkScalingSystem` | `[LATER]` | Binary schema sync + StateView AOI. The server already mutates `@type()`-decorated schema objects at runtime — Colyseus generates binary deltas but the client discards them (see `# Phase 4+` in `net_manager.gd`). Migration: (1) write a GDScript `@colyseus/schema` binary decoder for packets 14/15 in `net_manager.gd`; (2) rewrite `session_manager.gd` + `game_state.gd` from JSON message handlers to schema `listen()`/`onAdd`/`onRemove` callbacks; (3) assign `client.view = new StateView()` per client and wire `ServerVisibilitySystem` to call `client.view.add(entity)`/`remove(entity)` instead of the manual `broadcastToNationSet()` filtering introduced in Branch J. Covers all entity types: divisions, air wings, ships. `@filter`/`@filterChildren` were removed in Colyseus 0.16 — StateView is the replacement. **Do after Phase 14 (Economy Integration)** so all major schema classes (divisions, wings, ships, economy buildings on ProvinceState) are stable before migrating once. See `wiki/future-works/binary-schema-sync.md` for full design notes. |
 | `AmphbiousSystem` | `[LATER]` | Shore bombardment and amphibious assault. Requires Phase 13 naval complete. |
 | `MineWarfareSystem` | `[LATER]` | Minelayer and minesweeper ship classes. Sea zone denial via minefield placement. Requires Phase 13 naval complete. |
 | `MidgetSubmarineSystem` | `[LATER]` | Harbour-penetration submarine variant. Requires naval-land integration design. |

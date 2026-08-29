@@ -558,7 +558,18 @@ func _on_direct_move_ready(path: Array, division_id: String, target_lng: float, 
 		if wpid == "_synthetic_goal":
 			wpid = goal_id
 		path_to_submit.append(wpid)
-	_submit_move_order_for_division(division_id, path_to_submit, Vector2(target_lng, target_lat))
+
+	# Clamp the exact click target against the same neutral-territory/terrain rules the waypoint
+	# chain above just went through, plus a distance cap scaled to local waypoint density — mirrors
+	# movement_system.ts's resolveFinalPosition (server-authoritative). Without this, the client's
+	# dead-reckoning "last mile" would predict an unbounded, unchecked straight line toward the raw
+	# click coordinate, visibly overshooting before the server's own clamp corrects it.
+	var resolved_final: Vector2 = _pathfinder.resolve_final_position(
+		path_to_submit[-1], target_lng, target_lat,
+		_get_movement_profile(division_id), GameState.get_my_nation_id(), GameState.relations)
+	var final_pos: Vector2 = resolved_final if is_finite(resolved_final.x) else Vector2.INF
+
+	_submit_move_order_for_division(division_id, path_to_submit, final_pos)
 	_spawn_move_destination_effect(
 			_map_loader.project_lng_lat(target_lng, target_lat),
 			division_id)
@@ -1433,8 +1444,17 @@ func _on_division_updated(division_id: String) -> void:
 	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
 		var server_final_lng: float = float(data.get("final_position_lng", -999.0))
 		# Waypoints done but server is still advancing to the exact click position — let
-		# client DR continue the last mile; do not freeze yet.
+		# client DR continue the last mile; do not freeze yet. Sync the client's predicted
+		# _dr_final_goal to the server's authoritative value: the client's own pre-submission
+		# clamp (Pathfinder.resolve_final_position) only sees a road-only graph, while the server
+		# resolves against the full road+terrain-grid graph, so the two can disagree — without this
+		# sync the drawn route line would keep showing the client's original, possibly-wrong
+		# prediction forever instead of converging to the truth once the server responds.
 		if order.is_empty() and server_final_lng > -998.0 and not (combat_state_val in ["engaged", "suppressed"]):
+			var server_final_lat: float = float(data.get("final_position_lat", -999.0))
+			var server_goal := Vector2(server_final_lng, server_final_lat)
+			if not _dr_final_goal.has(division_id) or not _dr_final_goal[division_id].is_equal_approx(server_goal):
+				_dr_final_goal[division_id] = server_goal
 			_update_division_route(division_id)
 			_update_division_visibility(division_id)
 			return
@@ -1732,7 +1752,7 @@ func deselect() -> void:
 	EventBus.division_deselected.emit()
 	EventBus.division_active_changed.emit("")
 	EventBus.province_deselected.emit()
-	EventBus.division_selection_changed.emit([])
+	EventBus.division_selection_changed.emit([] as Array[String])
 	EventBus.division_hold_eligibility_changed.emit("", false)
 	EventBus.division_retreat_eligibility_changed.emit("", false)
 	_refresh_all_icon_visual_emphasis()

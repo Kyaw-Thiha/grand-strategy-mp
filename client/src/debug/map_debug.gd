@@ -4,7 +4,6 @@ extends "res://src/game/map_scene.gd"
 ## Scene → Run Specific Scene in the Godot editor.
 
 const MAP_ID := "western_europe_6"
-#const FrontlineOverlay := preload("res://src/systems/frontline/frontline_overlay.gd")  # deferred
 
 
 func _get_map_id() -> String:
