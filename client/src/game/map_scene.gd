@@ -158,7 +158,7 @@ func _on_map_loaded(province_count: int) -> void:
 		_subprovince_renderer.on_map_loaded(province_count)
 
 	if _supply_line_overlay != null:
-		_supply_line_overlay.setup(_map_loader as MapLoader)
+		_supply_line_overlay.setup(_map_loader as MapLoader, _military_system)
 
 	_map_interaction.setup(_map_loader)
 	_map_interaction.on_map_loaded(province_count)

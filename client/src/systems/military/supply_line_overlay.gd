@@ -51,6 +51,27 @@ const SELECTED_WIDTH_MULT := 0.75
 ## live on the division icon from a different, live field. See class doc.
 const HIDDEN_STATUSES: PackedStringArray = ["cut_off", "encircled"]
 
+## Visual-redesign constants (follow-up to the initial flat-line styling): a "flow" band travels
+## along the line from the far/hub end (points[-1]) toward the division end (points[0]) — the
+## direction supplies actually move — instead of the whole line breathing uniformly. Tunable,
+## illustrative, same convention as ROUTE_STYLE above.
+const FLOW_BAND_WIDTH := 0.22
+const FLOW_DIM_ALPHA_MULT := 0.35
+const FLOW_BRIGHT_ALPHA_MULT := 1.15
+## Width tapers from narrow at the division end (points[0]) to full width at the far/hub end
+## (points[-1]), reinforcing the same hub→division flow direction without extra draw calls.
+const WIDTH_TAPER_NEAR_MULT := 0.55
+const WIDTH_TAPER_FAR_MULT := 1.0
+
+## Road-snap + off-road smoothing constants (follow-up visual pass). While a route crosses a
+## road-kind cell with resolved geometry (MapLoader.get_road_geometry_points()), the drawn line
+## follows the literal road curve exactly — these constants only affect the off-road stretches.
+## Off-road anchor points (cell centroids) get a small, deterministic per-cell offset so the line
+## reads as a natural wandering trail instead of a rigid centroid-to-centroid zigzag, then a
+## Catmull-Rom spline is fit through the (wandered) anchors for a smooth curve. Tunable.
+const OFFROAD_WANDER_FRACTION := 0.08 # fraction of a cell's bounding-box shorter side
+const OFFROAD_SPLINE_SAMPLES_PER_SEGMENT := 5
+
 
 ## Per-division render state: the wrapper/line nodes plus the pulse animation phase and the
 ## resolved base style (post degraded-gradient interpolation) that _process() animates from
@@ -64,9 +85,21 @@ class _RouteLineState:
 	var base_width: float = 4.0
 	var pulse_rate: float = 2.0
 	var pulse_phase: float = 0.0
+	# The subprovinceIds the currently-displayed line.points was built from — lets _apply_route
+	# skip re-running the wander+spline pipeline on a status-only update (e.g. throughputRatio
+	# ticking slightly without the path itself changing), which the server broadcasts on a fixed
+	# cadence regardless of whether the path changed (see GameRoom.ts's SUPPLY_TICK_INTERVAL).
+	var last_subprovince_ids: Array = []
+	# Owned Gradient driving the traveling flow band (see FLOW_BAND_WIDTH's doc comment); rebuilt
+	# in-place every frame rather than reassigned, to avoid a per-frame resource allocation.
+	var gradient: Gradient = null
 
 
 var _map_loader: MapLoader = null
+# Source of live, per-frame division screen positions (military_system.gd's
+# get_division_world_position). Used only to keep a displayed route's first point glued to a
+# moving division between server SUPPLY_ROUTE_UPDATE pushes — never to recompute the route itself.
+var _military_system: Node = null
 # division_id → _RouteLineState. Deliberately not named `_route_overlays` — that name is
 # already used by military_system.gd for movement-order preview lines, an unrelated concept.
 var _route_lines: Dictionary = {}
@@ -90,20 +123,24 @@ func _init() -> void:
 	_connect_signals()
 
 
-## Registers the MapLoader used to resolve subprovince centroids, then syncs any supply
-## routes GameState already cached before this overlay was set up (e.g. a late scene load
-## after the server already sent updates).
+## Registers the MapLoader used to resolve subprovince centroids and the MilitarySystem used to
+## read live division positions, then syncs any supply routes GameState already cached before
+## this overlay was set up (e.g. a late scene load after the server already sent updates).
 ## Parameters:
 ## - loader: loaded MapLoader providing subprovince geometry lookups.
+## - military_system: MilitarySystem instance exposing get_division_world_position(); may be null
+##   (e.g. in a test harness), in which case live-position tracking is simply skipped.
 ## Returns: nothing.
-func setup(loader: MapLoader) -> void:
+func setup(loader: MapLoader, military_system: Node = null) -> void:
 	_map_loader = loader
+	_military_system = military_system
 	_sync_existing_routes()
 
 
 func _process(delta: float) -> void:
 	for division_id: Variant in _route_lines.keys():
 		_advance_pulse(String(division_id), delta)
+		_sync_live_start_point(String(division_id))
 
 
 # ── Signal wiring ────────────────────────────────────────────────────────────
@@ -181,11 +218,21 @@ func _apply_route(division_id: String, route: Dictionary) -> void:
 		state.line = Line2D.new()
 		state.line.antialiased = true
 		state.line.z_as_relative = false
+		# Width tapers along the line instead of being uniform — see WIDTH_TAPER_*'s doc comment.
+		var taper := Curve.new()
+		taper.add_point(Vector2(0.0, WIDTH_TAPER_NEAR_MULT))
+		taper.add_point(Vector2(1.0, WIDTH_TAPER_FAR_MULT))
+		state.line.width_curve = taper
+		state.gradient = Gradient.new()
+		state.line.gradient = state.gradient
 		state.wrapper.add_child(state.line)
 		add_child(state.wrapper)
 		_route_lines[division_id] = state
 
-	state.line.points = _polyline_for_route(route)
+	var subprovince_ids: Array = route.get("subprovinceIds", [])
+	if subprovince_ids != state.last_subprovince_ids:
+		state.line.points = _polyline_for_route(route)
+		state.last_subprovince_ids = subprovince_ids.duplicate()
 	_resolve_style(state, route)
 
 
@@ -219,24 +266,52 @@ func _resolve_style(state: _RouteLineState, route: Dictionary) -> void:
 		state.base_width = open_style["width"]
 
 
-## Converts a route's `subprovinceIds` into a screen-space polyline. `MapLoader.
-## get_subprovince_polygon()` already returns fully-projected points (it calls
-## `MapProjection.project_ring()` internally), so this only averages them into a centroid —
-## re-projecting here would double-project. Cells that don't resolve to a polygon are
-## skipped rather than inserting `Vector2.ZERO`.
+## Converts a route's `subprovinceIds` into a screen-space polyline. Road-kind cells with
+## resolved geometry (`MapLoader.get_road_geometry_points()`) contribute their exact, literal
+## road points; everything else (hinterland/town/capital, or a road cell with no resolved
+## geometry) contributes its polygon centroid as an "off-road anchor" that later gets a small
+## deterministic wander offset and Catmull-Rom smoothing (see `_smooth_offroad_runs`) — see
+## class doc's road-snap/off-road-smoothing constants. `MapLoader.get_subprovince_polygon()` /
+## `get_road_geometry_points()` both return fully-projected points already, so no re-projection
+## happens here. Cells that don't resolve to any polygon at all are skipped rather than
+## inserting `Vector2.ZERO`.
 ## Parameters:
 ## - route: the SupplyRoute dict whose `subprovinceIds` to trace.
-## Returns: the resolved screen-space polyline (may be shorter than `subprovinceIds` if
-## some cells didn't resolve).
+## Returns: the resolved screen-space polyline (may be shorter than `subprovinceIds` if some
+## cells didn't resolve, and longer than it once off-road stretches are spline-sampled).
 func _polyline_for_route(route: Dictionary) -> PackedVector2Array:
 	var subprovince_ids: Array = route.get("subprovinceIds", [])
+	# is_road_flags[i] tags points[i] as belonging to an exact road segment (true) or an
+	# off-road anchor awaiting smoothing (false) — kept as a parallel array since
+	# PackedVector2Array can't carry per-point metadata.
 	var points := PackedVector2Array()
+	var is_road_flags: Array[bool] = []
+	var anchor_ids: Array[String] = [] # subprovince_id per off-road anchor point; "" for road points
+
 	for raw_id: Variant in subprovince_ids:
-		var polygon: PackedVector2Array = _map_loader.get_subprovince_polygon(String(raw_id))
+		var sid := String(raw_id)
+		var data: Dictionary = _map_loader.get_subprovince_data(sid)
+		var kind: String = String(data.get("kind", ""))
+		var road_points: PackedVector2Array = PackedVector2Array()
+		if kind == "road":
+			road_points = _map_loader.get_road_geometry_points(sid)
+		if not road_points.is_empty():
+			if not points.is_empty() and points[points.size() - 1].distance_squared_to(road_points[road_points.size() - 1]) \
+					< points[points.size() - 1].distance_squared_to(road_points[0]):
+				road_points.reverse()
+			for point: Vector2 in road_points:
+				points.append(point)
+				is_road_flags.append(true)
+				anchor_ids.append("")
+			continue
+		var polygon: PackedVector2Array = _map_loader.get_subprovince_polygon(sid)
 		if polygon.is_empty():
 			continue
 		points.append(_centroid(polygon))
-	return points
+		is_road_flags.append(false)
+		anchor_ids.append(sid)
+
+	return _smooth_offroad_runs(points, is_road_flags, anchor_ids)
 
 
 ## Arithmetic centroid of an already-projected polygon, mirroring the simple averaging
@@ -249,6 +324,143 @@ func _centroid(polygon: PackedVector2Array) -> Vector2:
 	for point: Vector2 in polygon:
 		sum += point
 	return sum / float(polygon.size())
+
+
+## Splits `points` into alternating road-exact / off-road-anchor runs (per `is_road_flags`) and
+## replaces each off-road run with a wandered + Catmull-Rom-smoothed curve, leaving road runs
+## untouched. Boundary segments borrow the nearest adjacent fixed point (the last road point
+## before the run, or the first after it) as extra Catmull-Rom control points so the curve
+## connects smoothly into the adjoining road-exact run instead of kinking at the seam; a run at
+## the very start/end of the route (no adjacent fixed point) duplicates its own first/last anchor
+## instead, standard open-curve boundary handling.
+## Parameters:
+## - points: resolved points in route order (mix of exact road points and off-road centroids).
+## - is_road_flags: parallel array tagging each point as road-exact (true) or an off-road anchor.
+## - anchor_ids: parallel array giving each off-road anchor's subprovince_id (for the wander
+##   offset's hash seed); empty string for road points.
+## Returns: the final polyline with every off-road run replaced by its smoothed curve.
+func _smooth_offroad_runs(points: PackedVector2Array, is_road_flags: Array[bool], anchor_ids: Array[String]) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	var i := 0
+	while i < points.size():
+		if is_road_flags[i]:
+			result.append(points[i])
+			i += 1
+			continue
+		var run_start := i
+		while i < points.size() and not is_road_flags[i]:
+			i += 1
+		var run_end := i # exclusive
+		var wandered := PackedVector2Array()
+		for j in range(run_start, run_end):
+			var cap: float = _wander_cap_for_cell(anchor_ids[j])
+			wandered.append(points[j] + _hash_wander_offset(anchor_ids[j], cap))
+
+		if wandered.size() == 1:
+			result.append(wandered[0])
+			continue
+
+		var control := PackedVector2Array()
+		control.append(points[run_start - 1] if run_start > 0 else wandered[0])
+		for point: Vector2 in wandered:
+			control.append(point)
+		control.append(points[run_end] if run_end < points.size() else wandered[wandered.size() - 1])
+		var curve: PackedVector2Array = _catmull_rom_spline(control, OFFROAD_SPLINE_SAMPLES_PER_SEGMENT)
+		for point: Vector2 in curve:
+			result.append(point)
+	return result
+
+
+## Deterministic pseudo-random offset for one off-road anchor, seeded purely by its
+## `subprovince_id` (stable across redraws/frames — never re-rolled). Direction and magnitude
+## both derive from a hash of the id so the same cell always wanders the same way.
+## Parameters:
+## - subprovince_id: the cell whose anchor point to offset.
+## - cap: maximum offset magnitude (see `_wander_cap_for_cell`).
+## Returns: a 2D offset with magnitude in [0, cap].
+func _hash_wander_offset(subprovince_id: String, cap: float) -> Vector2:
+	var h: int = hash(subprovince_id)
+	var angle: float = float(((h % 3600) + 3600) % 3600) / 3600.0 * TAU
+	var magnitude_frac: float = float((absi(h / 3600)) % 1000) / 1000.0
+	return Vector2(cos(angle), sin(angle)) * (cap * magnitude_frac)
+
+
+## Caps an off-road anchor's wander offset to a small fraction of its own cell's bounding-box
+## *shorter* side (not the diagonal), so the line never wanders outside the cell it's meant to
+## represent — a long/thin/concave hinterland polygon's diagonal can be much larger than its
+## actual width, which previously let the offset push points well outside the cell.
+## Parameters:
+## - subprovince_id: the off-road cell to measure.
+## Returns: the maximum wander magnitude for that cell (0.0 if the cell has no polygon).
+func _wander_cap_for_cell(subprovince_id: String) -> float:
+	var polygon: PackedVector2Array = _map_loader.get_subprovince_polygon(subprovince_id)
+	if polygon.is_empty():
+		return 0.0
+	var min_pos: Vector2 = polygon[0]
+	var max_pos: Vector2 = polygon[0]
+	for point: Vector2 in polygon:
+		min_pos = min_pos.min(point)
+		max_pos = max_pos.max(point)
+	var size: Vector2 = max_pos - min_pos
+	return minf(size.x, size.y) * OFFROAD_WANDER_FRACTION
+
+
+## Floor on the distance term inside `_centripetal_catmull_rom_point`'s knot computation, so two
+## coincident control points (e.g. a duplicate seam point) never produce a divide-by-zero.
+const CATMULL_ROM_EPS := 0.0001
+
+## Samples a smooth curve through `control` via a **centripetal** (alpha = 0.5) Catmull-Rom
+## spline, not the naive uniform-parameter formula: off-road cell centroids vary a lot in
+## spacing, and uniform Catmull-Rom is well known to overshoot/loop when consecutive control
+## points are unevenly spaced — exactly the failure mode that produced stray lines cutting across
+## unrelated terrain. `control[0]` and `control[control.size() - 1]` are used only as tangent
+## padding (never emitted directly) — the curve interpolates exactly through
+## `control[1 .. control.size() - 2]`, matching how `_smooth_offroad_runs` builds `control`
+## (padding + the real wandered anchors). No-op (returns the padded-out anchors unchanged) if
+## there are fewer than 2 real anchors to connect.
+## Parameters:
+## - control: [pad_start, anchor_0, ..., anchor_n, pad_end], size >= 4.
+## - samples_per_segment: points sampled per anchor-to-anchor segment (t in [0, 1)).
+## Returns: the sampled curve, including the final anchor point exactly once at the end.
+func _catmull_rom_spline(control: PackedVector2Array, samples_per_segment: int) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	if control.size() < 4:
+		for i in range(1, control.size() - 1):
+			result.append(control[i])
+		return result
+	for seg in range(1, control.size() - 2):
+		var p0: Vector2 = control[seg - 1]
+		var p1: Vector2 = control[seg]
+		var p2: Vector2 = control[seg + 1]
+		var p3: Vector2 = control[seg + 2]
+		for sample in range(samples_per_segment):
+			var t: float = float(sample) / float(samples_per_segment)
+			result.append(_centripetal_catmull_rom_point(p0, p1, p2, p3, t))
+	result.append(control[control.size() - 2])
+	return result
+
+
+## Evaluates one point on a centripetal Catmull-Rom curve between `p1` and `p2`, via the standard
+## Barry-Goldman pyramidal blending formula: knot values are spaced by `sqrt(distance)` between
+## consecutive control points (rather than a fixed 0,1,2,3), which is the well-established fix for
+## uniform Catmull-Rom's overshoot/self-intersection problem with unevenly-spaced points.
+## Parameters:
+## - p0, p1, p2, p3: the four control points; the curve interpolates between p1 and p2.
+## - t: normalized position within the p1->p2 segment, in [0, 1).
+## Returns: the interpolated point.
+func _centripetal_catmull_rom_point(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: float) -> Vector2:
+	var t0 := 0.0
+	var t1: float = t0 + sqrt(maxf(p0.distance_to(p1), CATMULL_ROM_EPS))
+	var t2: float = t1 + sqrt(maxf(p1.distance_to(p2), CATMULL_ROM_EPS))
+	var t3: float = t2 + sqrt(maxf(p2.distance_to(p3), CATMULL_ROM_EPS))
+	var tt: float = lerpf(t1, t2, t)
+
+	var a1: Vector2 = p0 * ((t1 - tt) / (t1 - t0)) + p1 * ((tt - t0) / (t1 - t0))
+	var a2: Vector2 = p1 * ((t2 - tt) / (t2 - t1)) + p2 * ((tt - t1) / (t2 - t1))
+	var a3: Vector2 = p2 * ((t3 - tt) / (t3 - t2)) + p3 * ((tt - t2) / (t3 - t2))
+	var b1: Vector2 = a1 * ((t2 - tt) / (t2 - t0)) + a2 * ((tt - t0) / (t2 - t0))
+	var b2: Vector2 = a2 * ((t3 - tt) / (t3 - t1)) + a3 * ((tt - t1) / (t3 - t1))
+	return b1 * ((t2 - tt) / (t2 - t1)) + b2 * ((tt - t1) / (t2 - t1))
 
 
 func _remove_route_line(division_id: String) -> void:
@@ -376,13 +588,64 @@ func _advance_pulse(division_id: String, delta: float) -> void:
 	state.pulse_phase = fmod(state.pulse_phase + state.pulse_rate * delta, 1.0)
 	var pulse: float = 0.5 + 0.5 * sin(state.pulse_phase * TAU)
 
-	var alpha: float = lerpf(PULSE_ALPHA_MIN, PULSE_ALPHA_MAX, pulse)
-	alpha *= _emphasis_alpha_mult(division_id)
+	var emphasis_alpha: float = _emphasis_alpha_mult(division_id)
 	var width: float = state.base_width \
 			* lerpf(1.0 - PULSE_WIDTH_AMPLITUDE, 1.0 + PULSE_WIDTH_AMPLITUDE, pulse) \
 			* _emphasis_width_mult(division_id)
-
-	var color: Color = state.base_color
-	color.a = alpha
-	state.line.default_color = color
 	state.line.width = width
+
+	_update_flow_gradient(state, emphasis_alpha)
+
+
+## Rebuilds the traveling "flow" gradient in place for one frame: a bright band centered at
+## `state.pulse_phase` (already advanced by _advance_pulse) against an otherwise-dim line, giving
+## the impression of supplies moving along the route rather than the whole line breathing at once.
+## Band position is measured from the line's far/hub end (gradient offset 1.0, points[-1]) toward
+## the division end (gradient offset 0.0, points[0]) as pulse_phase increases, matching the
+## direction supplies actually flow — see FLOW_BAND_WIDTH's doc comment.
+## Parameters:
+## - state: the route's render state (reads pulse_phase/base_color, writes into state.gradient).
+## - emphasis_alpha: the active/selected emphasis alpha multiplier to apply on top of the band.
+## Returns: nothing.
+func _update_flow_gradient(state: _RouteLineState, emphasis_alpha: float) -> void:
+	# Gradient.offsets must be strictly increasing (no two equal), so every clamp below leaves an
+	# EPS margin from its neighbor rather than clamping flush against 0.0/1.0/each other.
+	const EPS := 0.001
+	var band_center: float = clampf(1.0 - state.pulse_phase, 2.0 * EPS, 1.0 - 2.0 * EPS)
+	var half_band: float = FLOW_BAND_WIDTH * 0.5
+	var band_start: float = clampf(band_center - half_band, EPS, band_center - EPS)
+	var band_end: float = clampf(band_center + half_band, band_center + EPS, 1.0 - EPS)
+
+	var dim_color: Color = state.base_color
+	dim_color.a = FLOW_DIM_ALPHA_MULT * emphasis_alpha
+	var bright_color: Color = state.base_color
+	bright_color.a = minf(FLOW_BRIGHT_ALPHA_MULT * emphasis_alpha, 1.0)
+
+	# Gradient offsets must be strictly increasing; when the band sits at an edge, band_start/
+	# band_end collapse toward 0.0/1.0 respectively rather than crossing, so this stays valid.
+	var offsets := PackedFloat32Array([0.0, band_start, band_center, band_end, 1.0])
+	var colors := PackedColorArray([dim_color, dim_color, bright_color, dim_color, dim_color])
+	state.gradient.offsets = offsets
+	state.gradient.colors = colors
+
+
+## Keeps a route's first point glued to the division's live, per-frame interpolated position
+## instead of the static subprovince centroid it was built from — this is what makes the line
+## track a moving unit smoothly between server SUPPLY_ROUTE_UPDATE pushes rather than only
+## snapping into place on the next discrete update. Purely a display-time repositioning of the
+## already-resolved first vertex; the rest of the polyline (and the route data itself) is
+## untouched.
+## Parameters:
+## - division_id: the division whose displayed line's first point to refresh.
+## Returns: nothing.
+func _sync_live_start_point(division_id: String) -> void:
+	if _military_system == null:
+		return
+	var state: _RouteLineState = _route_lines.get(division_id) as _RouteLineState
+	if state == null or state.line.get_point_count() == 0:
+		return
+	var world_pos: Vector2 = _military_system.get_division_world_position(division_id)
+	if not is_finite(world_pos.x) or not is_finite(world_pos.y):
+		return
+	var local_pos: Vector2 = state.wrapper.to_local(world_pos)
+	state.line.set_point_position(0, local_pos)

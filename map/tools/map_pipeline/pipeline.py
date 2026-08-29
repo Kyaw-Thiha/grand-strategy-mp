@@ -35,6 +35,7 @@ from validate import validate_all
 from subprovince_generator import SubprovinceConfig, default_config
 from subprovince_io import generate_real_province, publish_subprovince_outputs
 from subprovince_validation import build_cross_province_adjacency
+from road_subprovince_geometry import build_road_subprovince_geometry, serialize_road_subprovince_geometry
 
 # Pass-through files copied unchanged to the output directory
 PASSTHROUGH_FILES = [
@@ -1853,6 +1854,19 @@ def _print_subprovince_summary(succeeded: list[str], failed: list[dict],
     print("─────────────────────────────────────────────")
 
 
+def _publish_road_geometry(output_dir: Path, polygons: list, sources: dict) -> None:
+    """Clips each real road-kind subprovince cell to its source road LineString (roads.geojson)
+    and publishes road_subprovince_geometry.geojson — a best-effort visual aid the client uses to
+    draw supply lines that follow the literal road curve instead of a straight line through the
+    cell's centroid. Never load-bearing (client soft-fails if this file is absent/incomplete), so
+    a low match rate here is a visual regression, not a pipeline failure."""
+    road_cells = [{"subprovince_id": polygon.subprovince_id, "geometry": polygon.geometry}
+                  for polygon in polygons if polygon.kind == "road"]
+    geometry_by_id = build_road_subprovince_geometry(road_cells, sources.get("roads", []), 1e-8)
+    serialize_road_subprovince_geometry(output_dir / "road_subprovince_geometry.geojson", geometry_by_id)
+    print(f"  road_subprovince_geometry.geojson: {len(geometry_by_id)}/{len(road_cells)} road cells matched")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1900,8 +1914,16 @@ def main() -> None:
             polygons_by_province: dict[str, list] = {}
             for polygon in polygons:
                 polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            # NOTE: `polygons` here are generate_real_province()'s output — already reprojected to
+            # WGS84 degrees (subprovince_io.py's to_wgs84/snap transforms), NOT the working CRS
+            # `subprovince_config` was built for. `geometry_tolerance` (default 1.0, meters) is the
+            # wrong unit for a degree-space shared-boundary-length test: `shared.length > tolerance`
+            # would require a shared border longer than a full degree (~111km) to register at all,
+            # which is why cross-province adjacency was silently almost-never generated. Use the
+            # same WGS84-degree tolerance subprovince_io.py's own post-reprojection adjacency
+            # rebuild already uses (1e-8), not the working-CRS config value.
             cross_province_adjacency = build_cross_province_adjacency(
-                polygons_by_province, province_adjacency, subprovince_config.geometry_tolerance)
+                polygons_by_province, province_adjacency, 1e-8)
             for cell_id, neighbor_ids in cross_province_adjacency.items():
                 existing = set(adjacency.get(cell_id, []))
                 adjacency[cell_id] = sorted(existing | set(neighbor_ids))
@@ -1909,6 +1931,7 @@ def main() -> None:
             publish_subprovince_outputs(output_dir, polygons, adjacency)
             print(f"  subprovinces.geojson: {len(polygons)} cells")
             print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
+            _publish_road_geometry(output_dir, polygons, sources)
         write_subprovince_manifest(output_dir, succeeded, failed)
         _print_subprovince_summary(succeeded, failed, polygons, adjacency)
         print("Done.")
@@ -1930,8 +1953,16 @@ def main() -> None:
             polygons_by_province: dict[str, list] = {}
             for polygon in polygons:
                 polygons_by_province.setdefault(polygon.province_id, []).append(polygon)
+            # NOTE: `polygons` here are generate_real_province()'s output — already reprojected to
+            # WGS84 degrees (subprovince_io.py's to_wgs84/snap transforms), NOT the working CRS
+            # `subprovince_config` was built for. `geometry_tolerance` (default 1.0, meters) is the
+            # wrong unit for a degree-space shared-boundary-length test: `shared.length > tolerance`
+            # would require a shared border longer than a full degree (~111km) to register at all,
+            # which is why cross-province adjacency was silently almost-never generated. Use the
+            # same WGS84-degree tolerance subprovince_io.py's own post-reprojection adjacency
+            # rebuild already uses (1e-8), not the working-CRS config value.
             cross_province_adjacency = build_cross_province_adjacency(
-                polygons_by_province, province_adjacency, subprovince_config.geometry_tolerance)
+                polygons_by_province, province_adjacency, 1e-8)
             for cell_id, neighbor_ids in cross_province_adjacency.items():
                 existing = set(adjacency.get(cell_id, []))
                 adjacency[cell_id] = sorted(existing | set(neighbor_ids))
@@ -1939,6 +1970,7 @@ def main() -> None:
             publish_subprovince_outputs(output_dir, polygons, adjacency)
             print(f"  subprovinces.geojson: {len(polygons)} cells")
             print(f"  subprovince_adjacency.geojson: {len(adjacency)} nodes")
+            _publish_road_geometry(output_dir, polygons, sources)
         write_subprovince_manifest(output_dir, succeeded, failed)
         _print_subprovince_summary(succeeded, failed, polygons, adjacency)
         print("Done.")

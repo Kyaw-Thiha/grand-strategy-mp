@@ -20,6 +20,10 @@ var _waypoints: Dictionary = {}    # { nodes: [], edges: [], road_connections: [
 var _subprovince_data: Dictionary = {}    # subprovince_id → { province_id, kind, ... , raw_polygon }
 var _subprovince_adjacency: Dictionary = {} # subprovince_id → PackedStringArray of neighbor IDs
 var _province_subprovince_ids: Dictionary = {} # province_id → PackedStringArray
+# subprovince_id → Array of raw [lng, lat] points — the real road centerline clipped to that road-
+# kind cell (see road_subprovince_geometry.geojson). Purely a visual aid for SupplyLineOverlay;
+# soft-loaded (see _load_road_geometry) since not every map/build is guaranteed to have it yet.
+var _road_geometry: Dictionary = {}
 
 var _projection: MapProjection
 
@@ -55,6 +59,8 @@ func load_map(map_id: String) -> void:
 	if not _load_subprovince_data(data_root):
 		return
 
+	_load_road_geometry(data_root)
+
 	if not _load_generated_scene(map_id):
 		return
 
@@ -62,6 +68,7 @@ func load_map(map_id: String) -> void:
 	var wp_raw: Variant = _load_json("%s/waypoints.json" % data_root)
 	if wp_raw is Dictionary:
 		_waypoints = wp_raw
+		_tag_waypoints_with_subprovince_ids()
 	else:
 		push_warning("MapLoader: waypoints.json missing — run pipeline to generate it")
 
@@ -115,6 +122,86 @@ func get_terrain_lookup() -> Dictionary:
 
 func get_waypoint_graph() -> Dictionary:
 	return _waypoints
+
+## Coarse grid bucket size (degrees) for the one-time waypoint→subprovince tagging pass below.
+## Subprovince geometry is static once generated, so this tag never needs refreshing — only
+## `owner_id` changes at runtime, which callers (Pathfinder._resolve_node_nation) resolve live via
+## `GameState.subprovinces` at check time. A naive O(waypoints × subprovinces) scan is too slow at
+## real map scale (tens of thousands of subprovinces vs. the much smaller province count this
+## pipeline was originally sized for), so subprovinces are bucketed by bounding-box overlap into
+## this grid first. Tunable — illustrative, no profiling basis yet.
+const _SUBPROVINCE_TAG_GRID_DEG := 0.25
+
+## Tags each waypoint node in `_waypoints` with the subprovince_id whose polygon contains it
+## (raw lng/lat space, same coordinates the waypoint graph itself uses — no projection needed).
+## This is what lets Pathfinder._is_neutral_for resolve LIVE ownership instead of the node's static,
+## map-generation-time `nation_id` field, which goes stale the moment any subprovince capture
+## happens. Nodes outside all subprovince coverage are left untagged (Pathfinder falls back to the
+## static `nation_id` field for those, matching its pre-existing behavior).
+## Parameters: none — reads/mutates this loader's own `_waypoints`/`_subprovince_data`.
+## Returns: nothing.
+func _tag_waypoints_with_subprovince_ids() -> void:
+	var polygons_by_id: Dictionary = {}  # subprovince_id -> Array[PackedVector2Array] (raw space)
+	var grid: Dictionary = {}            # "gx,gy" -> Array[String] candidate subprovince_ids
+
+	for sid: String in _subprovince_data.keys():
+		var rings: Array = _subprovince_data[sid].get("raw_polygon", [])
+		var polys: Array[PackedVector2Array] = []
+		var min_lng := INF
+		var max_lng := -INF
+		var min_lat := INF
+		var max_lat := -INF
+		for ring: Variant in rings:
+			if not ring is Array:
+				continue
+			var poly := PackedVector2Array()
+			for coord: Variant in (ring as Array):
+				if not coord is Array or (coord as Array).size() < 2:
+					continue
+				var lng := float(coord[0])
+				var lat := float(coord[1])
+				poly.append(Vector2(lng, lat))
+				min_lng = minf(min_lng, lng)
+				max_lng = maxf(max_lng, lng)
+				min_lat = minf(min_lat, lat)
+				max_lat = maxf(max_lat, lat)
+			if poly.size() >= 3:
+				polys.append(poly)
+		if polys.is_empty() or min_lng > max_lng:
+			continue
+		polygons_by_id[sid] = polys
+
+		var gx0: int = floori(min_lng / _SUBPROVINCE_TAG_GRID_DEG)
+		var gx1: int = floori(max_lng / _SUBPROVINCE_TAG_GRID_DEG)
+		var gy0: int = floori(min_lat / _SUBPROVINCE_TAG_GRID_DEG)
+		var gy1: int = floori(max_lat / _SUBPROVINCE_TAG_GRID_DEG)
+		for gx: int in range(gx0, gx1 + 1):
+			for gy: int in range(gy0, gy1 + 1):
+				var key: String = "%d,%d" % [gx, gy]
+				if not grid.has(key):
+					grid[key] = []
+				(grid[key] as Array).append(sid)
+
+	var nodes: Array = _waypoints.get("nodes", [])
+	for node_variant: Variant in nodes:
+		if not node_variant is Dictionary:
+			continue
+		var node: Dictionary = node_variant
+		var lng: float = float(node.get("lng", 0.0))
+		var lat: float = float(node.get("lat", 0.0))
+		var gx: int = floori(lng / _SUBPROVINCE_TAG_GRID_DEG)
+		var gy: int = floori(lat / _SUBPROVINCE_TAG_GRID_DEG)
+		var key: String = "%d,%d" % [gx, gy]
+		var point := Vector2(lng, lat)
+		for sid: String in (grid.get(key, []) as Array):
+			var found := false
+			for poly: PackedVector2Array in (polygons_by_id[sid] as Array[PackedVector2Array]):
+				if Geometry2D.is_point_in_polygon(point, poly):
+					found = true
+					break
+			if found:
+				node["subprovince_id"] = sid
+				break
 
 ## Converts WGS84 (lng, lat) to Godot screen-space Vector2.
 ## Public wrapper around the shared MapProjection.
@@ -208,6 +295,7 @@ func _clear_loaded_map() -> void:
 	_subprovince_data.clear()
 	_subprovince_adjacency.clear()
 	_province_subprovince_ids.clear()
+	_road_geometry.clear()
 	_projection = null
 
 
@@ -289,6 +377,52 @@ func _load_subprovince_data(data_root: String) -> bool:
 			map_load_failed.emit("Malformed subprovince asset for '%s'" % _map_id)
 			return false
 	return true
+
+
+## Loads road_subprovince_geometry.geojson: for each road-kind subprovince cell, the real road
+## centerline clipped to that cell (see map/tools/map_pipeline/road_subprovince_geometry.py).
+## Soft-fails (warns and leaves _road_geometry empty) instead of failing the map load — this is a
+## pure visual aid for SupplyLineOverlay, never load-bearing, matching waypoints.json's existing
+## soft-fail convention rather than subprovinces.geojson's hard-fail one.
+## Parameters:
+## - data_root: the map's res:// asset directory, e.g. "res://assets/data/western_europe_6".
+## Returns: nothing.
+func _load_road_geometry(data_root: String) -> void:
+	var raw: Variant = _load_json("%s/road_subprovince_geometry.geojson" % data_root)
+	if not raw is Dictionary:
+		push_warning("MapLoader: road_subprovince_geometry.geojson missing — supply lines will not snap to roads")
+		return
+	var collection: Dictionary = raw
+	var features: Variant = collection.get("features", [])
+	if collection.get("type", "") != "FeatureCollection" or not features is Array:
+		push_warning("MapLoader: road_subprovince_geometry.geojson malformed — supply lines will not snap to roads")
+		return
+	for feature: Variant in features:
+		if not feature is Dictionary:
+			continue
+		var props: Dictionary = (feature as Dictionary).get("properties", {})
+		var sid: String = props.get("subprovince_id", "")
+		var geometry: Variant = (feature as Dictionary).get("geometry", {})
+		if sid.is_empty() or not geometry is Dictionary:
+			continue
+		var geom_dict: Dictionary = geometry
+		var coordinates: Variant = geom_dict.get("coordinates", null)
+		if geom_dict.get("type", "") == "LineString" and coordinates is Array and coordinates.size() >= 2:
+			_road_geometry[sid] = coordinates
+
+
+## Returns the real road-centerline points (already projected to screen space) clipped to the
+## given road-kind subprovince cell, or an empty array if none was resolved for it (either the
+## file is absent, or that cell had no match — see road_subprovince_geometry.py's docstring).
+## Parameters:
+## - subprovince_id: the road-kind cell to look up.
+## Returns: projected points in the road's original (unstitched) order — callers needing a
+## specific traversal direction must orient them themselves.
+func get_road_geometry_points(subprovince_id: String) -> PackedVector2Array:
+	var raw: Array = _road_geometry.get(subprovince_id, [])
+	if raw.is_empty():
+		return PackedVector2Array()
+	return _projection.project_ring(raw)
 
 
 ## Collects a cell's [lng, lat] outer rings from a Polygon or MultiPolygon geometry.

@@ -36,6 +36,7 @@ func _ready() -> void:
 	_case_8_degraded_gradient(loader)
 	_case_9_hidden_statuses(loader)
 	_case_10_pulse_purity(loader)
+	_case_11_live_position_tracking(loader)
 
 	GameState.divisions.clear()
 	GameState.supply_routes.clear()
@@ -211,14 +212,19 @@ func _case_5_in_place_update(loader: MapLoader) -> void:
 	_assert_true(state_after.wrapper == wrapper_before,
 		"case 5: the same wrapper node instance must be reused")
 
-	var expected_points: PackedVector2Array = PackedVector2Array()
-	expected_points.append(overlay._centroid(loader.get_subprovince_polygon("sp_c")))
-	expected_points.append(overlay._centroid(loader.get_subprovince_polygon("sp_d")))
-	_assert_true(state_after.line.points.size() == 2,
-		"case 5: updated line must have 2 points for the new subprovinceIds")
-	_assert_true(state_after.line.points[0].is_equal_approx(expected_points[0])
-			and state_after.line.points[1].is_equal_approx(expected_points[1]),
-		"case 5: updated line points must reflect the new subprovinceIds")
+	# Off-road anchors now get a small deterministic wander offset + Catmull-Rom smoothing (see
+	# supply_line_overlay.gd's OFFROAD_WANDER_FRACTION/OFFROAD_SPLINE_SAMPLES_PER_SEGMENT), so the
+	# updated line is no longer exactly the two raw centroids — assert proximity instead of exact
+	# equality, and that the point count reflects the new (smoothed, multi-sample) route rather
+	# than the old one.
+	var centroid_c: Vector2 = overlay._centroid(loader.get_subprovince_polygon("sp_c"))
+	var centroid_d: Vector2 = overlay._centroid(loader.get_subprovince_polygon("sp_d"))
+	_assert_true(state_after.line.points.size() > 2,
+		"case 5: updated line must be spline-sampled (more than 2 raw points) for an off-road pair")
+	_assert_true(state_after.line.points[0].distance_to(centroid_c) <= overlay._wander_cap_for_cell("sp_c") + 0.001,
+		"case 5: updated line's first point must stay near sp_c's centroid (within wander cap)")
+	_assert_true(state_after.line.points[state_after.line.points.size() - 1].distance_to(centroid_d) <= overlay._wander_cap_for_cell("sp_d") + 0.001,
+		"case 5: updated line's last point must stay near sp_d's centroid (within wander cap)")
 	_assert_true(state_after.status == "degraded",
 		"case 5: updated status must reflect the new route data")
 
@@ -430,6 +436,63 @@ func _case_10_pulse_purity(loader: MapLoader) -> void:
 		+ "sampled _process calls, not just remain static")
 
 	overlay.free()
+	GameState.supply_routes.clear()
+
+
+# ── Case 11 ──────────────────────────────────────────────────────────────────
+
+## A minimal stand-in for MilitarySystem exposing only what SupplyLineOverlay needs: a live,
+## per-frame division screen position. Lets the test drive two different positions across two
+## frames without a real MilitarySystem/division-icon scene tree.
+class _FakeMilitarySystem:
+	extends Node
+	var positions: Dictionary = {}
+
+	func get_division_world_position(division_id: String) -> Vector2:
+		return positions.get(division_id, Vector2.INF)
+
+
+## The route's first point must follow the division's live position each frame, without waiting
+## for a new supply_route_updated event -- this is Fix A from the visual-review follow-up: the
+## overlay was previously event-driven only and visually lagged behind a moving unit.
+func _case_11_live_position_tracking(loader: MapLoader) -> void:
+	GameState.supply_routes["div_own_1"] = _route("div_own_1", ["sp_a", "sp_b"], "open")
+	var fake_military := _FakeMilitarySystem.new()
+	add_child(fake_military)
+	var overlay := SupplyLineOverlay.new()
+	add_child(overlay)
+	overlay.setup(loader, fake_military)
+
+	var selected: Array[String] = ["div_own_1"]
+	EventBus.division_selection_changed.emit(selected)
+	_assert_true(overlay._route_lines.has("div_own_1"), "case 11: line must exist before tracking")
+	var state: SupplyLineOverlay._RouteLineState = overlay._route_lines["div_own_1"]
+
+	fake_military.positions["div_own_1"] = Vector2(50.0, 50.0)
+	overlay._process(0.016)
+	var point_frame_1: Vector2 = state.line.points[0]
+	_assert_true(point_frame_1.is_equal_approx(state.wrapper.to_local(Vector2(50.0, 50.0))),
+		"case 11: first point must snap to the division's live position on frame 1, got %s"
+		% [point_frame_1])
+
+	fake_military.positions["div_own_1"] = Vector2(120.0, 80.0)
+	overlay._process(0.016)
+	var point_frame_2: Vector2 = state.line.points[0]
+	_assert_true(point_frame_2.is_equal_approx(state.wrapper.to_local(Vector2(120.0, 80.0))),
+		"case 11: first point must follow the division to its new live position on frame 2, "
+		+ "with no new supply_route_updated event, got %s" % [point_frame_2])
+	_assert_true(not point_frame_1.is_equal_approx(point_frame_2),
+		"case 11: sanity check, the two sampled frames must actually differ")
+
+	# Vector2.INF (icon not visible/no data) must not clobber the last-known point.
+	fake_military.positions["div_own_1"] = Vector2.INF
+	overlay._process(0.016)
+	var point_frame_3: Vector2 = state.line.points[0]
+	_assert_true(point_frame_3.is_equal_approx(point_frame_2),
+		"case 11: an INF position (icon not visible) must leave the last-known point unchanged")
+
+	overlay.free()
+	fake_military.free()
 	GameState.supply_routes.clear()
 
 
