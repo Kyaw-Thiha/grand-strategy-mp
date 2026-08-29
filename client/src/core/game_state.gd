@@ -28,6 +28,10 @@ var relations: Dictionary = {}
 var proposals: Dictionary = {}
 # stacks: { stack_id → Array[division_id] ordered by stack_position }
 var stacks: Dictionary = {}
+# active_engagement_pairs: { engagement_id → { division_a: String, division_b: String } }
+# Populated on COMBAT_STARTED, erased on COMBAT_ENDED. Used by military_system.gd to
+# build combat-avoidance zones for pathfinding — see docs/PATHFINDING.md.
+var active_engagement_pairs: Dictionary = {}
 # air_wings: { wing_id → {wing_id, nation_id, aircraft_type, count, combat_readiness,
 #   position_lng, position_lat, heading_deg, lifecycle_state, mission,
 #   target_id, home_airbase_province_id, weapon_ready} }
@@ -222,13 +226,19 @@ func _apply_province_contest_updated(data: Dictionary) -> void:
 
 
 ## Called by SessionManager when server sends COMBAT_STARTED.
-## Stores is_meeting_battle on the involved divisions for icon rendering.
+## Stores is_meeting_battle on the involved divisions for icon rendering, and records
+## the pair under its engagement_id for pathfinding's combat-avoidance zones.
 func _apply_combat_started(data: Dictionary) -> void:
 	var is_meeting: bool = data.get("is_meeting_battle", false)
-	for div_id: String in [data.get("division_a", ""), data.get("division_b", "")]:
+	var division_a: String = data.get("division_a", "")
+	var division_b: String = data.get("division_b", "")
+	for div_id: String in [division_a, division_b]:
 		if divisions.has(div_id):
 			divisions[div_id]["is_meeting_battle"] = is_meeting
 			EventBus.division_updated.emit(div_id)
+	var engagement_id: String = data.get("engagement_id", "")
+	if not engagement_id.is_empty():
+		active_engagement_pairs[engagement_id] = {"division_a": division_a, "division_b": division_b}
 
 
 ## Called by SessionManager when server sends STACK_FORMED.

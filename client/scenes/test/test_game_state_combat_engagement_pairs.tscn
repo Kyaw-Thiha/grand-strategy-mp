@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/test_game_state_combat_engagement_pairs.gd" id="1"]
+
+[node name="TestRoot" type="Node"]
+script = ExtResource("1")
