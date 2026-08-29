@@ -49,6 +49,7 @@
         "test/6a-grid-schema.test.ts",
         "test/6b-perk-extensibility.test.ts",
         "test/6b-round-system.test.ts",
+        "test/6m-combat-engagement-id.test.ts",
         "test/6-phase-gate.test.ts",
         "test/6c-combat-stats.test.ts",
         "test/6d-infantry-patterns.test.ts",
