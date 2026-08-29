@@ -1139,7 +1139,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     // Trim path at first neutral-territory waypoint
     const allowedWaypoints = this.movementSystem.trimToAllowedTerritory(
-      waypoints, division.nation_id, this.state.relations,
+      waypoints, division.nation_id, this.state.relations, this.subprovinceSystem, this.state.subprovinces,
     );
     if (allowedWaypoints.length === 0) {
       client.send("MOVE_ORDER_REJECTED", { division_id: divisionId, reason: "neutral_territory" });
@@ -1152,9 +1152,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       division.move_order.push(wpId);
     }
 
-    // Store exact click target for last-mile advancement (-999 = none)
-    division.final_position_lng = (typeof msg.final_lng === "number") ? msg.final_lng : -999;
-    division.final_position_lat = (typeof msg.final_lat === "number") ? msg.final_lat : -999;
+    // Store exact click target for last-mile advancement (-999 = none) — resolved/clamped against
+    // the same neutral-territory guard and terrain passability the waypoint chain just went
+    // through, plus a distance cap scaled to the local waypoint graph's own density. Without this,
+    // _advanceFinalPosition would walk an unchecked, unbounded straight line toward the raw click
+    // coordinate regardless of what trimToAllowedTerritory decided about the chain above it.
+    division.final_position_lng = -999;
+    division.final_position_lat = -999;
+    if (typeof msg.final_lng === "number" && typeof msg.final_lat === "number") {
+      const resolved = this.movementSystem.resolveFinalPosition(
+        allowedWaypoints[allowedWaypoints.length - 1],
+        msg.final_lng, msg.final_lat,
+        division, this.state.relations, this.subprovinceSystem, this.state.subprovinces,
+      );
+      if (resolved) {
+        division.final_position_lng = resolved.lng;
+        division.final_position_lat = resolved.lat;
+      }
+    }
   }
 
   private handleHold(client: Client, msg: { division_id?: string }) {
@@ -1295,9 +1310,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this.state.phase = "running";
     this.gameStartedAt = new Date();
 
-    // Load waypoints for movement and map data for combat + supply
+    // Load waypoints for movement and map data for combat + supply. Movement's own neutral-
+    // territory check no longer needs a loadMapData snapshot — it resolves ownership live via
+    // SubprovinceSystem/state.subprovinces instead (see movement_system.ts's _isNeutralFor).
     this.movementSystem.loadWaypoints(this.state.map_id);
-    this.movementSystem.loadMapData(this.state.map_id);
     this.combatSystem.loadMapData(this.state.map_id);
     this.supplySystem.loadMapData(this.state.map_id);
     this.subprovinceSystem.loadForRoom(this.state.map_id);
@@ -1585,8 +1601,12 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this.subprovinceSystem.resetFreezeTracking();
       this.subprovinceSystem.scanCombatFreeze(this.state.divisions.values());
       for (const division of this.state.divisions.values()) {
-        this.subprovinceSystem.checkCaptureAfterMovement(division, this.state, (sessionFilter, type, msg) =>
-          this._broadcastToFilteredNations(sessionFilter, type, msg),
+        const startPosition = this.movementSystem.getTickStartPosition(division.division_id);
+        this.subprovinceSystem.checkCaptureAfterMovement(
+          division,
+          this.state,
+          (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
+          startPosition,
         );
       }
       for (const { nationId, provinceId } of this.subprovinceSystem.getTrackedAttackerProvincePairs()) {

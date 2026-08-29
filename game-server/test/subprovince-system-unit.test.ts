@@ -149,6 +149,39 @@ describe("lane:subprovince | SubprovinceSystem core", () => {
     assert.equal(state.subprovinces.get(ALBANIA_CELL_A.id)!.owner_id, "germany");
   });
 
+  it("sweeps a division's whole one-tick movement segment, not just its end position, so cells passed through get captured too", () => {
+    const { state, sys } = makeState();
+    // Division ends the tick at CELL_B but started the tick at CELL_A (a real, distinct cell in
+    // the same province) — simulating a fast/multi-hop single-tick move that crosses CELL_A along
+    // the way without stopping there. Before the tunneling fix, only the end position (CELL_B) was
+    // ever sampled, so CELL_A would never flip even though the division's path passed through it.
+    const division = makeDivision("germany", ALBANIA_CELL_B, "idle");
+    state.divisions.set(division.division_id, division);
+
+    const deltas = sys.checkCaptureAfterMovement(division, state, noop, ALBANIA_CELL_A);
+
+    const capturedIds = deltas.map((d) => d.subprovinceId);
+    assert.ok(capturedIds.includes(ALBANIA_CELL_A.id),
+      `expected the swept start cell ${ALBANIA_CELL_A.id} to be captured; got ${JSON.stringify(capturedIds)}`);
+    assert.ok(capturedIds.includes(ALBANIA_CELL_B.id),
+      `expected the end cell ${ALBANIA_CELL_B.id} to be captured; got ${JSON.stringify(capturedIds)}`);
+    assert.equal(state.subprovinces.get(ALBANIA_CELL_A.id)!.owner_id, "germany");
+    assert.equal(state.subprovinces.get(ALBANIA_CELL_B.id)!.owner_id, "germany");
+  });
+
+  it("without a startPosition, the sweep degenerates to a single end-position check (unchanged pre-fix behavior)", () => {
+    const { state, sys } = makeState();
+    const division = makeDivision("germany", ALBANIA_CELL_B, "idle");
+    state.divisions.set(division.division_id, division);
+
+    const deltas = sys.checkCaptureAfterMovement(division, state, noop);
+
+    assert.equal(deltas.length, 1);
+    assert.equal(deltas[0].subprovinceId, ALBANIA_CELL_B.id);
+    assert.equal(state.subprovinces.get(ALBANIA_CELL_A.id)!.owner_id, "albania",
+      "the far-away CELL_A must not be touched when no startPosition/sweep is involved");
+  });
+
   it("reverts every captured cell in a province when the attacker's last division there is gone", () => {
     const { state, sys } = makeState();
     const divisionA = makeDivision("germany", ALBANIA_CELL_A, "idle");

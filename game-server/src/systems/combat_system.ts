@@ -44,6 +44,16 @@ import {
 // Kilometres represented by one degree of lat/lng (approximate, matches movement_system)
 const KM_PER_DEG = 111.0;
 
+/**
+ * Temporary diagnostic switch for tracing the "unit appears stuck after entering enemy territory"
+ * visual-review report — not a permanent feature. Enable with STUCK_UNIT_DEBUG=true to log the
+ * state transitions most relevant to that report (entering engaged combat, the encircled-retreat
+ * block firing, and — in movement_system.ts — the engaged/suppressed movement skip) so a live
+ * repro can be captured and the true trigger confirmed before any further combat-logic change is
+ * attempted. Safe to strip once the report is resolved or confirmed non-reproducible.
+ */
+const STUCK_UNIT_DEBUG = process.env.STUCK_UNIT_DEBUG === "true";
+
 // Engagement detection is skipped for this many ticks so players can issue starting
 // orders before border divisions auto-engage each other.
 let COMBAT_GRACE_TICKS = 10;
@@ -280,6 +290,8 @@ export class CombatSystem {
   private activePairs = new Map<string, ActivePair>(); // sorted "idA|idB" → data
   private movementSystem: MovementSystem;
   private _resolveCombatTickCount = 0;
+  /** Current tick number, for STUCK_UNIT_DEBUG log correlation only. */
+  private _debugTickCount = 0;
   /** Set by GameRoom right after both systems are constructed; drives the city-capture cascade. */
   private subprovinceSystem: SubprovinceSystem | null = null;
   /**
@@ -412,6 +424,7 @@ export class CombatSystem {
     tickCount: number,
     broadcast: (type: string, msg: unknown) => void,
   ): Set<string> {
+    this._debugTickCount = tickCount;
     const changed = new Set<string>();
     this._handleDestroyed(state, changed, broadcast);
     this._dissolveInvalidStacks(state, changed, broadcast);
@@ -535,6 +548,11 @@ export class CombatSystem {
             // Update division states
             a.combat_state = "engaged";
             b.combat_state = "engaged";
+            if (STUCK_UNIT_DEBUG) {
+              console.log(`[STUCK_UNIT_DEBUG] tick=${this._debugTickCount} engaged: `
+                + `${a.division_id}(${a.nation_id}, supply=${a.supply_status}) vs `
+                + `${b.division_id}(${b.nation_id}, supply=${b.supply_status})`);
+            }
 
             if (!a.engaged_with.includes(b.division_id)) a.engaged_with.push(b.division_id);
             if (!b.engaged_with.includes(a.division_id)) b.engaged_with.push(a.division_id);
@@ -1323,7 +1341,12 @@ export class CombatSystem {
   // _initiateRetreat
   // ---------------------------------------------------------------------------
 
-  /** Public — called by GameRoom for manual RETREAT commands. */
+  /**
+   * Public — called by GameRoom for manual RETREAT commands. Applies the same
+   * `supply_status === "encircled"` block the auto-retreat path already enforces in
+   * _checkAutoRetreatOrRotate, so a manually-issued retreat can't do what auto-retreat refuses to:
+   * an encircled division is trapped regardless of which path requested the retreat.
+   */
   initiateRetreat(
     div:       DivisionState,
     enemies:   DivisionState[],
@@ -1331,6 +1354,7 @@ export class CombatSystem {
     changed:   Set<string>,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
+    if (div.supply_status === "encircled") return;
     this._initiateRetreat(div, enemies, state, changed, broadcast);
   }
 
@@ -1443,7 +1467,7 @@ export class CombatSystem {
       waypointId = target.waypointId;
       blockedFraction = target.blockedFraction;
     } else {
-      const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations);
+      const waypoint = this.movementSystem.getNearestNonNeutralWaypoint(retreatLng, retreatLat, div.nation_id, state.relations, null, null);
       waypointId = waypoint?.id ?? null;
     }
 
@@ -1458,10 +1482,9 @@ export class CombatSystem {
     // non-friendly ground, plus a reduced-speed penalty for the remainder of the retreat. Tier 0
     // "normal" and Tier 1 "out_of_supply" retreat cleanly (no damage, no speed penalty) — Tier 1
     // retreat is explicitly clean per STRATEGIC_COMBAT.md, only Tier 2 triggers fighting-
-    // withdrawal. Tier 3 "encircled" never reaches this method: the pre-existing gate in
-    // _checkAutoRetreatOrRotate blocks it before _initiateRetreat is called on the auto-retreat
-    // path (the manual RETREAT command path has no equivalent gate — see GameRoom.handleRetreat
-    // — a pre-existing gap outside this task's scope, not introduced or closed here).
+    // withdrawal. Tier 3 "encircled" never reaches this method: _checkAutoRetreatOrRotate blocks it
+    // on the auto-retreat path, and the public initiateRetreat() wrapper above applies the same
+    // guard for the manual RETREAT command path (GameRoom.handleRetreat), so both paths agree.
     if (div.supply_status === "cut_off") {
       div.hp = Math.max(0, div.hp - FIGHTING_WITHDRAWAL_MAX_DAMAGE * blockedFraction);
       div.retreat_speed_mult = RETREAT_SPEED_PENALTY_MULT;
@@ -1544,7 +1567,14 @@ export class CombatSystem {
     if (div.suppression < threshold) return;
 
     // Encircled divisions cannot retreat — they are trapped
-    if (div.supply_status === "encircled") return;
+    if (div.supply_status === "encircled") {
+      if (STUCK_UNIT_DEBUG) {
+        console.log(`[STUCK_UNIT_DEBUG] tick=${this._debugTickCount} encircled-retreat-blocked: `
+          + `${div.division_id}(${div.nation_id}, combat_state=${div.combat_state}, `
+          + `suppression=${div.suppression}, hp=${div.hp})`);
+      }
+      return;
+    }
 
     // First time threshold is crossed: mark as "suppressed" for one tick so the
     // client can display the intermediate state before the retreat fires.

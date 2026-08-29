@@ -40,6 +40,17 @@ const ACTIVE_COMBAT_STATES = new Set(["engaged", "suppressed"]);
 const NON_CAPTURING_STATES = new Set(["retreating", "destroyed"]);
 
 /**
+ * Distance (degrees) between consecutive capture-sweep sample points along a division's one-tick
+ * movement segment. Deliberately smaller than the smallest expected subprovince cell so a fast
+ * division can't cross a whole cell between two samples without it being checked. Tunable —
+ * illustrative value, no playtesting basis yet, same convention as other density/timing constants
+ * elsewhere in this codebase (see supply_line_overlay.gd's ROUTE_STYLE doc comment).
+ */
+const SWEEP_STEP_DEG = 0.02;
+/** Safety cap on sweep samples for one division's one-tick segment, against runaway sampling. */
+const SWEEP_MAX_SAMPLES = 150;
+
+/**
  * Owns subprovince ownership state and capture/revert/freeze logic. Loaded once per room
  * from the map's subprovince graph (Task 1), operates on GameRoomState.subprovinces (Task 2).
  *
@@ -187,38 +198,99 @@ export class SubprovinceSystem {
    * Called once per living division per tick, after movementSystem.tick(). Requires
    * resetFreezeTracking() + scanCombatFreeze(allDivisions) to have already run this tick (see
    * scanCombatFreeze's doc comment) — this method only READS freeze state, it does not set it.
+   *
+   * `startPosition` is the division's position at the START of this tick's movement (from
+   * MovementSystem.getTickStartPosition), if it moved this tick. A division's one-tick movement
+   * can cross more than one subprovince cell (fast/off-road movement, or several short waypoint
+   * hops consumed in one tick's leftover-budget recursion) — checking only the END position would
+   * silently skip capture for any cell fully traversed along the way. When `startPosition` is
+   * omitted/null (division didn't move this tick, or caller has no start position available), the
+   * sweep degenerates to a single point at the division's current position, matching the
+   * pre-sweep behavior exactly.
    */
-  checkCaptureAfterMovement(division: DivisionState, state: GameRoomState, broadcast: BroadcastFn): CaptureDelta[] {
+  checkCaptureAfterMovement(
+    division: DivisionState,
+    state: GameRoomState,
+    broadcast: BroadcastFn,
+    startPosition?: { lng: number; lat: number } | null,
+  ): CaptureDelta[] {
     const deltas: CaptureDelta[] = [];
-    const subprovinceId = this.getSubprovinceAtPosition({ lng: division.position_lng, lat: division.position_lat });
-    division.subprovince_id = subprovinceId ?? "";
-    if (subprovinceId === null) return deltas;
+    const endPosition = { lng: division.position_lng, lat: division.position_lat };
+    division.subprovince_id = this.getSubprovinceAtPosition(endPosition) ?? "";
 
-    const def = this.defsById.get(subprovinceId);
-    if (!def) return deltas;
-    if (def.kind === "capital") return deltas;
+    // These gates are about the division's own state this tick, not about any particular cell, so
+    // they apply to the whole sweep at once rather than being re-checked per sampled cell.
     if (NON_CAPTURING_STATES.has(division.combat_state)) return deltas;
-    // An engaged/suppressed division never captures its own cell this tick; freeze marking for
-    // OTHER divisions sharing this cell is scanCombatFreeze's responsibility, not this check's.
+    // An engaged/suppressed division never captures cells it passes through this tick; freeze
+    // marking for OTHER divisions sharing a cell is scanCombatFreeze's responsibility, not this
+    // check's.
     if (ACTIVE_COMBAT_STATES.has(division.combat_state)) return deltas;
-    if (this.isCombatFrozen(subprovinceId)) return deltas;
 
-    const sp = state.subprovinces.get(subprovinceId);
-    if (!sp) return deltas;
-
-    if (division.nation_id !== sp.owner_id) {
-      sp.owner_id = division.nation_id;
-      deltas.push({ subprovinceId, newOwner: division.nation_id });
-
-      if (division.nation_id !== state.provinces.get(sp.province_id)?.owner_id) {
-        let provinces = this.attackerProvinces.get(division.nation_id);
-        if (!provinces) { provinces = new Set(); this.attackerProvinces.set(division.nation_id, provinces); }
-        provinces.add(sp.province_id);
-      }
+    const sweptIds = this._sweepSubprovinceIds(startPosition ?? endPosition, endPosition);
+    for (const subprovinceId of sweptIds) {
+      this._captureSubprovince(subprovinceId, division, state, deltas);
     }
 
     this._emitCaptureEvents(deltas, state, broadcast);
     return deltas;
+  }
+
+  /**
+   * Samples subprovince IDs along the straight-line segment from `start` to `end`, deduplicating
+   * consecutive repeats (a straight sweep only re-enters a cell it already left in pathological
+   * geometry, which isn't worth special-casing). Always includes the segment's end point; includes
+   * the start point too when `start` differs from `end`. See SWEEP_STEP_DEG's doc comment for the
+   * sampling-density rationale.
+   */
+  private _sweepSubprovinceIds(
+    start: { lng: number; lat: number },
+    end: { lng: number; lat: number },
+  ): string[] {
+    const dx = end.lng - start.lng;
+    const dy = end.lat - start.lat;
+    const distDeg = Math.sqrt(dx * dx + dy * dy);
+    const steps = Math.min(SWEEP_MAX_SAMPLES, Math.max(1, Math.ceil(distDeg / SWEEP_STEP_DEG)));
+
+    const ids: string[] = [];
+    let lastId: string | null = null;
+    let firstSample = true;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const point = { lng: start.lng + dx * t, lat: start.lat + dy * t };
+      const id = this.getSubprovinceAtPosition(point);
+      if (id !== null && (firstSample || id !== lastId)) {
+        ids.push(id);
+      }
+      lastId = id;
+      firstSample = false;
+    }
+    return ids;
+  }
+
+  /** Applies the capture check/flip to exactly one subprovince cell (one sweep sample). */
+  private _captureSubprovince(
+    subprovinceId: string,
+    division: DivisionState,
+    state: GameRoomState,
+    deltas: CaptureDelta[],
+  ): void {
+    const def = this.defsById.get(subprovinceId);
+    if (!def) return;
+    if (def.kind === "capital") return;
+    if (this.isCombatFrozen(subprovinceId)) return;
+
+    const sp = state.subprovinces.get(subprovinceId);
+    if (!sp) return;
+    if (division.nation_id === sp.owner_id) return;
+
+    sp.owner_id = division.nation_id;
+    deltas.push({ subprovinceId, newOwner: division.nation_id });
+
+    if (division.nation_id !== state.provinces.get(sp.province_id)?.owner_id) {
+      let provinces = this.attackerProvinces.get(division.nation_id);
+      if (!provinces) { provinces = new Set(); this.attackerProvinces.set(division.nation_id, provinces); }
+      provinces.add(sp.province_id);
+    }
   }
 
   /** Called once per (attackerNationId, provinceId) tracked pair per tick. */
