@@ -4,3 +4,4 @@
 **/__pycache__/*
 HANDOFF.md
 shared/dem/README.txt
+tools/map_pipeline/diagnostics/
