@@ -15,6 +15,7 @@ from subprovince_generator import (
     TerrainPatch,
     TerrainRaster,
     assign_stable_ids,
+    default_config,
     generate_subprovinces,
     merge_slivers,
 )
@@ -58,6 +59,21 @@ def terrain_for(bounds=(0, 0, 40, 40), cover="plains", elev="flat"):
         np.full(shape, elev, dtype=object),
         grid,
     )
+
+
+def test_default_config_raises_road_and_hinterland_minimums():
+    # road_min_area is set relative to a nominal full segment's area (road_width *
+    # road_segment_length = 10_000 * 80_000 = 8e8), high enough to catch segments truncated
+    # near province borders/junctions/turns but well below the ~6e8 floor a normally-jittered
+    # full segment can shrink to (road_segment_length jitters +/-12%), so untruncated segments
+    # are never affected.
+    cfg = default_config()
+    assert cfg.road_width == 10_000.0
+    assert cfg.road_segment_length == 80_000.0
+    assert cfg.road_min_area == pytest.approx(4e8)
+    # hinterland_tiny_grid_cells tripled from 10.0 to 30.0 so more undersized hinterland cells
+    # get absorbed into surrounding terrain via the existing _resolve_tiny_hinterland merge.
+    assert cfg.hinterland_tiny_grid_cells == pytest.approx(30.0)
 
 
 def test_city_fallback_forms_capital_without_overlap():
