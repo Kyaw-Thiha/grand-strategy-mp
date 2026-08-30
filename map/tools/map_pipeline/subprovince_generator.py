@@ -1206,17 +1206,19 @@ def generate_subprovinces(province_id: str, province: BaseGeometry,
     timings.mark("hinterland")
 
     grid_cell_area = abs(terrain.grid.transform.a * terrain.grid.transform.e)
-    hinterland_cells = _resolve_tiny_hinterland(hinterland_cells, config, grid_cell_area)
-    hinterland_cells = _split_oversized_hinterland(hinterland_cells, terrain, config, grid_cell_area)
-    # A split can leave a few undersized edge pieces; one more merge pass cleans those up. Since
-    # that merge pass runs with a fresh `settled` set, it could in principle grow an
-    # already-large cell past the split threshold again, so split once more to catch that — and
-    # the sequence must end on a merge pass, not a split, since a split is exactly what can
-    # produce fresh undersized slivers in the first place; ending on split leaves whatever it
-    # just created with no further cleanup opportunity at all.
-    hinterland_cells = _resolve_tiny_hinterland(hinterland_cells, config, grid_cell_area)
-    hinterland_cells = _split_oversized_hinterland(hinterland_cells, terrain, config, grid_cell_area)
-    hinterland_cells = _resolve_tiny_hinterland(hinterland_cells, config, grid_cell_area)
+    # Alternate merge/split until the hinterland cell count stops changing, instead of a fixed
+    # number of rounds: a single round can leave fresh undersized edge pieces from the split (a
+    # merge's own `settled` set only guarantees one action per cell per round), and empirically a
+    # fixed short sequence converges far short of what the merge/split machinery can actually
+    # achieve. Capped well above the rounds real provinces need in practice, purely as a runaway
+    # guard, not a tuning knob — this loop is observed to reach a stable fixed point (no
+    # oscillation) well under the cap.
+    for _ in range(20):
+        before = len(hinterland_cells)
+        hinterland_cells = _resolve_tiny_hinterland(hinterland_cells, config, grid_cell_area)
+        hinterland_cells = _split_oversized_hinterland(hinterland_cells, terrain, config, grid_cell_area)
+        if len(hinterland_cells) == before:
+            break
     timings.mark("hinterland-size-passes")
 
     # Naturalize shared borders between hinterland blobs (topology-safe, verified), after the
