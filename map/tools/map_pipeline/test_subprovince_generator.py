@@ -425,6 +425,26 @@ def test_tiny_hinterland_absorbs_into_diff_terrain_with_no_nearby_match():
     assert result[0].geometry.area == pytest.approx(10.0)
 
 
+def test_raised_hinterland_tiny_threshold_absorbs_previously_kept_cell():
+    from subprovince_generator import _resolve_tiny_hinterland
+    # A 20-unit-area hinterland cell with grid_cell_area=1.0 sits between the old threshold
+    # (10.0) and the new default (30.0): the old threshold left it alone, the new one merges it
+    # into the adjacent same-terrain cell.
+    cells = [
+        PolygonLabel(box(0, 0, 4, 5), "hinterland", "plains", "flat", False),
+        PolygonLabel(box(4, 0, 14, 5), "hinterland", "plains", "flat", False),
+    ]
+    old_threshold_cfg = config().__class__(**{**config().__dict__, "hinterland_tiny_grid_cells": 10.0})
+    old_result = _resolve_tiny_hinterland(cells, old_threshold_cfg, grid_cell_area=1.0)
+    assert len(old_result) == 2  # 20 < 10*1.0 is false, so left alone under the old threshold
+
+    new_threshold_cfg = config().__class__(**{**config().__dict__, "hinterland_tiny_grid_cells": 30.0})
+    new_result = _resolve_tiny_hinterland(cells, new_threshold_cfg, grid_cell_area=1.0)
+    assert len(new_result) == 1
+    assert new_result[0].cover_combat == "plains"
+    assert new_result[0].geometry.area == pytest.approx(70.0)
+
+
 def test_tiny_hinterland_left_alone_with_no_candidates():
     from subprovince_generator import _resolve_tiny_hinterland
     cells = [
