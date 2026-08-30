@@ -364,6 +364,26 @@ def test_road_min_area_is_independent_of_generic_min_area():
     assert len(hinterland_cells) == 2
 
 
+def test_default_road_min_area_absorbs_border_truncated_fragment():
+    # A road cell sized like a segment truncated to ~45% of a nominal full segment (as can
+    # happen when `_split_corridor`'s difference against a province border, or an adjacent
+    # road's carve-out at a junction, clips a segment down) must be absorbed into its road
+    # neighbor under the new default `road_min_area`, where it would have survived under the
+    # old default of 30e6.
+    truncated_area_side = 19_000.0  # ~3.6e8 sq units: below new 4e8 floor, above old 30e6 floor
+    cells = [
+        PolygonLabel(box(0, 0, truncated_area_side, 19_000.0), "road", "plains", "flat", False),
+        PolygonLabel(box(truncated_area_side, 0, truncated_area_side + 80_000.0, 19_000.0),
+                     "road", "plains", "flat", False),
+    ]
+    old_default_merged = merge_slivers(cells, min_area=10e6, tolerance=1.0, road_min_area=30e6)
+    assert len(old_default_merged) == 2  # survives under the old, too-permissive floor
+
+    new_default_merged = merge_slivers(cells, min_area=10e6, tolerance=1.0, road_min_area=4e8)
+    assert len(new_default_merged) == 1
+    assert new_default_merged[0].kind == "road"
+
+
 def test_hinterland_sliver_does_not_cross_cover_boundary():
     cells = [
         PolygonLabel(box(0, 0, 2, 2), "hinterland", "plains", "flat", False),
