@@ -1,17 +1,20 @@
 /**
  * Phase 4D end-to-end: meeting battle visual detection.
  *
- * germany_div_05 (Sarreguemines, 6.500°E 49.190°N) and france_div_05 (Metz, 6.175°E 49.123°N)
- * spawn ~37 km apart — within the 50 km engagement range (25+25). After DIVISIONS_SPAWNED,
- * both receive MOVE orders into their own territory so move orders exist on tick 1 when
- * engagement is detected. This ensures both sides are labeled as "meeting" battle.
+ * A throwaway German test division and a throwaway French test division, spawned via the
+ * test-only SPAWN_DIVISION message (which does not validate territory ownership) at the old
+ * Sarreguemines / Metz coordinates, spawn ~37 km apart — within the 50 km engagement range
+ * (25+25). After spawning, both receive MOVE orders into their own territory so move orders
+ * exist on tick 1 when engagement is detected. This ensures both sides are labeled as
+ * "meeting" battle.
  *
  * Tests:
  *   1. COMBAT_STARTED fires with is_meeting_battle === true
  *   2. DIVISION_UPDATES shows both divisions with attacker_role === "meeting"
  *
- * Run with: npx tsx test/4d-meeting-battle.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4d-meeting-battle.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -22,6 +25,14 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-4d-meeting-a@example.com";
 const BOT_B_EMAIL = "e2e-4d-meeting-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway test divisions spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation) at the old Sarreguemines / Metz coordinates — preserves the ~37 km
+// engagement-range distance.
+const DE_DIV = "e2e-4d-meeting-de-front";
+const FR_DIV = "e2e-4d-meeting-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 async function register(email: string): Promise<void> {
   const res = await fetch(`${HONO_URL}/auth/email`, {
@@ -79,7 +90,7 @@ function sleep(ms: number): Promise<void> {
 
 async function main() {
   console.log("Phase 4D — Meeting Battle Detection\n");
-  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
+  console.log(`  Front-line pair: ${DE_DIV} (Sarreguemines) vs ${FR_DIV} (Metz)`);
   console.log("  Both receive MOVE orders into their own territory -> meeting battle\n");
 
   // 1. Register + login
@@ -135,18 +146,22 @@ async function main() {
   const spawnMsg = await divisionsSpawnedPromise as {
     divisions: { division_id: string; position_lng: number; position_lat: number }[];
   };
-  console.log(`   ${spawnMsg.divisions.length} divisions spawned`);
+  console.log(`   ${spawnMsg.divisions.length} default-roster divisions spawned`);
 
-  // 4. Send MOVE orders into own territory so both sides have orders when engagement triggers
-  console.log("4. Sending MOVE orders to both front-line divisions...");
+  // 4. Spawn our own throwaway front-line pair, then send MOVE orders into own territory so
+  // both sides have orders when engagement triggers.
+  console.log("4. Spawning front-line pair and sending MOVE orders...");
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
   // BOTH divisions move toward Berlin (same direction) so they stay within engagement range
   // while both having active move_orders when COMBAT_GRACE_TICKS expire
   roomA.send("SUBMIT_MOVE_ORDER", {
-    division_id: "germany_div_05",
+    division_id: DE_DIV,
     waypoints: ["wp_079006"],  // (13.298, 52.504) — Berlin, ~500 km NE
   });
   roomB.send("SUBMIT_MOVE_ORDER", {
-    division_id: "france_div_05",
+    division_id: FR_DIV,
     waypoints: ["wp_079006"],  // Same Berlin waypoint — parallel movement
   });
   console.log("   ✓ MOVE orders submitted");
@@ -159,8 +174,8 @@ async function main() {
     is_meeting_battle: boolean;
   };
   const involvesFrontPair =
-    (combatStartedMsg.division_a === "germany_div_05" || combatStartedMsg.division_b === "germany_div_05") &&
-    (combatStartedMsg.division_a === "france_div_05"  || combatStartedMsg.division_b === "france_div_05");
+    (combatStartedMsg.division_a === DE_DIV || combatStartedMsg.division_b === DE_DIV) &&
+    (combatStartedMsg.division_a === FR_DIV  || combatStartedMsg.division_b === FR_DIV);
   assert(involvesFrontPair, `COMBAT_STARTED did not involve the front-line pair: ${JSON.stringify(combatStartedMsg)}`);
   assert(combatStartedMsg.is_meeting_battle === true,
     `Expected is_meeting_battle=true but got ${combatStartedMsg.is_meeting_battle}`);
@@ -171,17 +186,17 @@ async function main() {
   const meetingDivs = await waitForDivisionState(
     roomA,
     divs => {
-      const gd05 = divs.find(d => d.division_id === "germany_div_05");
-      const fd05 = divs.find(d => d.division_id === "france_div_05");
+      const gd05 = divs.find(d => d.division_id === DE_DIV);
+      const fd05 = divs.find(d => d.division_id === FR_DIV);
       return !!(gd05 && fd05 && gd05.attacker_role === "meeting" && fd05.attacker_role === "meeting");
     },
     15000,
     "both divisions have attacker_role === meeting",
   );
-  const gd05Role = meetingDivs.find(d => d.division_id === "germany_div_05")?.attacker_role;
-  const fd05Role = meetingDivs.find(d => d.division_id === "france_div_05")?.attacker_role;
-  console.log(`   ✓ germany_div_05.attacker_role: ${gd05Role}`);
-  console.log(`   ✓ france_div_05.attacker_role:  ${fd05Role}`);
+  const gd05Role = meetingDivs.find(d => d.division_id === DE_DIV)?.attacker_role;
+  const fd05Role = meetingDivs.find(d => d.division_id === FR_DIV)?.attacker_role;
+  console.log(`   ✓ ${DE_DIV}.attacker_role: ${gd05Role}`);
+  console.log(`   ✓ ${FR_DIV}.attacker_role:  ${fd05Role}`);
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
   roomA.leave();

@@ -37,8 +37,15 @@ async function main() {
   roomA.onMessage("GAME_STARTED", () => console.log("GAME_STARTED"));
   roomA.onMessage("DIVISIONS_SPAWNED", () => console.log("DIVISIONS_SPAWNED"));
   roomA.onMessage("COMBAT_STARTED", (msg) => console.log("COMBAT_STARTED:", JSON.stringify(msg)));
+  // Throwaway test division IDs, spawned via the test-only SPAWN_DIVISION message (which
+  // does not validate territory ownership). The default roster no longer includes a
+  // front-line pair that legally starts within engagement range (the old germany_div_05
+  // spawn was a data bug inside French territory and has been removed).
+  const DE_DIV = "debug-de-front";
+  const FR_DIV = "debug-fr-front";
+
   roomA.onMessage("DIVISION_UPDATES", (msg: any) => {
-    const front = msg.divisions?.filter((d: any) => d.division_id === "germany_div_05" || d.division_id === "france_div_05");
+    const front = msg.divisions?.filter((d: any) => d.division_id === DE_DIV || d.division_id === FR_DIV);
     if (front?.length) console.log("DIVISION_UPDATES front-pair:", JSON.stringify(front));
   });
 
@@ -46,6 +53,12 @@ async function main() {
   roomB.send("SET_READY", { ready: true });
   await new Promise(r => setTimeout(r, 200));
   roomA.send("START_GAME", {});
+  await new Promise(r => setTimeout(r, 500));
+
+  // Spawn our own throwaway front-line pair ~37 km apart (Sarreguemines / Metz coords) —
+  // within the 50 km engagement range — so combat starts automatically.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: 6.500, position_lat: 49.190 });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: 6.175, position_lat: 49.123 });
 
   await new Promise(r => setTimeout(r, 20000));
   roomA.leave(); roomB.leave();

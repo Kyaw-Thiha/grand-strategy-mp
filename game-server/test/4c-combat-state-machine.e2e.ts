@@ -2,16 +2,18 @@
  * Phase 4C — combat state machine e2e tests.
  *
  * Tests the full state transition: engaged → suppressed → retreating.
- * Uses the same front-line pair as 4c-combat.e2e.ts:
- *   germany_div_05 (Saarbrücken) vs france_div_05 (Metz) — ~92 km apart, auto-engage.
+ * Uses a throwaway front-line pair spawned via the test-only SPAWN_DIVISION message (which
+ * does not validate territory ownership), placed at the same Sarreguemines/Metz coordinates
+ * previously used by the (now-removed) default-roster pair: ~37 km apart, auto-engage.
  *
  * Tests:
  *   A. "suppressed" combat_state appears in DIVISION_UPDATES before "retreating"
  *   B. A suppressed division deals 0 damage (enemy suppression stops increasing)
  *   C. Manual RETREAT command transitions a division to "retreating" (regression guard)
  *
- * Run with: npx tsx test/4c-combat-state-machine.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4c-combat-state-machine.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -22,6 +24,13 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-sm-bot-a@example.com";
 const BOT_B_EMAIL = "e2e-sm-bot-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway test divisions spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation) at the old Sarreguemines / Metz coordinates.
+const DE_DIV = "e2e-sm-de-front";
+const FR_DIV = "e2e-sm-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -144,6 +153,11 @@ async function setupGame(): Promise<{ roomA: Room; roomB: Room }> {
   await gameStartedPromise;
   await divisionsSpawnedPromise;
 
+  // Spawn our own throwaway front-line pair via the test-only SPAWN_DIVISION message.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
+
   // Wait for COMBAT_STARTED on the front-line pair before running individual tests
   await waitForMessage(roomA, "COMBAT_STARTED", 20000);
 
@@ -161,7 +175,7 @@ async function testA_suppressedStateBeforeRetreat(): Promise<void> {
   const suppressedDivs = await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => (d.division_id === "germany_div_05" || d.division_id === "france_div_05")
+      d => (d.division_id === DE_DIV || d.division_id === FR_DIV)
         && d.combat_state === "suppressed",
     ),
     90000,
@@ -201,7 +215,7 @@ async function testB_suppressedDealsNoDamage(): Promise<void> {
   const suppressedDivs = await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => (d.division_id === "germany_div_05" || d.division_id === "france_div_05")
+      d => (d.division_id === DE_DIV || d.division_id === FR_DIV)
         && d.combat_state === "suppressed",
     ),
     90000,
@@ -210,7 +224,7 @@ async function testB_suppressedDealsNoDamage(): Promise<void> {
 
   const suppressedDiv = suppressedDivs.find(d => d.combat_state === "suppressed")!;
   // The enemy is the OTHER division
-  const enemyId = suppressedDiv.division_id === "germany_div_05" ? "france_div_05" : "germany_div_05";
+  const enemyId = suppressedDiv.division_id === DE_DIV ? FR_DIV : DE_DIV;
 
   // Record the enemy's suppression at this instant from the same batch
   const enemyInBatch = suppressedDivs.find(d => d.division_id === enemyId);
@@ -247,24 +261,24 @@ async function testC_manualRetreatCommand(): Promise<void> {
   await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => d.division_id === "germany_div_05" && d.combat_state === "engaged",
+      d => d.division_id === DE_DIV && d.combat_state === "engaged",
     ),
     15000,
-    "germany_div_05 is 'engaged'",
+    `${DE_DIV} is 'engaged'`,
   );
-  console.log("   germany_div_05 is engaged — sending RETREAT");
+  console.log(`   ${DE_DIV} is engaged — sending RETREAT`);
 
-  // Bot A controls Germany — send RETREAT for germany_div_05
-  roomA.send("RETREAT", { division_id: "germany_div_05" });
+  // Bot A controls Germany — send RETREAT for the German test division
+  roomA.send("RETREAT", { division_id: DE_DIV });
 
   const retreatDivs = await waitForDivisionState(
     roomA,
-    divs => divs.some(d => d.division_id === "germany_div_05" && d.combat_state === "retreating"),
+    divs => divs.some(d => d.division_id === DE_DIV && d.combat_state === "retreating"),
     8000,
-    "germany_div_05 enters 'retreating'",
+    `${DE_DIV} enters 'retreating'`,
   );
-  const retreating = retreatDivs.find(d => d.division_id === "germany_div_05");
-  assert(retreating?.combat_state === "retreating", "germany_div_05 did not enter 'retreating' after RETREAT command");
+  const retreating = retreatDivs.find(d => d.division_id === DE_DIV);
+  assert(retreating?.combat_state === "retreating", `${DE_DIV} did not enter 'retreating' after RETREAT command`);
   console.log("   ✓ Manual RETREAT command correctly transitions division to 'retreating'");
 
   roomA.leave();
@@ -276,7 +290,7 @@ async function testC_manualRetreatCommand(): Promise<void> {
 
 async function main() {
   console.log("Phase 4C — Combat State Machine e2e tests");
-  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
+  console.log(`  Front-line pair: ${DE_DIV} (Sarreguemines) vs ${FR_DIV} (Metz)`);
   console.log("  Auto-engage: ~37 km apart, within 50 km engagement range\n");
 
   await testA_suppressedStateBeforeRetreat();

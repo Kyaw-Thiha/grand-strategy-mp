@@ -1,9 +1,11 @@
 /**
  * Phase 4G end-to-end: reposition during combat, river crossing penalty, hold fix.
  *
- * Uses germany_div_05 (Sarreguemines, 6.500°E 49.190°N) vs france_div_05 (Metz, 6.175°E 49.123°N)
- * — spawn ~37 km apart, within the 50 km engagement range. No MOVE order needed — both sides
- * auto-engage as meeting battle (60% threshold).
+ * Uses a throwaway German test division vs a throwaway French test division, spawned via the
+ * test-only SPAWN_DIVISION message (which does not validate territory ownership) at the old
+ * Sarreguemines (6.500°E 49.190°N) / Metz (6.175°E 49.123°N) coordinates — spawn ~37 km apart,
+ * within the 50 km engagement range. No MOVE order needed — both sides auto-engage as meeting
+ * battle (60% threshold).
  *
  * Distance cap: the server no longer enforces a fixed repos distance. The client-side
  * engagement-boundary truncation handles path capping. The server accepts any valid reposition
@@ -16,8 +18,9 @@
  *   C — Reposition rejected when not in combat
  *   E — Hold broadcasts update (move_order cleared, client learns)
  *
- * Run with: npx tsx test/4g-reposition.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4g-reposition.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -28,6 +31,14 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-4g-bot-a@example.com";
 const BOT_B_EMAIL = "e2e-4g-bot-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway test divisions spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation) at the old Sarreguemines / Metz coordinates — preserves the ~37 km
+// engagement-range distance and the ~4.4 km proximity of wp_070996 used in Test A.
+const DE_DIV = "e2e-4g-de-front";
+const FR_DIV = "e2e-4g-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -118,8 +129,8 @@ function sleep(ms: number): Promise<void> {
 
 async function main() {
   console.log("Phase 4G — reposition, river crossing, hold fix\n");
-  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
-  console.log("  Reposition target: wp_070996 (~4.4 km from germany_div_05)");
+  console.log(`  Front-line pair: ${DE_DIV} (Sarreguemines) vs ${FR_DIV} (Metz)`);
+  console.log(`  Reposition target: wp_070996 (~4.4 km from ${DE_DIV})`);
   console.log("  Idle test division: germany_div_01 (Frankfurt area)");
 
   // ── 1. Register + login ───────────────────────────────────────────────────
@@ -174,11 +185,15 @@ async function main() {
   await divisionsSpawnedPromise;
   console.log("   ✓ DIVISIONS_SPAWNED");
 
+  // Spawn our own throwaway front-line pair via the test-only SPAWN_DIVISION message.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
+
   // ── 4. Test A: Reposition accepted during combat ──────────────────────────
-  // No MOVE order needed — germany_div_05 and france_div_05 auto-engage from
-  // standing positions (~37 km apart, well within the 50 km combined range).
-  // Both sides are classified as meeting battle (60% threshold), which is fine
-  // for testing reposition behaviour.
+  // No MOVE order needed — the throwaway divisions auto-engage from standing positions
+  // (~37 km apart, well within the 50 km combined range). Both sides are classified as
+  // meeting battle (60% threshold), which is fine for testing reposition behaviour.
   console.log("\n4. Test A: Reposition accepted during combat...");
 
   const combatStartedMsg = await waitForMessage(roomA, "COMBAT_STARTED", 20000) as {
@@ -187,27 +202,27 @@ async function main() {
     is_meeting_battle: boolean;
   };
   const involvesTarget =
-    combatStartedMsg.division_a === "germany_div_05" ||
-    combatStartedMsg.division_b === "germany_div_05";
-  assert(involvesTarget, `COMBAT_STARTED did not involve germany_div_05: ${JSON.stringify(combatStartedMsg)}`);
+    combatStartedMsg.division_a === DE_DIV ||
+    combatStartedMsg.division_b === DE_DIV;
+  assert(involvesTarget, `COMBAT_STARTED did not involve ${DE_DIV}: ${JSON.stringify(combatStartedMsg)}`);
   console.log(`   ✓ COMBAT_STARTED — is_meeting_battle: ${combatStartedMsg.is_meeting_battle}`);
 
-  // Send REPOSITION for germany_div_05 to a nearby waypoint
+  // Send REPOSITION for the German test division to a nearby waypoint
   roomA.send("REPOSITION", {
-    division_id: "germany_div_05",
+    division_id: DE_DIV,
     waypoints: ["wp_070996"],
   });
 
   const repositionAccepted = await waitForDivisionState(
     roomA,
     divs => {
-      const gd05 = divs.find(d => d.division_id === "germany_div_05");
+      const gd05 = divs.find(d => d.division_id === DE_DIV);
       return !!(gd05 && gd05.reposition_order && gd05.reposition_order.length > 0);
     },
     5000,
-    "reposition_order populated on germany_div_05",
+    `reposition_order populated on ${DE_DIV}`,
   );
-  const gd05Repos = repositionAccepted.find(d => d.division_id === "germany_div_05");
+  const gd05Repos = repositionAccepted.find(d => d.division_id === DE_DIV);
   assert(!!gd05Repos?.reposition_order && gd05Repos.reposition_order.length > 0,
     "reposition_order should be non-empty after REPOSITION command");
   assert(gd05Repos?.combat_state === "engaged",
@@ -220,19 +235,19 @@ async function main() {
   // engagement-boundary truncation handles the actual path capping.
   console.log("\n5. Test D: Reposition accepted with far-away waypoint...");
 
-  // germany_div_05 is still in combat — send REPOSITION with wp_079006 (Berlin ~670 km away)
+  // The German test division is still in combat — send REPOSITION with wp_079006 (Berlin ~670 km away)
   // Server accepts it (division is within Ra+Rb of france) — client would have truncated
   const dStatePromise = waitForDivisionState(
     roomA,
     divs => {
-      const gd05 = divs.find(d => d.division_id === "germany_div_05");
+      const gd05 = divs.find(d => d.division_id === DE_DIV);
       return !!(gd05?.reposition_order && gd05.reposition_order.length > 0);
     },
     3000,
     "reposition_order populated after far-away repos",
   );
   roomA.send("REPOSITION", {
-    division_id: "germany_div_05",
+    division_id: DE_DIV,
     waypoints: ["wp_079006"],
   });
   await dStatePromise;
@@ -251,14 +266,14 @@ async function main() {
   const repositionCleared = await waitForDivisionState(
     roomA,
     divs => {
-      const gd05 = divs.find(d => d.division_id === "germany_div_05");
+      const gd05 = divs.find(d => d.division_id === DE_DIV);
       return !!(gd05?.reposition_order !== undefined && gd05.reposition_order !== null &&
         gd05.reposition_order.length === 0);
     },
     15000,
-    "reposition_order cleared on germany_div_05",
+    `reposition_order cleared on ${DE_DIV}`,
   );
-  const gd05PostCombat = repositionCleared.find(d => d.division_id === "germany_div_05");
+  const gd05PostCombat = repositionCleared.find(d => d.division_id === DE_DIV);
   assert(gd05PostCombat?.reposition_order?.length === 0,
     "reposition_order should be empty after combat ends");
   console.log("   ✓ reposition_order cleared after combat end");

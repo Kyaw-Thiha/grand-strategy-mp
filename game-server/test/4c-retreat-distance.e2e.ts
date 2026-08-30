@@ -7,8 +7,9 @@
  * Measures the distance the retreating division actually travels (engagement
  * position → final idle position), not its distance from the enemy.
  *
- * Run with: npx tsx test/4c-retreat-distance.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4c-retreat-distance.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -23,6 +24,14 @@ const PASSWORD    = "password123";
 const KM_PER_DEG = 111.0;
 // Must be between retreatKm=20 (fail) and retreatKm=50 (pass)
 const MIN_RETREAT_TRAVEL_KM = 35;
+
+// Throwaway test divisions spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation) at the same coordinates the old default-roster front-line pair used
+// (Sarreguemines / Metz) — preserves the ~37 km engagement-range distance.
+const DE_DIV = "e2e-rd-de-front";
+const FR_DIV = "e2e-rd-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -108,7 +117,7 @@ function sleep(ms: number): Promise<void> {
 async function main() {
   console.log("Phase 4C — retreat distance e2e test");
   console.log(`  Assertion: retreat travel distance ≥ ${MIN_RETREAT_TRAVEL_KM} km`);
-  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz) — ~37 km apart\n");
+  console.log(`  Front-line pair: ${DE_DIV} (Sarreguemines) vs ${FR_DIV} (Metz) — ~37 km apart\n`);
 
   await register(BOT_A_EMAIL);
   await register(BOT_B_EMAIL);
@@ -154,10 +163,15 @@ async function main() {
   await gameStartedPromise;
   await divisionsSpawnedPromise;
 
+  // Spawn our own throwaway front-line pair via the test-only SPAWN_DIVISION message.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
+
   // Track both front-line divisions from spawn.
   // Their positions will be populated on the first DIVISION_UPDATES that includes them.
-  const germTracker = trackDivision(roomA, "germany_div_05");
-  const frTracker   = trackDivision(roomA, "france_div_05");
+  const germTracker = trackDivision(roomA, DE_DIV);
+  const frTracker   = trackDivision(roomA, FR_DIV);
 
   await waitForMessage(roomA, "COMBAT_STARTED", 20000);
   console.log("  ✓ COMBAT_STARTED");
@@ -166,7 +180,7 @@ async function main() {
   await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => (d.division_id === "germany_div_05" || d.division_id === "france_div_05")
+      d => (d.division_id === DE_DIV || d.division_id === FR_DIV)
         && d.combat_state === "retreating",
     ),
     90000,
@@ -176,8 +190,8 @@ async function main() {
   // Determine which division is retreating and capture engagement position from tracker.
   // Position is frozen at the engagement point (movement_system skips "engaged"/"suppressed").
   const germState = germTracker.current.combat_state;
-  const retreatingId = germState === "retreating" ? "germany_div_05" : "france_div_05";
-  const retreatTracker = retreatingId === "germany_div_05" ? germTracker : frTracker;
+  const retreatingId = germState === "retreating" ? DE_DIV : FR_DIV;
+  const retreatTracker = retreatingId === DE_DIV ? germTracker : frTracker;
 
   const engageLng = retreatTracker.current.position_lng ?? 0;
   const engageLat = retreatTracker.current.position_lat ?? 0;

@@ -21,8 +21,9 @@
  *
  * Test B will FAIL with current code (Bug 1) — goes green after Fix 1.
  *
- * Run with: npx tsx test/4e-combat-cleanup.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4e-combat-cleanup.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -33,6 +34,14 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-4e-cleanup-a@example.com";
 const BOT_B_EMAIL = "e2e-4e-cleanup-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway test divisions spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation) at the same coordinates the old default-roster front-line pair used
+// (Sarreguemines / Metz) — preserves the ~37 km auto-engage meeting-battle distance.
+const DE_DIV = "e2e-4e-cleanup-de-front";
+const FR_DIV = "e2e-4e-cleanup-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 interface DivisionUpdate {
   division_id: string;
@@ -97,7 +106,7 @@ function sleep(ms: number): Promise<void> {
 
 async function main() {
   console.log("Phase 4E — Combat cleanup after disengagement\n");
-  console.log("  Front-line pair: germany_div_05 vs france_div_05 (auto-engage meeting battle)\n");
+  console.log(`  Front-line pair: ${DE_DIV} vs ${FR_DIV} (auto-engage meeting battle)\n`);
 
   // 1. Register + login
   console.log("1. Registering and logging in...");
@@ -161,6 +170,11 @@ async function main() {
   await divisionsSpawnedPromise;
   console.log("   ✓ DIVISIONS_SPAWNED");
 
+  // Spawn our own throwaway front-line pair via the test-only SPAWN_DIVISION message.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
+
   // ── Test A: One division retreats first ───────────────────────────────────
   console.log("\n--- Test A: One division retreats first ---");
 
@@ -172,14 +186,14 @@ async function main() {
   const retreatDivs = await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => (d.division_id === "germany_div_05" || d.division_id === "france_div_05") &&
+      d => (d.division_id === DE_DIV || d.division_id === FR_DIV) &&
            d.combat_state === "retreating",
     ),
     90000,
     "any front-line division retreats",
   );
   const retreatingDiv = retreatDivs.find(d => d.combat_state === "retreating");
-  const survivorId = retreatingDiv?.division_id === "germany_div_05" ? "france_div_05" : "germany_div_05";
+  const survivorId = retreatingDiv?.division_id === DE_DIV ? FR_DIV : DE_DIV;
   const survivorState = retreatDivs.find(d => d.division_id === survivorId)?.combat_state;
   console.log(`   ✓ ${retreatingDiv!.division_id} is retreating`);
   console.log(`   ✓ ${survivorId} combat_state: ${survivorState} (still engaged/suppressed — not idle yet)`);
