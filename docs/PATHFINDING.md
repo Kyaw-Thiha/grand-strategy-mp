@@ -214,6 +214,57 @@ Restriction in `STRATEGIC_COMBAT.md`).
 
 ---
 
+## Combat-Zone Exclusion
+
+Active combats exclude their combined engagement radius from A* routing, unless the
+segment's own destination waypoint lies inside that same radius — a unit will detour
+around an ongoing battle it has nothing to do with, but can still be deliberately routed
+into one.
+
+### Zone construction (`military_system.gd:_build_combat_zones`)
+
+`GameState.active_engagement_pairs` (`engagement_id -> {division_a, division_b}`,
+populated from the server's `COMBAT_STARTED`/`COMBAT_ENDED` broadcasts) is unioned via a
+simple union-find: any two pairs sharing a division_id merge into one cluster, so a
+"two attackers vs one defender" fight — which is two separate `ActivePair`s
+server-side — becomes a single combat zone client-side. Each cluster's zone is the set
+of its participants' current positions; the exclusion radius itself reuses
+`ENGAGEMENT_RADIUS_KM = 25.0` (military_system.gd) / `ENGAGEMENT_RADIUS_DEG = 25.0/111.0`
+(pathfinder.gd) — the same constant already used for the engagement-circle UI overlay.
+
+Zones are rebuilt fresh on every pathfinding call rather than cached, since the cost is
+bounded by the number of active engagements (not graph size), and this avoids any risk of
+the cached zones drifting out of sync with `GameState`.
+
+### Exclusion in `_astar_impl`
+
+Mirrors neutral-territory exclusion exactly: both forward and backward neighbor
+expansions add `_is_in_hostile_combat_zone(v, combat_zones, zone_exempt)` alongside the
+existing `_is_neutral_for` check, and the segment's own `to_id` is always exempt from
+exclusion (a node cannot be excluded by being its own destination). `zone_exempt` — which
+zones the destination sits inside — is precomputed once per query
+(`_combat_zone_exemptions`), not recomputed per node, so the added cost per node visited
+is `O(zones)` distance checks, comparable to the existing neutral-territory lookup.
+
+This is a **hard exclusion**, not a cost multiplier (unlike shift-move road avoidance):
+if a combat zone fully blocks the only route to a destination, `find_nearest_reachable`'s
+existing fallback (see "Route-to-Closest-Reachable-Waypoint Fallback" above) already
+handles it by routing to the nearest reachable node short of the zone — no new fallback
+logic was needed.
+
+### Multi-waypoint chains
+
+Each segment of a shift-move chain (`_recompute_chain`) computes its own combat zones
+snapshot and calls `find_path` with its own milestone as `to_id`. A segment whose
+destination waypoint sits inside a combat zone is exempt for that zone; a later segment
+continuing past that waypoint toward a destination outside the zone is not — it will
+detour around re-entering it. `_submit_reposition_order` (the reposition-during-combat
+path used while a division is already engaged) does not apply this exclusion — that
+function's whole purpose is computing a path constrained to stay within an active
+combat's boundary.
+
+---
+
 ## String-Pulling (`pathfinder.gd` lines 358–397)
 
 Post-processes the raw A* waypoint list to remove redundant intermediate nodes:
