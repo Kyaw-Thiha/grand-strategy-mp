@@ -445,11 +445,11 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		_skip_synthetic_lifecycle: bool = false,
 		combat_zones: Array[Dictionary] = []) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
-		return { "logical": [] }
+		return { "logical": [], "visual": [] }
 	if from_id == to_id:
-		return { "logical": [from_id] }
+		return { "logical": [from_id], "visual": [from_id] }
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
-		return { "logical": [] }
+		return { "logical": [], "visual": [] }
 
 	var actual_to_id: String = to_id
 	var has_synthetic: bool = false

@@ -263,6 +263,14 @@ path used while a division is already engaged) does not apply this exclusion —
 function's whole purpose is computing a path constrained to stay within an active
 combat's boundary.
 
+### Known limitation: no hydration on join/reconnect
+
+`GameState.active_engagement_pairs` is populated only by the `COMBAT_STARTED` broadcast.
+A client that joins or reconnects mid-game receives no such broadcast for battles already
+in progress, so combat-avoidance does not apply to any pre-existing engagement until it
+ends and a fresh `COMBAT_STARTED` fires. This is fail-open — identical to pre-feature
+behavior — and not addressed by this feature; building hydration is tracked separately.
+
 ---
 
 ## String-Pulling (`pathfinder.gd` lines 358–397)

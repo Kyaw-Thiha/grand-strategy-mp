@@ -790,6 +790,16 @@ func _build_combat_zones(active_engagement_pairs: Dictionary, divisions: Diction
 		var b: String = str(pair.get("division_b", ""))
 		if a.is_empty() or b.is_empty():
 			continue
+		var data_a: Dictionary = divisions.get(a, {})
+		var data_b: Dictionary = divisions.get(b, {})
+		if data_a.is_empty() or data_b.is_empty():
+			continue
+		var state_a: String = str(data_a.get("combat_state", ""))
+		var state_b: String = str(data_b.get("combat_state", ""))
+		if not (state_a == "engaged" or state_a == "suppressed"):
+			continue
+		if not (state_b == "engaged" or state_b == "suppressed"):
+			continue
 		if not parent.has(a):
 			parent[a] = a
 		if not parent.has(b):
