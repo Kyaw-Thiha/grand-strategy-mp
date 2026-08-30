@@ -15,8 +15,9 @@
  *   6. Teleporting a German division deep into France raises France-interior
  *      province's germany share from 0 → > 0 within the next frontline tick
  *
- * Run with: npx tsx test/4e-frontline.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4e-frontline.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -32,7 +33,13 @@ const PASSWORD    = "password123";
 // Province we6_france_10 city is at approximately (1.5, 45.8)
 const DEEP_FRANCE_LNG = 1.5;
 const DEEP_FRANCE_LAT = 45.8;
-const TELEPORT_DIV    = "germany_div_05";
+
+// Throwaway German test division spawned via SPAWN_DIVISION (bypasses territory-ownership
+// validation), near we6_germany_01 city so it contributes to the baseline germany-influence
+// assertions before being teleported deep into France.
+const TELEPORT_DIV      = "e2e-4e-teleport-div";
+const TELEPORT_SPAWN_LNG = 8.684450;
+const TELEPORT_SPAWN_LAT = 50.063147;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +137,17 @@ async function main() {
   console.log("   ✓ GAME_STARTED");
   await divisionsSpawnedPromise;
   console.log("   ✓ DIVISIONS_SPAWNED");
+
+  // Spawn throwaway German test division near German territory via the test-only
+  // SPAWN_DIVISION message, so it contributes to the baseline germany-influence
+  // assertions below before being teleported deep into France in step 8.
+  roomA.send("SPAWN_DIVISION", {
+    division_id: TELEPORT_DIV,
+    nation_id: "germany",
+    position_lng: TELEPORT_SPAWN_LNG,
+    position_lat: TELEPORT_SPAWN_LAT,
+  });
+  await sleep(300);
 
   // 4. Collect FRONTLINE_BATCH events for 12 s (covers at least 2 frontline ticks)
   console.log("\n4. Collecting FRONTLINE_BATCH events for 12 s...");

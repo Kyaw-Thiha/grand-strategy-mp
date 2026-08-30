@@ -42,6 +42,14 @@ const DR_OFFROAD_KMH  := 20.0
 const DR_KM_PER_DEG   := 111.0
 const DR_SNAP_DEG     := 0.0001  # waypoint snap threshold (matches server)
 const REPOSITION_SPEED := 0.30   # matches server's REPOSITION_SPEED
+## Click radius (degrees, ~500 m at Western European latitudes) within which a click snaps to
+## a province's `city_position` rather than the raw mouse coordinate. Tight enough that clicks
+## clearly intended for open terrain just outside a city boundary aren't hijacked; small enough
+## to read as "I clicked on the city." Compared to ROAD_SEARCH_RADIUS_SQ (0.015², ~1.5 km):
+## road snapping is more permissive because roads are a routing preference, but city snapping is
+## a deliberate UX intent. See LAND_MOVEMENT_IMPROVEMENTS.md Point 3.
+const CITY_SNAP_RADIUS_DEG := 0.005
+const CITY_SNAP_RADIUS_SQ := 0.005 * 0.005
 
 var _map_loader: Node = null
 var _icon_layer: Node2D = null
@@ -88,14 +96,31 @@ var _submit_on_thread_complete: bool = false # submit chain as soon as current t
 var _shift_chain_started: bool = false      # true once the user has made at least one shift-click
 
 var _dr_pos_deg: Dictionary = {}   # div_id -> Vector2(lng, lat) — local simulated position
-var _dr_order: Dictionary = {}     # div_id -> Array[String] — client-local waypoint queue
+var _dr_order: Dictionary = {}     # div_id -> Array — client-local DR queue.
+								   # Each entry: Dictionary {id: String, lng: float, lat: float, kmh: float}.
+								   # - Real waypoint: id set (the waypoint id), lng/lat from the node,
+								   #   kmh from terrain — speed lookup happens at build time, not per frame.
+								   # - Jitter sub-point: id="" (synthetic), kmh inherited from the
+								   #   segment's source real waypoint (Point 2 off-road jitter).
+								   # - Terminal hop (Point 4): id="" with the resolved final point,
+								   #   kmh carried over from the last real waypoint consumed.
+								   #   Replaces the old _dr_final_goal + _advance_dr_last_mile pair —
+								   #   the final hop is now a regular entry consumed by the same DR
+								   #   loop as the rest of the chain.
 var _dr_profiles: Dictionary = {}  # div_id -> Dictionary — cached parsed movement profiles
 var _dr_speed_mult: Dictionary = {}  # div_id -> float — speed multiplier (1.0 normal, 0.30 repos)
-var _dr_final_goal: Dictionary = {}   # div_id -> Vector2(lng, lat) of exact click
-var _dr_last_waypoint_road: bool = false    # was the last consumed waypoint on a road?
-var _dr_last_waypoint_terrain: String = ""  # "cover_elevation" of the last consumed waypoint
+var _dr_last_real_kmh: Dictionary = {}  # div_id -> float — kmh of the most recently consumed
+										# real-waypoint entry. Used by Point 4 to seed the kmh of
+										# a freshly-appended terminal entry when server's
+										# final_position_lng/lat updates mid-flight (the chain's
+										# last real entry has already been popped by then).
 var _dr_icon_reconcile_from: Dictionary = {}  # div_id → Vector2 screen pos (blend start)
 var _dr_icon_reconcile_t: Dictionary    = {}  # div_id → float 0.0..1.0 blend progress
+## One-time snapshot of every province's city_position, built at setup() for click-time snapping.
+## Linear-scanned on every right-click / move-click (clicks are infrequent — O(N) per click is fine).
+## Each entry: {lng: float, lat: float, province_id: String}. World projection not stored here
+## because snap compares in lng/lat (the input space); consumers can project the result themselves.
+var _city_index: Array[Dictionary] = []
 
 var _pending_chain_origin_deg: Vector2 = Vector2.ZERO
 var _chain_last_refresh_time: float = 0.0
@@ -196,11 +221,17 @@ func setup(map_loader: Node, icon_layer: Node2D, vision_system: Node = null) -> 
 	for div_id: String in GameState.divisions:
 		_on_division_added(div_id)
 
+	_build_city_index()
+
 
 func _process(delta: float) -> void:
 	for div_id: String in _icons:
 		var icon: Node2D = _icons[div_id]
-		if _dr_order.has(div_id) and (not _dr_order[div_id].is_empty() or _dr_final_goal.has(div_id)):
+		# Point 4: terminal hop is now a final entry in _dr_order (not a separate _dr_final_goal
+		# field), so the only check needed is "is there anything left to consume." If empty, the
+		# else-branch below lerps the icon toward _target_positions[div_id], which mirrors the
+		# server's authoritative position on foreign units and the client's last DR step on self.
+		if _dr_order.has(div_id) and not _dr_order[div_id].is_empty():
 			_advance_dr(div_id, delta)
 			if _dr_icon_reconcile_t.has(div_id):
 				const RECONCILE_DURATION_S := 0.15
@@ -383,6 +414,8 @@ func try_click_at_world(world_pos: Vector2, shift_held: bool = false, ctrl_held:
 
 	if _move_mode and not _selected_division_ids.is_empty():
 		var ll: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+		var snapped: Vector2 = _snap_click_to_nearest_city(ll.x, ll.y)
+		ll = snapped
 		if _selected_division_ids.size() == 1:
 			_handle_move_click(ll.x, ll.y, shift_held)
 		else:
@@ -476,6 +509,8 @@ func _handle_right_click_move(world_pos: Vector2, shift_held: bool) -> bool:
 		return true
 
 	var lng_lat: Vector2 = _map_loader.world_to_lng_lat(world_pos)
+	var snapped: Vector2 = _snap_click_to_nearest_city(lng_lat.x, lng_lat.y)
+	lng_lat = snapped
 	if moving_division_ids.size() > 1:
 		_handle_group_move_click(lng_lat.x, lng_lat.y)
 		return true
@@ -515,6 +550,7 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var goal_lat_snapshot := target_lat
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_gen += 1
 	var gen := _path_gen
 	_path_pending = true
@@ -524,16 +560,16 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 		var path_result: Dictionary = _pathfinder.find_path(
 			start_id, "_synthetic_goal", movement_profile, 1.0,
 			my_nation, relations_snapshot,
-			INF, INF, true)
+			INF, INF, true, combat_zones_snapshot)
 		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			var fallback_id: String = _pathfinder.find_nearest_reachable(
 				start_id, goal_lng_snapshot, goal_lat_snapshot, movement_profile,
-				my_nation, relations_snapshot)
+				my_nation, relations_snapshot, combat_zones_snapshot)
 			if not fallback_id.is_empty():
 				path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
 					my_nation, relations_snapshot,
-					INF, INF, true)
+					INF, INF, true, combat_zones_snapshot)
 				path = path_result.get("logical", [])
 		call_deferred("_on_direct_move_ready", path, division_id_snapshot, goal_lng_snapshot, goal_lat_snapshot, gen)
 	)
@@ -622,6 +658,7 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_gen += 1
 	var gen := _path_gen
 	_path_pending = true
@@ -632,7 +669,7 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		if shift_held and waypoint_index > 0 and road_mult > 1.0:
 			if not _pathfinder.road_crosses_segment(start_id, goal_id):
 				effective_mult = road_mult
-		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot, INF, INF, false, combat_zones_snapshot)
 		call_deferred("_on_segment_ready", seg_result.get("logical", []), goal_id, shift_held, division_id_snapshot, gen)
 	)
 
@@ -654,6 +691,7 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		return
 
 	var submitted_any_order: bool = false
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	for index: int in moving_division_ids.size():
 		var division_id: String = moving_division_ids[index]
 		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
@@ -662,11 +700,11 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
 		var movement_profile: Dictionary = _get_movement_profile(division_id)
-		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			goal_id = _pathfinder.find_nearest(target_lng, target_lat)
-			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 			path = path_result.get("logical", [])
 			if path.is_empty():
 				push_warning("[MilitarySystem] No group path found for %s" % division_id)
@@ -770,6 +808,76 @@ func _get_group_destination_offset(index: int, count: int) -> Vector2:
 	return Vector2(centered_column, centered_row) * GROUP_MOVE_SLOT_SPACING_DEG
 
 
+## Groups active engagement pairs into combat clusters (any two pairs sharing a
+## division_id merge into one cluster — handles e.g. two attackers vs one defender as
+## a single zone) and resolves each participant's current position.
+## Rebuilt fresh on every pathfinding call rather than cached — cheap (bounded by the
+## number of active engagements, not graph size) and avoids drift from GameState.
+## active_engagement_pairs: engagement_id -> {division_a: String, division_b: String}
+## divisions: division_id -> DivisionState dict (must have position_lng/position_lat)
+## Returns: [{division_ids: Array[String], positions: Array[Vector2]}, ...]
+func _build_combat_zones(active_engagement_pairs: Dictionary, divisions: Dictionary) -> Array[Dictionary]:
+	var parent: Dictionary = {}  # division_id -> division_id (union-find parent pointer)
+
+	for eng_id: String in active_engagement_pairs:
+		var pair: Dictionary = active_engagement_pairs[eng_id]
+		var a: String = str(pair.get("division_a", ""))
+		var b: String = str(pair.get("division_b", ""))
+		if a.is_empty() or b.is_empty():
+			continue
+		var data_a: Dictionary = divisions.get(a, {})
+		var data_b: Dictionary = divisions.get(b, {})
+		if data_a.is_empty() or data_b.is_empty():
+			continue
+		var state_a: String = str(data_a.get("combat_state", ""))
+		var state_b: String = str(data_b.get("combat_state", ""))
+		if not (state_a == "engaged" or state_a == "suppressed"):
+			continue
+		if not (state_b == "engaged" or state_b == "suppressed"):
+			continue
+		if not parent.has(a):
+			parent[a] = a
+		if not parent.has(b):
+			parent[b] = b
+		var root_a: String = _uf_find(parent, a)
+		var root_b: String = _uf_find(parent, b)
+		if root_a != root_b:
+			parent[root_a] = root_b
+
+	var clusters: Dictionary = {}  # root -> Array[String]
+	for div_id: String in parent:
+		var root: String = _uf_find(parent, div_id)
+		if not clusters.has(root):
+			clusters[root] = []
+		clusters[root].append(div_id)
+
+	var zones: Array[Dictionary] = []
+	for root: String in clusters:
+		var division_ids: Array = clusters[root]
+		var positions: Array[Vector2] = []
+		for div_id: String in division_ids:
+			var data: Dictionary = divisions.get(div_id, {})
+			if data.is_empty():
+				continue
+			positions.append(Vector2(float(data.get("position_lng", 0.0)), float(data.get("position_lat", 0.0))))
+		if not positions.is_empty():
+			zones.append({"division_ids": division_ids, "positions": positions})
+	return zones
+
+
+## Iterative union-find "find" with path compression.
+func _uf_find(parent: Dictionary, x: String) -> String:
+	var root: String = x
+	while parent[root] != root:
+		root = parent[root]
+	var cur: String = x
+	while parent[cur] != root:
+		var next_id: String = parent[cur]
+		parent[cur] = root
+		cur = next_id
+	return root
+
+
 func _refresh_chain_start() -> void:
 	var div_id := _selected_division_id
 	if not _dr_pos_deg.has(div_id) or _pending_milestones.is_empty():
@@ -792,10 +900,11 @@ func _refresh_chain_start() -> void:
 
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_pending = true
 	_path_thread = Thread.new()
 	_path_thread.start(func() -> void:
-		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot, INF, INF, false, combat_zones_snapshot)
 		call_deferred("_on_chain_refresh_ready", seg_result.get("logical", []), milestones_snapshot, div_id_snapshot)
 	)
 
@@ -846,59 +955,48 @@ func _replace_chain_first_segment(new_segment: Array) -> void:
 
 
 func _advance_dr(div_id: String, delta: float) -> void:
-	var order: Array[String] = _dr_order[div_id]
+	var order: Array = _dr_order[div_id]
 	if order.is_empty():
-		if _dr_final_goal.has(div_id):
-			_advance_dr_last_mile(div_id, delta)
+		return
+	if not _dr_pos_deg.has(div_id):
+		_dr_order.erase(div_id)
 		return
 	var pos_deg: Vector2 = _dr_pos_deg[div_id]
 
-	var next_id: String = order[0]
-	var next_node: Dictionary = _pathfinder.get_node(next_id)
-	if next_node.is_empty():
-		return
+	var entry: Dictionary = order[0]
+	var target_lng: float = float(entry["lng"])
+	var target_lat: float = float(entry["lat"])
+	var entry_id: String = str(entry["id"])
+	var entry_kmh: float = float(entry["kmh"])
 
-	var target_deg := Vector2(float(next_node["lng"]), float(next_node["lat"]))
-
-	var kmh: float
-	if _pathfinder.is_road_node(next_id):
-		kmh = DR_ROAD_KMH
-	else:
-		var profile: Dictionary = _dr_profiles.get(div_id, {})
-		var terrain_key := str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
-		var raw_cost: Variant = profile.get(terrain_key, 1.0)
-		if raw_cost == null:
-			return
-		var cost: float = float(raw_cost)
-		if not is_finite(cost) or cost <= 0.0:
-			return
-		kmh = DR_OFFROAD_KMH / cost
-
-	kmh *= _dr_speed_mult.get(div_id, 1.0)
+	# Speed is precomputed per entry at build time (_waypoint_kmh for real waypoints; inherited
+	# from the segment's source real waypoint for jitter sub-points and the terminal hop). The
+	# per-frame loop never touches terrain/profile data, which is what kept the original code
+	# having to look up _dr_last_waypoint_* caches for the last-mile phase.
+	var kmh: float = entry_kmh * _dr_speed_mult.get(div_id, 1.0)
 	var speed_degs: float = (kmh / DR_KM_PER_DEG) * float(GameState.game_speed)
 	var advance: float = speed_degs * delta
 
-	var to_target: Vector2 = target_deg - pos_deg
+	var to_target: Vector2 = Vector2(target_lng, target_lat) - pos_deg
 	var dist: float = to_target.length()
 
 	if dist < DR_SNAP_DEG or advance >= dist:
-		if order.size() == 1:
-			_dr_last_waypoint_road = _pathfinder.is_road_node(next_id)
-			_dr_last_waypoint_terrain = str(next_node.get("cover_combat", "")) + "_" + str(next_node.get("elevation", ""))
-		_dr_pos_deg[div_id] = target_deg
+		# Cache the last real-waypoint kmh — used when re-appending a terminal entry mid-flight
+		# (server's final_position changes after the chain's last real entry has already been
+		# popped, leaving no entry to inherit from). No-op for sub-point entries.
+		if not entry_id.is_empty():
+			_dr_last_real_kmh[div_id] = entry_kmh
+		_dr_pos_deg[div_id] = Vector2(target_lng, target_lat)
 		order.pop_front()
 		_dr_order[div_id] = order
 		if order.is_empty():
-			if _dr_final_goal.has(div_id):
-				_advance_dr_last_mile(div_id, delta)
-			else:
-				_target_positions[div_id] = _map_loader.project_lng_lat(
-						_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
-				_update_division_route(div_id)
-				var done_icon := _icons[div_id] as Node2D
-				done_icon.position = _target_positions[div_id]
-				done_icon.set_moving(false)
-				_update_division_visibility(div_id)
+			_target_positions[div_id] = _map_loader.project_lng_lat(
+					_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
+			_update_division_route(div_id)
+			var done_icon := _icons[div_id] as Node2D
+			done_icon.position = _target_positions[div_id]
+			done_icon.set_moving(false)
+			_update_division_visibility(div_id)
 			return
 		if dist > 0.0:
 			var leftover: float = delta * maxf(1.0 - dist / maxf(advance, 1e-9), 0.0)
@@ -912,66 +1010,6 @@ func _advance_dr(div_id: String, delta: float) -> void:
 	moving_icon.position = _map_loader.project_lng_lat(
 			_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
 	moving_icon.queue_redraw()
-	_update_division_visibility(div_id)
-
-
-func _advance_dr_last_mile(div_id: String, delta: float) -> void:
-	if not _dr_final_goal.has(div_id):
-		return
-	var pos_deg: Vector2 = _dr_pos_deg[div_id]
-	var final_goal: Vector2 = _dr_final_goal[div_id]
-	var to_final: Vector2 = final_goal - pos_deg
-	var dist_final: float = to_final.length()
-
-	if dist_final < DR_SNAP_DEG:
-		_dr_pos_deg[div_id] = final_goal
-		_dr_final_goal.erase(div_id)
-		var done_icon := _icons[div_id] as Node2D
-		done_icon.position = _map_loader.project_lng_lat(final_goal.x, final_goal.y)
-		done_icon.set_moving(false)
-		_target_positions[div_id] = done_icon.position
-		_update_division_route(div_id)
-		_update_division_visibility(div_id)
-		return
-
-	var lm_profile: Dictionary = _dr_profiles.get(div_id, {})
-
-	# Base speed from the last waypoint (cached — no per-frame oscillation)
-	var lm_base_kmh: float
-	if _dr_last_waypoint_road:
-		lm_base_kmh = DR_ROAD_KMH
-	else:
-		var lm_cost: Variant = lm_profile.get(_dr_last_waypoint_terrain, 1.0)
-		if lm_cost == null or not is_finite(float(lm_cost)) or float(lm_cost) <= 0.0:
-			_dr_final_goal.erase(div_id)
-			var abort_icon := _icons[div_id] as Node2D
-			abort_icon.set_moving(false)
-			_update_division_visibility(div_id)
-			return
-		lm_base_kmh = DR_OFFROAD_KMH / float(lm_cost)
-
-	# Destination speed from the synthetic goal's terrain
-	var dest_node: Dictionary = _pathfinder.get_node("_synthetic_goal")
-	var lm_dest_kmh: float = DR_OFFROAD_KMH
-	if not dest_node.is_empty() and not lm_profile.is_empty():
-		var dest_key: String = str(dest_node.get("cover_combat", "")) + "_" + str(dest_node.get("elevation", ""))
-		var dest_cost: Variant = lm_profile.get(dest_key, 1.0)
-		if dest_cost != null and is_finite(float(dest_cost)) and float(dest_cost) > 0.0:
-			lm_dest_kmh = DR_OFFROAD_KMH / float(dest_cost)
-
-	# Smooth average between base and destination speeds
-	var lm_kmh: float = (lm_base_kmh + lm_dest_kmh) * 0.5
-	lm_kmh *= _dr_speed_mult.get(div_id, 1.0)
-	var lm_advance: float = (lm_kmh / DR_KM_PER_DEG) * float(GameState.game_speed) * delta
-	if lm_advance >= dist_final:
-		_dr_pos_deg[div_id] = final_goal
-	else:
-		_dr_pos_deg[div_id] = pos_deg + to_final.normalized() * lm_advance
-
-	var lm_icon := _icons[div_id] as Node2D
-	lm_icon.position = _map_loader.project_lng_lat(_dr_pos_deg[div_id].x, _dr_pos_deg[div_id].y)
-	_target_positions[div_id] = lm_icon.position
-	lm_icon.queue_redraw()
 	_update_division_visibility(div_id)
 
 
@@ -994,8 +1032,9 @@ func _recompute_chain() -> void:
 
 	_pending_chain.clear()
 	var current_start := start_id
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	for milestone_id: String in _pending_milestones:
-		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 		var seg: Array = seg_result.get("logical", [])
 		if seg.is_empty():
 			break
@@ -1049,7 +1088,9 @@ func _submit_pending() -> void:
 ## - waypoint_ids: ordered waypoint ids for the server command and local route.
 ## Returns: Nothing.
 func _submit_move_order_for_division(div_id: String, waypoint_ids: Array, final_pos: Vector2 = Vector2.INF) -> void:
-	_dr_final_goal.erase(div_id)  # clear any previous final goal first
+	# Point 4: terminal hop is now appended to _dr_order as a final entry (id="" so the
+	# existing consume-by-distance loop handles it like any other sub-point). The wire message
+	# still includes final_lng/final_lat so the server's resolveFinalPosition stays authoritative.
 	if waypoint_ids.is_empty():
 		return
 	if not _is_own_unit(div_id):
@@ -1081,14 +1122,18 @@ func _submit_move_order_for_division(div_id: String, waypoint_ids: Array, final_
 			if parsed is Dictionary:
 				_dr_profiles[div_id] = parsed
 
-	var str_order: Array[String] = []
-	for wp: Variant in chain_snapshot:
-		str_order.append(str(wp))
-	_dr_order[div_id] = str_order
+	# Build DR entries with off-road jitter (Point 2) + terminal hop (Point 4). The chain
+	# submitted to the server is the raw waypoint-id list — jitter / terminal are pure
+	# client-side rendering concerns that don't change which nodes the server ticks through.
+	var movement_profile: Dictionary = _dr_profiles.get(div_id, {})
+	var entries: Array = _compute_visual_chain(chain_snapshot, div_id, movement_profile)
+	if final_pos != Vector2.INF and not entries.is_empty():
+		# Carry the speed over from the last real waypoint consumed. For a freshly-submitted
+		# order, that's the chain's last real entry — its kmh is right there in `entries`.
+		var terminal_kmh: float = float(entries[entries.size() - 1]["kmh"])
+		entries.append({ "id": "", "lng": final_pos.x, "lat": final_pos.y, "kmh": terminal_kmh })
+	_dr_order[div_id] = entries
 
-	# Set new final goal AFTER clearing old one — must come after _dr_order assignment
-	if final_pos != Vector2.INF:
-		_dr_final_goal[div_id] = final_pos
 	if div_id == _selected_division_id:
 		_emit_active_hold_eligibility()
 
@@ -1267,6 +1312,80 @@ func _get_division_lng_lat(division_id: String) -> Vector2:
 			float(div_data.get("position_lat", 0.0)))
 
 
+## Builds _city_index once from the loaded map's province data. Runs O(province_count) at setup
+## so click-time snap can stay a simple linear scan (clicks are infrequent — a spatial index here
+## would be premature). Cities are absent from the waypoint graph itself (see
+## LAND_MOVEMENT_IMPROVEMENTS.md Point 3), so this client-side index is the only lookup path.
+## Parameters: none.
+## Returns: nothing.
+func _build_city_index() -> void:
+	_city_index.clear()
+	if _map_loader == null:
+		return
+	for province_id: String in _map_loader.get_all_province_ids():
+		var province_data: Dictionary = _map_loader.get_province_data(province_id)
+		var city_position: Array = province_data.get("city_position", [])
+		if city_position.size() < 2:
+			continue
+		_city_index.append({
+			"lng": float(city_position[0]),
+			"lat": float(city_position[1]),
+			"province_id": province_id,
+		})
+
+
+## Snaps a raw click coordinate to the nearest city_position when within CITY_SNAP_RADIUS_DEG;
+## returns the input unchanged otherwise. Multiple cities within the radius resolve to the
+## closest one (raw Euclidean in lng/lat — within the ~500 m snap radius, the cos(lat)
+## distortion is negligible at Western European latitudes). City position data comes from
+## provinces.geojson via the map pipeline (`pipeline.py:_build_provinces`); see
+## LAND_MOVEMENT_IMPROVEMENTS.md Point 3 for the design rationale.
+func _snap_click_to_nearest_city(lng: float, lat: float) -> Vector2:
+	var best_dist_sq := CITY_SNAP_RADIUS_SQ
+	var best: Vector2 = Vector2(lng, lat)
+	for city: Dictionary in _city_index:
+		var ddx: float = float(city["lng"]) - lng
+		var ddy: float = float(city["lat"]) - lat
+		var d2: float = ddx * ddx + ddy * ddy
+		if d2 < best_dist_sq:
+			best_dist_sq = d2
+			best = Vector2(float(city["lng"]), float(city["lat"]))
+	return best
+
+
+## Returns the DR-consumable entry list for a raw waypoint-id path: real waypoints + off-road
+## jitter sub-points (Point 2). Each entry is a Dictionary {id, lng, lat, kmh}; sub-points have
+## id="" so consumers can distinguish real waypoints (for suffix-match against server broadcasts)
+## from synthetic sub-points (consumed purely on the client's own distance check).
+##
+## Used by:
+##  - `_submit_move_order_for_division` to seed `_dr_order` for self-moves
+##  - `_on_division_updated` (foreign-unit branch) to expand server `move_order` for DR playback
+##  - `_get_chain_positions` for the ghost overlay preview
+##  - `_update_division_route` for the HUD line (foreign + self both go through the same helper)
+##
+## Deterministic per (division_id, waypoint set): same input always yields the same jittered
+## polyline, so this client's icon, this client's HUD, and other players' HUD (all derived from
+## the same call) draw the same wobble.
+func _compute_visual_chain(raw_waypoint_ids: Array, division_id: String, movement_profile: Dictionary) -> Array:
+	if _pathfinder == null or not _pathfinder.is_built():
+		return []
+	if raw_waypoint_ids.is_empty():
+		return []
+	return _pathfinder._inject_offroad_jitter(raw_waypoint_ids, movement_profile, division_id)
+
+
+## Projects a list of {_dr_order} entries (lng/lat Dictionaries) into world-space Vector2 list
+## suitable for HUD/overlay rendering. Single-purpose helper so `_update_division_route` and
+## `_get_chain_positions` don't duplicate the projection loop. Entries may be real waypoints or
+## jitter sub-points — projection is identical for both (lng/lat field set the same way).
+func _project_entries_to_world(entries: Array) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for entry: Dictionary in entries:
+		out.append(_map_loader.project_lng_lat(float(entry["lng"]), float(entry["lat"])))
+	return out
+
+
 func _get_group_center_lng_lat(division_ids: Array[String]) -> Vector2:
 	if division_ids.is_empty():
 		return Vector2.ZERO
@@ -1287,12 +1406,14 @@ func _get_ghost_positions() -> Array[Vector2]:
 
 
 func _get_chain_positions() -> Array[Vector2]:
-	var positions: Array[Vector2] = []
-	for wp_id: String in _pending_chain:
-		var node: Dictionary = _pathfinder.get_node(wp_id)
-		if not node.is_empty():
-			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
-	return positions
+	# Point 2: ghost preview uses the same jittered visual chain the actual DR will animate
+	# through, so what the player sees mid-chain-build matches what they'll see during execution.
+	# The division_id seed is the selected one — at ghost-build time there's no submitted order
+	# yet, so determinism just means the ghost wobble is stable across ghost-refresh cycles.
+	var div_id := _selected_division_id
+	var movement_profile: Dictionary = _get_movement_profile(div_id)
+	var entries: Array = _compute_visual_chain(_pending_chain, div_id, movement_profile)
+	return _project_entries_to_world(entries)
 
 
 func _update_ghost() -> void:
@@ -1329,18 +1450,12 @@ func _update_division_route(division_id: String) -> void:
 	var no_milestones: Array[Vector2] = []
 	var icon: Node2D = _icons.get(division_id) as Node2D
 
-	# DR active (owning client) — 60fps update via client-side remaining order.
+	# DR active (owning client) — 60fps update via client-side remaining order. Point 2:
+	# entries may include jitter sub-points (id=""); Point 4: the last entry may be the
+	# terminal hop. Both are projected by _project_entries_to_world without any special-casing.
 	var dr_order: Array = _dr_order.get(division_id, [])
-	var has_remaining: bool = not dr_order.is_empty() or _dr_final_goal.has(division_id)
-	if has_remaining and icon != null:
-		var positions: Array[Vector2] = []
-		for wp_id: Variant in dr_order:
-			var node: Dictionary = _pathfinder.get_node(str(wp_id))
-			if not node.is_empty():
-				positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
-		if _dr_final_goal.has(division_id):
-			var fg: Vector2 = _dr_final_goal[division_id]
-			positions.append(_map_loader.project_lng_lat(fg.x, fg.y))
+	if not dr_order.is_empty() and icon != null:
+		var positions: Array[Vector2] = _project_entries_to_world(dr_order)
 		route.start_node = icon
 		if is_repos:
 			route.set_path(positions, no_milestones, color)
@@ -1348,17 +1463,30 @@ func _update_division_route(division_id: String) -> void:
 			route.set_path(positions, no_milestones, color.darkened(0.25))
 		return
 
-	# No local DR — draw from server move_order (foreign unit or stopped/arrived).
+	# No local DR — foreign unit's authoritative move_order arrives as string ids only, so
+	# re-expand via _compute_visual_chain to keep this client's HUD line in lockstep with the
+	# icon's animated path (and with every other player's view of the same unit). Same helper
+	# the self-submit path uses, so the wobble is identical for self and foreign.
 	route.start_node = null
 	var order: Array = div_data.get("move_order", [])
 	if order.is_empty():
 		route.clear()
 		return
-	var positions: Array[Vector2] = []
-	for wp_id: Variant in order:
-		var node: Dictionary = _pathfinder.get_node(str(wp_id))
-		if not node.is_empty():
-			positions.append(_map_loader.project_lng_lat(float(node["lng"]), float(node["lat"])))
+	var movement_profile: Dictionary = _get_movement_profile(division_id)
+	var entries: Array = _compute_visual_chain(order, division_id, movement_profile)
+	# Foreign terminal hop: server's final_position_lng/lat, when set, becomes the chain's
+	# final entry. Mirrors what _submit_move_order_for_division does for self-moves.
+	var server_final_lng: float = float(div_data.get("final_position_lng", -999.0))
+	var server_final_lat: float = float(div_data.get("final_position_lat", -999.0))
+	if server_final_lng > -998.0 and not entries.is_empty():
+		var terminal_kmh: float = float(entries[entries.size() - 1]["kmh"])
+		entries.append({
+			"id": "",
+			"lng": server_final_lng,
+			"lat": server_final_lat,
+			"kmh": terminal_kmh,
+		})
+	var positions: Array[Vector2] = _project_entries_to_world(entries)
 	if icon != null:
 		route.start_node = icon
 	route.set_path(positions, no_milestones, color.darkened(0.25))
@@ -1421,57 +1549,6 @@ func _on_division_updated(division_id: String) -> void:
 	var repos_order: Array = data.get("reposition_order", [])
 	var combat_state_val: String = data.get("combat_state", "idle")
 
-	# Engaged division with active reposition order — seed DR at 30% speed for smooth movement
-	if repos_order.size() > 0 and combat_state_val in ["engaged", "suppressed"]:
-		if not _dr_pos_deg.has(division_id):
-			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
-		if not _dr_profiles.has(division_id):
-			var pj: String = data.get("movement_profile_json", "")
-			if not pj.is_empty():
-				var parsed: Variant = JSON.parse_string(pj)
-				if parsed is Dictionary:
-					_dr_profiles[division_id] = parsed
-		var str_repos: Array[String] = []
-		for wp: Variant in repos_order:
-			str_repos.append(str(wp))
-		_dr_order[division_id] = str_repos
-		_dr_speed_mult[division_id] = REPOSITION_SPEED
-		(icon as Node2D).set_moving(true)
-		_update_division_route(division_id)
-		_update_division_visibility(division_id)
-		return
-
-	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
-		var server_final_lng: float = float(data.get("final_position_lng", -999.0))
-		# Waypoints done but server is still advancing to the exact click position — let
-		# client DR continue the last mile; do not freeze yet. Sync the client's predicted
-		# _dr_final_goal to the server's authoritative value: the client's own pre-submission
-		# clamp (Pathfinder.resolve_final_position) only sees a road-only graph, while the server
-		# resolves against the full road+terrain-grid graph, so the two can disagree — without this
-		# sync the drawn route line would keep showing the client's original, possibly-wrong
-		# prediction forever instead of converging to the truth once the server responds.
-		if order.is_empty() and server_final_lng > -998.0 and not (combat_state_val in ["engaged", "suppressed"]):
-			var server_final_lat: float = float(data.get("final_position_lat", -999.0))
-			var server_goal := Vector2(server_final_lng, server_final_lat)
-			if not _dr_final_goal.has(division_id) or not _dr_final_goal[division_id].is_equal_approx(server_goal):
-				_dr_final_goal[division_id] = server_goal
-			_update_division_route(division_id)
-			_update_division_visibility(division_id)
-			return
-		# Server cleared final position (reached it) or combat overrides — sync client goal too.
-		if _dr_final_goal.has(division_id):
-			_dr_final_goal.erase(division_id)
-		# Division fully stopped or locked in combat — freeze at server-authoritative position.
-		_dr_pos_deg.erase(division_id)
-		_dr_order.erase(division_id)
-		_dr_profiles.erase(division_id)
-		_dr_speed_mult.erase(division_id)
-		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
-		(icon as Node2D).set_moving(false)
-		_update_division_route(division_id)
-		_update_division_visibility(division_id)
-		return
-
 	# Cache movement profile once (doesn't change during a session).
 	if not _dr_profiles.has(division_id):
 		var pj: String = data.get("movement_profile_json", "")
@@ -1480,62 +1557,239 @@ func _on_division_updated(division_id: String) -> void:
 			if parsed is Dictionary:
 				_dr_profiles[division_id] = parsed
 
-	# Build typed String order.
+	# Engaged division with active reposition order — seed DR at 30% speed for smooth movement
+	if repos_order.size() > 0 and combat_state_val in ["engaged", "suppressed"]:
+		if not _dr_pos_deg.has(division_id):
+			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
+		var repos_entries: Array = _compute_visual_chain(repos_order, division_id, _dr_profiles[division_id])
+		_dr_order[division_id] = repos_entries
+		_dr_speed_mult[division_id] = REPOSITION_SPEED
+		(icon as Node2D).set_moving(true)
+		_update_division_route(division_id)
+		_update_division_visibility(division_id)
+		return
+
+	if order.is_empty() or combat_state_val in ["engaged", "suppressed"]:
+		var server_final_lng: float = float(data.get("final_position_lng", -999.0))
+		var server_final_lat: float = float(data.get("final_position_lat", -999.0))
+		# Waypoints done but server is still advancing to the exact click position — let
+		# client DR continue to the server-broadcast terminal; do not freeze yet. The terminal
+		# is the last entry in `_dr_order` (Point 4); if it's missing or stale, refresh it
+		# from the server's authoritative final_position_lng/lat. The client's own pre-submit
+		# resolve_final_position only saw the road-only graph; the server resolves against the
+		# full road+terrain-grid graph, so the two can disagree — without this sync the icon
+		# would freeze on the client's possibly-wrong prediction instead of converging to the
+		# server's truth once the broadcast arrives.
+		if order.is_empty() and server_final_lng > -998.0 and not (combat_state_val in ["engaged", "suppressed"]):
+			var server_goal := Vector2(server_final_lng, server_final_lat)
+			var cur_order: Array = _dr_order.get(division_id, [])
+			if cur_order.is_empty():
+				# Last real entry was popped, leaving _dr_order empty. Rebuild a stub chain with
+				# the server's terminal as the only entry; the carried-over kmh comes from the
+				# last consumed real entry, cached in _dr_last_real_kmh during _advance_dr.
+				var carried_kmh: float = float(_dr_last_real_kmh.get(division_id, DR_ROAD_KMH))
+				if not _dr_pos_deg.has(division_id):
+					_dr_pos_deg[division_id] = Vector2(server_final_lng, server_final_lat)
+				_target_positions[division_id] = _map_loader.project_lng_lat(server_final_lng, server_final_lat)
+				_dr_order[division_id] = [{
+					"id": "",
+					"lng": server_goal.x,
+					"lat": server_goal.y,
+					"kmh": carried_kmh,
+				}]
+			else:
+				var tail: Dictionary = cur_order[cur_order.size() - 1]
+				var tail_pos: Vector2 = Vector2(float(tail["lng"]), float(tail["lat"]))
+				if not tail_pos.is_equal_approx(server_goal):
+					var terminal_kmh: float = float(tail["kmh"])
+					cur_order[cur_order.size() - 1] = {
+						"id": "",
+						"lng": server_goal.x,
+						"lat": server_goal.y,
+						"kmh": terminal_kmh,
+					}
+					_dr_order[division_id] = cur_order
+			_update_division_route(division_id)
+			_update_division_visibility(division_id)
+			return
+		# Server cleared final position (reached it) or combat overrides — pop the terminal
+		# entry if present. The remaining real/sub-point entries should already have been
+		# consumed by `_advance_dr`, but defensively drop any residual terminal.
+		var stop_order: Array = _dr_order.get(division_id, [])
+		if not stop_order.is_empty():
+			var last_entry: Dictionary = stop_order[stop_order.size() - 1]
+			if str(last_entry["id"]) == "":
+				# Was the tail a terminal? Check by inspecting whether removing it leaves a real
+				# waypoint at the tail OR leaves an empty list. The original heuristic from the
+				# pre-Point-4 code: when the server clears final, anything left in _dr_order
+				# that isn't a real waypoint needs clearing.
+				# Walk back to find the last real entry; trim everything after it.
+				var trim_to: int = stop_order.size() - 1
+				while trim_to > 0:
+					var candidate: Dictionary = stop_order[trim_to]
+					if str(candidate["id"]) != "":
+						break
+					trim_to -= 1
+				if trim_to < stop_order.size() - 1:
+					stop_order = stop_order.slice(0, trim_to + 1)
+					_dr_order[division_id] = stop_order
+		_dr_order.erase(division_id)
+		# Division fully stopped or locked in combat — freeze at server-authoritative position.
+		_dr_pos_deg.erase(division_id)
+		_dr_profiles.erase(division_id)
+		_dr_speed_mult.erase(division_id)
+		_dr_last_real_kmh.erase(division_id)
+		_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
+		(icon as Node2D).set_moving(false)
+		_update_division_route(division_id)
+		_update_division_visibility(division_id)
+		return
+
+	# Build typed String order — the server's authoritative id sequence, used for suffix-match.
 	var str_order: Array[String] = []
 	for wp: Variant in order:
 		str_order.append(str(wp))
 
 	if not _dr_pos_deg.has(division_id):
-		# First update with a live order — seed DR from server position.
-		# For foreign units, fall back to legacy lerp if FOREIGN_UNIT_PATH_DR is off.
+		# First update with a live order — seed DR from server position. Build the full entry
+		# list (real waypoints + jitter sub-points + optional terminal) up front so animation,
+		# HUD line, and reconciliation all work off the same data.
 		if not FOREIGN_UNIT_PATH_DR and not _is_own_unit(division_id):
 			_target_positions[division_id] = _map_loader.project_lng_lat(server_lng, server_lat)
 		else:
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
-			_dr_order[division_id] = str_order
+			var seeded: Array = _build_server_entries(division_id, data, str_order)
+			_dr_order[division_id] = seeded
 		(icon as Node2D).set_moving(true)
 	else:
+		if not _dr_order.has(division_id):
+			return
 		var cur_order: Array = _dr_order[division_id]
-		var cur_lead: String = cur_order[0] if not cur_order.is_empty() else ""
+		# Filter to real-waypoint ids only (skip jitter sub-points with id="") for the
+		# suffix-match against server's str_order — server has no notion of sub-points.
+		var cur_real_ids: Array[String] = []
+		for entry in cur_order:
+			if str(entry["id"]) != "":
+				cur_real_ids.append(str(entry["id"]))
 		var new_lead: String = str_order[0] if not str_order.is_empty() else ""
+		var updated_lead: String = cur_real_ids[0] if not cur_real_ids.is_empty() else ""
 		var consumed_ids: Array = data.get("consumed_waypoint_ids", [])
-		var local_order: Array = cur_order.duplicate()
-		for cid: Variant in consumed_ids:
-			if not local_order.is_empty() and str(cid) == str(local_order[0]):
-				local_order = local_order.slice(1)
-		_dr_order[division_id] = local_order
-		var updated_lead: String = local_order[0] if not local_order.is_empty() else ""
 
-		# Check if client is ahead of server (local_order is a suffix of str_order).
-		# Avoids resetting position when DR has simply outpaced server consumption.
+		# Pop real entries whose ids match a server-broadcast consumed id. Sub-points are not
+		# in this loop — they're consumed by distance in `_advance_dr`. The loop walks past
+		# any leading sub-points to find a real entry, then checks if it's been consumed.
+		while not cur_order.is_empty() and str(cur_order[0]["id"]) == "":
+			cur_order = cur_order.slice(1)
+		var consumed_set: Dictionary = {}
+		for cid in consumed_ids:
+			consumed_set[str(cid)] = true
+		while not cur_order.is_empty() and str(cur_order[0]["id"]) != "" and consumed_set.has(str(cur_order[0]["id"])):
+			var popped: Dictionary = cur_order[0]
+			_dr_last_real_kmh[division_id] = float(popped["kmh"])
+			cur_order = cur_order.slice(1)
+			# Once we pop a real waypoint, the next entry may be a sub-point — skip past it.
+			while not cur_order.is_empty() and str(cur_order[0]["id"]) == "":
+				cur_order = cur_order.slice(1)
+		_dr_order[division_id] = cur_order
+
+		# Recompute cur_real_ids after the trim — needed for the suffix-match below.
+		cur_real_ids.clear()
+		for entry in _dr_order.get(division_id, []):
+			if str(entry["id"]) != "":
+				cur_real_ids.append(str(entry["id"]))
+		updated_lead = cur_real_ids[0] if not cur_real_ids.is_empty() else ""
+
+		# Check if client is ahead of server: client's remaining real ids form a suffix of the
+		# server's str_order. Avoids resetting position when DR has simply outpaced consumption.
 		var is_ahead: bool = false
-		if not local_order.is_empty() and local_order.size() <= str_order.size():
-			var str_tail: Array = str_order.slice(str_order.size() - local_order.size())
+		if not cur_real_ids.is_empty() and cur_real_ids.size() <= str_order.size():
+			var str_tail: Array = str_order.slice(str_order.size() - cur_real_ids.size())
 			is_ahead = true
-			for i in range(local_order.size()):
-				if str(local_order[i]) != str(str_tail[i]):
+			for i in range(cur_real_ids.size()):
+				if str(cur_real_ids[i]) != str(str_tail[i]):
 					is_ahead = false
 					break
 
-		# Client at final goal (DR fully consumed) while server still has trailing waypoints
-		var at_final_goal: bool = local_order.is_empty() and _dr_final_goal.has(division_id)
+		# Client fully consumed the visual chain (real + sub + terminal) while server still has
+		# trailing real waypoints. The next broadcast will catch up via consumed_waypoint_ids.
+		var at_final_goal: bool = _dr_order.get(division_id, []).is_empty() and not str_order.is_empty()
 
 		if is_ahead:
-			var consumed_count: int = str_order.size() - local_order.size()
+			var consumed_count: int = str_order.size() - cur_real_ids.size()
 			if consumed_count > 0:
 				var last_consumed_node: Dictionary = _pathfinder.get_node(str(str_order[consumed_count - 1]))
 				if not last_consumed_node.is_empty():
 					_dr_pos_deg[division_id] = Vector2(float(last_consumed_node["lng"]), float(last_consumed_node["lat"]))
 		elif not at_final_goal and updated_lead != new_lead:
-			_dr_final_goal.erase(division_id)
+			# Real route change (e.g. server reroute) — full reset. The new lead is a real
+			# waypoint; the new _dr_order is built fresh from str_order + jitter + terminal.
 			if _icons.has(division_id):
 				_dr_icon_reconcile_from[division_id] = _icons[division_id].position
 				_dr_icon_reconcile_t[division_id]    = 0.0
 			_dr_pos_deg[division_id] = Vector2(server_lng, server_lat)
-			_dr_order[division_id] = str_order
+			_dr_order[division_id] = _build_server_entries(division_id, data, str_order)
+		else:
+			# Same route, possibly with server-side final_position update. Refresh the terminal
+			# entry if the server's broadcast changed — keeps the icon converging to the server's
+			# authoritative clamp even if the client predicted a slightly different point.
+			_refresh_terminal_entry(division_id, data)
 
 	_update_division_route(division_id)
 	_update_division_visibility(division_id)
+
+
+## Builds the full DR entry list for a foreign unit (or self on reroute): real waypoints +
+## jitter sub-points + optional terminal hop from the server's `final_position_lng/lat`. Mirrors
+## what `_submit_move_order_for_division` does for self-submitted orders, but reads the source
+## waypoint list from the authoritative schema broadcast rather than the client's submission.
+## Parameters:
+## - division_id: division the order is for (used as the deterministic jitter seed).
+## - data: full division snapshot from GameState (for final_position + profile lookups).
+## - str_order: typed Array[String] of server-authoritative waypoint ids for this move order.
+## Returns: Array of entry dictionaries ready to assign to `_dr_order`.
+func _build_server_entries(division_id: String, data: Dictionary, str_order: Array[String]) -> Array:
+	var movement_profile: Dictionary = _dr_profiles.get(division_id, {})
+	var entries: Array = _compute_visual_chain(str_order, division_id, movement_profile)
+	var server_final_lng: float = float(data.get("final_position_lng", -999.0))
+	var server_final_lat: float = float(data.get("final_position_lat", -999.0))
+	if server_final_lng > -998.0 and not entries.is_empty():
+		var terminal_kmh: float = float(entries[entries.size() - 1]["kmh"])
+		entries.append({
+			"id": "",
+			"lng": server_final_lng,
+			"lat": server_final_lat,
+			"kmh": terminal_kmh,
+		})
+	return entries
+
+
+## Refreshes the terminal entry in `_dr_order[division_id]` from the server's broadcast
+## `final_position_lng/lat`. Replaces the tail if it was already a terminal; appends a new
+## terminal if the tail was the chain's last real waypoint (sub-point entries between the last
+## real waypoint and the terminal are preserved, so DR continues smoothly without a discontinuity).
+## No-op when the tail is already up-to-date or when `_dr_order` is empty.
+func _refresh_terminal_entry(division_id: String, data: Dictionary) -> void:
+	var server_final_lng: float = float(data.get("final_position_lng", -999.0))
+	var server_final_lat: float = float(data.get("final_position_lat", -999.0))
+	var cur: Array = _dr_order.get(division_id, [])
+	if cur.is_empty():
+		return
+	if server_final_lng > -998.0:
+		var server_goal := Vector2(server_final_lng, server_final_lat)
+		var tail: Dictionary = cur[cur.size() - 1]
+		var tail_pos: Vector2 = Vector2(float(tail["lng"]), float(tail["lat"]))
+		if tail_pos.is_equal_approx(server_goal):
+			return  # already in sync
+		# Replace the tail (could be either a terminal from a prior broadcast, or the chain's
+		# last real waypoint — either way the new terminal kmh inherits from the existing tail).
+		var terminal_kmh: float = float(tail["kmh"])
+		cur[cur.size() - 1] = {
+			"id": "",
+			"lng": server_goal.x,
+			"lat": server_goal.y,
+			"kmh": terminal_kmh,
+		}
+		_dr_order[division_id] = cur
 
 
 func _on_division_removed(division_id: String) -> void:
@@ -1554,6 +1808,7 @@ func _on_division_removed(division_id: String) -> void:
 	_dr_order.erase(division_id)
 	_dr_profiles.erase(division_id)
 	_dr_speed_mult.erase(division_id)
+	_dr_last_real_kmh.erase(division_id)
 	_dr_icon_reconcile_from.erase(division_id)
 	_dr_icon_reconcile_t.erase(division_id)
 	if _selected_division_ids.has(division_id):
@@ -1931,9 +2186,11 @@ static func can_hold_division_data(
 func _can_hold_division(division_id: String) -> bool:
 	if division_id.is_empty():
 		return false
+	# Point 4: terminal hop lives in `_dr_order`, so a non-empty `_dr_order` is sufficient — no
+	# separate `_dr_final_goal.has` check is needed.
 	var has_local_movement: bool = (
 		_dr_order.has(division_id) and not (_dr_order[division_id] as Array).is_empty()
-	) or _dr_final_goal.has(division_id)
+	)
 	return can_hold_division_data(
 		GameState.get_division(division_id),
 		_is_own_unit(division_id),

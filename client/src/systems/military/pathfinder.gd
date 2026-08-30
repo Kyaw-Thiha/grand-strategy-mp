@@ -2,7 +2,10 @@ extends RefCounted
 ## A* pathfinder over the waypoint graph.
 ## Phase 4B: Two-phase routing (road entry pre-check) + string-pulling post-processor.
 ## Call build() once after loading the waypoint graph.
-## Call find_path() for each route request — returns {"logical": Array, "visual": Array}.
+## Call find_path() for each route request — returns {"logical": Array[String]} (a sequence of
+## real waypoint ids from the graph; off-road jitter sub-points and the resolved final-click
+## terminal are added by the consumer via `_inject_offroad_jitter` + manual append, see
+## LAND_MOVEMENT_IMPROVEMENTS.md Points 2 + 4).
 
 const ROAD_COST_BASE := 0.05
 const RIVER_PENALTIES := {
@@ -19,6 +22,10 @@ const ROAD_PROXIMITY_DEG   := 0.003           # ~300m — counts as "road in the
 const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
 const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
 const SYNTHETIC_GOAL_ID := "_synthetic_goal"
+## Radius (degrees) within which a division is considered part of an active combat's
+## zone for pathfinding exclusion. Mirrors military_system.gd's ENGAGEMENT_RADIUS_KM
+## (25.0 km) — the two constants must stay numerically equal (25.0 / 111.0 km-per-deg).
+const ENGAGEMENT_RADIUS_DEG := 25.0 / 111.0
 
 ## Last-mile ("exact click target") straight-line hop bounds — see resolve_final_position's doc
 ## comment. Client-local tunables; deliberately not required to match movement_system.ts's
@@ -28,9 +35,22 @@ const LAST_MILE_CAP_SLACK_MULT := 1.5
 const FALLBACK_LAST_MILE_CAP_DEG := 0.05
 const LAST_MILE_SWEEP_STEP_DEG := 0.02
 
-const MAX_SPLINE_DEV_DEG: float = 0.0067
-const SPLINE_SUBDIVISIONS: int = 8
 const MAX_FALLBACK_CANDIDATES := 5
+## Off-road segment noise amplitude cap (degrees, ~330 m). Below the road-node sampling distance
+## (~0.007° / ~750 m) so a jittered sub-point never crosses far enough to enter a different
+## road's snap radius — the visual wobble stays in the corridor the original A* route was chosen
+## to occupy. See LAND_MOVEMENT_IMPROVEMENTS.md Point 2 for design rationale.
+const JITTER_AMP_DEG: float = 0.003
+## Off-road segment subdivision step (degrees, ~1.7 km). Sits between the complex-tier terrain
+## grid spacing (~0.07°) and the road-node spacing (~0.007°) so each off-road sub-segment is
+## shorter than a typical road hop but long enough that short off-road moves generate only a
+## few sub-points (cheap to animate, no busy geometry).
+const JITTER_SUBDIV_STEP_DEG: float = 0.015
+## Minimum number of jitter sub-points inserted on an off-road segment below JITTER_SUBDIV_STEP_DEG
+## length. Ensures even very short off-road segments wobble visibly instead of skipping jitter
+## entirely. Capped at MAX_JITTER_SUBDIVISIONS to bound the cost on long segments.
+const MIN_JITTER_SUBDIVISIONS: int = 2
+const MAX_JITTER_SUBDIVISIONS: int = 6
 ## Roughly 5 km per cell at Western European latitudes. The query expands across
 ## cells until its distance bound proves the nearest result is exact.
 const SPATIAL_CELL_SIZE_DEG := 0.05
@@ -438,13 +458,14 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		relations: Dictionary = {},
 		goal_lng: float = INF,
 		goal_lat: float = INF,
-		_skip_synthetic_lifecycle: bool = false) -> Dictionary:
+		_skip_synthetic_lifecycle: bool = false,
+		combat_zones: Array[Dictionary] = []) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
-		return { "logical": [], "visual": [] }
+		return { "logical": [] }
 	if from_id == to_id:
-		return { "logical": [from_id], "visual": [from_id] }
+		return { "logical": [from_id] }
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
-		return { "logical": [], "visual": [] }
+		return { "logical": [] }
 
 	var actual_to_id: String = to_id
 	var has_synthetic: bool = false
@@ -459,12 +480,13 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		if not goal_node.is_empty():
 			var hpa_result: Array = _hpa_find_path(from_id, actual_to_id, movement_profile,
 				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
-				road_cost_multiplier, player_nation_id, relations, _skip_synthetic_lifecycle)
+				road_cost_multiplier, player_nation_id, relations, _skip_synthetic_lifecycle,
+				combat_zones)
 			if not hpa_result.is_empty():
 				return _finalize_path(hpa_result, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 	if not _road_nodes.has(from_id) and not _road_nodes.has(actual_to_id):
-		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		var has_road := false
 		for wp_id in offroad_path:
 			if _road_nodes.has(wp_id):
@@ -474,32 +496,33 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 			return _finalize_path(offroad_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 	if _road_nodes.has(from_id):
-		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not road_path.is_empty():
 			return _finalize_path(road_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 	else:
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
-			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
+			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations, combat_zones)
 			if not seg1.is_empty() and not seg2.is_empty():
 				return _finalize_path(_join_segments(seg1, seg2), movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
-	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 	return _finalize_path(path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 
 func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
 		movement_profile: Dictionary,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> String:
+		relations: Dictionary = {},
+		combat_zones: Array[Dictionary] = []) -> String:
 	var candidates: Array[String] = _find_nearest_ids(
 		near_lng, near_lat, MAX_FALLBACK_CANDIDATES)
 	for candidate_id: String in candidates:
 		if candidate_id == from_id:
 			continue
 		var result: Dictionary = find_path(from_id, candidate_id, movement_profile, 1.0,
-				player_nation_id, relations)
+				player_nation_id, relations, INF, INF, false, combat_zones)
 		if not result.get("logical", []).is_empty():
 			return candidate_id
 	return ""
@@ -507,8 +530,7 @@ func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
 
 func _build_path_result(raw_path: Array, movement_profile: Dictionary) -> Dictionary:
 	var logical: Array = _string_pull(raw_path, movement_profile)
-	var visual: Array = _smooth_path(logical)
-	return { "logical": logical, "visual": visual }
+	return { "logical": logical }
 
 
 func _finalize_path(raw_path: Array, movement_profile: Dictionary, has_synthetic: bool, original_to_id: String, _skip_synthetic_lifecycle: bool = false) -> Dictionary:
@@ -546,7 +568,8 @@ func _find_nearest_road_node(from_id: String) -> String:
 func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 		road_only: bool, road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> Array:
+		relations: Dictionary = {},
+		combat_zones: Array[Dictionary] = []) -> Array:
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
@@ -554,6 +577,11 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 
 	var from_node: Dictionary = _nodes[from_id]
 	var to_node: Dictionary = _nodes[to_id]
+
+	# Precomputed once per query: which zones the destination sits inside. Those zones
+	# are exempt for this whole search — a deliberate destination inside an active
+	# combat must still be reachable.
+	var zone_exempt: Array[bool] = _combat_zone_exemptions(to_node, combat_zones)
 
 	# Forward search state (from_id → to_id)
 	var gf: Dictionary = { from_id: 0.0 }
@@ -597,7 +625,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
+				if v != to_id and (_is_neutral_for(v, player_nation_id, relations) or _is_in_hostile_combat_zone(v, combat_zones, zone_exempt)):
 					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
@@ -627,7 +655,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
+				if v != to_id and (_is_neutral_for(v, player_nation_id, relations) or _is_in_hostile_combat_zone(v, combat_zones, zone_exempt)):
 					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
@@ -701,52 +729,121 @@ func _can_skip_to(path: Array, from_idx: int, to_idx: int, movement_profile: Dic
 	return true
 
 
-func _smooth_path(waypoints: Array) -> Array:
-	if waypoints.size() <= 2:
-		return waypoints.duplicate()
-	var result: Array = []
-	var pts: Array = []
-	pts.append(waypoints[0])
-	pts.append_array(waypoints)
-	pts.append(waypoints[-1])
-	for i in range(1, pts.size() - 2):
-		var p0: Dictionary = _nodes.get(str(pts[i-1]), {})
-		var p1: Dictionary = _nodes.get(str(pts[i]),   {})
-		var p2: Dictionary = _nodes.get(str(pts[i+1]), {})
-		var p3: Dictionary = _nodes.get(str(pts[i+2]), {})
-		if p0.is_empty() or p1.is_empty() or p2.is_empty() or p3.is_empty():
-			result.append(pts[i])
+## Expands a raw waypoint-id list into the DR-consumable entry sequence: real waypoints preserved
+## verbatim, off-road segments subdivided and offset by deterministic perpendicular noise so the
+## client-visible route wobbles between waypoints instead of tracing a straight polyline. Road
+## segments are emitted as the two endpoints only (no sub-points) — road geometry is already
+## "jittery" in spirit, and adding noise on top would make the line look unstable.
+##
+## Determinism: noise is a pure function of (division_id, segment_index, sub_index), so every
+## call returns the same list for the same input. This is what lets the icon animation, the HUD
+## route line, and other players' HUD (all derived from the same list) agree on the geometry, and
+## what makes the wobble stable across reconciliation / replays.
+##
+## Output entry shape: {id: String, lng: float, lat: float, kmh: float}.
+## - Real waypoint: id set (the original waypoint id), lng/lat from the node, kmh from terrain
+## - Sub-point: id="" (so consumers can distinguish real from synthetic without scanning ids),
+##   kmh inherits from the segment's source real waypoint so a chain of sub-points moves at one
+##   consistent speed rather than oscillating per-frame
+##
+## Parameters:
+## - real_ids: ordered list of real waypoint ids (the post-string-pull output of find_path)
+## - movement_profile: division profile, used for terrain-based speed lookup at real waypoints
+## - division_id: seed for the deterministic noise — same id always produces the same wobble
+## Returns: list of entry dictionaries ready to feed _dr_order. Empty when real_ids is empty.
+func _inject_offroad_jitter(real_ids: Array, movement_profile: Dictionary, division_id: String) -> Array:
+	var out: Array = []
+	if real_ids.is_empty():
+		return out
+	var real_count: int = real_ids.size()
+	for i: int in real_count:
+		var rid: String = str(real_ids[i])
+		var node: Dictionary = _nodes.get(rid, {})
+		if node.is_empty():
+			# Defensive: skip unknown ids rather than error — the wire format only allows real
+			# ids, so an empty dict here means a stale or buggy caller.
 			continue
-		var t01 := pow(_dist(p0, p1), 0.5)
-		var t12 := pow(_dist(p1, p2), 0.5)
-		var t23 := pow(_dist(p2, p3), 0.5)
-		if t01 < 1e-9 or t12 < 1e-9 or t23 < 1e-9:
-			result.append(pts[i])
+		var lng: float = float(node["lng"])
+		var lat: float = float(node["lat"])
+		var kmh: float = _waypoint_kmh(rid, node, movement_profile)
+		out.append({ "id": rid, "lng": lng, "lat": lat, "kmh": kmh })
+
+		if i == real_count - 1:
+			break
+
+		var next_rid: String = str(real_ids[i + 1])
+		var next_node: Dictionary = _nodes.get(next_rid, {})
+		if next_node.is_empty():
 			continue
-		var max_dev := _max_catmull_rom_deviation(p0, p1, p2, p3, t01, t12, t23)
-		if max_dev > MAX_SPLINE_DEV_DEG:
-			result.append(pts[i])
+
+		# Skip jitter for road-to-road segments — road geometry already implies the curves.
+		if _road_nodes.has(rid) and _road_nodes.has(next_rid):
 			continue
-		if result.is_empty() or str(result[-1]) != str(pts[i]):
-			result.append(pts[i])
-		for s in range(1, SPLINE_SUBDIVISIONS):
-			var tt: float = float(s) / float(SPLINE_SUBDIVISIONS)
-			var sp: Vector2 = _catmull_rom_point(p0, p1, p2, p3, t01, t12, t23, tt)
-			result.append("_spline_%f_%f" % [sp.x, sp.y])
-			_nodes["_spline_%f_%f" % [sp.x, sp.y]] = {
-				"id": "_spline_%f_%f" % [sp.x, sp.y],
-				"lng": sp.x, "lat": sp.y,
-				"cover_combat": "plains", "elevation": "flat", "nation_id": null
-			}
-	if waypoints.size() > 0:
-		result.append(waypoints[-1])
-	return result
+
+		var nlng: float = float(next_node["lng"])
+		var nlat: float = float(next_node["lat"])
+		var dx: float = nlng - lng
+		var dy: float = nlat - lat
+		var seg_len: float = sqrt(dx * dx + dy * dy)
+		if seg_len <= 0.0:
+			continue
+
+		# Perpendicular unit vector (right-hand normal of the segment direction). Sign doesn't
+		# matter for the visual result; choose +90° for determinism.
+		var perp_x: float = -dy / seg_len
+		var perp_y: float = dx / seg_len
+
+		var subdiv_count: int = clampi(int(round(seg_len / JITTER_SUBDIV_STEP_DEG)), MIN_JITTER_SUBDIVISIONS, MAX_JITTER_SUBDIVISIONS)
+		# Always emit subdiv_count sub-points between the two endpoints (NOT inclusive of either
+		# endpoint — those are already in `out`). Smoothstep taper pushes amplitude to zero at the
+		# segment boundaries so consecutive segments join seamlessly without visible kinks.
+		var seg_idx: int = i
+		for j: int in range(1, subdiv_count + 1):
+			var t: float = float(j) / float(subdiv_count + 1)
+			var sx: float = lng + dx * t
+			var sy: float = lat + dy * t
+			# Taper: 6*t^5 - 15*t^4 + 10*t^3 — smoothstep, zero derivative at endpoints so the
+			# polyline is C1-continuous at the joins between segments.
+			var taper: float = t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+			var noise: float = _jitter_noise(division_id, seg_idx, j)
+			var off: float = JITTER_AMP_DEG * taper * noise
+			out.append({
+				"id": "",
+				"lng": sx + perp_x * off,
+				"lat": sy + perp_y * off,
+				"kmh": kmh,
+			})
+	return out
 
 
-func _dist(a: Dictionary, b: Dictionary) -> float:
-	var dx := float(a.get("lng", 0.0)) - float(b.get("lng", 0.0))
-	var dy := float(a.get("lat", 0.0)) - float(b.get("lat", 0.0))
-	return sqrt(dx*dx + dy*dy)
+## Returns km/h for a real waypoint (road → DR_ROAD_KMH, off-road → DR_OFFROAD_KMH / terrain_cost).
+## Centralised so _inject_offroad_jitter and any future speed-lookup site share one definition.
+## Impassable terrain (cost = INF or missing) returns DR_OFFROAD_KMH as a defensive fallback —
+## the caller's profile lookup should have already rejected impassable waypoints before they
+## reach this function, so this is a "shouldn't happen" branch rather than expected behavior.
+func _waypoint_kmh(waypoint_id: String, node: Dictionary, movement_profile: Dictionary) -> float:
+	if _road_nodes.has(waypoint_id):
+		return 60.0  # matches DR_ROAD_KMH on the consumer side
+	var key: String = str(node.get("cover_combat", "")) + "_" + str(node.get("elevation", ""))
+	var raw: Variant = movement_profile.get(key, 1.0)
+	if raw == null or not is_finite(float(raw)) or float(raw) <= 0.0:
+		return 20.0  # DR_OFFROAD_KMH fallback
+	return 20.0 / float(raw)
+
+
+## Pure-function deterministic noise in [-1, 1] from (division_id, segment_index, sub_index).
+## FNV-1a-style hash on the concatenated string → integer → centered float. No global state, no
+## RNG sequence dependency — same triple always yields the same value, regardless of call order
+## or how many other paths the system has processed.
+func _jitter_noise(division_id: String, segment_index: int, sub_index: int) -> float:
+	var s: String = "%s|%d|%d" % [division_id, segment_index, sub_index]
+	var h: int = 2166136261  # FNV-1a 32-bit offset basis
+	for i: int in s.length():
+		h = (h ^ ord(s[i])) & 0xffffffff
+		h = (h * 16777619) & 0xffffffff  # FNV-1a 32-bit prime
+	# Center to [-1, 1]. Sign bit used to flip, magnitude to scale.
+	var center: float = (float(h & 0x7fffffff) / float(0x7fffffff)) * 2.0 - 1.0
+	return center
 
 
 ## Resolves which nation owns a waypoint node for the neutral-territory check below. Prefers LIVE
@@ -790,6 +887,43 @@ func _is_nation_neutral_for(nation: Variant, player_nation_id: String, relations
 			var stance: String = rel_entry.get("stance", "neutral")
 			return stance != "war" and stance != "alliance"
 	return true  # relations loaded but nation absent → treat as neutral (blocked)
+
+
+## Precomputes, once per A* query, which combat zones the destination node sits
+## inside. Parallel array to combat_zones — zone_exempt[i] is true if to_node lies
+## within ENGAGEMENT_RADIUS_DEG of any participant position in combat_zones[i].
+func _combat_zone_exemptions(to_node: Dictionary, combat_zones: Array[Dictionary]) -> Array[bool]:
+	var dest_pos := Vector2(float(to_node.get("lng", 0.0)), float(to_node.get("lat", 0.0)))
+	var radius_sq: float = ENGAGEMENT_RADIUS_DEG * ENGAGEMENT_RADIUS_DEG
+	var exempt: Array[bool] = []
+	for zone: Dictionary in combat_zones:
+		var in_zone: bool = false
+		for pos: Vector2 in zone.get("positions", []):
+			if dest_pos.distance_squared_to(pos) <= radius_sq:
+				in_zone = true
+				break
+		exempt.append(in_zone)
+	return exempt
+
+
+## True if node_id falls inside a combat zone that is NOT exempt (i.e. a zone the
+## destination is not part of). zone_exempt is the parallel array produced by
+## _combat_zone_exemptions for the current query's destination.
+func _is_in_hostile_combat_zone(node_id: String, combat_zones: Array[Dictionary], zone_exempt: Array[bool]) -> bool:
+	if combat_zones.is_empty():
+		return false
+	var node: Dictionary = _nodes.get(node_id, {})
+	if node.is_empty():
+		return false
+	var node_pos := Vector2(float(node["lng"]), float(node["lat"]))
+	var radius_sq: float = ENGAGEMENT_RADIUS_DEG * ENGAGEMENT_RADIUS_DEG
+	for i: int in combat_zones.size():
+		if zone_exempt[i]:
+			continue
+		for pos: Vector2 in combat_zones[i].get("positions", []):
+			if node_pos.distance_squared_to(pos) <= radius_sq:
+				return true
+	return false
 
 
 ## Terrain movement cost at an arbitrary point, keyed off the nearest graph node's terrain type —
@@ -875,57 +1009,6 @@ func resolve_final_position(
 	return Vector2(resolved_lng, resolved_lat)
 
 
-func _catmull_rom_point(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
-		t01: float, t12: float, t23: float, t: float) -> Vector2:
-	var t_val := t01 + t * t12
-	var t0 := 0.0; var t1 := t01; var t2 := t01 + t12; var t3 := t01 + t12 + t23
-	var A1 := _lerp_pt(p0, p1, t0, t1, t_val)
-	var A2 := _lerp_pt(p1, p2, t1, t2, t_val)
-	var A3 := _lerp_pt(p2, p3, t2, t3, t_val)
-	var B1 := _lerp_pt_v(A1, A2, t0, t2, t_val)
-	var B2 := _lerp_pt_v(A2, A3, t1, t3, t_val)
-	return _lerp_pt_v(B1, B2, t1, t2, t_val)
-
-
-func _lerp_pt(a: Dictionary, b: Dictionary, ta: float, tb: float, tv: float) -> Vector2:
-	if abs(tb - ta) < 1e-9:
-		return Vector2(float(a["lng"]), float(a["lat"]))
-	var r := (tv - ta) / (tb - ta)
-	return Vector2(
-		float(a["lng"]) + r * (float(b["lng"]) - float(a["lng"])),
-		float(a["lat"]) + r * (float(b["lat"]) - float(a["lat"]))
-	)
-
-
-func _lerp_pt_v(a: Vector2, b: Vector2, ta: float, tb: float, tv: float) -> Vector2:
-	if abs(tb - ta) < 1e-9:
-		return a
-	var r := (tv - ta) / (tb - ta)
-	return Vector2(a.x + r * (b.x - a.x), a.y + r * (b.y - a.y))
-
-
-func _max_catmull_rom_deviation(p0: Dictionary, p1: Dictionary, p2: Dictionary, p3: Dictionary,
-		t01: float, t12: float, t23: float) -> float:
-	var max_dev := 0.0
-	var line_start := Vector2(float(p1["lng"]), float(p1["lat"]))
-	var line_end   := Vector2(float(p2["lng"]), float(p2["lat"]))
-	for s in range(1, SPLINE_SUBDIVISIONS):
-		var t := float(s) / float(SPLINE_SUBDIVISIONS)
-		var sp := _catmull_rom_point(p0, p1, p2, p3, t01, t12, t23, t)
-		var dev := _point_to_segment_dist(sp, line_start, line_end)
-		if dev > max_dev:
-			max_dev = dev
-	return max_dev
-
-
-func _point_to_segment_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
-	var ab := b - a
-	var ap := p - a
-	var t_val := ab.dot(ap) / (ab.length_squared() + 1e-9)
-	t_val = clamp(t_val, 0.0, 1.0)
-	return (p - (a + t_val * ab)).length()
-
-
 func _edge_cost(edge: Dictionary, nb_id: String, movement_profile: Dictionary,
 		road_cost_multiplier: float = 1.0) -> float:
 	var river_penalty: float = edge["river_penalty"]
@@ -985,7 +1068,8 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
 		relations: Dictionary = {},
-		_skip_synthetic_lifecycle: bool = false) -> Array:
+		_skip_synthetic_lifecycle: bool = false,
+		combat_zones: Array[Dictionary] = []) -> Array:
 	if not _skip_synthetic_lifecycle:
 		_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
 
@@ -994,7 +1078,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 
 	# If same cluster or clusters not found, fall back
 	if from_cluster.is_empty() or to_cluster.is_empty() or from_cluster == to_cluster:
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not _skip_synthetic_lifecycle:
 			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
@@ -1002,7 +1086,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	# Abstract search: Dijkstra over abstract graph
 	var abstract_path: Array = _abstract_dijkstra(from_cluster, to_cluster)
 	if abstract_path.is_empty():
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not _skip_synthetic_lifecycle:
 			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
@@ -1024,7 +1108,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	if not all_path_nodes.has(SYNTHETIC_GOAL_ID):
 		all_path_nodes.append(SYNTHETIC_GOAL_ID)
 
-	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 	if not _skip_synthetic_lifecycle:
 		_remove_synthetic_goal()
 	return _substitute_synthetic(stitched, to_id)

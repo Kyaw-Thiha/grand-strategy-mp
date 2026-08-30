@@ -17,7 +17,6 @@ const PLAYABLE_POSITIONS: DivisionSpawnConfig[] = [
   { division_id: "germany_div_02", nation_id: "germany", lng: 17.033000, lat: 51.100000, is_neutral: false },
   { division_id: "germany_div_03", nation_id: "germany", lng: 8.804892, lat: 53.052868, is_neutral: false },
   { division_id: "germany_div_04", nation_id: "germany", lng: 8.610000, lat: 50.000000, is_neutral: false }, // ~9 km from germany_div_01 — stack pair
-  { division_id: "germany_div_05", nation_id: "germany", lng: 6.500000, lat: 49.190000, is_neutral: false }, // Sarreguemines — Franco-German border front
   { division_id: "germany_div_06", nation_id: "germany", lng: 13.385771, lat: 52.483566, is_neutral: false },
   { division_id: "germany_div_07", nation_id: "germany", lng: 14.553000, lat: 53.432000, is_neutral: false },
   { division_id: "germany_div_08", nation_id: "germany", lng: 10.056123, lat: 53.529503, is_neutral: false },

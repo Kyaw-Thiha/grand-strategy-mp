@@ -2,11 +2,13 @@
  * Phase 4D end-to-end: stacking + three-tier supply/encirclement.
  *
  * Scenario:
- *   germany_div_05 (Saarbrücken) is teleported 400 km into France — deep behind enemy lines —
- *   so it is far from any German province (→ OUT_OF_SUPPLY) and far from any German division
- *   (→ CUT_OFF). Four French divisions are then teleported to surround it in all 8 directions
- *   (→ DIVISION_ENCIRCLED). The encircled German division takes HP drain each tick until it
- *   is destroyed or retreats (combat damage accelerates this).
+ *   A throwaway German test division (spawned via the test-only SPAWN_DIVISION message,
+ *   which does not validate territory ownership) is teleported 400 km into France — deep
+ *   behind enemy lines — so it is far from any German province (→ OUT_OF_SUPPLY) and far
+ *   from any German division (→ CUT_OFF). Four French divisions are then teleported to
+ *   surround it in all 8 directions (→ DIVISION_ENCIRCLED). The encircled German division
+ *   takes HP drain each tick until it is destroyed or retreats (combat damage accelerates
+ *   this).
  *
  * Stack test (soft):
  *   Two German divisions are teleported to the same spot → STACK_FORMED fires.
@@ -14,14 +16,15 @@
  *
  * Tests:
  *   1. Game starts + divisions spawn
- *   2. OUT_OF_SUPPLY fires for germany_div_05 within 15 s (teleported far from Germany)
- *   3. CUT_OFF fires for germany_div_05 within 15 s after step 2
+ *   2. OUT_OF_SUPPLY fires for the victim division within 15 s (teleported far from Germany)
+ *   3. CUT_OFF fires for the victim division within 15 s after step 2
  *   4. DIVISION_ENCIRCLED fires within 15 s after step 3 (4 French divisions form a ring)
- *   5. UNIT_DESTROYED fires for germany_div_05 (from HP drain + combat damage)
+ *   5. UNIT_DESTROYED fires for the victim division (from HP drain + combat damage)
  *   6. Soft: STACK_FORMED fires when two German divisions overlap
  *
- * Run with: npx tsx test/4d-encirclement.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4d-encirclement.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -33,8 +36,12 @@ const BOT_A_EMAIL = "e2e-4d-bot-a@example.com";
 const BOT_B_EMAIL = "e2e-4d-bot-b@example.com";
 const PASSWORD    = "password123";
 
-// Victim division — will be teleported deep into enemy territory
-const VICTIM_DIV = "germany_div_05";
+// Victim division — a throwaway test division spawned via SPAWN_DIVISION (bypasses
+// territory-ownership validation), which will be teleported deep into enemy territory.
+// Spawned near we6_germany_01 city so it starts well within German supply range.
+const VICTIM_DIV = "e2e-4d-victim";
+const VICTIM_SPAWN_LNG = 8.684450;
+const VICTIM_SPAWN_LAT = 50.063147;
 
 // Teleport destination — central France, 171 km from nearest province city (no province capture),
 // 903 km from nearest German province (well beyond 200 km OOS threshold).
@@ -188,8 +195,16 @@ async function main() {
   await divisionsSpawnedPromise;
   console.log("   ✓ DIVISIONS_SPAWNED");
 
-  // 4. Teleport victim into deep France (away from all German provinces and divisions)
-  console.log("\n4. Teleporting victim division into deep France...");
+  // 4. Spawn throwaway victim division near German territory, then teleport it into deep
+  // France (away from all German provinces and divisions).
+  console.log("\n4. Spawning victim division and teleporting into deep France...");
+  roomA.send("SPAWN_DIVISION", {
+    division_id: VICTIM_DIV,
+    nation_id: "germany",
+    position_lng: VICTIM_SPAWN_LNG,
+    position_lat: VICTIM_SPAWN_LAT,
+  });
+  await sleep(200);
   roomA.send("DEV_TELEPORT", { division_id: VICTIM_DIV, lng: VICTIM_LNG, lat: VICTIM_LAT });
   await sleep(200);
   console.log(`   ${VICTIM_DIV} → (${VICTIM_LNG.toFixed(3)}, ${VICTIM_LAT.toFixed(3)}) [Central France, 171km from nearest city]`);

@@ -5,10 +5,16 @@
  *   A — Direct neutral target rejected: germany_div_01 → Swiss waypoint
  *   B — Path through neutral territory trimmed: [German, Swiss] → [German]
  *   C — Own territory allowed: germany_div_01 → German waypoint
- *   D — Enemy territory allowed (at war): germany_div_05 → French waypoint
+ *   D — Enemy territory allowed (at war): throwaway German test division → French waypoint
  *
- * Run with: npx tsx test/4f-territory-movement.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Test D used to target the default-roster germany_div_05, but that division was removed
+ * (it was a data bug — it spawned inside French sovereign territory). It is replaced with
+ * a throwaway division spawned via the test-only SPAWN_DIVISION message (which does not
+ * validate territory ownership), placed harmlessly inside German territory.
+ *
+ * Run with: NODE_ENV=test npx tsx test/4f-territory-movement.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -19,6 +25,11 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-4f-territory-a@example.com";
 const BOT_B_EMAIL = "e2e-4f-territory-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway German test division for Test D, spawned via SPAWN_DIVISION (bypasses
+// territory-ownership validation) inside German territory, near germany_div_01.
+const DE_TEST_DIV = "e2e-4f-de-test";
+const DE_TEST_LNG = 8.70, DE_TEST_LAT = 50.05;
 
 interface DivisionUpdate {
   division_id: string;
@@ -122,6 +133,16 @@ async function setupGame(): Promise<{ roomA: Room; roomB: Room }> {
 
   await gameStartedPromise;
   await divisionsSpawnedPromise;
+
+  // Spawn throwaway German test division for Test D via the test-only SPAWN_DIVISION message.
+  roomA.send("SPAWN_DIVISION", {
+    division_id: DE_TEST_DIV,
+    nation_id: "germany",
+    position_lng: DE_TEST_LNG,
+    position_lat: DE_TEST_LAT,
+  });
+  await sleep(300);
+
   return { roomA, roomB };
 }
 
@@ -161,10 +182,10 @@ async function main() {
 
   // ── Test D: Enemy territory allowed (at war) ─────────────────────────────
   console.log("\n--- Test D: Enemy (France) territory allowed ---");
-  console.log("2. Sending germany_div_05 → wp_000213 (French territory, at war)...");
-  const rejectD = waitForRejection(roomA, roomB, "germany_div_05", 3000);
+  console.log(`2. Sending ${DE_TEST_DIV} → wp_000213 (French territory, at war)...`);
+  const rejectD = waitForRejection(roomA, roomB, DE_TEST_DIV, 3000);
   roomA.send("SUBMIT_MOVE_ORDER", {
-    division_id: "germany_div_05",
+    division_id: DE_TEST_DIV,
     waypoints: ["wp_000213"],
   });
   const reasonD = await rejectD;

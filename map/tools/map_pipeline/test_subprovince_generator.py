@@ -15,6 +15,7 @@ from subprovince_generator import (
     TerrainPatch,
     TerrainRaster,
     assign_stable_ids,
+    default_config,
     generate_subprovinces,
     merge_slivers,
 )
@@ -58,6 +59,21 @@ def terrain_for(bounds=(0, 0, 40, 40), cover="plains", elev="flat"):
         np.full(shape, elev, dtype=object),
         grid,
     )
+
+
+def test_default_config_raises_road_and_hinterland_minimums():
+    # road_min_area is set relative to a nominal full segment's area (road_width *
+    # road_segment_length = 10_000 * 80_000 = 8e8), high enough to catch segments truncated
+    # near province borders/junctions/turns but well below the ~6e8 floor a normally-jittered
+    # full segment can shrink to (road_segment_length jitters +/-12%), so untruncated segments
+    # are never affected.
+    cfg = default_config()
+    assert cfg.road_width == 10_000.0
+    assert cfg.road_segment_length == 80_000.0
+    assert cfg.road_min_area == pytest.approx(4e8)
+    # hinterland_tiny_grid_cells tripled from 10.0 to 30.0 so more undersized hinterland cells
+    # get absorbed into surrounding terrain via the existing _resolve_tiny_hinterland merge.
+    assert cfg.hinterland_tiny_grid_cells == pytest.approx(30.0)
 
 
 def test_city_fallback_forms_capital_without_overlap():
@@ -348,6 +364,26 @@ def test_road_min_area_is_independent_of_generic_min_area():
     assert len(hinterland_cells) == 2
 
 
+def test_default_road_min_area_absorbs_border_truncated_fragment():
+    # A road cell sized like a segment truncated to ~45% of a nominal full segment (as can
+    # happen when `_split_corridor`'s difference against a province border, or an adjacent
+    # road's carve-out at a junction, clips a segment down) must be absorbed into its road
+    # neighbor under the new default `road_min_area`, where it would have survived under the
+    # old default of 30e6.
+    truncated_area_side = 19_000.0  # ~3.6e8 sq units: below new 4e8 floor, above old 30e6 floor
+    cells = [
+        PolygonLabel(box(0, 0, truncated_area_side, 19_000.0), "road", "plains", "flat", False),
+        PolygonLabel(box(truncated_area_side, 0, truncated_area_side + 80_000.0, 19_000.0),
+                     "road", "plains", "flat", False),
+    ]
+    old_default_merged = merge_slivers(cells, min_area=10e6, tolerance=1.0, road_min_area=30e6)
+    assert len(old_default_merged) == 2  # survives under the old, too-permissive floor
+
+    new_default_merged = merge_slivers(cells, min_area=10e6, tolerance=1.0, road_min_area=4e8)
+    assert len(new_default_merged) == 1
+    assert new_default_merged[0].kind == "road"
+
+
 def test_hinterland_sliver_does_not_cross_cover_boundary():
     cells = [
         PolygonLabel(box(0, 0, 2, 2), "hinterland", "plains", "flat", False),
@@ -387,6 +423,26 @@ def test_tiny_hinterland_absorbs_into_diff_terrain_with_no_nearby_match():
     assert len(result) == 1
     assert result[0].cover_combat == "forest"
     assert result[0].geometry.area == pytest.approx(10.0)
+
+
+def test_raised_hinterland_tiny_threshold_absorbs_previously_kept_cell():
+    from subprovince_generator import _resolve_tiny_hinterland
+    # A 20-unit-area hinterland cell with grid_cell_area=1.0 sits between the old threshold
+    # (10.0) and the new default (30.0): the old threshold left it alone, the new one merges it
+    # into the adjacent same-terrain cell.
+    cells = [
+        PolygonLabel(box(0, 0, 4, 5), "hinterland", "plains", "flat", False),
+        PolygonLabel(box(4, 0, 14, 5), "hinterland", "plains", "flat", False),
+    ]
+    old_threshold_cfg = config().__class__(**{**config().__dict__, "hinterland_tiny_grid_cells": 10.0})
+    old_result = _resolve_tiny_hinterland(cells, old_threshold_cfg, grid_cell_area=1.0)
+    assert len(old_result) == 2  # 20 < 10*1.0 is false, so left alone under the old threshold
+
+    new_threshold_cfg = config().__class__(**{**config().__dict__, "hinterland_tiny_grid_cells": 30.0})
+    new_result = _resolve_tiny_hinterland(cells, new_threshold_cfg, grid_cell_area=1.0)
+    assert len(new_result) == 1
+    assert new_result[0].cover_combat == "plains"
+    assert new_result[0].geometry.area == pytest.approx(70.0)
 
 
 def test_tiny_hinterland_left_alone_with_no_candidates():

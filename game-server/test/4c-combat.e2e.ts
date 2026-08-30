@@ -1,9 +1,13 @@
 /**
  * Phase 4C end-to-end: engagement, combat, auto-retreat, province capture.
  *
- * germany_div_05 (Sarreguemines, 6.500°E 49.190°N) and france_div_05 (Metz, 6.175°E 49.123°N)
- * spawn ~37 km apart — within the 50 km engagement range (25+25) — so combat starts
- * automatically on the first game tick without any move orders needed.
+ * The default roster no longer includes a front-line pair that legally starts within
+ * engagement range (the old germany_div_05 spawn was a data bug — it sat inside French
+ * sovereign territory — and has been removed). Instead, this test spawns its own throwaway
+ * divisions via the test-only SPAWN_DIVISION message (which does not validate territory
+ * ownership): a German division and a French division placed ~37 km apart — within the
+ * 50 km engagement range (25+25) — so combat starts automatically on the first game tick
+ * without any move orders needed.
  *
  * Tests:
  *   1. Game starts → COMBAT_STARTED fires within a few ticks (no move orders needed)
@@ -11,8 +15,9 @@
  *   3. Suppression threshold hit → combat_state changes to "retreating"
  *   4. Soft: PROVINCE_CAPTURED fires when an uncontested division reaches a city
  *
- * Run with: npx tsx test/4c-combat.e2e.ts
- * Requires both servers running with DEV_MODE=true.
+ * Run with: NODE_ENV=test npx tsx test/4c-combat.e2e.ts
+ * Requires both servers running with DEV_MODE=true and the game-server started with
+ * NODE_ENV=test (so the SPAWN_DIVISION test-only message handler is registered).
  */
 
 import { Client, Room } from "@colyseus/sdk";
@@ -23,6 +28,14 @@ const COLYSEUS_URL = process.env.COLYSEUS_URL ?? "ws://localhost:2567";
 const BOT_A_EMAIL = "e2e-4c-bot-a@example.com";
 const BOT_B_EMAIL = "e2e-4c-bot-b@example.com";
 const PASSWORD    = "password123";
+
+// Throwaway test divisions, spawned via SPAWN_DIVISION at the same coordinates the old
+// default-roster front-line pair used (Sarreguemines / Metz) — preserves the ~37 km
+// engagement-range distance without depending on default territory-owned starting positions.
+const DE_DIV = "e2e-4c-de-front";
+const FR_DIV = "e2e-4c-fr-front";
+const DE_LNG = 6.500, DE_LAT = 49.190; // Sarreguemines
+const FR_LNG = 6.175, FR_LAT = 49.123; // Metz
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +98,7 @@ function sleep(ms: number): Promise<void> {
 
 async function main() {
   console.log("Phase 4C — engagement, combat, auto-retreat, province capture\n");
-  console.log("  Front-line pair: germany_div_05 (Sarreguemines) vs france_div_05 (Metz)");
+  console.log(`  Front-line pair: ${DE_DIV} (Sarreguemines) vs ${FR_DIV} (Metz)`);
   console.log("  Spawn distance: ~37 km — within engagement range (25+25=50 km)\n");
 
   // 1. Register + login
@@ -141,18 +154,20 @@ async function main() {
   const spawnMsg = await divisionsSpawnedPromise as {
     divisions: { division_id: string; position_lng: number; position_lat: number }[];
   };
-  console.log(`   ${spawnMsg.divisions.length} divisions spawned`);
+  console.log(`   ${spawnMsg.divisions.length} default-roster divisions spawned`);
 
-  const germDiv = spawnMsg.divisions.find(d => d.division_id === "germany_div_05");
-  const frDiv   = spawnMsg.divisions.find(d => d.division_id === "france_div_05");
-  assert(!!germDiv, "germany_div_05 not in spawn list");
-  assert(!!frDiv,   "france_div_05 not in spawn list");
+  // Spawn our own throwaway front-line pair via the test-only SPAWN_DIVISION message —
+  // this bypasses territory-ownership validation entirely, so we can place them at exact
+  // coordinates without needing a legally-owned starting position.
+  roomA.send("SPAWN_DIVISION", { division_id: DE_DIV, nation_id: "germany", position_lng: DE_LNG, position_lat: DE_LAT });
+  roomB.send("SPAWN_DIVISION", { division_id: FR_DIV, nation_id: "france", position_lng: FR_LNG, position_lat: FR_LAT });
+  await sleep(300);
 
-  const dx = germDiv!.position_lng - frDiv!.position_lng;
-  const dy = germDiv!.position_lat - frDiv!.position_lat;
+  const dx = DE_LNG - FR_LNG;
+  const dy = DE_LAT - FR_LAT;
   const distKm = Math.sqrt(dx * dx + dy * dy) * 111;
-  console.log(`   germany_div_05: (${germDiv!.position_lng.toFixed(3)}, ${germDiv!.position_lat.toFixed(3)})`);
-  console.log(`   france_div_05:  (${frDiv!.position_lng.toFixed(3)},  ${frDiv!.position_lat.toFixed(3)})`);
+  console.log(`   ${DE_DIV}: (${DE_LNG.toFixed(3)}, ${DE_LAT.toFixed(3)})`);
+  console.log(`   ${FR_DIV}:  (${FR_LNG.toFixed(3)},  ${FR_LAT.toFixed(3)})`);
   console.log(`   Spawn distance: ${distKm.toFixed(1)} km (engagement triggers at ≤ 50 km)`);
   assert(distKm <= 50, `Divisions too far apart to engage: ${distKm.toFixed(1)} km`);
 
@@ -164,8 +179,8 @@ async function main() {
     is_meeting_battle: boolean;
   };
   const involvesFrontPair =
-    (combatStartedMsg.division_a === "germany_div_05" || combatStartedMsg.division_b === "germany_div_05") &&
-    (combatStartedMsg.division_a === "france_div_05"  || combatStartedMsg.division_b === "france_div_05");
+    (combatStartedMsg.division_a === DE_DIV || combatStartedMsg.division_b === DE_DIV) &&
+    (combatStartedMsg.division_a === FR_DIV  || combatStartedMsg.division_b === FR_DIV);
   assert(involvesFrontPair, `COMBAT_STARTED did not involve the front-line pair: ${JSON.stringify(combatStartedMsg)}`);
   console.log(`   ✓ COMBAT_STARTED — meeting_battle: ${combatStartedMsg.is_meeting_battle}`);
 
@@ -174,16 +189,16 @@ async function main() {
   const damageConfirmed = await waitForDivisionState(
     roomA,
     divs => {
-      const gd05 = divs.find(d => d.division_id === "germany_div_05");
-      const fd05 = divs.find(d => d.division_id === "france_div_05");
+      const gd05 = divs.find(d => d.division_id === DE_DIV);
+      const fd05 = divs.find(d => d.division_id === FR_DIV);
       return !!(gd05 && fd05 && (gd05.suppression! > 0 || fd05.suppression! > 0));
     },
     15000,
     "suppression > 0 on front-line divisions",
   );
-  const gd05After = damageConfirmed.find(d => d.division_id === "germany_div_05");
-  const fd05After = damageConfirmed.find(d => d.division_id === "france_div_05");
-  console.log(`   ✓ Suppression building — germany_div_05: ${gd05After?.suppression?.toFixed(1)}%  france_div_05: ${fd05After?.suppression?.toFixed(1)}%`);
+  const gd05After = damageConfirmed.find(d => d.division_id === DE_DIV);
+  const fd05After = damageConfirmed.find(d => d.division_id === FR_DIV);
+  console.log(`   ✓ Suppression building — ${DE_DIV}: ${gd05After?.suppression?.toFixed(1)}%  ${FR_DIV}: ${fd05After?.suppression?.toFixed(1)}%`);
 
   // 6. Test: auto-retreat fires when suppression hits threshold
   // Suppression grows at ~1.75/tick (BASE_ATTRITION 2.5 × 0.7 SUPPRESSION_FRACTION).
@@ -193,7 +208,7 @@ async function main() {
   const retreatDivs = await waitForDivisionState(
     roomA,
     divs => divs.some(
-      d => (d.division_id === "germany_div_05" || d.division_id === "france_div_05") &&
+      d => (d.division_id === DE_DIV || d.division_id === FR_DIV) &&
            d.combat_state === "retreating",
     ),
     90000,
