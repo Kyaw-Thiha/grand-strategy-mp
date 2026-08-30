@@ -164,6 +164,43 @@ applies to the synthetic goal routing.
 
 ---
 
+## City-Snapping (Point 3, `military_system.gd`)
+
+**Problem this solves:** for clicks clearly meant to land on a city (a deliberate target
+rather than a few pixels off the dot), the player's intent reads as "go to *that city*",
+not "go to whatever pixel I happened to click." Currently A* routes to the nearest
+road/terrain node, so a click 50 m off the city center can route to a node on the
+opposite side of the city from where the player expected the unit to stop.
+
+**Approach:** before invoking pathfinding, the click coordinates are passed through
+`_snap_click_to_nearest_city(lng, lat)` (called from `_handle_right_click_move` and
+`_handle_move_click`). If any city position is within `CITY_SNAP_RADIUS_DEG = 0.005` of
+the click (~500 m at Western European latitudes), the click coordinates are replaced
+with the nearest city's `city_position` from `provinces.geojson`. The snapped
+coordinates then flow through `_map_loader.world_to_lng_lat` → synthetic-goal insertion →
+A* → DR the same way raw clicks always have.
+
+**Why a small radius:** the radius is deliberately tighter than the road snap radius
+(`ROAD_SEARCH_RADIUS_SQ = 0.015²`, ~1.5 km). Roads are a routing preference — we don't
+care if a click "near" a road snaps to it, because road choice is incidental to the
+player's intent. Cities, on the other hand, are a deliberate UX target — snapping should
+feel like the unit explicitly walked into the city, not that the click was a few hundred
+meters off and we guessed wrong. 500 m is roughly the size of a small city footprint
+plus margin; clicks just outside read as "open terrain near a city" and stay un-snapped.
+
+**City data source:** `provinces[i].city_position` (`map/tools/map_pipeline/pipeline.py` line
+240 — `[city_lng, city_lat]`), already loaded into the client at runtime via
+`MapLoader._province_data`. `MilitarySystem._build_city_index` does one O(province_count) pass
+at setup; click-time snap is then an O(cities) linear scan per click — well under 1 ms in
+practice. Cities are deliberately absent from the waypoint graph itself, so this client-side
+index is the only lookup path.
+
+**Server impact:** none. The snapped vs raw lng/lat is indistinguishable over the wire —
+the server still runs `resolveFinalPosition` against its full graph. The snap is purely a
+client-side "where do I want this unit to go" intent expression.
+
+---
+
 ## Route-to-Closest-Reachable-Waypoint Fallback (`pathfinder.gd:find_nearest_reachable`)
 
 When the primary `find_path` returns an empty path, the client tries a fallback:
@@ -317,66 +354,65 @@ The client drives unit animation entirely from the validated waypoint list. No s
 acknowledgement is awaited per waypoint — DR runs at 60fps from the client's local order
 queue.
 
+### Entry shape (Points 2 + 4)
+
+`_dr_order[div_id]` is an `Array` of homogeneous entry dictionaries, all consumed by the same
+`_advance_dr()` loop. Each entry has shape `{id: String, lng: float, lat: float, kmh: float}`:
+
+| Entry kind   | `id`      | `lng`/`lat` source                              | `kmh` source                          |
+|--------------|-----------|--------------------------------------------------|----------------------------------------|
+| Real waypoint| waypoint id (e.g. `"w_123"`) | the graph node's coords             | terrain lookup at build time           |
+| Jitter sub-point | `""`  | `_inject_offroad_jitter` output (Point 2)        | inherited from segment's source real waypoint |
+| Terminal hop  | `""`     | `resolve_final_position` output (Point 4)        | inherited from chain's last real waypoint |
+
+The `id == ""` discriminator lets the suffix-match logic in `_on_division_updated` skip
+synthetic entries (sub-points and terminal are never in the server's `consumed_waypoint_ids`),
+while `_advance_dr()` treats every entry uniformly.
+
 ### Speed formula (mirrors `movement_system.ts` exactly)
 
 ```
-road node:    DR_ROAD_KMH   = 60.0 km/h
-off-road:     DR_OFFROAD_KMH / terrain_cost  (DR_OFFROAD_KMH = 20.0)
-conversion:   DR_KM_PER_DEG = 111.0 km/deg
-advance/frame = (kmh / DR_KM_PER_DEG) × GameState.game_speed × delta
+road waypoint:    DR_ROAD_KMH                       = 60.0 km/h
+off-road waypoint: DR_OFFROAD_KMH / terrain_cost    (DR_OFFROAD_KMH = 20.0)
+conversion:        DR_KM_PER_DEG                    = 111.0 km/deg
+advance/frame:     (kmh / DR_KM_PER_DEG) × GameState.game_speed × delta
 ```
 
-A speed multiplier `_dr_speed_mult` is applied per division:
-- Normal movement: 1.0×
-- Reposition (in-combat): 0.30× (matches server's `REPOSITION_SPEED`)
+`kmh` is **precomputed per entry at build time** (`_waypoint_kmh` in `pathfinder.gd` for real
+waypoints; inherited for sub-points and the terminal). The per-frame loop in `_advance_dr()` no
+longer does any terrain or profile lookup — it just reads `entry["kmh"]` and multiplies by
+`_dr_speed_mult[div_id]` (1.0× normal, 0.30× for reposition — matches server's `REPOSITION_SPEED`).
 
 ### Waypoint consumption
 
 `_advance_dr()` processes the front of `_dr_order` each frame. When distance to the
-next waypoint falls below `DR_SNAP_DEG = 0.0001°` (~11 m), the waypoint is consumed
-and popped from the queue. Leftover delta time is carried forward recursively through
-the next waypoint, allowing multiple waypoints to be consumed in a single frame at
-high game speeds.
+front entry's `(lng, lat)` falls below `DR_SNAP_DEG = 0.0001°` (~11 m), the entry is consumed
+and popped from the queue. Real entries update `_dr_last_real_kmh[div_id]` (cached so that a
+mid-flight server-broadcast `final_position_lng/lat` update can build a fresh terminal entry
+without losing the speed carryover). Leftover delta time is carried forward recursively through
+the next entry, allowing multiple entries to be consumed in a single frame at high game speeds.
 
-### Last-mile — final goal advancement
+### Final-hop (Point 4) — first-class trailing entry
 
-When the last waypoint is consumed and `_dr_final_goal` is set (the exact click
-position), DR enters the **last mile** phase. Rather than stopping at the last
-waypoint, `_advance_dr_last_mile()` advances the icon frame-by-frame toward the
-exact click position:
+The exact-click terminal hop is the **last entry in `_dr_order`**, identified by `id == ""`
+just like a jitter sub-point. There is no separate "last-mile" phase — the same `_advance_dr()`
+loop that consumes real waypoints and jitter sub-points also consumes the terminal. The
+behavioural differences from a real waypoint are:
 
-1. Each frame, compute distance remaining to `_dr_final_goal`
-2. If within `DR_SNAP_DEG` → snap to final position, erase `_dr_final_goal`,
-   set `_target_positions`, park icon with `set_moving(false)`
-3. Otherwise → compute speed from **weighted average** of last-waypoint speed
-   and destination terrain speed
+- **`kmh` is inherited** from the chain's last real waypoint (no terrain recomputation, no
+  destination/terrain averaging — the original code's `(base + dest) / 2` "smooth"
+  deceleration was actually a 3× speed jump that read as a teleport).
+- **Built lazily**: appended by `_submit_move_order_for_division` for self-submitted moves,
+  and by `_on_division_updated` / `_build_server_entries` / `_refresh_terminal_entry` for
+  foreign units (mirroring the server's authoritative `final_position_lng/lat` broadcast).
+- **Refreshed when server changes its mind**: `_refresh_terminal_entry()` overwrites the tail
+  in place if the server's broadcast `final_position_lng/lat` differs from what the client
+  predicted (the client's pre-submit `resolve_final_position` only sees the road-only graph;
+  the server resolves against the full road+terrain graph).
 
-**Weighted speed formula:**
-
-```
-base_speed:
-  if last_waypoint was a road node → DR_ROAD_KMH (60)
-  else                           → DR_OFFROAD_KMH / last_waypoint_terrain_cost
-
-dest_speed:
-  DR_OFFROAD_KMH / synthetic_goal_terrain_cost   (always "plains_flat" = 1.0)
-
-final_speed = (base_speed + dest_speed) × 0.5
-```
-
-This averaging eliminates the speed discontinuity when the unit arrives at the
-last waypoint via road (60 km/h) and transitions to off-road last mile (20 km/h).
-The resulting speed of (60 + 20) / 2 = 40 km/h is a smooth deceleration rather
-than a jarring 3× slowdown.
-
-**`_target_positions` synchronisation:** After each last-mile step,
-`_target_positions[div_id]` is updated to match the icon's current position.
-This prevents the `_process` else-branch from lerping the icon back to a stale
-position when `_dr_order` is empty but `_dr_final_goal` is still active.
-
-**Visual path:** During the last mile, `_update_division_route()` appends the
-final goal position as a visual endpoint to the route overlay, so the player sees
-the complete path including the last leg.
+`_target_positions` synchronisation: After each terminal step, `_target_positions[div_id]` is
+updated to match the icon's current position. This prevents the `_process` else-branch from
+lerping the icon back to a stale position when `_dr_order` is empty.
 
 ### Server corrections
 
@@ -395,44 +431,46 @@ _dr_order[div_id] = local_order
 
 **Client-ahead detection (suffix match):**
 When the client's DR has consumed waypoints faster than the server, the consumed
-IDs may not match the client's `local_order` front. A suffix match is used instead:
+IDs may not match `_dr_order`'s front (which may now be a sub-point with `id == ""`,
+not the server's next real waypoint). The comparison filters `_dr_order` to real-id
+entries (`str(entry["id"]) != ""`) before the suffix check, since the server has no
+notion of synthetic sub-points:
 
 ```
-if local_order is not empty and local_order.size <= str_order.size:
-    str_tail = str_order.slice(str_order.size - local_order.size)
-    if local_order == str_tail:
+cur_real_ids = filter(_dr_order[div_id], entry => entry.id != "")
+if cur_real_ids is non-empty and cur_real_ids.size <= str_order.size:
+    str_tail = str_order.slice(str_order.size - cur_real_ids.size)
+    if cur_real_ids == str_tail:
         # Client is ahead but on the same route — advance position forward
         # to match the server's last consumed waypoint
     else:
         # Real divergence — full reset to server position
 ```
 
-This prevents the client from snapping backward when DR simply outpaced server
+This prevents the client from snapping backward when DR has simply outpaced server
 consumption. Only real route changes (server rerouted) trigger a full reset.
 
 **`at_final_goal` guard:**
-When `local_order` is empty and `_dr_final_goal` is active (client in last mile),
-the handler returns early — the server still has final_position_lng set. When the
-server clears `final_position_lng` (arrived at its own final destination), the
-client syncs its `_target_positions` to the server's position, which should
-match the client's already-arrived icon position (no visual snap).
+When `_dr_order` is empty (client has consumed everything including the terminal) and the
+server still has trailing real waypoints in `str_order`, the next broadcast will catch up via
+`consumed_waypoint_ids`. Once the server clears `final_position_lng/lat` (arrived), the
+client syncs its `_target_positions` to the server's position, which matches the client's
+already-arrived icon position (no visual snap).
 
 ### `_process` dispatch
 
 The `_process` loop decides per frame whether to call `_advance_dr`:
 
 ```
-if _dr_order has div_id and (not _dr_order[div_id] is empty or _dr_final_goal has div_id):
+if _dr_order has div_id and not _dr_order[div_id].is_empty():
     _advance_dr(div_id, delta)
     _update_division_route(div_id)
 else:
     lerp icon toward _target_positions
 ```
 
-This ensures `_advance_dr` is called even when `_dr_order` is empty, as long as
-`_dr_final_goal` is still active (last-mile phase). Without the `_dr_final_goal`
-check, the `else` branch would lerp the icon back to a stale `_target_positions`
-on every frame after the last waypoint is consumed.
+Point 4 collapsed `_dr_final_goal` into `_dr_order`, so a non-empty check on `_dr_order` is
+sufficient — the terminal hop is just the last entry in the queue.
 
 ---
 
@@ -477,37 +515,53 @@ skip lifecycle management.
 
 ---
 
-## Path Smoothing (client-side, cosmetic only)
+## Off-road Jitter (Point 2, client-side rendering)
 
-**Problem this solves:** the raw waypoint list (post string-pulling) is a polyline of
-straight-line segments. Dead reckoning faithfully animates a division along that polyline,
-which means the division's heading snaps sharply at every waypoint — visually jagged
-movement, especially at any waypoint where the route changes direction by a wide angle.
-This is a rendering problem, not a pathfinding problem: the *route* the waypoint list
-describes is correct and unchanged by anything in this section.
+**Problem this solves:** off-road segments of the path (any segment between two non-road
+nodes, including terrain-to-terrain and terrain-to-road transitions) trace as dead-straight
+lines on the HUD overlay and as dead-straight animation for the unit icon, which reads as
+mechanical and "wrong" — road geometry already implies natural curves, but off-road travel
+should look like it's cutting through uneven terrain rather than a laser beam. This is purely
+a rendering concern: the *route* the waypoint list describes is unchanged, and the server
+still ticks through the same real waypoint ids.
 
-**Approach:** a **centripetal Catmull-Rom spline** is fit through the waypoint list
-client-side, after string-pulling and before handing the list to the dead-reckoning
-animator. The spline passes exactly through every original waypoint (it does not
-approximate or skip any of them, unlike a Bézier curve) while replacing the straight-line
-segments between them with a smooth curve, so the division's heading changes continuously
-through a turn instead of snapping. The centripetal variant specifically (rather than the
-uniform variant) is required — the uniform variant can produce loops or self-intersections
-on paths with unevenly-spaced waypoints, which this game's waypoint lists routinely have
-(road nodes are densely spaced at ~750m, terrain nodes far sparser).
+**Approach:** after A* + string-pulling produce the path's real waypoint ids, an additional
+post-processing pass (`Pathfinder._inject_offroad_jitter`) expands the list into the entry
+shape DR consumes (see "Entry shape" above). For each pair of consecutive real waypoints:
 
-**Terrain-safety constraint:** a spline fit through waypoints can cut a corner that the
-original A* route deliberately avoided (routing around a lake or impassable terrain
-feature). To prevent this, the spline's maximum deviation from the original straight-line
-polyline is clamped to a small bound (on the order of the base graph's road-node sampling
-distance, ~750m) — the curve is only ever allowed to round off a corner by an amount that
-cannot plausibly cut across terrain the route was already routed to avoid. If a deviation
-bound would be exceeded at any segment (a genuinely sharp, necessary turn — e.g. squeezing
-between two impassable features), that segment falls back to a straight line rather than
-forcing a smooth curve through terrain the pathfinder explicitly avoided.
+- If both are road nodes → no jitter (just the two endpoints, road geometry is already
+  "jittery" in spirit and adding noise would look unstable on a path the player expects to be
+  smooth).
+- If at least one is off-road → subdivide the segment into `N` interior sub-points, each
+  offset perpendicular to the segment by a smoothstep-tapered noise amplitude.
 
-**Scope:** this is purely a client-side rendering step. It does not change which nodes
-dead reckoning's speed formula or server corrections operate against — the server and the
-authoritative waypoint list remain exactly as specified above; only the visual
-interpolation between consecutive waypoints changes from a straight line to a clamped
-spline segment.
+**Constants:**
+
+| Constant                 | Value       | Meaning                                                  |
+|--------------------------|-------------|----------------------------------------------------------|
+| `JITTER_AMP_DEG`         | `0.003` (~330 m) | Max perpendicular offset. Below the road-node sampling distance (~750 m / `0.007°`) so a jittered sub-point can never stray far enough to cross into a different road's snap radius. |
+| `JITTER_SUBDIV_STEP_DEG` | `0.015` (~1.7 km) | Target segment length between sub-points. Between road-node spacing and complex-tier terrain spacing, so short off-road segments generate 2 sub-points, longer ones up to 6. |
+| `MIN_JITTER_SUBDIVISIONS`| `2`         | Always emit at least this many sub-points per off-road segment. |
+| `MAX_JITTER_SUBDIVISIONS`| `6`         | Cap the count on long off-road segments to bound cost. |
+
+**Taper:** the offset amplitude follows a smoothstep `6t⁵ - 15t⁴ + 10t³` over each segment,
+which is zero (and zero-derivative) at both endpoints. Consecutive off-road segments therefore
+join seamlessly without visible kinks at the shared waypoint.
+
+**Determinism:** the noise value is a pure function of `(division_id, segment_index, sub_index)`
+via FNV-1a hashing — no global RNG state, no call-order dependency. The same call always
+returns the same list. This is what lets the icon animation, the HUD route line, and other
+players' HUD (all derived from the same call) agree on the geometry, and what makes the wobble
+stable across reconciliation / replays.
+
+**Terrain-safety constraint:** the noise amplitude (`0.003°`) is well below the
+road-node spacing (`0.007°`) and the `ROAD_PROXIMITY_DEG` snap radius (`0.003°`) — the
+jittered sub-points cannot stray far enough from the original straight segment to enter a
+different corridor or cross into impassable terrain the A* route was chosen to avoid.
+
+**Scope:** this is purely a client-side rendering step, applied on the main thread (not the
+pathfinding Thread) by the consumer (`military_system._compute_visual_chain`). The server's
+authoritative waypoint list stays as the un-jittered string ids; only DR consumption, the
+HUD route overlay, and the ghost overlay see the jittered entry list. Shift-move chains,
+group moves, and single-click moves all pass through the same helper, so the wobble is
+applied uniformly everywhere a client-visible path is built.
