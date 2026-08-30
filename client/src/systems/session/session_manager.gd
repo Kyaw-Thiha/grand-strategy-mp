@@ -56,6 +56,9 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"COMBAT_ENDED":
 			var winner_id: String = data.get("winner_id", "")
 			var retreated_id: String = data.get("retreated_id", "")
+			var engagement_id: String = data.get("engagement_id", "")
+			if not engagement_id.is_empty():
+				GameState.active_engagement_pairs.erase(engagement_id)
 			for div_id: String in [winner_id, retreated_id]:
 				if GameState.divisions.has(div_id):
 					GameState.divisions[div_id]["is_meeting_battle"] = false

@@ -360,6 +360,7 @@ export class CombatSystem {
       const [idA, idB] = key.split("|");
       const divA = state.divisions.get(idA);
       const divB = state.divisions.get(idB);
+      const pair = this.activePairs.get(key);
       this.activePairs.delete(key);
       if (!divA || !divB) continue;
 
@@ -375,6 +376,7 @@ export class CombatSystem {
         reason: "diplomacy",
         division_a: divA.division_id,
         division_b: divB.division_id,
+        engagement_id: pair?.engagement_id ?? "",
       });
     }
   }
@@ -568,6 +570,7 @@ export class CombatSystem {
               division_b:        b.division_id,
               is_meeting_battle: pair.is_meeting,
               attacker_id:       pair.attacker_id,
+              engagement_id:     pair.engagement_id,
             });
 
             // If this is a secondary attacker on the same defender, re-evaluate
@@ -1406,14 +1409,17 @@ export class CombatSystem {
       retreatLat = div.position_lat + (dy / len) * retreatDeg;
     }
 
-    // Collect opponent IDs before deleting pairs, then reset after
+    // Collect opponent IDs (and their engagement_id) before deleting pairs, then reset after
     const opponentIds: string[] = [];
     const pairsToRemove: string[] = [];
-    for (const [key] of this.activePairs) {
+    const engagementIdByOpponent = new Map<string, string>();
+    for (const [key, pair] of this.activePairs) {
       const [idA, idB] = key.split("|");
       if (idA === div.division_id || idB === div.division_id) {
         pairsToRemove.push(key);
-        opponentIds.push(idA === div.division_id ? idB : idA);
+        const opponentId = idA === div.division_id ? idB : idA;
+        opponentIds.push(opponentId);
+        engagementIdByOpponent.set(opponentId, pair.engagement_id);
       }
     }
     for (const key of pairsToRemove) this.activePairs.delete(key);
@@ -1428,19 +1434,20 @@ export class CombatSystem {
 
       const opponent = state.divisions.get(opponentId);
       if (!opponent) continue;
+      const engagementId = engagementIdByOpponent.get(opponentId) ?? "";
       if (opponent.combat_state === "engaged") {
         opponent.combat_state  = "idle";
         opponent.attacker_role = "";
         opponent.engaged_with.splice(0, opponent.engaged_with.length);
         opponent.reposition_order.splice(0, opponent.reposition_order.length);
         changed.add(opponentId);
-        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id });
+        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id, engagement_id: engagementId });
       } else if (opponent.combat_state === "suppressed") {
         // Suppressed opponent will retreat naturally on the next tick.
         // Broadcast COMBAT_ENDED now so the client knows, but don't reset
         // the opponent — its engaged_with is needed for retreat direction.
         opponent.reposition_order.splice(0, opponent.reposition_order.length);
-        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id });
+        broadcast("COMBAT_ENDED", { winner_id: opponentId, retreated_id: div.division_id, engagement_id: engagementId });
       }
       // Opponents in "suppressed" state will retreat on their own next tick;
       // don't interfere — their retreat direction depends on engaged_with.

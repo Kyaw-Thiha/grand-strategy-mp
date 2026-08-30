@@ -22,6 +22,10 @@ const ROAD_PROXIMITY_DEG   := 0.003           # ~300m — counts as "road in the
 const ROAD_PROXIMITY_SQ    := 0.003 * 0.003
 const ROAD_CROSS_SAMPLE_DEG := 0.002          # ~200m sample interval along segment
 const SYNTHETIC_GOAL_ID := "_synthetic_goal"
+## Radius (degrees) within which a division is considered part of an active combat's
+## zone for pathfinding exclusion. Mirrors military_system.gd's ENGAGEMENT_RADIUS_KM
+## (25.0 km) — the two constants must stay numerically equal (25.0 / 111.0 km-per-deg).
+const ENGAGEMENT_RADIUS_DEG := 25.0 / 111.0
 
 ## Last-mile ("exact click target") straight-line hop bounds — see resolve_final_position's doc
 ## comment. Client-local tunables; deliberately not required to match movement_system.ts's
@@ -454,7 +458,8 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		relations: Dictionary = {},
 		goal_lng: float = INF,
 		goal_lat: float = INF,
-		_skip_synthetic_lifecycle: bool = false) -> Dictionary:
+		_skip_synthetic_lifecycle: bool = false,
+		combat_zones: Array[Dictionary] = []) -> Dictionary:
 	if not _built or from_id.is_empty() or to_id.is_empty():
 		return { "logical": [] }
 	if from_id == to_id:
@@ -475,12 +480,13 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 		if not goal_node.is_empty():
 			var hpa_result: Array = _hpa_find_path(from_id, actual_to_id, movement_profile,
 				float(goal_node.get("lng", 0.0)), float(goal_node.get("lat", 0.0)),
-				road_cost_multiplier, player_nation_id, relations, _skip_synthetic_lifecycle)
+				road_cost_multiplier, player_nation_id, relations, _skip_synthetic_lifecycle,
+				combat_zones)
 			if not hpa_result.is_empty():
 				return _finalize_path(hpa_result, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 	if not _road_nodes.has(from_id) and not _road_nodes.has(actual_to_id):
-		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var offroad_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		var has_road := false
 		for wp_id in offroad_path:
 			if _road_nodes.has(wp_id):
@@ -490,32 +496,33 @@ func find_path(from_id: String, to_id: String, movement_profile: Dictionary,
 			return _finalize_path(offroad_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 	if _road_nodes.has(from_id):
-		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+		var road_path: Array = _astar_impl(from_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not road_path.is_empty():
 			return _finalize_path(road_path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 	else:
 		var road_entry_id: String = _find_nearest_road_node(from_id)
 		if road_entry_id != "":
-			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
-			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations)
+			var seg1: Array = _astar_impl(from_id, road_entry_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
+			var seg2: Array = _astar_impl(road_entry_id, actual_to_id, movement_profile, true, road_cost_multiplier, player_nation_id, relations, combat_zones)
 			if not seg1.is_empty() and not seg2.is_empty():
 				return _finalize_path(_join_segments(seg1, seg2), movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
-	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	var path: Array = _astar_impl(from_id, actual_to_id, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 	return _finalize_path(path, movement_profile, has_synthetic, to_id, _skip_synthetic_lifecycle)
 
 
 func find_nearest_reachable(from_id: String, near_lng: float, near_lat: float,
 		movement_profile: Dictionary,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> String:
+		relations: Dictionary = {},
+		combat_zones: Array[Dictionary] = []) -> String:
 	var candidates: Array[String] = _find_nearest_ids(
 		near_lng, near_lat, MAX_FALLBACK_CANDIDATES)
 	for candidate_id: String in candidates:
 		if candidate_id == from_id:
 			continue
 		var result: Dictionary = find_path(from_id, candidate_id, movement_profile, 1.0,
-				player_nation_id, relations)
+				player_nation_id, relations, INF, INF, false, combat_zones)
 		if not result.get("logical", []).is_empty():
 			return candidate_id
 	return ""
@@ -561,7 +568,8 @@ func _find_nearest_road_node(from_id: String) -> String:
 func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 		road_only: bool, road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
-		relations: Dictionary = {}) -> Array:
+		relations: Dictionary = {},
+		combat_zones: Array[Dictionary] = []) -> Array:
 	if from_id == to_id:
 		return [from_id]
 	if not _nodes.has(from_id) or not _nodes.has(to_id):
@@ -569,6 +577,11 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 
 	var from_node: Dictionary = _nodes[from_id]
 	var to_node: Dictionary = _nodes[to_id]
+
+	# Precomputed once per query: which zones the destination sits inside. Those zones
+	# are exempt for this whole search — a deliberate destination inside an active
+	# combat must still be reachable.
+	var zone_exempt: Array[bool] = _combat_zone_exemptions(to_node, combat_zones)
 
 	# Forward search state (from_id → to_id)
 	var gf: Dictionary = { from_id: 0.0 }
@@ -612,7 +625,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
+				if v != to_id and (_is_neutral_for(v, player_nation_id, relations) or _is_in_hostile_combat_zone(v, combat_zones, zone_exempt)):
 					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
@@ -642,7 +655,7 @@ func _astar_impl(from_id: String, to_id: String, movement_profile: Dictionary,
 					continue
 				if road_only and not edge["on_road"]:
 					continue
-				if v != to_id and _is_neutral_for(v, player_nation_id, relations):
+				if v != to_id and (_is_neutral_for(v, player_nation_id, relations) or _is_in_hostile_combat_zone(v, combat_zones, zone_exempt)):
 					continue
 				var cost: float = _edge_cost(edge, v, movement_profile, road_cost_multiplier)
 				if not is_finite(cost):
@@ -876,6 +889,43 @@ func _is_nation_neutral_for(nation: Variant, player_nation_id: String, relations
 	return true  # relations loaded but nation absent → treat as neutral (blocked)
 
 
+## Precomputes, once per A* query, which combat zones the destination node sits
+## inside. Parallel array to combat_zones — zone_exempt[i] is true if to_node lies
+## within ENGAGEMENT_RADIUS_DEG of any participant position in combat_zones[i].
+func _combat_zone_exemptions(to_node: Dictionary, combat_zones: Array[Dictionary]) -> Array[bool]:
+	var dest_pos := Vector2(float(to_node.get("lng", 0.0)), float(to_node.get("lat", 0.0)))
+	var radius_sq: float = ENGAGEMENT_RADIUS_DEG * ENGAGEMENT_RADIUS_DEG
+	var exempt: Array[bool] = []
+	for zone: Dictionary in combat_zones:
+		var in_zone: bool = false
+		for pos: Vector2 in zone.get("positions", []):
+			if dest_pos.distance_squared_to(pos) <= radius_sq:
+				in_zone = true
+				break
+		exempt.append(in_zone)
+	return exempt
+
+
+## True if node_id falls inside a combat zone that is NOT exempt (i.e. a zone the
+## destination is not part of). zone_exempt is the parallel array produced by
+## _combat_zone_exemptions for the current query's destination.
+func _is_in_hostile_combat_zone(node_id: String, combat_zones: Array[Dictionary], zone_exempt: Array[bool]) -> bool:
+	if combat_zones.is_empty():
+		return false
+	var node: Dictionary = _nodes.get(node_id, {})
+	if node.is_empty():
+		return false
+	var node_pos := Vector2(float(node["lng"]), float(node["lat"]))
+	var radius_sq: float = ENGAGEMENT_RADIUS_DEG * ENGAGEMENT_RADIUS_DEG
+	for i: int in combat_zones.size():
+		if zone_exempt[i]:
+			continue
+		for pos: Vector2 in combat_zones[i].get("positions", []):
+			if node_pos.distance_squared_to(pos) <= radius_sq:
+				return true
+	return false
+
+
 ## Terrain movement cost at an arbitrary point, keyed off the nearest graph node's terrain type —
 ## mirrors movement_system.ts's _terrainCostAtPosition. Road nodes always cost 1.0 (never
 ## impassable). Returns INF when off-road terrain is impassable for the given profile; fails open
@@ -1018,7 +1068,8 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 		road_cost_multiplier: float = 1.0,
 		player_nation_id: String = "",
 		relations: Dictionary = {},
-		_skip_synthetic_lifecycle: bool = false) -> Array:
+		_skip_synthetic_lifecycle: bool = false,
+		combat_zones: Array[Dictionary] = []) -> Array:
 	if not _skip_synthetic_lifecycle:
 		_insert_synthetic_goal(goal_lng, goal_lat, player_nation_id, relations)
 
@@ -1027,7 +1078,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 
 	# If same cluster or clusters not found, fall back
 	if from_cluster.is_empty() or to_cluster.is_empty() or from_cluster == to_cluster:
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not _skip_synthetic_lifecycle:
 			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
@@ -1035,7 +1086,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	# Abstract search: Dijkstra over abstract graph
 	var abstract_path: Array = _abstract_dijkstra(from_cluster, to_cluster)
 	if abstract_path.is_empty():
-		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+		var flat: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 		if not _skip_synthetic_lifecycle:
 			_remove_synthetic_goal()
 		return _substitute_synthetic(flat, to_id)
@@ -1057,7 +1108,7 @@ func _hpa_find_path(from_id: String, to_id: String, movement_profile: Dictionary
 	if not all_path_nodes.has(SYNTHETIC_GOAL_ID):
 		all_path_nodes.append(SYNTHETIC_GOAL_ID)
 
-	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations)
+	var stitched: Array = _astar_impl(from_id, SYNTHETIC_GOAL_ID, movement_profile, false, road_cost_multiplier, player_nation_id, relations, combat_zones)
 	if not _skip_synthetic_lifecycle:
 		_remove_synthetic_goal()
 	return _substitute_synthetic(stitched, to_id)

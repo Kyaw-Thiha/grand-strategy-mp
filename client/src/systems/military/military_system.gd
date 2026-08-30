@@ -550,6 +550,7 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 	var goal_lat_snapshot := target_lat
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_gen += 1
 	var gen := _path_gen
 	_path_pending = true
@@ -559,16 +560,16 @@ func _submit_direct_move_order(division_id: String, target_lng: float, target_la
 		var path_result: Dictionary = _pathfinder.find_path(
 			start_id, "_synthetic_goal", movement_profile, 1.0,
 			my_nation, relations_snapshot,
-			INF, INF, true)
+			INF, INF, true, combat_zones_snapshot)
 		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			var fallback_id: String = _pathfinder.find_nearest_reachable(
 				start_id, goal_lng_snapshot, goal_lat_snapshot, movement_profile,
-				my_nation, relations_snapshot)
+				my_nation, relations_snapshot, combat_zones_snapshot)
 			if not fallback_id.is_empty():
 				path_result = _pathfinder.find_path(start_id, fallback_id, movement_profile, 1.0,
 					my_nation, relations_snapshot,
-					INF, INF, true)
+					INF, INF, true, combat_zones_snapshot)
 				path = path_result.get("logical", [])
 		call_deferred("_on_direct_move_ready", path, division_id_snapshot, goal_lng_snapshot, goal_lat_snapshot, gen)
 	)
@@ -657,6 +658,7 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_gen += 1
 	var gen := _path_gen
 	_path_pending = true
@@ -667,7 +669,7 @@ func _handle_move_click(lng: float, lat: float, shift_held: bool) -> void:
 		if shift_held and waypoint_index > 0 and road_mult > 1.0:
 			if not _pathfinder.road_crosses_segment(start_id, goal_id):
 				effective_mult = road_mult
-		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, effective_mult, my_nation, relations_snapshot, INF, INF, false, combat_zones_snapshot)
 		call_deferred("_on_segment_ready", seg_result.get("logical", []), goal_id, shift_held, division_id_snapshot, gen)
 	)
 
@@ -689,6 +691,7 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		return
 
 	var submitted_any_order: bool = false
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	for index: int in moving_division_ids.size():
 		var division_id: String = moving_division_ids[index]
 		var current_lng_lat: Vector2 = _get_division_lng_lat(division_id)
@@ -697,11 +700,11 @@ func _handle_group_move_click(target_lng: float, target_lat: float) -> void:
 		var start_id: String = _pathfinder.find_nearest(current_lng_lat.x, current_lng_lat.y)
 		var goal_id: String = _pathfinder.find_nearest(destination_lng_lat.x, destination_lng_lat.y)
 		var movement_profile: Dictionary = _get_movement_profile(division_id)
-		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var path_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 		var path: Array = path_result.get("logical", [])
 		if path.is_empty():
 			goal_id = _pathfinder.find_nearest(target_lng, target_lat)
-			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+			path_result = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 			path = path_result.get("logical", [])
 			if path.is_empty():
 				push_warning("[MilitarySystem] No group path found for %s" % division_id)
@@ -805,6 +808,76 @@ func _get_group_destination_offset(index: int, count: int) -> Vector2:
 	return Vector2(centered_column, centered_row) * GROUP_MOVE_SLOT_SPACING_DEG
 
 
+## Groups active engagement pairs into combat clusters (any two pairs sharing a
+## division_id merge into one cluster — handles e.g. two attackers vs one defender as
+## a single zone) and resolves each participant's current position.
+## Rebuilt fresh on every pathfinding call rather than cached — cheap (bounded by the
+## number of active engagements, not graph size) and avoids drift from GameState.
+## active_engagement_pairs: engagement_id -> {division_a: String, division_b: String}
+## divisions: division_id -> DivisionState dict (must have position_lng/position_lat)
+## Returns: [{division_ids: Array[String], positions: Array[Vector2]}, ...]
+func _build_combat_zones(active_engagement_pairs: Dictionary, divisions: Dictionary) -> Array[Dictionary]:
+	var parent: Dictionary = {}  # division_id -> division_id (union-find parent pointer)
+
+	for eng_id: String in active_engagement_pairs:
+		var pair: Dictionary = active_engagement_pairs[eng_id]
+		var a: String = str(pair.get("division_a", ""))
+		var b: String = str(pair.get("division_b", ""))
+		if a.is_empty() or b.is_empty():
+			continue
+		var data_a: Dictionary = divisions.get(a, {})
+		var data_b: Dictionary = divisions.get(b, {})
+		if data_a.is_empty() or data_b.is_empty():
+			continue
+		var state_a: String = str(data_a.get("combat_state", ""))
+		var state_b: String = str(data_b.get("combat_state", ""))
+		if not (state_a == "engaged" or state_a == "suppressed"):
+			continue
+		if not (state_b == "engaged" or state_b == "suppressed"):
+			continue
+		if not parent.has(a):
+			parent[a] = a
+		if not parent.has(b):
+			parent[b] = b
+		var root_a: String = _uf_find(parent, a)
+		var root_b: String = _uf_find(parent, b)
+		if root_a != root_b:
+			parent[root_a] = root_b
+
+	var clusters: Dictionary = {}  # root -> Array[String]
+	for div_id: String in parent:
+		var root: String = _uf_find(parent, div_id)
+		if not clusters.has(root):
+			clusters[root] = []
+		clusters[root].append(div_id)
+
+	var zones: Array[Dictionary] = []
+	for root: String in clusters:
+		var division_ids: Array = clusters[root]
+		var positions: Array[Vector2] = []
+		for div_id: String in division_ids:
+			var data: Dictionary = divisions.get(div_id, {})
+			if data.is_empty():
+				continue
+			positions.append(Vector2(float(data.get("position_lng", 0.0)), float(data.get("position_lat", 0.0))))
+		if not positions.is_empty():
+			zones.append({"division_ids": division_ids, "positions": positions})
+	return zones
+
+
+## Iterative union-find "find" with path compression.
+func _uf_find(parent: Dictionary, x: String) -> String:
+	var root: String = x
+	while parent[root] != root:
+		root = parent[root]
+	var cur: String = x
+	while parent[cur] != root:
+		var next_id: String = parent[cur]
+		parent[cur] = root
+		cur = next_id
+	return root
+
+
 func _refresh_chain_start() -> void:
 	var div_id := _selected_division_id
 	if not _dr_pos_deg.has(div_id) or _pending_milestones.is_empty():
@@ -827,10 +900,11 @@ func _refresh_chain_start() -> void:
 
 	var my_nation: String = GameState.get_my_nation_id()
 	var relations_snapshot: Dictionary = GameState.relations.duplicate()
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	_path_pending = true
 	_path_thread = Thread.new()
 	_path_thread.start(func() -> void:
-		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot)
+		var seg_result: Dictionary = _pathfinder.find_path(start_id, goal_id, movement_profile, 1.0, my_nation, relations_snapshot, INF, INF, false, combat_zones_snapshot)
 		call_deferred("_on_chain_refresh_ready", seg_result.get("logical", []), milestones_snapshot, div_id_snapshot)
 	)
 
@@ -958,8 +1032,9 @@ func _recompute_chain() -> void:
 
 	_pending_chain.clear()
 	var current_start := start_id
+	var combat_zones_snapshot: Array[Dictionary] = _build_combat_zones(GameState.active_engagement_pairs, GameState.divisions)
 	for milestone_id: String in _pending_milestones:
-		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations)
+		var seg_result: Dictionary = _pathfinder.find_path(current_start, milestone_id, movement_profile, 1.0, GameState.get_my_nation_id(), GameState.relations, INF, INF, false, combat_zones_snapshot)
 		var seg: Array = seg_result.get("logical", [])
 		if seg.is_empty():
 			break
