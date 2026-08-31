@@ -31,6 +31,8 @@ import { loadProvincePIPData }    from "../utils/geo_utils.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
+import { EconomyBuildingSystem } from "../systems/economy_building_system.js";
+import { getBuildingStats } from "../data/building_stats.js";
 
 // How many game ticks between subprovince-graph supply route recomputation/broadcast.
 // Matches the (unexported) SUPPLY_TICK_INTERVAL used by SupplySystem.tick()'s ring-based
@@ -104,6 +106,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airStrategicBombingSystem!: AirStrategicBombingSystem;
   private serverVisibilitySystem!: ServerVisibilitySystem;
   private airNavalBomberSystem       = new AirNavalBomberSystem();
+  private economyBuildingSystem = new EconomyBuildingSystem();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -508,6 +511,43 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this.state.air_wings.set(msg.wing_id, wing);
       this.broadcastFilteredAirWingUpdates({ wings: [serializeWing(wing)] });
+    });
+
+    this.onMessage("BUILD_BUILDING", (client, msg: { province_id: string; building_type: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const province = this.state.provinces.get(msg.province_id);
+      if (!province || province.owner_id !== nation.nation_id) return;
+
+      const econ = this.economyBuildingSystem.get(msg.province_id);
+      if (!econ) return;
+      const currentLevel = econ.buildings[msg.building_type] ?? 0;
+      const stats = getBuildingStats(msg.building_type);
+      // Same 0-based "cost to reach next level" indexing as EconomyBuildingSystem.startConstruction.
+      const cost = stats.resource_cost_by_level[currentLevel];
+      if (!cost) return; // already at level cap
+
+      for (const [resType, amount] of Object.entries(cost)) {
+        if ((nation.resources.get(resType) ?? 0) < (amount ?? 0)) return; // insufficient — reject silently
+      }
+
+      const project = this.economyBuildingSystem.startConstruction(msg.province_id, msg.building_type, province.infrastructure);
+      if (!project) return; // already in progress or at cap
+
+      // Resource cost is deducted at construction START, not completion — per
+      // ECONOMY_BUILDINGS.md's "costs resources and time," both paid up front.
+      for (const [resType, amount] of Object.entries(cost)) {
+        nation.resources.set(resType, (nation.resources.get(resType) ?? 0) - (amount ?? 0));
+      }
+
+      this.broadcast("BUILDING_UPDATES", {
+        province_id: msg.province_id,
+        buildings: econ.buildings,
+        construction_queue: econ.construction_queue,
+      });
     });
 
     if (process.env.DEV_MODE === "true") {
@@ -1330,6 +1370,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     );
     this._initRelations();
     this.broadcastRelations();
+    this._initNationEconomy();
+    // Resources are per-nation private data (each player only sees their own nation's
+    // stockpile) — sent per-client via client.send(), not a global broadcast. Nothing
+    // produces resources yet in this branch, so this is a one-time snapshot of the seeded
+    // starting stockpile; Branch B adds ongoing RESOURCE_UPDATES as production comes online.
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) continue;
+      client.send("RESOURCE_UPDATES", { resources: Object.fromEntries(nation.resources) });
+    }
 
     // Spawn all divisions and air wings
     this.spawnDivisions();
@@ -1351,6 +1403,14 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (province.owner_id) provinceOwners[pid] = province.owner_id;
     }
     this.broadcast("PROVINCE_INIT", { provinces: provinceOwners });
+
+    // Send initial per-province buildings/resource-deposits (off-schema, DivisionState.grid
+    // precedent — see EconomyBuildingSystem's doc comment).
+    const economySnapshot: Record<string, { buildings: Record<string, number>; resource_deposits: Record<string, number> }> = {};
+    for (const [pid, econ] of this.economyBuildingSystem.getAll()) {
+      economySnapshot[pid] = { buildings: econ.buildings, resource_deposits: econ.resource_deposits };
+    }
+    this.broadcast("PROVINCE_ECONOMY_INIT", { provinces: economySnapshot });
 
     // Send initial subprovince ownership snapshot (owner_id only — geometry/kind/province_id
     // are already static client data loaded from the map pipeline in Batch 3).
@@ -1636,6 +1696,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         }
       }
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg), this.subprovinceSystem);
+
+      // TODO Branch B: constructionMultiplier is per-nation (each nation allocates its own
+      // Industry Pool), but tick()'s signature only takes one global number since Branch A
+      // hardcodes 1.0 for everyone. Branch B needs to change this to a per-province-owner
+      // lookup, not a single multiplier.
+      const constructionMultiplier = 1.0;
+      this.economyBuildingSystem.tick(this.state.provinces, constructionMultiplier, (type, msg) => this.broadcast(type, msg));
 
       // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
       // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
@@ -2383,6 +2450,19 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     });
   }
 
+  /**
+   * Seed each nation's starting resources. Only money gets a nonzero starting stockpile —
+   * TBD playtesting placeholder — so BUILD_BUILDING is testable standalone before Branch B's
+   * resource-production ticks exist (without this, buildings would be permanently
+   * unaffordable until Branch B merges).
+   */
+  private _initNationEconomy(): void {
+    const STARTING_MONEY = 500; // TBD playtesting — starting stockpile placeholder
+    for (const nation of this.state.nations.values()) {
+      nation.resources.set("money", STARTING_MONEY);
+    }
+  }
+
   /** Populate state.provinces from map_data.json initial nation owners. */
   private _initProvinces(mapId: string): void {
     const __dir = dirname(fileURLToPath(import.meta.url));
@@ -2396,7 +2476,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           population?:     number;
           industry?:       number;
           infrastructure?: number;
-          resources?:      { oil?: number };
+          buildings?:  Record<string, number>;
+          resources?:  Record<string, number>;
         }>;
         adjacency?: Array<{ from_province: string; to_province: string }>;
       }>(dataPath);
@@ -2409,6 +2490,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (p.industry       !== undefined) slot.industry       = p.industry;
         if (p.infrastructure !== undefined) slot.infrastructure = p.infrastructure;
         this.state.provinces.set(p.province_id, slot);
+        this.economyBuildingSystem.init(p.province_id, p.buildings ?? {}, p.resources ?? {});
         if (p.city_position && p.city_position.length >= 2) {
           this._provinceCityPositionLookup.set(p.province_id, {
             lng: p.city_position[0],
