@@ -102,10 +102,14 @@
     "economy": {
       "source_prefixes": [
         "src/systems/economy_",
-        "src/data/building_stats.ts"
+        "src/systems/resource_economy_system.ts",
+        "src/data/building_stats.ts",
+        "src/data/resource_stats.ts",
+        "src/data/unit_resource_tags.ts"
       ],
       "tests": [
-        "test/9a-economy-foundation.test.ts"
+        "test/9a-economy-foundation.test.ts",
+        "test/9b-resource-economy.test.ts"
       ]
     }
   },

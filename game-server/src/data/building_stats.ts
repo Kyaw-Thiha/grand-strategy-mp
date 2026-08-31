@@ -6,7 +6,12 @@ export interface BuildingStats {
 }
 
 // The 24-key buildings{} schema per MAP_DATA_CONTRACT.md / map/tools/map_pipeline/pipeline.py's
-// BUILDING_TYPES — keep these two lists identical, they describe the same field names.
+// BUILDING_TYPES, PLUS "infrastructure" (Branch B schema gap 2 — ECONOMY_BUILDINGS.md documents
+// Infrastructure as a full civilian building, but no bld_infrastructure field exists anywhere
+// in MAP_DATA_CONTRACT.md or map_data.json yet; that's real map-authoring work outside this
+// branch's scope. Adding the entry here with a safe level-0 default lets the base effect exist
+// and be buildable without depending on the map pipeline being re-run — every province simply
+// starts with no Infrastructure building until a later map-authoring pass seeds real levels.
 export const BUILDING_TYPES: string[] = [
   // Strategic (military, out of ECONOMY_BUILDINGS.md's scope this phase — entries exist only
   // so buildings{} round-trips through the schema without a missing-key error).
@@ -14,7 +19,7 @@ export const BUILDING_TYPES: string[] = [
   // Production (base throughput only this phase, per ECONOMY_BUILDINGS.md).
   "barracks", "tank_plant", "ordnance_factory", "aircraft_factory",
   // Civilian.
-  "school", "hospital", "warehouse", "shipyard", "town_hall",
+  "school", "hospital", "warehouse", "shipyard", "town_hall", "infrastructure",
   // Resource-extraction.
   "res_grain", "res_iron", "res_oil", "res_rubber", "res_nitrates",
   "res_tungsten", "res_chromium", "res_aluminium", "res_uranium",
