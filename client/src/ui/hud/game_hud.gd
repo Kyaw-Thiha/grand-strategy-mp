@@ -32,6 +32,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _dock_btn_e: Button = $HUDRoot/LeftDockRail/VBox/DockButton_E
 @onready var _dock_btn_t: Button = $HUDRoot/LeftDockRail/VBox/DockButton_T
 @onready var _dock_btn_y: Button = $HUDRoot/LeftDockRail/VBox/DockButton_Y
+@onready var _dock_btn_p: Button = $HUDRoot/LeftDockRail/VBox/DockButton_P
 @onready var _research_progress_fill: ColorRect = $HUDRoot/LeftDockRail/VBox/DockButton_Q/ResearchProgressFill
 
 @onready var _military_panel: Control = $MilitaryPanel
@@ -39,6 +40,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _diplomacy_panel: Control = $DiplomacyPanel
 @onready var _research_panel: Control = $ResearchPanel
 @onready var _research_tree_panel: Control = $ResearchTreePanel
+@onready var _production_panel: Control = $ProductionPanel
 
 @onready var _land_selection_popover: Control = $LandSelectionPopover
 @onready var _land_selection_surround: LandSelectionSurround = $LandSelectionSurround
@@ -49,9 +51,11 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 
 var _division_builder_panel: Control
 var _division_template_viewer_panel: Control
+var _province_detail_panel: Control
 
 const _DOCK_BUTTON_STYLE_NORMAL := preload("res://assets/themes/hud_dark.tres")
 const _DivisionBuilderScene := preload("res://scenes/game/panels/division_builder_panel.tscn")
+const _ProvinceDetailScene := preload("res://scenes/game/panels/province_detail_panel.tscn")
 const _DivisionTemplateViewerScene := preload("res://scenes/game/panels/division_template_viewer_panel.tscn")
 var _active_dock_btn: Button = null
 var _map_loader: Node = null
@@ -135,10 +139,12 @@ func _ready() -> void:
 	_dock_btn_e.pressed.connect(_make_dock_toggle("economy"))
 	_dock_btn_t.pressed.connect(_make_dock_toggle("military"))
 	_dock_btn_y.pressed.connect(_make_dock_toggle("diplomacy"))
+	_dock_btn_p.pressed.connect(_make_dock_toggle("production"))
 	_connect_side_drawer_close("research", _research_panel)
 	_connect_side_drawer_close("economy", _economy_panel)
 	_connect_side_drawer_close("military", _military_panel)
 	_connect_side_drawer_close("diplomacy", _diplomacy_panel)
+	_connect_side_drawer_close("production", _production_panel)
 	if _research_tree_panel.has_signal("close_requested"):
 		_research_tree_panel.connect("close_requested", _on_research_tree_close_requested)
 	if _research_panel.has_signal("full_tree_requested"):
@@ -162,6 +168,34 @@ func _ready() -> void:
 	hud_manager.register_panel("diplomacy", _diplomacy_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research", _research_panel, HUDManager.PlacementMode.SIDE_DOCKED)
 	hud_manager.register_panel("research_tree", _research_tree_panel, HUDManager.PlacementMode.FULL_CENTER)
+	hud_manager.register_panel("production", _production_panel, HUDManager.PlacementMode.SIDE_DOCKED)
+
+	# Province Detail — full-center, opened from FriendlyProvincePanel's Upgrade button
+	_province_detail_panel = _ProvinceDetailScene.instantiate()
+	add_child(_province_detail_panel)
+	_register_ui_input_ownership_root(_province_detail_panel)
+	hud_manager.register_panel("province_detail", _province_detail_panel, HUDManager.PlacementMode.FULL_CENTER)
+	EventBus.province_detail_open_requested.connect(func(_province_id: String) -> void:
+		_hide_all_bottom_panels()
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(false)
+		hud_manager.show_panel("province_detail")
+	)
+	EventBus.province_detail_closed.connect(func() -> void:
+		hud_manager.hide_panel("province_detail")
+		if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+			_map_interaction.set_player_input_enabled(true)
+	)
+	if _province_detail_panel.has_signal("close_requested"):
+		_province_detail_panel.connect("close_requested", func() -> void:
+			hud_manager.hide_panel("province_detail")
+			if _map_interaction != null and _map_interaction.has_method("set_player_input_enabled"):
+				_map_interaction.set_player_input_enabled(true)
+		)
+
+	EventBus.production_panel_open_requested.connect(func() -> void:
+		hud_manager.show_panel("production")
+	)
 
 	# Division Builder — full-center, opened from military panel template list
 	_division_builder_panel = _DivisionBuilderScene.instantiate()
@@ -337,9 +371,10 @@ func _ready() -> void:
 	)
 
 	hud_manager.set_panel_shortcut("economy",   KEY_E)
-	hud_manager.set_panel_shortcut("military",  KEY_R)
+	hud_manager.set_panel_shortcut("military",  KEY_Y)
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
 	hud_manager.set_panel_shortcut("research",  KEY_Q)
+	hud_manager.set_panel_shortcut("production", KEY_R)
 
 	# Bottom selection bar — reactive to EventBus selection signals
 	EventBus.division_selected.connect(_on_division_selected)
@@ -597,6 +632,7 @@ func _get_dock_button_for_panel(panel_name: String) -> Button:
 		"diplomacy": return _dock_btn_y
 		"research":  return _dock_btn_q
 		"research_tree": return _dock_btn_q
+		"production": return _dock_btn_p
 	return null
 
 

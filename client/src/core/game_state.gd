@@ -43,6 +43,11 @@ var air_wing_paths: Dictionary = {}
 var supply_routes: Dictionary = {}
 # naval_contact_markers: { marker_id → {marker_id, nation_id, position_lng, position_lat, ...} }
 var naval_contact_markers: Dictionary = {}
+# resources: { resource_type → amount }, this player's own nation only
+var resources: Dictionary = {}
+# province_economy: { province_id → { "buildings": {...}, "resource_deposits": {...},
+#   "construction_queue": [...] } } — off-schema, mirrors DivisionState.grid's precedent
+var province_economy: Dictionary = {}
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -68,6 +73,8 @@ func reset_session_state() -> void:
 	air_wing_paths.clear()
 	supply_routes.clear()
 	naval_contact_markers.clear()
+	resources.clear()
+	province_economy.clear()
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -108,6 +115,33 @@ func _apply_divisions_spawned(data: Dictionary) -> void:
 			entry["movement_profile_json"] = shared_profile
 		divisions[div_id] = entry
 		EventBus.division_added.emit(div_id)
+
+
+## Called by SessionManager when server sends PROVINCE_ECONOMY_INIT (once, at game start).
+func _apply_province_economy_init(data: Dictionary) -> void:
+	var provinces_data: Dictionary = data.get("provinces", {})
+	for pid: String in provinces_data:
+		province_economy[pid] = provinces_data[pid]
+	EventBus.province_economy_updated.emit("")  # empty id = bulk update, no specific province
+
+
+## Called by SessionManager when server sends BUILDING_UPDATES.
+func _apply_building_updates(data: Dictionary) -> void:
+	var pid: String = data.get("province_id", "")
+	if pid.is_empty():
+		return
+	if not province_economy.has(pid):
+		province_economy[pid] = {}
+	province_economy[pid]["buildings"] = data.get("buildings", {})
+	province_economy[pid]["construction_queue"] = data.get("construction_queue", [])
+	EventBus.province_economy_updated.emit(pid)
+
+
+## Called by SessionManager when server sends RESOURCE_UPDATES.
+func _apply_resource_updates(data: Dictionary) -> void:
+	for key: String in data.get("resources", {}):
+		resources[key] = data["resources"][key]
+	EventBus.resources_updated.emit()
 
 
 ## Called by SessionManager when server sends DIVISION_UPDATES.
