@@ -132,3 +132,9 @@ signal air_wing_spawn_open_requested(province_id: String)  ## province_id param 
 
 signal naval_contact_marker_added(data: Dictionary)
 signal naval_contact_marker_expired(data: Dictionary)
+
+signal resources_updated()
+signal province_economy_updated(province_id: String)  ## empty string = bulk/multi-province update
+signal province_detail_open_requested(province_id: String)
+signal province_detail_closed()
+signal production_panel_open_requested()

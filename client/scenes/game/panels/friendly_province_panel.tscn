@@ -109,11 +109,10 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "BUILDINGS"
 
-[node name="BuildingsVal" type="Label" parent="Margin/HBox/StatsBlock/StatsGrid"]
+[node name="BuildingsVal" type="HBoxContainer" parent="Margin/HBox/StatsBlock/StatsGrid"]
+unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-horizontal_alignment = 2
-text = "--"
+theme_override_constants/separation = 4
 
 [node name="IndustryKey" type="Label" parent="Margin/HBox/StatsBlock/StatsGrid"]
 layout_mode = 2
@@ -164,12 +163,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 36)
 text = "Upgrade"
-
-[node name="BtnBuildRadar" type="Button" parent="Margin/HBox/ActionsBlock"]
-layout_mode = 2
-size_flags_horizontal = 3
-custom_minimum_size = Vector2(0, 36)
-text = "Build Radar"
 
 [node name="BtnManageProd" type="Button" parent="Margin/HBox/ActionsBlock"]
 layout_mode = 2

@@ -98,6 +98,15 @@
         "test/subprovince-city-cascade.test.ts",
         "test/subprovince-retreat.test.ts"
       ]
+    },
+    "economy": {
+      "source_prefixes": [
+        "src/systems/economy_",
+        "src/data/building_stats.ts"
+      ],
+      "tests": [
+        "test/9a-economy-foundation.test.ts"
+      ]
     }
   },
   "shared": {

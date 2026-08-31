@@ -1,24 +1,19 @@
 extends PanelContainer
-## Economy panel — side-docked. Resources tab shows this nation's stockpile as plain
-## numbers (no net-rate, no bar-fill, no manpower row yet — those need Branch B's actual
-## resource production to have something to display). Industry/My Trade tabs land in
-## Branch B / Branch D.
+## Production panel — side-docked, Templates/Reserve/Naval sub-tabs.
+## All three tabs are empty placeholders this branch (Phase 9 Branch A) — Templates and
+## Reserve get real content in Branch C, Naval stays a placeholder for the whole phase
+## (naval combat isn't implemented yet).
 
 signal close_requested()
 
 const _CONTENT_PATH: String = "Margin/VBox/ContentBody"
-const RESOURCE_ORDER := ["money", "grain", "iron", "oil", "rubber",
-	"nitrates", "tungsten", "chromium", "aluminium", "uranium"]
 
 @onready var _close_button: Button = %CloseButton
-@onready var _resources_list: VBoxContainer = %ResourcesList
 
 
 func _ready() -> void:
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
 	_setup_tab_buttons()
-	EventBus.resources_updated.connect(_refresh_resources)
-	_refresh_resources()
 
 
 func _setup_tab_buttons() -> void:
@@ -56,13 +51,3 @@ func cycle_sub_tab(forward: bool) -> void:
 	if count <= 1:
 		return
 	tabs.current_tab = posmod(tabs.current_tab + (1 if forward else -1), count)
-
-
-func _refresh_resources() -> void:
-	for child in _resources_list.get_children():
-		child.queue_free()
-	for res_type: String in RESOURCE_ORDER:
-		var amount: float = GameState.resources.get(res_type, 0.0)
-		var row := Label.new()
-		row.text = "%s   %s" % [res_type.capitalize(), str(int(amount))]
-		_resources_list.add_child(row)

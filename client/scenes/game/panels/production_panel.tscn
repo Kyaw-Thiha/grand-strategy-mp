@@ -1,6 +1,6 @@
 [gd_scene load_steps=7 format=3]
 
-[ext_resource type="Script" path="res://src/ui/hud/economy_panel.gd" id="1"]
+[ext_resource type="Script" path="res://src/ui/hud/production_panel.gd" id="1"]
 [ext_resource type="Theme" path="res://assets/themes/hud_dark.tres" id="2"]
 [ext_resource type="Texture2D" uid="uid://br70146pt0tl6" path="res://assets/icons/xmark-solid-full.svg" id="3_xmark"]
 
@@ -31,7 +31,7 @@ void fragment() {
 shader = SubResource("Shader_icon_tint")
 shader_parameter/icon_color = Color(0.96, 0.78, 0.38, 1)
 
-[node name="EconomyPanel" type="PanelContainer"]
+[node name="ProductionPanel" type="PanelContainer"]
 custom_minimum_size = Vector2(332, 0)
 theme = ExtResource("2")
 theme_override_styles/panel = SubResource("SB_panel_accent")
@@ -61,7 +61,7 @@ color = Color(0.79, 0.60, 0.19, 1.0)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 18
-text = "ECONOMY"
+text = "PRODUCTION"
 
 [node name="CloseButton" type="Button" parent="Margin/VBox/Header"]
 unique_name_in_owner = true
@@ -98,12 +98,24 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 0
 
-[node name="BtnResources" type="Button" parent="Margin/VBox/ContentBody/TabButtons"]
+[node name="BtnTemplates" type="Button" parent="Margin/VBox/ContentBody/TabButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 button_pressed = true
-text = "Resources"
+text = "Templates"
+
+[node name="BtnReserve" type="Button" parent="Margin/VBox/ContentBody/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Reserve"
+
+[node name="BtnNaval" type="Button" parent="Margin/VBox/ContentBody/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Naval"
 
 [node name="TabBar" type="TabContainer" parent="Margin/VBox/ContentBody"]
 layout_mode = 2
@@ -114,14 +126,44 @@ current_tab = 0
 tab_alignment = 0
 theme_override_constants/side_margin = 0
 
-[node name="Resources" type="ScrollContainer" parent="Margin/VBox/ContentBody/TabBar"]
+[node name="Templates" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar"]
 layout_mode = 2
-size_flags_horizontal = 3
 size_flags_vertical = 3
-tooltip_text = "Resources"
+tooltip_text = "Templates"
 
-[node name="ResourcesList" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Resources"]
-unique_name_in_owner = true
+[node name="PlaceholderTemplates" type="Label" parent="Margin/VBox/ContentBody/TabBar/Templates"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 4
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+text = "No templates yet."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="Reserve" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar"]
+layout_mode = 2
+size_flags_vertical = 3
+tooltip_text = "Reserve"
+
+[node name="PlaceholderReserve" type="Label" parent="Margin/VBox/ContentBody/TabBar/Reserve"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+text = "No Reserve data yet."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="Naval" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar"]
+layout_mode = 2
+size_flags_vertical = 3
+tooltip_text = "Naval"
+
+[node name="PlaceholderNaval" type="Label" parent="Margin/VBox/ContentBody/TabBar/Naval"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+text = "Naval production not yet available."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2

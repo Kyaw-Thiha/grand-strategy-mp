@@ -85,6 +85,15 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"PROVINCE_INIT":
 			GameState._apply_province_init(data)
 
+		"PROVINCE_ECONOMY_INIT":
+			GameState._apply_province_economy_init(data)
+
+		"BUILDING_UPDATES":
+			GameState._apply_building_updates(data)
+
+		"RESOURCE_UPDATES":
+			GameState._apply_resource_updates(data)
+
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
 

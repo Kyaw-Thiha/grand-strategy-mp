@@ -30,6 +30,16 @@ export class NationState extends Schema {
   @type("string")   player_id: string  = "";
   @type("boolean")  is_ready: boolean  = false;
   @type(["string"]) researched_perks   = new ArraySchema<string>();
+  // Ten-resource national stockpile (money, grain, iron, oil, rubber, nitrates, tungsten,
+  // chromium, aluminium, uranium) — see ECONOMY_BUILDINGS.md / RESOURCE_ECONOMY.md.
+  @type({ map: "number" }) resources = new MapSchema<number>();
+  @type("number") manpower_available: number = 0;
+  @type("number") manpower_ceiling:   number = 0;
+  // Keyed by unit_type — populated by Branch C (Unit Production/Reserve).
+  @type({ map: "number" }) reserve_pool = new MapSchema<number>();
+  // Keyed by resource type + "construction_speed" + "unit_production_speed" — populated by
+  // Branch B (Industry Pool allocation).
+  @type({ map: "number" }) industry_alloc = new MapSchema<number>();
 }
 
 export class ProvinceState extends Schema {

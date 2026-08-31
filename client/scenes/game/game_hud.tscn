@@ -29,6 +29,7 @@
 [ext_resource type="PackedScene" uid="uid://c8q605jnjdup1" path="res://scenes/game/panels/chat_panel.tscn" id="35_chat_panel"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_air_wing_panel.tscn" id="36"]
 [ext_resource type="PackedScene" path="res://scenes/game/land_selection_surround.tscn" id="37_surround"]
+[ext_resource type="PackedScene" path="res://scenes/game/panels/production_panel.tscn" id="38_production_panel"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -368,12 +369,12 @@ size_flags_horizontal = 4
 text = "E"
 horizontal_alignment = 1
 
-[node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=2130558185]
+[node name="DockButton_P" type="Button" parent="HUDRoot/LeftDockRail/VBox"]
 custom_minimum_size = Vector2(46, 50)
 layout_mode = 2
-tooltip_text = "Military (R)"
+tooltip_text = "Production (R)"
 
-[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T" unique_id=2073718966]
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_P"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -384,18 +385,18 @@ mouse_filter = 2
 theme_override_constants/separation = 2
 alignment = 1
 
-[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1016136817]
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_P/Content"]
 modulate = Color(0.91, 0.87, 0.78, 1)
 material = SubResource("ShaderMaterial_icon_tint")
 custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 size_flags_horizontal = 4
 mouse_filter = 2
-texture = ExtResource("23_military")
+texture = ExtResource("28_industry")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1801052734]
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_P/Content"]
 layout_mode = 2
 size_flags_horizontal = 4
 text = "R"
@@ -432,6 +433,39 @@ stretch_mode = 5
 layout_mode = 2
 size_flags_horizontal = 4
 text = "T"
+horizontal_alignment = 1
+
+[node name="DockButton_T" type="Button" parent="HUDRoot/LeftDockRail/VBox" unique_id=2130558185]
+custom_minimum_size = Vector2(46, 50)
+layout_mode = 2
+tooltip_text = "Military (Y)"
+
+[node name="Content" type="VBoxContainer" parent="HUDRoot/LeftDockRail/VBox/DockButton_T" unique_id=2073718966]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1016136817]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_horizontal = 4
+mouse_filter = 2
+texture = ExtResource("23_military")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ShortcutLabel" type="Label" parent="HUDRoot/LeftDockRail/VBox/DockButton_T/Content" unique_id=1801052734]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Y"
 horizontal_alignment = 1
 
 [node name="MapModeTabs" type="PanelContainer" parent="HUDRoot" unique_id=220020208]
@@ -633,6 +667,9 @@ script = ExtResource("34_notification_feed")
 visible = false
 
 [node name="EconomyPanel" parent="." unique_id=1554449830 instance=ExtResource("7")]
+visible = false
+
+[node name="ProductionPanel" parent="." instance=ExtResource("38_production_panel")]
 visible = false
 
 [node name="DiplomacyPanel" parent="." unique_id=403663427 instance=ExtResource("8")]

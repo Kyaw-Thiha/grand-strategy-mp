@@ -966,6 +966,7 @@ QGIS will enforce the schema on every new feature.
 | bld_airbase | Integer | Yes | Default 0 |
 | bld_supply_hub | Integer | Yes | Default 0 |
 | bld_factory | Integer | Yes | Default 0 |
+| bld_radar | Integer | Yes | Default 0. Detection building — see ECONOMY_BUILDINGS.md's Out of Scope list; no base effect implemented yet, schema-only |
 | bld_barracks | Integer | Yes | Default 0. Infantry production + XP training — see ECONOMY_BUILDINGS.md, TACTICAL_COMBAT.md |
 | bld_tank_plant | Integer | Yes | Default 0. Armour production — see ECONOMY_BUILDINGS.md |
 | bld_ordnance_factory | Integer | Yes | Default 0. Artillery/AT/AA production — see ECONOMY_BUILDINGS.md |

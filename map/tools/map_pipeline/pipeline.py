@@ -56,6 +56,27 @@ RESOURCE_TYPES = [
     "nitrates", "tungsten", "chromium", "aluminium", "uranium",
 ]
 
+# The 24-key buildings{} schema per MAP_DATA_CONTRACT.md — supersedes the old 5-key
+# strategic-only placeholder (fort, port, airbase, supply_hub, factory), not additive.
+# Each entry here is both the buildings{} dict key AND the geojson property suffix
+# (read as f"bld_{name}") — game-server's building_stats.ts BUILDING_TYPES list must use
+# these exact identifiers (including the "res_*" extraction names) so a building level
+# read from this schema round-trips without a translation layer.
+STRATEGIC_BUILDING_TYPES = ["fort", "port", "airbase", "supply_hub", "factory", "radar"]
+PRODUCTION_BUILDING_TYPES = ["barracks", "tank_plant", "ordnance_factory", "aircraft_factory"]
+CIVILIAN_BUILDING_TYPES = ["school", "hospital", "warehouse", "shipyard", "town_hall"]
+RESOURCE_BUILDING_TYPES = [f"res_{r}" for r in
+    ["grain", "iron", "oil", "rubber", "nitrates", "tungsten", "chromium", "aluminium", "uranium"]]
+BUILDING_TYPES = (
+    STRATEGIC_BUILDING_TYPES + PRODUCTION_BUILDING_TYPES
+    + CIVILIAN_BUILDING_TYPES + RESOURCE_BUILDING_TYPES
+)
+
+# ECONOMY_BUILDINGS.md's "Starting Buildings — Default Placement": non-capital starting
+# provinces round-robin one of these three (the capital gets all four PRODUCTION_BUILDING_TYPES
+# instead — see _apply_default_building_placement).
+DEFAULT_PLACEMENT_ROTATION = ["barracks", "ordnance_factory", "tank_plant"]
+
 # TBD playtesting — flat abundance value used by the "playtest" resource preset below.
 PLAYTEST_RESOURCE_ABUNDANCE = 60
 
@@ -216,13 +237,7 @@ def build_provinces(
 
         city_props = city_by_province.get(pid, {})
 
-        buildings = {
-            "fort":       props.get("bld_fort", 0),
-            "port":       props.get("bld_port", 0),
-            "airbase":    props.get("bld_airbase", 0),
-            "supply_hub": props.get("bld_supply_hub", 0),
-            "factory":    props.get("bld_factory", 0),
-        }
+        buildings = {b: props.get(f"bld_{b}", 0) for b in BUILDING_TYPES}
         resources = {r: props.get(f"res_{r}", 0) for r in RESOURCE_TYPES}
 
         provinces_out.append({
@@ -286,6 +301,39 @@ def _apply_playtest_resource_preset(provinces_out: list[dict]) -> None:
             p["resources"] = {r: 0 for r in RESOURCE_TYPES}
         for i, res_type in enumerate(RESOURCE_TYPES):
             provs[i % len(provs)]["resources"][res_type] = PLAYTEST_RESOURCE_ABUNDANCE
+
+
+def _apply_default_building_placement(provinces: list[dict]) -> None:
+    """
+    Seeds level-1 production buildings on each nation's capital and other starting
+    provinces in place, per ECONOMY_BUILDINGS.md's "Starting Buildings — Default
+    Placement": the capital gets level 1 of all four production buildings (barracks,
+    tank_plant, ordnance_factory, aircraft_factory); every other province the nation starts
+    owning gets level 1 of one of barracks/ordnance_factory/tank_plant, round-robin sorted
+    by province_id for determinism (mirrors assign_supply_hubs's determinism approach).
+
+    Civilian buildings (school/hospital/warehouse/shipyard/town_hall) and all nine
+    resource-extraction buildings are deliberately left at level 0 everywhere — the design
+    doc only specifies defaults for the five buildings above, so everything else stays
+    player-built from scratch.
+    """
+    by_nation: dict[str, list[dict]] = defaultdict(list)
+    for p in provinces:
+        by_nation[p["nation_id"]].append(p)
+
+    for provs in by_nation.values():
+        provs.sort(key=lambda p: p["province_id"])
+        capital = next((p for p in provs if p["is_capital"]), None)
+        if capital is None:
+            continue
+
+        for b in PRODUCTION_BUILDING_TYPES:
+            capital["buildings"][b] = 1
+
+        others = [p for p in provs if p is not capital]
+        for i, p in enumerate(others):
+            b = DEFAULT_PLACEMENT_ROTATION[i % len(DEFAULT_PLACEMENT_ROTATION)]
+            p["buildings"][b] = 1
 
 
 def assign_supply_hubs(provinces: list[dict], adjacency: list[dict]) -> None:
@@ -2025,6 +2073,8 @@ def main() -> None:
               f"the source geojson are being IGNORED; provinces.geojson itself is untouched")
     provinces = build_provinces(sources, simplify_tolerance, resource_preset=args.resource_preset)
     print(f"  {len(provinces)} provinces built")
+
+    _apply_default_building_placement(provinces)
 
     print("Building adjacency graph...")
     adjacency = build_adjacency(sources)
