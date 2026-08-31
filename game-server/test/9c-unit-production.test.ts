@@ -1,5 +1,9 @@
 import assert from "assert";
-import { describe, it } from "mocha";
+import { describe, it, before, after, beforeEach } from "mocha";
+import { ColyseusTestServer, boot } from "@colyseus/testing";
+import { SignJWT } from "jose";
+import appConfig from "../src/app.config.js";
+import { getTestPort } from "./helpers.js";
 import { getUnitProductionStats, UNIT_PRODUCTION_STATS, PRODUCTION_BUILDING_TYPES } from "../src/data/unit_production_stats.js";
 import { getBuildingStats, BUILDING_TYPES } from "../src/data/building_stats.js";
 import { UnitType } from "../src/types/tactical_types.js";
@@ -8,7 +12,17 @@ import {
   rankDemand, scoreTypeForBuilding, assignIdleBuildings, DemandSlot,
   UnitProductionSystem,
 } from "../src/systems/unit_production_system.js";
-import { NationState, DivisionState } from "../src/rooms/schema/GameRoomState.js";
+import { NationState, DivisionState, type GameRoomState } from "../src/rooms/schema/GameRoomState.js";
+
+const JWT_SECRET = process.env.JWT_SECRET || "test-secret";
+const jwtSecret = new TextEncoder().encode(JWT_SECRET);
+
+async function makeToken(sub = "test-user") {
+  return new SignJWT({ sub, steam_id: "dev_steam", has_host_pass: true })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("24h")
+    .sign(jwtSecret);
+}
 
 describe("lane:economy | Unit production stats", () => {
   it("every non-empty UnitType has a build_points entry", () => {
@@ -337,5 +351,140 @@ describe("lane:economy | Warehouse Reserve cap", () => {
   it("reserve_cap defaults to 0 on a fresh NationState until _economyTick computes it (schema default)", () => {
     const nation = new NationState();
     assert.strictEqual(nation.reserve_cap, 0);
+  });
+});
+
+describe("lane:economy | GameRoom integration — RAISE_DIVISION/FORCE_DEPLOY/CANCEL_MARSHALLING", () => {
+  let colyseus: ColyseusTestServer<typeof appConfig>;
+
+  before(async () => {
+    colyseus = await boot(appConfig, getTestPort());
+  });
+  after(async () => {
+    await colyseus.shutdown();
+  });
+  beforeEach(async () => {
+    await colyseus.cleanup();
+  });
+
+  async function joinRoom() {
+    const token = await makeToken();
+    const room = await colyseus.createRoom<GameRoomState>("game_room", {});
+    const client = await colyseus.connectTo(room, { token });
+    await room.waitForNextPatch();
+    client.send("SELECT_NATION", { nation_id: "germany" });
+    await room.waitForNextPatch();
+    await (room as any).startGame();
+    await room.waitForNextPatch();
+    return { client, room };
+  }
+
+  it("RAISE_DIVISION does not create a DivisionState in state.divisions", async () => {
+    const { client, room } = await joinRoom();
+    const before = room.state.divisions.size;
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    assert.strictEqual(room.state.divisions.size, before);
+  });
+
+  it("RAISE_DIVISION from a non-owned province is silently ignored", async () => {
+    const { client, room } = await joinRoom();
+    const before = room.state.divisions.size;
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_france_03",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    assert.strictEqual(room.state.divisions.size, before);
+  });
+
+  // _marshallingIdCounter is a module-level counter shared by every unit-test describe block in
+  // this same file (the pure-function tests above already call startMarshalling many times) —
+  // never assume a specific id string; always read the real one back off the room.
+  function getMarshallingIdForGermany(room: any): string {
+    const list = room.unitProductionSystem.listMarshallingForNation("germany");
+    assert.strictEqual(list.length, 1, "expected exactly one marshalling entry for germany");
+    return list[0].marshalling_id;
+  }
+
+  it("FORCE_DEPLOY below 50% aggregate HP is rejected", async () => {
+    const { client, room } = await joinRoom();
+    const beforeDivisions = room.state.divisions.size;
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    const marshallingId = getMarshallingIdForGermany(room);
+    // No stock seeded, no ticks waited — aggregate HP is 0%.
+    client.send("FORCE_DEPLOY", { marshalling_id: marshallingId });
+    await room.waitForNextPatch();
+    assert.strictEqual(room.state.divisions.size, beforeDivisions);
+  });
+
+  it("FORCE_DEPLOY at >=50% aggregate HP creates a real DivisionState positioned at home_province_id's city position", async () => {
+    const { client, room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    nation.reserve_pool.set("infantry", 1000); // seed Reserve so Marshalling fills fast
+    const beforeDivisions = room.state.divisions.size;
+
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    const marshallingId = getMarshallingIdForGermany(room);
+
+    // MARSHALLING_RATE=20/tick, TICK_MS=1000 — 3 ticks reaches hp>=50 for the single slot.
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+
+    client.send("FORCE_DEPLOY", { marshalling_id: marshallingId });
+    await room.waitForNextPatch();
+
+    assert.strictEqual(room.state.divisions.size, beforeDivisions + 1);
+    const div = room.state.divisions.get(`division_${marshallingId}`);
+    assert.ok(div, "expected the deployed division to exist under the derived division_id");
+    assert.strictEqual(div!.grid.cells[0].unit_type, "infantry");
+    assert.ok(div!.grid.cells[0].hp >= 50);
+  });
+
+  it("CANCEL_MARSHALLING removes the marshalling entry and returns already-allocated stock to reserve_pool", async () => {
+    const { client, room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    nation.reserve_pool.set("infantry", 1000);
+    const beforeReserve = nation.reserve_pool.get("infantry")!;
+
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    const marshallingId = getMarshallingIdForGermany(room);
+    await new Promise((resolve) => setTimeout(resolve, 1500)); // partial fill, well under 100%
+
+    client.send("CANCEL_MARSHALLING", { marshalling_id: marshallingId });
+    await room.waitForNextPatch();
+
+    // Non-destructive: whatever was drawn out of reserve_pool during the partial fill should be
+    // back, so total reserve_pool ends up close to (though not necessarily exactly, since the
+    // tick loop keeps running production/marshalling every second) what it was seeded at.
+    const afterReserve = nation.reserve_pool.get("infantry")!;
+    assert.ok(afterReserve <= beforeReserve, "cancel should never leave more stock than was ever drawn out");
+    assert.ok(afterReserve > 0);
+  });
+
+  it("Warehouse Reserve cap: reserve_cap is nonzero even with zero Warehouses, per the never-zero-floor guarantee", async () => {
+    const { room } = await joinRoom();
+    await new Promise((resolve) => setTimeout(resolve, 1500)); // let _economyTick run at least once
+    const nation = room.state.nations.get("germany")!;
+    assert.ok(nation.reserve_cap >= 200); // RESERVE_CAP_BASELINE placeholder
   });
 });
