@@ -19,9 +19,20 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _session_timer: Label                 = %SessionTimer
 @onready var _flag_texture: TextureRect            = %FlagTexture
 @onready var _manpower_label: Label                = %ManpowerLabel
-@onready var _steel_label: Label                   = %SteelLabel
+@onready var _money_label: Label                   = %MoneyLabel
+@onready var _grain_label: Label                   = %GrainLabel
 @onready var _oil_label: Label                     = %OilLabel
-@onready var _fuel_label: Label                    = %FuelLabel
+@onready var _more_button: Button                  = %MoreButton
+@onready var _more_flyout: PanelContainer           = %MoreFlyout
+@onready var _more_flyout_list: VBoxContainer       = %MoreFlyoutList
+
+# Branch B — resources shown in the top bar's always-4 (RESOURCE_ECONOMY.md's roster order),
+# everything else goes in the "[v N more]" hover flyout. Order matches
+# plans/economy_production_ui_handoff.md §2: Money, Grain, Oil, Manpower (fixed regardless of
+# nation), Manpower rendered separately below since it isn't one of the ten resources.
+const _TOP_BAR_RESOURCES := ["money", "grain", "oil"]
+const _ALL_RESOURCE_ORDER := ["money", "grain", "iron", "oil", "rubber",
+	"nitrates", "tungsten", "chromium", "aluminium", "uranium"]
 
 @onready var _btn_settings: Button = %SettingsButton
 @onready var _btn_map_political: Button = %BtnMapPolitical
@@ -121,6 +132,13 @@ func setup_game_context(
 
 func _ready() -> void:
 	set_session_time(0)
+
+	EventBus.resources_updated.connect(_refresh_resource_bar)
+	_refresh_resource_bar()
+	_more_button.mouse_entered.connect(func() -> void: _more_flyout.visible = true; _position_more_flyout())
+	_more_button.mouse_exited.connect(_on_more_button_mouse_exited)
+	_more_flyout.mouse_entered.connect(func() -> void: _more_flyout.visible = true)
+	_more_flyout.mouse_exited.connect(func() -> void: _more_flyout.visible = false)
 
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_register_initial_ui_input_ownership()
@@ -936,10 +954,63 @@ func _layout_persistent_hud(width_override: float = -1.0) -> void:
 		return
 	_is_narrow_hud = use_narrow_layout
 	_nation_label.visible = not use_narrow_layout
-	_manpower_label.text = "MP --" if use_narrow_layout else "MANPOWER --"
-	_steel_label.text = "ST --" if use_narrow_layout else "STEEL --"
-	_oil_label.text = "OIL --"
-	_fuel_label.text = "FUEL --"
+	_refresh_resource_bar()
+
+
+## Branch B — refreshes the top bar's always-4 (Money/Grain/Oil/Manpower) and the "[v N more]"
+## hover flyout's contents. Only resources this nation has meaningful access to appear in the
+## flyout (a landlocked nation with zero aluminium access never shows an aluminium row) —
+## approximated client-side via nonzero current stockpile or nonzero storage cap, since the
+## client doesn't receive raw per-resource national deposit totals directly.
+func _refresh_resource_bar() -> void:
+	var narrow: bool = _is_narrow_hud
+	var money_rate: float = GameState.resource_net_rates.get("money", 0.0)
+	var grain_rate: float = GameState.resource_net_rates.get("grain", 0.0)
+	var oil_rate: float = GameState.resource_net_rates.get("oil", 0.0)
+
+	_money_label.text = "$%d (%s%d/t)" % [int(GameState.resources.get("money", 0.0)), "+" if money_rate >= 0 else "", int(money_rate)]
+	_grain_label.text = "%s %d (%s%d/t)" % ["GR" if narrow else "GRAIN", int(GameState.resources.get("grain", 0.0)), "+" if grain_rate >= 0 else "", int(grain_rate)]
+
+	var oil_text: String = "%s %d (%s%d/t)" % ["OIL", int(GameState.resources.get("oil", 0.0)), "+" if oil_rate >= 0 else "", int(oil_rate)]
+	# Oil's "!" marker — only when the penalty is actively biting, never for low stock alone.
+	if GameState.oil_penalty_active:
+		oil_text += " !"
+	_oil_label.text = oil_text
+
+	_manpower_label.text = "%s %d/%d" % ["MP" if narrow else "MANPOWER", int(GameState.manpower_available), int(GameState.manpower_ceiling)]
+
+	var flyout_resources: Array = []
+	for res_type: String in _ALL_RESOURCE_ORDER:
+		if _TOP_BAR_RESOURCES.has(res_type):
+			continue
+		var has_access: bool = GameState.resources.get(res_type, 0.0) > 0.0 or GameState.resource_storage_cap.get(res_type, 0.0) > 0.0
+		if has_access:
+			flyout_resources.append(res_type)
+
+	_more_button.text = "v %d more" % flyout_resources.size()
+
+	for child in _more_flyout_list.get_children():
+		child.queue_free()
+	for res_type: String in flyout_resources:
+		var rate: float = GameState.resource_net_rates.get(res_type, 0.0)
+		var row := Label.new()
+		row.text = "%s   %d   %s%d/t" % [res_type.to_upper(), int(GameState.resources.get(res_type, 0.0)), "+" if rate >= 0 else "", int(rate)]
+		_more_flyout_list.add_child(row)
+
+
+func _position_more_flyout() -> void:
+	# top_level = true makes `position` viewport-relative, not parent-relative — anchor to the
+	# button's actual global position (bottom-left corner) instead of local (0, height).
+	_more_flyout.global_position = _more_button.global_position + Vector2(0, _more_button.size.y)
+
+
+func _on_more_button_mouse_exited() -> void:
+	# Give the pointer a frame to land on the flyout itself before hiding — dismissed on
+	# mouse-leave per the Hover Flyout pattern, but only once it's actually left BOTH controls.
+	await get_tree().process_frame
+	if not _more_button.get_global_rect().has_point(get_viewport().get_mouse_position()) \
+			and not _more_flyout.get_global_rect().has_point(get_viewport().get_mouse_position()):
+		_more_flyout.visible = false
 
 
 ## Relays chat size changes back into the bottom HUD layout.

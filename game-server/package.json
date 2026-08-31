@@ -19,7 +19,7 @@
     "test:tactical": "NODE_ENV=test mocha --grep 'lane:tactical' 'test/6*.test.ts'",
     "test:movement": "NODE_ENV=test mocha --grep 'lane:movement' 'test/movement-jerk.test.ts'",
     "test:core": "NODE_ENV=test mocha --grep 'lane:core' 'test/GameRoom.test.ts'",
-    "test:economy": "NODE_ENV=test mocha --grep 'lane:economy' 'test/9a-economy-foundation.test.ts'",
+    "test:economy": "NODE_ENV=test mocha --grep 'lane:economy' 'test/9a-economy-foundation.test.ts' 'test/9b-resource-economy.test.ts'",
     "bot-fight": "NODE_ENV=development tsx scripts/bot_fight.ts"
   },
   "author": "",

@@ -19,8 +19,10 @@ async function makeToken(sub = "test-user") {
 }
 
 describe("lane:economy | building_stats data table", () => {
-  it("has all 24 building types", () => {
-    assert.strictEqual(BUILDING_TYPES.length, 24);
+  it("has all 25 building types", () => {
+    // 24 per MAP_DATA_CONTRACT.md + "infrastructure" (Branch B schema gap 2 — see
+    // building_stats.ts's comment on BUILDING_TYPES).
+    assert.strictEqual(BUILDING_TYPES.length, 25);
   });
   it("construction_points increase per level", () => {
     const stats = getBuildingStats("res_iron");
@@ -44,7 +46,7 @@ describe("lane:economy | EconomyBuildingSystem parallel construction", () => {
     const sys = freshSystem();
     sys.startConstruction("p1", "school", 50);
     sys.startConstruction("p1", "hospital", 50);
-    sys.tick(new Map([["p1", { infrastructure: 100 }]]), 1.0, () => {});
+    sys.tick(new Map([["p1", { infrastructure: 100, owner_id: "n1" }]]), () => 1.0, () => {});
     const econ = sys.get("p1")!;
     assert.strictEqual(econ.construction_queue.length, 2);
     // res_iron/school/hospital all share the same default construction-points curve,
@@ -59,7 +61,7 @@ describe("lane:economy | EconomyBuildingSystem parallel construction", () => {
     const sys = freshSystem();
     sys.startConstruction("p1", "school", 50);
     for (let i = 0; i < 1000; i++) {
-      sys.tick(new Map([["p1", { infrastructure: 100 }]]), 1.0, () => {});
+      sys.tick(new Map([["p1", { infrastructure: 100, owner_id: "n1" }]]), () => 1.0, () => {});
     }
     const econ = sys.get("p1")!;
     assert.strictEqual(econ.buildings["school"], 1);
@@ -114,11 +116,22 @@ describe("lane:economy | NationState economy fields", () => {
     assert.strictEqual(nation!.resources.get("iron") ?? 0, 0);
   });
 
-  it("reserve_pool and industry_alloc start empty", async () => {
+  it("reserve_pool starts empty (populated by Branch C)", async () => {
     const { room } = await joinRoom();
     const nation = room.state.nations.get("germany")!;
     assert.strictEqual(nation.reserve_pool.size, 0);
-    assert.strictEqual(nation.industry_alloc.size, 0);
+  });
+
+  it("industry_alloc starts seeded with a valid default summing to 100 (money/construction_speed 50/50), not empty", async () => {
+    // Branch B (ECONOMY_BUILDINGS.md's Industry Pool: "New factories default-allocate to money
+    // production and construction speed") — supersedes Branch A's placeholder empty-map
+    // behavior now that a real default allocation exists.
+    const { room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    const total = Array.from(nation.industry_alloc.values()).reduce((sum, v) => sum + v, 0);
+    assert.strictEqual(total, 100);
+    assert.strictEqual(nation.industry_alloc.get("money"), 50);
+    assert.strictEqual(nation.industry_alloc.get("construction_speed"), 50);
   });
 
   it("BUILD_BUILDING: owner can build, resource cost deducted, non-owner and insufficient funds rejected", async () => {
@@ -134,10 +147,13 @@ describe("lane:economy | NationState economy fields", () => {
     const after = nation.resources.get("money") ?? 0;
     assert.ok(after < before, "money should be deducted immediately on BUILD_BUILDING");
 
-    // Non-owner province: france's capital, not germany's — should be a silent no-op.
+    // Non-owner province: france's capital, not germany's — should be a silent no-op. Branch B's
+    // population-scaled money trickle now runs every tick, so money can drift upward between
+    // patches on its own — assert the rejected build didn't deduct anything (no further
+    // decrease), not exact equality.
     const moneyAfterFirstBuild = after;
     client.send("BUILD_BUILDING", { province_id: "we6_france_03", building_type: "school" });
     await room.waitForNextPatch();
-    assert.strictEqual(nation.resources.get("money") ?? 0, moneyAfterFirstBuild);
+    assert.ok((nation.resources.get("money") ?? 0) >= moneyAfterFirstBuild, "non-owner build must not deduct money");
   });
 });

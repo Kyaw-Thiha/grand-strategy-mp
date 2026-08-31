@@ -571,7 +571,7 @@ export class MovementSystem {
     // fighting-withdrawal penalty (Batch 8 Task 3) move at retreat_speed_mult of normal speed —
     // applied here (own movement) but deliberately NOT in _advanceReposition, which is
     // in-combat repositioning, not retreat movement.
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult * division.oil_speed_mult;
 
     if (advanceDeg >= distDeg) {
       division.position_lng = nextNode.lng;
@@ -626,7 +626,7 @@ export class MovementSystem {
       kmh = OFFROAD_SPEED_KMH / cost;
     }
 
-    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult;
+    const advanceDeg = (kmh / KM_PER_DEG_LAT) * speedMult * division.retreat_speed_mult * division.oil_speed_mult;
     if (advanceDeg >= distDeg) {
       division.position_lng = division.final_position_lng;
       division.position_lat = division.final_position_lat;

@@ -40,6 +40,29 @@ export class NationState extends Schema {
   // Keyed by resource type + "construction_speed" + "unit_production_speed" — populated by
   // Branch B (Industry Pool allocation).
   @type({ map: "number" }) industry_alloc = new MapSchema<number>();
+  // Branch B — Oil's 3-way allocation-priority toggle (RESOURCE_ECONOMY.md's "Oil" section).
+  @type("string") oil_priority: string = "balanced"; // "military"|"balanced"|"economy"
+  // Branch B — DEV_PHASES.md's documented Phase 9 placeholder: always false this phase, no
+  // code sets it true yet. Aluminium's real air-doctrine-tier ceiling is Phase 14 scope.
+  @type("boolean") aluminium_air_doctrine_flag: boolean = false;
+  // Branch B — School's base effect. No research-currency consumption system exists yet
+  // (General Technology panel gap, unit_production_handoff.md open question #3) — this is
+  // intentionally a stockpile with no sink yet.
+  @type("number") science_points: number = 0;
+  // Branch B — Shipyard's base effect (trade convoy capacity). Nothing consumes this yet;
+  // Branch D's trade routes are the consumer.
+  @type("number") convoy_capacity: number = 0;
+  // Branch B — Bauxite Mine → Refinery two-stage chain's intermediate value. NOT one of the
+  // ten tradeable resources, kept out of `resources` deliberately.
+  @type("number") bauxite_stock: number = 0;
+  // Branch B — Warehouse's Bulk Storage base effect: per-resource storage ceiling. Keyed by
+  // the same ten resource-type strings as `resources`.
+  @type({ map: "number" }) resource_storage_cap = new MapSchema<number>();
+  // Branch B — Hospital's pooled national casualty-reduction multiplier (< 1.0 = less damage
+  // taken), precomputed once per economy tick from summed owned-Hospital levels so
+  // combat_system.ts (which has no access to per-province building data) can read it directly
+  // without needing economyBuildingSystem threaded through. Floor-clamped, never approaches 0.
+  @type("number") hospital_damage_mult: number = 1.0;
 }
 
 export class ProvinceState extends Schema {
@@ -50,6 +73,11 @@ export class ProvinceState extends Schema {
   @type("number") infrastructure:      number = 50;
   @type("number") oil_bombed_until_ms: number = 0;
   @type("number") naval_base_level: number = 0;
+  // Branch B (schema gap 3) — the pipeline already writes this into map_data.json; ProvinceState
+  // never carried it before now. Town Hall's base effect multiplies this.
+  @type("number") vp_value: number = 0;
+  // Branch B — Shipyard's "Requires a port in the same province" gate. Read from map_data.json.
+  @type("boolean") has_port: boolean = false;
   /** Player-built supply hub, separate from the static, map-authored is_supply_hub provinces
    *  SubprovinceSystem loads at room start. */
   @type("boolean") has_supply_hub: boolean = false;
@@ -98,6 +126,14 @@ export class DivisionState extends Schema {
   @type("number") final_position_lat: number = -999;
   @type("string")          template_id: string = "";
   @type("string") subprovince_id: string = ""; // resolved each tick by SubprovinceSystem.checkCaptureAfterMovement
+  // Branch B — oil-starved units' HP-recovery-degradation penalty (RESOURCE_ECONOMY.md's Oil
+  // section: "readiness AND recovery-rate degrades under scarcity"). Consumed by Phase 7's
+  // future HP-recovery tick; no-op until then — supply_system.ts has no healing code yet.
+  @type("number") oil_recovery_penalty: number = 0;
+  // Branch B — movement-speed multiplier applied when this division contains at least one
+  // oil-consuming unit_type (RESOURCE_ECONOMY.md's Oil section). 1.0 = no penalty/no oil
+  // consumers present. Recomputed every economy tick; consumed by movement_system.ts.
+  @type("number") oil_speed_mult: number = 1.0;
   grid: DivisionGridState = new DivisionGridState(); // server-side only — not schema-synced
 }
 

@@ -28,6 +28,37 @@ import { QUALITY_DEFAULTS }           from "../data/naval_contact_quality.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { ServerVisibilitySystem } from "../systems/server_visibility_system.js";
 import { loadProvincePIPData }    from "../utils/geo_utils.js";
+import {
+  ResourceEconomySystem,
+  tickPopulation,
+  computeManpower,
+  industrySliceMultiplier,
+  hospitalDamageMultiplier,
+  scienceGainForTick,
+  convoyCapacityForShipyards,
+  storageCapForLevel,
+  isChromiumAvailable,
+  computeOilDemandMet,
+  oilSpeedMultiplier,
+  oilPriorityWeight,
+  effectiveVpValue,
+  type OilPriority,
+} from "../systems/resource_economy_system.js";
+import {
+  TEN_RESOURCES,
+  HOSPITAL_STORAGE_CAP_BASE,
+  HOSPITAL_STORAGE_CAP_PER_LEVEL,
+  SCIENCE_PER_SCHOOL_LEVEL,
+  CONVOY_CAPACITY_PER_SHIPYARD_LEVEL,
+  TOWN_HALL_VP_MULT_PER_LEVEL,
+  INFRASTRUCTURE_BONUS_PER_LEVEL,
+  INFRASTRUCTURE_BASE_DEFAULT,
+  OIL_DEMAND_PER_CONSUMING_CELL,
+  OIL_SPEED_MULT_FLOOR,
+  INDUSTRY_REALLOCATION_COOLDOWN_MS,
+} from "../data/resource_stats.js";
+import { OIL_CONSUMING_TYPES } from "../data/unit_resource_tags.js";
+import type { ProvinceEconomyData } from "../systems/economy_building_system.js";
 import { STARTING_POSITIONS } from "../data/maps/western_europe_6/starting_positions.js";
 import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_wing_starting_positions.js";
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
@@ -107,6 +138,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private serverVisibilitySystem!: ServerVisibilitySystem;
   private airNavalBomberSystem       = new AirNavalBomberSystem();
   private economyBuildingSystem = new EconomyBuildingSystem();
+  private resourceEconomySystem = new ResourceEconomySystem();
+  private _industryAllocCooldownByNation = new Map<string, number>();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -548,6 +581,41 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         buildings: econ.buildings,
         construction_queue: econ.construction_queue,
       });
+    });
+
+    // Branch B — Oil's 3-way allocation-priority toggle (RESOURCE_ECONOMY.md's Oil section).
+    // Nation-scoped, not province-scoped — no province ownership check needed.
+    this.onMessage("SET_OIL_PRIORITY", (client, msg: { priority: OilPriority }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      if (!["military", "balanced", "economy"].includes(msg.priority)) return;
+      nation.oil_priority = msg.priority;
+    });
+
+    // Branch B — National Industry Pool allocation sliders (ECONOMY_BUILDINGS.md's "The
+    // Industry Pool"). Rejects allocations that don't sum to 100 across all slices, and
+    // enforces a short reallocation cooldown per nation.
+    this.onMessage("SET_INDUSTRY_ALLOCATION", (client, msg: { allocations: Record<string, number> }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+
+      const now = Date.now();
+      const lastSet = this._industryAllocCooldownByNation.get(nation.nation_id) ?? 0;
+      if (now - lastSet < INDUSTRY_REALLOCATION_COOLDOWN_MS) return;
+
+      const total = Object.values(msg.allocations ?? {}).reduce((sum, v) => sum + v, 0);
+      if (Math.abs(total - 100) > 0.5) return; // reject — must sum to 100, not silently normalized
+
+      for (const [key, value] of Object.entries(msg.allocations)) {
+        nation.industry_alloc.set(key, Math.max(0, Math.min(100, value)));
+      }
+      this._industryAllocCooldownByNation.set(nation.nation_id, now);
     });
 
     if (process.env.DEV_MODE === "true") {
@@ -1697,12 +1765,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       }
       const supplyChanged = this.supplySystem.tick(this.state, this.tickCount, (type, msg) => this.broadcast(type, msg), this.subprovinceSystem);
 
-      // TODO Branch B: constructionMultiplier is per-nation (each nation allocates its own
-      // Industry Pool), but tick()'s signature only takes one global number since Branch A
-      // hardcodes 1.0 for everyone. Branch B needs to change this to a per-province-owner
-      // lookup, not a single multiplier.
-      const constructionMultiplier = 1.0;
-      this.economyBuildingSystem.tick(this.state.provinces, constructionMultiplier, (type, msg) => this.broadcast(type, msg));
+      this.economyBuildingSystem.tick(
+        this.state.provinces,
+        (ownerNationId) => industrySliceMultiplier(this.state.nations.get(ownerNationId)?.industry_alloc.get("construction_speed") ?? 0),
+        (type, msg) => this.broadcast(type, msg),
+      );
+
+      this._economyTick();
 
       // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
       // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
@@ -2458,8 +2527,146 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
    */
   private _initNationEconomy(): void {
     const STARTING_MONEY = 500; // TBD playtesting — starting stockpile placeholder
-    for (const nation of this.state.nations.values()) {
+    for (const [nationId, nation] of this.state.nations) {
       nation.resources.set("money", STARTING_MONEY);
+      for (const resType of TEN_RESOURCES) {
+        nation.resource_storage_cap.set(resType, HOSPITAL_STORAGE_CAP_BASE);
+      }
+      // Branch B (Step 2b edge case) — seed manpower_available = manpower_ceiling at init,
+      // not left at the schema default of 0, which would otherwise read as a heavy deficit
+      // before the regen-toward-ceiling tick has run even once.
+      const ownedProvinces = [...this.state.provinces.values()].filter((p) => p.owner_id === nationId);
+      computeManpower(nation, ownedProvinces);
+      nation.manpower_available = nation.manpower_ceiling;
+
+      // ECONOMY_BUILDINGS.md's Industry Pool: "New factories default-allocate to money
+      // production and construction speed" — this default must always sum to 100 across every
+      // slice, same as any player-submitted SET_INDUSTRY_ALLOCATION (see that handler's reject-
+      // if-not-100 check). Leaving industry_alloc empty at init (schema default) would show a
+      // client panel where every slider reads 0%, which doesn't sum to 100 at all.
+      for (const key of [...TEN_RESOURCES, "construction_speed", "unit_production_speed"]) {
+        nation.industry_alloc.set(key, 0);
+      }
+      nation.industry_alloc.set("money", 50);
+      nation.industry_alloc.set("construction_speed", 50);
+    }
+  }
+
+  /**
+   * Branch B — population/manpower, resource extraction, oil/chromium/tungsten mechanics,
+   * building base effects (Hospital/School/Shipyard/Infrastructure/Town Hall/Warehouse), and
+   * the per-nation RESOURCE_UPDATES broadcast. Called once per gameTick, after
+   * economyBuildingSystem.tick() (construction) so this tick's fresh resource stockpile is
+   * available to that tick's SET_INDUSTRY_ALLOCATION-driven multipliers next tick.
+   */
+  private _economyTick(): void {
+    tickPopulation(this.state.provinces.values());
+
+    const provincesByNation = new Map<string, ProvinceState[]>();
+    for (const province of this.state.provinces.values()) {
+      if (!province.owner_id) continue;
+      if (!provincesByNation.has(province.owner_id)) provincesByNation.set(province.owner_id, []);
+      provincesByNation.get(province.owner_id)!.push(province);
+    }
+
+    for (const [nationId, nation] of this.state.nations) {
+      const ownedProvinces = provincesByNation.get(nationId) ?? [];
+      computeManpower(nation, ownedProvinces);
+
+      const ownedEconomies = ownedProvinces
+        .map((p) => this.economyBuildingSystem.get(p.province_id))
+        .filter((e): e is ProvinceEconomyData => !!e);
+
+      const industryMultiplierByResource = (resType: string) =>
+        industrySliceMultiplier(nation.industry_alloc.get(resType) ?? 0);
+
+      const { gained } = this.resourceEconomySystem.tickExtraction(
+        nation, ownedProvinces, ownedEconomies, industryMultiplierByResource, this.tickCount,
+      );
+
+      // Hospital — pooled national casualty reduction, precomputed for combat_system.ts.
+      const totalHospitalLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["hospital"] ?? 0), 0);
+      nation.hospital_damage_mult = hospitalDamageMultiplier(totalHospitalLevel);
+
+      // School — science output. No consumer exists yet; intentional stockpile-with-no-sink.
+      const totalSchoolLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["school"] ?? 0), 0);
+      nation.science_points += scienceGainForTick(totalSchoolLevel, SCIENCE_PER_SCHOOL_LEVEL);
+
+      // Shipyard — convoy capacity, only counted in provinces with has_port. Nothing consumes
+      // this yet; Branch D's trade routes are the consumer.
+      let totalShipyardWithPort = 0;
+      for (const p of ownedProvinces) {
+        if (!p.has_port) continue;
+        totalShipyardWithPort += this.economyBuildingSystem.get(p.province_id)?.buildings["shipyard"] ?? 0;
+      }
+      nation.convoy_capacity = convoyCapacityForShipyards(totalShipyardWithPort, CONVOY_CAPACITY_PER_SHIPYARD_LEVEL);
+
+      // Infrastructure — composes with (does not replace) ProvinceState.infrastructure's
+      // existing default/movement-speed/construction-rate readers.
+      for (const p of ownedProvinces) {
+        const infraLevel = this.economyBuildingSystem.get(p.province_id)?.buildings["infrastructure"] ?? 0;
+        if (infraLevel > 0) {
+          p.infrastructure = INFRASTRUCTURE_BASE_DEFAULT + infraLevel * INFRASTRUCTURE_BONUS_PER_LEVEL;
+        }
+      }
+
+      // Warehouse — per-resource storage ceiling, shared cap value across all ten resources
+      // (per-resource bar-fill in the UI, but one national cap number, per Common
+      // Misassumptions guidance in the branch plan).
+      const totalWarehouseLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["warehouse"] ?? 0), 0);
+      const cap = storageCapForLevel(totalWarehouseLevel, HOSPITAL_STORAGE_CAP_BASE, HOSPITAL_STORAGE_CAP_PER_LEVEL);
+      for (const resType of TEN_RESOURCES) nation.resource_storage_cap.set(resType, cap);
+
+      // Town Hall — effective VP value, computed/broadcast but not consumed by any scoring
+      // system yet (none exists).
+      const effectiveVpByProvince: Record<string, number> = {};
+      for (const p of ownedProvinces) {
+        const townHallLevel = this.economyBuildingSystem.get(p.province_id)?.buildings["town_hall"] ?? 0;
+        effectiveVpByProvince[p.province_id] = effectiveVpValue(p.vp_value, townHallLevel, TOWN_HALL_VP_MULT_PER_LEVEL);
+      }
+
+      // Chromium — threshold flag only; hard-gates (block production, cut supply) are
+      // explicitly deferred (Branch C, Phase 7 respectively).
+      const chromiumAvailable = isChromiumAvailable(nation.resources.get("chromium") ?? 0);
+
+      // Oil — demand computed from owned divisions' oil-consuming cell count, priority-toggle
+      // weighted, applied as a movement-speed multiplier per division and stored as a
+      // recovery-degradation no-op for Phase 7's future healing tick.
+      let oilConsumingCells = 0;
+      const nationDivisions: DivisionState[] = [];
+      for (const div of this.state.divisions.values()) {
+        if (div.nation_id !== nationId || !div.grid) continue;
+        nationDivisions.push(div);
+        for (const cell of div.grid.cells) {
+          if (cell.unit_type !== "" && OIL_CONSUMING_TYPES.has(cell.unit_type)) oilConsumingCells++;
+        }
+      }
+      const totalOilDemand = oilConsumingCells * OIL_DEMAND_PER_CONSUMING_CELL;
+      const oilDemandMet = computeOilDemandMet(nation.resources.get("oil") ?? 0, totalOilDemand);
+      const oilBasePenalty = 1.0 - oilSpeedMultiplier(oilDemandMet);
+      const priority = (nation.oil_priority as OilPriority) || "balanced";
+      const oilWeight = oilPriorityWeight(priority, "military");
+      const oilFinalMult = Math.max(OIL_SPEED_MULT_FLOOR, 1.0 - oilBasePenalty * oilWeight);
+      for (const div of nationDivisions) {
+        const hasOilConsumer = (div.grid?.cells ?? []).some((c) => OIL_CONSUMING_TYPES.has(c.unit_type));
+        div.oil_speed_mult = hasOilConsumer ? oilFinalMult : 1.0;
+        div.oil_recovery_penalty = hasOilConsumer ? oilBasePenalty * oilWeight : 0;
+      }
+
+      this.broadcastToNation("RESOURCE_UPDATES", {
+        resources: Object.fromEntries(nation.resources),
+        net_rates: gained,
+        chromium_available: chromiumAvailable,
+        manpower_available: nation.manpower_available,
+        manpower_ceiling: nation.manpower_ceiling,
+        science_points: nation.science_points,
+        convoy_capacity: nation.convoy_capacity,
+        effective_vp_by_province: effectiveVpByProvince,
+        oil_priority: nation.oil_priority,
+        oil_penalty_active: oilBasePenalty > 1e-6,
+        resource_storage_cap: Object.fromEntries(nation.resource_storage_cap),
+        industry_alloc: Object.fromEntries(nation.industry_alloc),
+      }, nationId);
     }
   }
 
@@ -2476,6 +2683,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
           population?:     number;
           industry?:       number;
           infrastructure?: number;
+          vp_value?:       number;
+          has_port?:       boolean;
           buildings?:  Record<string, number>;
           resources?:  Record<string, number>;
         }>;
@@ -2489,6 +2698,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         if (p.population     !== undefined) slot.population     = p.population;
         if (p.industry       !== undefined) slot.industry       = p.industry;
         if (p.infrastructure !== undefined) slot.infrastructure = p.infrastructure;
+        if (p.vp_value        !== undefined) slot.vp_value        = p.vp_value;
+        if (p.has_port        !== undefined) slot.has_port        = p.has_port;
         this.state.provinces.set(p.province_id, slot);
         this.economyBuildingSystem.init(p.province_id, p.buildings ?? {}, p.resources ?? {});
         if (p.city_position && p.city_position.length >= 2) {

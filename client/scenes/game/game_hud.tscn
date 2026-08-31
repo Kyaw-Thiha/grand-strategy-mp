@@ -30,6 +30,7 @@
 [ext_resource type="PackedScene" path="res://scenes/game/panels/friendly_air_wing_panel.tscn" id="36"]
 [ext_resource type="PackedScene" path="res://scenes/game/land_selection_surround.tscn" id="37_surround"]
 [ext_resource type="PackedScene" path="res://scenes/game/panels/production_panel.tscn" id="38_production_panel"]
+[ext_resource type="Texture2D" path="res://assets/icons/cubes-stacked-solid-full.svg" id="39_grain"]
 
 [sub_resource type="Shader" id="Shader_icon_tint"]
 code = "shader_type canvas_item;
@@ -94,6 +95,18 @@ border_color = Color(0.909804, 0.721569, 0.309804, 1)
 
 [sub_resource type="StyleBoxEmpty" id="StyleBox_map_mode_focus"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBox_resource_flyout"]
+bg_color = Color(0.07, 0.05, 0.03, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.79, 0.60, 0.19, 1.0)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [sub_resource type="ButtonGroup" id="ButtonGroup_map_modes"]
 
 [node name="GameHUD" type="CanvasLayer" unique_id=925665196]
@@ -151,6 +164,63 @@ size_flags_horizontal = 3
 layout_mode = 2
 theme_override_constants/separation = 12
 
+[node name="MoneyItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1469709023]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/MoneyItem" unique_id=1300477849]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("25_landmark")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="MoneyLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/MoneyItem" unique_id=269059707]
+unique_name_in_owner = true
+layout_mode = 2
+text = "$0 (+0/t)"
+
+[node name="GrainItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=486653410]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/GrainItem" unique_id=645306080]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("39_grain")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="GrainLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/GrainItem" unique_id=1587312852]
+unique_name_in_owner = true
+layout_mode = 2
+text = "GRAIN 0 (+0/t)"
+
+[node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1129771256]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=590765351]
+modulate = Color(0.91, 0.87, 0.78, 1)
+material = SubResource("ShaderMaterial_icon_tint")
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("29_oilwell")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=641530814]
+unique_name_in_owner = true
+layout_mode = 2
+text = "OIL 0 (+0/t)"
+
 [node name="ManpowerItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1469709022]
 layout_mode = 2
 theme_override_constants/separation = 4
@@ -170,62 +240,32 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "MANPOWER --"
 
-[node name="SteelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=486653409]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=645306079]
-modulate = Color(0.91, 0.87, 0.78, 1)
-material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(18, 18)
-layout_mode = 2
-mouse_filter = 2
-texture = ExtResource("28_industry")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="SteelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/SteelItem" unique_id=1587312851]
+[node name="MoreButton" type="Button" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1917032430]
 unique_name_in_owner = true
 layout_mode = 2
-text = "STEEL --"
+text = "v 0 more"
+flat = true
+mouse_filter = 1
 
-[node name="OilItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=1129771256]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=590765351]
-modulate = Color(0.91, 0.87, 0.78, 1)
-material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(18, 18)
-layout_mode = 2
+[node name="MoreFlyout" type="PanelContainer" parent="HUDRoot/TopBar/HBox/ResourceBar/MoreButton" unique_id=1917032431]
+unique_name_in_owner = true
+visible = false
+top_level = true
+theme_override_styles/panel = SubResource("StyleBox_resource_flyout")
 mouse_filter = 2
-texture = ExtResource("29_oilwell")
-expand_mode = 1
-stretch_mode = 5
+z_index = 100
 
-[node name="OilLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/OilItem" unique_id=641530814]
+[node name="MoreFlyoutMargin" type="MarginContainer" parent="HUDRoot/TopBar/HBox/ResourceBar/MoreButton/MoreFlyout"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="MoreFlyoutList" type="VBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar/MoreButton/MoreFlyout/MoreFlyoutMargin"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "OIL --"
-
-[node name="FuelItem" type="HBoxContainer" parent="HUDRoot/TopBar/HBox/ResourceBar" unique_id=667355371]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Icon" type="TextureRect" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=691358137]
-modulate = Color(0.91, 0.87, 0.78, 1)
-material = SubResource("ShaderMaterial_icon_tint")
-custom_minimum_size = Vector2(18, 18)
-layout_mode = 2
-mouse_filter = 2
-texture = ExtResource("30_fire")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="FuelLabel" type="Label" parent="HUDRoot/TopBar/HBox/ResourceBar/FuelItem" unique_id=1213706026]
-unique_name_in_owner = true
-layout_mode = 2
-text = "FUEL --"
+theme_override_constants/separation = 2
 
 [node name="SpacerRight" type="Control" parent="HUDRoot/TopBar/HBox" unique_id=128137147]
 layout_mode = 2

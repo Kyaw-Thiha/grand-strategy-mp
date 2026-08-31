@@ -7,6 +7,7 @@ import type { GameRoomState, DivisionState, GridCellState, RelationState } from 
 import type { MovementSystem } from "./movement_system.js";
 import type { SubprovinceSystem } from "./subprovince_system.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
+import { tungstenPenMultiplier, drainCombatAttrition } from "./resource_economy_system.js";
 import type { GridCellDelta, UnitIncapacitatedPayload, RoundResolvedPayload, UnitTypeValue } from "../types/tactical_types.js";
 import {
   getTargetCells,
@@ -864,6 +865,12 @@ export class CombatSystem {
     pair:           ActivePair,
     broadcast:      (type: string, msg: unknown) => void,
     attackerPerkIds: string[],
+    // Branch B — attacker nation's tungsten availability shifts the effective pen value fed
+    // into _armorPenMultiplier (RESOURCE_ECONOMY.md's Tungsten section: a stat-table shift,
+    // never a rate/block). Defender nation's Hospital multiplier reduces HP damage taken,
+    // pooled nationally with hard diminishing returns (ECONOMY_BUILDINGS.md's Hospital).
+    tungstenMult:   number = 1.0,
+    hospitalMult:   number = 1.0,
   ): GridCellDelta[] {
     if (!attacker.grid || !defender.grid) return [];
 
@@ -925,7 +932,7 @@ export class CombatSystem {
       } else {
         targets = getTargetCells(attCell.unit_type, attRow, attCol, defender.grid.cells, roundNumber, Infinity, cover);
       }
-      const attackerPen = UNIT_COMBAT_STATS[attCell.unit_type]?.pen ?? 10;
+      const attackerPen = (UNIT_COMBAT_STATS[attCell.unit_type]?.pen ?? 10) * tungstenMult;
 
       // Column-shift modifiers: attacker-level (apply to all targets uniformly)
       let sideArmourActive = false;
@@ -963,7 +970,7 @@ export class CombatSystem {
         const defenderFormationBonus = defenderFormationBonuses.get(tIdx) ?? IDENTITY_FORMATION_BONUS;
         const defenderTerrainMod = defenderTerrainMods.get(tIdx) ?? IDENTITY_TERRAIN_MODIFIERS;
         const artyMult = artyMultMap?.get(tIdx) ?? 1.0;
-        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * attackerRowPerk.hp_dealt_mult * attackerFormationBonus.hp_dealt_mult * attackerTerrainMod.hp_dealt_mult) / xpHpMult);
+        tCell.hp          = Math.max(0, tCell.hp - (perTargetHp * penMult * tacticalHpBonus * artyMult * hospitalMult * attackerRowPerk.hp_dealt_mult * attackerFormationBonus.hp_dealt_mult * attackerTerrainMod.hp_dealt_mult) / xpHpMult);
         tCell.suppression = Math.min(100, tCell.suppression + (perTargetSupp * cavMult * attackerRowPerk.supp_dealt_mult * attackerFormationBonus.supp_dealt_mult * attackerTerrainMod.supp_dealt_mult * defenderRowPerk.supp_resist_mult * defenderFormationBonus.supp_resist_mult * defenderTerrainMod.supp_resist_mult) / xpSuppResist);
 
         const floor = _getIncapFloor(tCell.unit_type);
@@ -1041,11 +1048,21 @@ export class CombatSystem {
     this._decayCellSuppression(divB, divB.combat_state === "retreating", pair.battle_cover);
     const aNation1 = state.nations.get(divA.nation_id);
     const aPerks1  = aNation1 ? Array.from(aNation1.researched_perks) : [];
-    const deltasB  = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast, aPerks1);
+    const bNation1 = state.nations.get(divB.nation_id);
+    const tungstenMult1 = tungstenPenMultiplier(aNation1?.resources.get("tungsten") ?? 0);
+    const hospitalMult1 = bNation1?.hospital_damage_mult ?? 1.0;
+    const deltasB  = this._applyPerCellDamage(divA, divB, damageByA, pair, broadcast, aPerks1, tungstenMult1, hospitalMult1);
     this._decayCellSuppression(divA, divA.combat_state === "retreating", pair.battle_cover);
     const aNation2 = state.nations.get(divB.nation_id);
     const aPerks2  = aNation2 ? Array.from(aNation2.researched_perks) : [];
-    const deltasA  = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast, aPerks2);
+    const tungstenMult2 = tungstenPenMultiplier(aNation2?.resources.get("tungsten") ?? 0);
+    const hospitalMult2 = aNation1?.hospital_damage_mult ?? 1.0;
+    const deltasA  = this._applyPerCellDamage(divB, divA, damageByB, pair, broadcast, aPerks2, tungstenMult2, hospitalMult2);
+
+    // Branch B — Rubber/Nitrate combat-round attrition (RESOURCE_ECONOMY.md's Rubber/Nitrates
+    // sections). Drains both nations' stockpiles proportional to engaged vehicle/infantry-arty
+    // cell counts, once per round (this function runs once per round-boundary pair resolution).
+    drainCombatAttrition([divA, divB], state.nations);
 
     // Recompute division-level aggregates from cell data
     divB.hp           = this._computeDivisionHp(divB.grid?.cells ?? []);

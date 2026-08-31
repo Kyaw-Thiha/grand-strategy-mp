@@ -76,22 +76,26 @@ export class EconomyBuildingSystem {
    * Called once per gameTick. Every building slot in a province progresses independently and
    * in parallel — there is no shared local construction capacity within a province (unlike
    * Naval's repair/construction slot-sharing, which is a documented special case elsewhere).
-   * industryConstructionMultiplier is 1.0 until Branch B wires the real per-nation Industry
-   * Pool "construction speed" slice.
+   *
+   * `industryConstructionMultiplier` is a per-nation lookup (Branch B — the Industry Pool's
+   * "construction speed" slice is allocated per-nation, not globally, so a single flat number
+   * can't be correct once more than one nation exists). Branch A hardcoded 1.0 for everyone;
+   * pass `() => 1.0` to preserve that behavior.
    *
    * Broadcasts BUILDING_UPDATES on every tick a province has a non-empty construction_queue
    * (not only on completion), so client progress bars advance visibly every tick.
    */
   tick(
-    provinces: { get(provinceId: string): { infrastructure: number } | undefined },
-    industryConstructionMultiplier: number,
+    provinces: { get(provinceId: string): { infrastructure: number; owner_id: string } | undefined },
+    industryConstructionMultiplier: (ownerNationId: string) => number,
     broadcast: (type: string, msg: unknown) => void,
   ): void {
     for (const [provinceId, econ] of this.provinceEconomy) {
       if (econ.construction_queue.length === 0) continue;
 
-      const infra = provinces.get(provinceId)?.infrastructure ?? 50;
-      const rate = baseConstructionRate(infra) * industryConstructionMultiplier;
+      const province = provinces.get(provinceId);
+      const infra = province?.infrastructure ?? 50;
+      const rate = baseConstructionRate(infra) * industryConstructionMultiplier(province?.owner_id ?? "");
 
       for (const project of econ.construction_queue) {
         project.points_remaining = Math.max(0, project.points_remaining - rate);
