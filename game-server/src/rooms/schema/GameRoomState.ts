@@ -37,6 +37,9 @@ export class NationState extends Schema {
   @type("number") manpower_ceiling:   number = 0;
   // Keyed by unit_type — populated by Branch C (Unit Production/Reserve).
   @type({ map: "number" }) reserve_pool = new MapSchema<number>();
+  // One shared national cap across every unit_type, same shape as resource_storage_cap
+  // (Branch B precedent) — Warehouse's Reserve-cap extension (Branch C) populates this.
+  @type("number") reserve_cap: number = 0;
   // Keyed by resource type + "construction_speed" + "unit_production_speed" — populated by
   // Branch B (Industry Pool allocation).
   @type({ map: "number" }) industry_alloc = new MapSchema<number>();

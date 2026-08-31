@@ -4,6 +4,11 @@ import { getUnitProductionStats, UNIT_PRODUCTION_STATS, PRODUCTION_BUILDING_TYPE
 import { getBuildingStats, BUILDING_TYPES } from "../src/data/building_stats.js";
 import { UnitType } from "../src/types/tactical_types.js";
 import { AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
+import {
+  rankDemand, scoreTypeForBuilding, assignIdleBuildings, DemandSlot,
+  UnitProductionSystem,
+} from "../src/systems/unit_production_system.js";
+import { NationState, DivisionState } from "../src/rooms/schema/GameRoomState.js";
 
 describe("lane:economy | Unit production stats", () => {
   it("every non-empty UnitType has a build_points entry", () => {
@@ -57,5 +62,280 @@ describe("lane:economy | base_rate_by_level for production buildings", () => {
     const nonProduction = BUILDING_TYPES.find((t) => !PRODUCTION_BUILDING_TYPES.includes(t));
     assert.ok(nonProduction, "expected at least one non-production building type");
     assert.strictEqual(getBuildingStats(nonProduction!).base_rate_by_level, undefined);
+  });
+});
+
+describe("lane:economy | Auto-scheduler priority ranking", () => {
+  it("ranks by missing_pct descending, pooling marshalling and field_resupply together", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "a", unit_type: "infantry", missing_pct: 0.4, stream: "field_resupply" },
+      { slot_id: "b", unit_type: "infantry", missing_pct: 1.0, stream: "marshalling" },
+      { slot_id: "c", unit_type: "infantry", missing_pct: 0.1, stream: "field_resupply" },
+    ];
+    const ranked = rankDemand(slots);
+    assert.deepStrictEqual(ranked.map((s) => s.slot_id), ["b", "a", "c"]);
+  });
+
+  it("a fully-healthy slot (missing_pct 0) never outranks any damaged slot", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "healthy", unit_type: "infantry", missing_pct: 0, stream: "field_resupply" },
+      { slot_id: "damaged", unit_type: "infantry", missing_pct: 0.01, stream: "field_resupply" },
+    ];
+    assert.strictEqual(rankDemand(slots)[0].slot_id, "damaged");
+  });
+});
+
+describe("lane:economy | Cost-weighted type aggregation", () => {
+  it("type_score = sum(missing_pct x build_points) per unit_type, higher aggregate wins", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "a", unit_type: "light_tank", missing_pct: 1.0, stream: "marshalling" },
+      { slot_id: "b", unit_type: "light_tank", missing_pct: 1.0, stream: "marshalling" },
+      { slot_id: "c", unit_type: "heavy_tank", missing_pct: 0.5, stream: "marshalling" },
+    ];
+    const scores = scoreTypeForBuilding("tank_plant", slots, true);
+    assert.strictEqual(scores.get("light_tank"), 120);
+    assert.strictEqual(scores.get("heavy_tank"), 70);
+  });
+
+  it("only slots whose unit_type is produced_by this buildingType are scored", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "a", unit_type: "infantry", missing_pct: 1.0, stream: "marshalling" },
+      { slot_id: "b", unit_type: "light_tank", missing_pct: 1.0, stream: "marshalling" },
+    ];
+    const scores = scoreTypeForBuilding("tank_plant", slots, true);
+    assert.ok(!scores.has("infantry"));
+    assert.ok(scores.has("light_tank"));
+  });
+});
+
+describe("lane:economy | Chromium hard-gate — exclusion, not deprioritization", () => {
+  it("chromium_gated=true (heavy_tank) is excluded entirely when chromiumAvailable is false", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "a", unit_type: "heavy_tank", missing_pct: 1.0, stream: "marshalling" },
+      { slot_id: "b", unit_type: "medium_tank", missing_pct: 1.0, stream: "marshalling" },
+    ];
+    const scores = scoreTypeForBuilding("tank_plant", slots, false);
+    assert.ok(!scores.has("heavy_tank"));
+    assert.ok(scores.has("medium_tank"));
+  });
+
+  it("heavy_tank resumes scoring the instant chromiumAvailable flips true, same call, no re-trigger needed", () => {
+    const slots: DemandSlot[] = [{ slot_id: "a", unit_type: "heavy_tank", missing_pct: 1.0, stream: "marshalling" }];
+    assert.ok(scoreTypeForBuilding("tank_plant", slots, true).has("heavy_tank"));
+    assert.ok(!scoreTypeForBuilding("tank_plant", slots, false).has("heavy_tank"));
+  });
+});
+
+describe("lane:economy | Pull assignment", () => {
+  it("an idle building with no compatible open demand stays idle, no assignment, no throw", () => {
+    const assignments = assignIdleBuildings(
+      [{ province_id: "p1", building_type: "tank_plant" }],
+      new Map(),
+    );
+    assert.strictEqual(assignments.length, 0);
+  });
+
+  it("assigns the highest-scoring unit_type for each idle building", () => {
+    const demandByBuilding = new Map([
+      ["barracks", new Map([["infantry", 30], ["mg", 50]])],
+    ]);
+    const assignments = assignIdleBuildings(
+      [{ province_id: "p1", building_type: "barracks" }],
+      demandByBuilding,
+    );
+    assert.strictEqual(assignments[0].unit_type, "mg");
+  });
+});
+
+function makeNation(): NationState {
+  const n = new NationState();
+  n.nation_id = "test_nation";
+  n.reserve_cap = 200;
+  return n;
+}
+
+describe("lane:economy | Production tick — building to Reserve", () => {
+  it("effective_build_rate = base_rate(level) x industry_pool_unit_production_speed_multiplier", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    const provinceEconomies = new Map([["p1", { buildings: { barracks: 1 } }]]);
+    sys.assignOrder("p1", "barracks", "infantry"); // build_points=30, base_rate lvl1=3
+    for (let t = 0; t < 20; t++) {
+      sys.tickProduction(provinceEconomies, () => nation, (allocPct) => 1.0 + allocPct / 100);
+    }
+    assert.ok((nation.reserve_pool.get("infantry") ?? 0) >= 100);
+  });
+
+  it("a heavy tank (build_points 140) takes longer than a light tank (60) at the same building level", () => {
+    const sys1 = new UnitProductionSystem();
+    const sys2 = new UnitProductionSystem();
+    const nation1 = makeNation();
+    const nation2 = makeNation();
+    const econ = new Map([["p1", { buildings: { tank_plant: 1 } }]]);
+    sys1.assignOrder("p1", "tank_plant", "heavy_tank");
+    sys2.assignOrder("p1", "tank_plant", "light_tank");
+    for (let t = 0; t < 5; t++) {
+      sys1.tickProduction(econ, () => nation1, () => 1.0);
+      sys2.tickProduction(econ, () => nation2, () => 1.0);
+    }
+    assert.ok((nation2.reserve_pool.get("light_tank") ?? 0) >= (nation1.reserve_pool.get("heavy_tank") ?? 0));
+  });
+
+  it("on completion, produced HP-equivalent is added to reserve_pool, not to any division directly", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    const econ = new Map([["p1", { buildings: { barracks: 5 } }]]);
+    sys.assignOrder("p1", "barracks", "infantry");
+    for (let t = 0; t < 5; t++) sys.tickProduction(econ, () => nation, () => 1.0);
+    assert.ok((nation.reserve_pool.get("infantry") ?? 0) > 0);
+  });
+
+  it("reserve_cap clamps reserve_pool — overflow production is wasted, not banked past the cap", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    nation.reserve_cap = 50;
+    nation.reserve_pool.set("infantry", 45);
+    const econ = new Map([["p1", { buildings: { barracks: 5 } }]]);
+    sys.assignOrder("p1", "barracks", "infantry");
+    for (let t = 0; t < 5; t++) sys.tickProduction(econ, () => nation, () => 1.0);
+    assert.strictEqual(nation.reserve_pool.get("infantry"), 50);
+  });
+
+  it("a building with level 0 (demolished/never built) is a no-op, not a throw", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    const econ = new Map([["p1", { buildings: { barracks: 0 } }]]);
+    sys.assignOrder("p1", "barracks", "infantry");
+    assert.doesNotThrow(() => sys.tickProduction(econ, () => nation, () => 1.0));
+  });
+});
+
+describe("lane:economy | Idle building scan", () => {
+  it("only production building types with level > 0 and no in-progress order are idle", () => {
+    const sys = new UnitProductionSystem();
+    const econs = [
+      { province_id: "p1", owner_id: "n1", buildings: { barracks: 1, tank_plant: 0 } },
+      { province_id: "p2", owner_id: "n1", buildings: { ordnance_factory: 2 } },
+      { province_id: "p3", owner_id: "", buildings: { barracks: 1 } }, // unowned — excluded
+    ];
+    sys.assignOrder("p2", "ordnance_factory", "artillery");
+    const idle = sys.listIdleBuildings(econs);
+    assert.deepStrictEqual(idle, [{ province_id: "p1", building_type: "barracks" }]);
+  });
+});
+
+describe("lane:economy | Marshalling fill", () => {
+  it("fill_rate = MARSHALLING_RATE when reserve_pool has enough of the needed type", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    nation.reserve_pool.set("infantry", 1000);
+    const id = sys.startMarshalling("test_nation", "tmpl1", "capital", [{ cell_index: 0, unit_type: "infantry" }]);
+    sys.tickMarshalling(new Map([["test_nation", nation]]));
+    const data = sys.getMarshalling(id)!;
+    assert.strictEqual(data.slots[0].current_hp, 20); // MARSHALLING_RATE placeholder = 20
+  });
+
+  it("fill_rate = min(MARSHALLING_RATE, production_rate) when Reserve is empty for that type", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation(); // reserve_pool empty
+    const id = sys.startMarshalling("test_nation", "tmpl1", "capital", [{ cell_index: 0, unit_type: "infantry" }]);
+    sys.assignOrder("p1", "barracks", "infantry"); // build_points 30, no ticks run -> effective_rate stays 0
+    sys.tickMarshalling(new Map([["test_nation", nation]]));
+    assert.strictEqual(sys.getMarshalling(id)!.slots[0].current_hp, 0);
+  });
+
+  it("MARSHALLING_RATE is a flat national constant, independent of province/building level", () => {
+    const sys = new UnitProductionSystem();
+    const nationA = makeNation();
+    nationA.reserve_pool.set("infantry", 1000);
+    const idA = sys.startMarshalling("test_nation", "tmpl1", "province_a", [{ cell_index: 0, unit_type: "infantry" }]);
+    sys.tickMarshalling(new Map([["test_nation", nationA]]));
+    assert.strictEqual(sys.getMarshalling(idA)!.slots[0].current_hp, 20);
+  });
+});
+
+describe("lane:economy | Aggregate HP% and CANCEL_MARSHALLING", () => {
+  it("aggregate_hp_pct = sum(current_hp) / (slot_count x 100), whole-division not headcount", () => {
+    const sys = new UnitProductionSystem();
+    const id = sys.startMarshalling("n1", "t1", "capital", [
+      { cell_index: 0, unit_type: "infantry" },
+      { cell_index: 1, unit_type: "infantry" },
+    ]);
+    const data = sys.getMarshalling(id)!;
+    data.slots[0].current_hp = 100;
+    data.slots[1].current_hp = 0;
+    assert.strictEqual(sys.aggregateHpPct(data), 0.5);
+  });
+
+  it("a 40%-by-slot-count-full-HP template can cross 50% before a 60%-by-slot-count-half-HP template", () => {
+    const sys = new UnitProductionSystem();
+    const idA = sys.startMarshalling("n1", "t1", "capital", Array.from({ length: 5 }, (_, i) => ({ cell_index: i, unit_type: "infantry" })));
+    const dataA = sys.getMarshalling(idA)!;
+    dataA.slots[0].current_hp = 100;
+    dataA.slots[1].current_hp = 100;
+    // 2/5 slots filled, both full HP -> 40% by slot count, aggregate = 200/500 = 0.4 (not yet 50%, but higher than B)
+    const idB = sys.startMarshalling("n1", "t2", "capital", Array.from({ length: 5 }, (_, i) => ({ cell_index: i, unit_type: "infantry" })));
+    const dataB = sys.getMarshalling(idB)!;
+    dataB.slots[0].current_hp = 50;
+    dataB.slots[1].current_hp = 50;
+    dataB.slots[2].current_hp = 50;
+    // 3/5 slots filled at half HP -> 60% by slot count, aggregate = 150/500 = 0.3
+    assert.ok(sys.aggregateHpPct(dataA) > sys.aggregateHpPct(dataB));
+  });
+
+  it("cancelling returns already-allocated HP-equivalent back to reserve_pool, non-destructive", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    const id = sys.startMarshalling("test_nation", "t1", "capital", [{ cell_index: 0, unit_type: "infantry" }]);
+    sys.getMarshalling(id)!.slots[0].current_hp = 40;
+    sys.cancelMarshalling(id, new Map([["test_nation", nation]]));
+    assert.strictEqual(nation.reserve_pool.get("infantry"), 40);
+    assert.strictEqual(sys.getMarshalling(id), undefined);
+  });
+});
+
+describe("lane:economy | Field-supply delivery — simplified placeholder", () => {
+  it("field_supply_line_capacity delivers a rate slower than MARSHALLING_RATE", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    nation.reserve_pool.set("infantry", 1000);
+    const div = new DivisionState();
+    div.nation_id = "test_nation";
+    div.grid.cells[0].unit_type = "infantry";
+    div.grid.cells[0].hp = 0;
+    sys.tickFieldDelivery([div], new Map([["test_nation", nation]]));
+    assert.ok(div.grid.cells[0].hp > 0 && div.grid.cells[0].hp <= 10); // placeholder rate = MARSHALLING_RATE*0.5 = 10
+  });
+
+  it("a fully-healthy cell (hp=100) is not touched", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    nation.reserve_pool.set("infantry", 1000);
+    const div = new DivisionState();
+    div.nation_id = "test_nation";
+    div.grid.cells[0].unit_type = "infantry";
+    div.grid.cells[0].hp = 100;
+    sys.tickFieldDelivery([div], new Map([["test_nation", nation]]));
+    assert.strictEqual(div.grid.cells[0].hp, 100);
+  });
+
+  it("an empty cell (unit_type === '') is never drawn against", () => {
+    const sys = new UnitProductionSystem();
+    const nation = makeNation();
+    nation.reserve_pool.set("infantry", 1000);
+    const div = new DivisionState();
+    div.nation_id = "test_nation";
+    div.grid.cells[0].unit_type = "";
+    div.grid.cells[0].hp = 0;
+    sys.tickFieldDelivery([div], new Map([["test_nation", nation]]));
+    assert.strictEqual(div.grid.cells[0].hp, 0);
+    assert.strictEqual(nation.reserve_pool.get("infantry"), 1000);
+  });
+});
+
+describe("lane:economy | Warehouse Reserve cap", () => {
+  it("reserve_cap defaults to 0 on a fresh NationState until _economyTick computes it (schema default)", () => {
+    const nation = new NationState();
+    assert.strictEqual(nation.reserve_cap, 0);
   });
 });
