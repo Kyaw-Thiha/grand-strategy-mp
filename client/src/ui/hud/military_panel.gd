@@ -13,6 +13,7 @@ signal close_requested()
 const _CONTENT_PATH: String = "Margin/VBox/ContentBody"
 
 @onready var _close_button: Button = %CloseButton
+@onready var _deploying_list: VBoxContainer = %DeployingList
 
 
 func _ready() -> void:
@@ -26,6 +27,8 @@ func _ready() -> void:
 	EventBus.air_wing_added.connect(func(_id: String) -> void: _refresh_air_list())
 	EventBus.air_wing_updated.connect(func(_id: String) -> void: _refresh_air_list())
 	EventBus.air_wing_removed.connect(func(_id: String) -> void: _refresh_air_list())
+	EventBus.marshalling_updated.connect(_refresh_deploying)
+	_refresh_deploying()
 
 	# DISABLED: re-enable when active-division list is restored
 	# EventBus.division_added.connect(func(_id: String) -> void: _refresh_land_list())
@@ -179,6 +182,53 @@ static func _derive_division_type(cells: Array) -> String:
 	if inf >= 5:
 		return "Infantry Division"
 	return "Mixed"
+
+
+# ── Deploying divisions ────────────────────────────────────────────────────
+
+func _refresh_deploying() -> void:
+	for child in _deploying_list.get_children():
+		child.queue_free()
+	if GameState.marshalling_divisions.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No divisions currently marshalling. Raise one from the Production panel."
+		_deploying_list.add_child(empty_label)
+		return
+	for mid: String in GameState.marshalling_divisions:
+		var data: Dictionary = GameState.marshalling_divisions[mid]
+		var pct: float = float(data.get("aggregate_hp_pct", 0.0)) * 100.0
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		var by_type: Dictionary = {}
+		for slot: Dictionary in data.get("slots", []):
+			if float(slot.get("current_hp", 0.0)) >= 100.0:
+				continue
+			var ut: String = slot.get("unit_type", "")
+			by_type[ut] = by_type.get(ut, 0) + 1
+		var missing_parts: Array[String] = []
+		for ut: String in by_type:
+			missing_parts.append("%dx %s" % [by_type[ut], ut])
+		label.text = "%s   %d%% agg. HP   Missing: %s" % [
+			data.get("template_id", ""), int(pct), ", ".join(missing_parts) if missing_parts.size() > 0 else "none",
+		]
+		row.add_child(label)
+
+		var btn_cancel := Button.new()
+		btn_cancel.text = "Cancel"
+		btn_cancel.pressed.connect(func() -> void:
+			CommandQueue.submit("CANCEL_MARSHALLING", {"marshalling_id": mid})
+		)
+		row.add_child(btn_cancel)
+
+		var btn_deploy := Button.new()
+		btn_deploy.text = "Force Deploy"
+		btn_deploy.disabled = pct < 50.0
+		btn_deploy.pressed.connect(func() -> void:
+			CommandQueue.submit("FORCE_DEPLOY", {"marshalling_id": mid})
+		)
+		row.add_child(btn_deploy)
+
+		_deploying_list.add_child(row)
 
 
 # ── Air tab ────────────────────────────────────────────────────────────────
