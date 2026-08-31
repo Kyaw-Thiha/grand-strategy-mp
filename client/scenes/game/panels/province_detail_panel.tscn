@@ -81,6 +81,11 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "Germany | Pop 0 | Ind 0 | Infra 0"
 
+[node name="ResourcesProducedContainer" type="VBoxContainer" parent="OuterMargin/Panel/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 2
+
 [node name="Scroll" type="ScrollContainer" parent="OuterMargin/Panel/Margin/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3

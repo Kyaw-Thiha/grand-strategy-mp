@@ -50,6 +50,7 @@ var _row_widgets: Dictionary = {}
 @onready var _meta: Label = %Meta
 @onready var _close_button: Button = %CloseButton
 @onready var _rows_container: VBoxContainer = %RowsContainer
+@onready var _resources_produced_container: VBoxContainer = %ResourcesProducedContainer
 
 
 func _ready() -> void:
@@ -80,10 +81,24 @@ func _on_province_economy_updated(province_id: String) -> void:
 
 ## Full teardown + recreate — only called when a (possibly new) province is opened, never on
 ## a routine economy tick, so the ScrollContainer's child list stays stable while browsing.
+# Mirrors game-server/src/data/resource_stats.ts's EXTRACTION_STATS base_output_by_level —
+# TBD playtesting placeholder values, kept in sync manually since this client-side display is
+# an approximation (the server doesn't currently broadcast per-province/per-building output,
+# only nationally-aggregated net rates) intended to show relative scale, not an exact live
+# industry-multiplied number.
+const _RES_BASE_OUTPUT_BY_LEVEL := {
+	"res_grain": [4, 7, 11, 16, 22], "res_iron": [4, 7, 11, 16, 22],
+	"res_oil": [3, 6, 10, 15, 21], "res_rubber": [3, 6, 10, 15, 21], "res_nitrates": [3, 6, 10, 15, 21],
+	"res_tungsten": [1, 2, 3, 4, 5], "res_chromium": [1, 2, 3, 4, 5], "res_aluminium": [1, 2, 3, 4, 5],
+	"res_uranium": [1, 2],
+}
+
+
 func _rebuild_rows() -> void:
 	if _current_province_id.is_empty():
 		return
 	_refresh_header()
+	_refresh_resources_produced()
 
 	for child in _rows_container.get_children():
 		child.queue_free()
@@ -159,6 +174,7 @@ func _update_rows_in_place() -> void:
 	if _current_province_id.is_empty() or _row_widgets.is_empty():
 		return
 	_refresh_header()
+	_refresh_resources_produced()
 
 	var econ: Dictionary = GameState.province_economy.get(_current_province_id, {})
 	var buildings: Dictionary = econ.get("buildings", {})
@@ -224,6 +240,60 @@ func _populate_action_slot(action_slot: HBoxContainer, building_type: String, le
 		btn.custom_minimum_size = Vector2(85, 20)
 		btn.add_theme_font_size_override("font_size", 11)
 		action_slot.add_child(btn)
+
+
+## "RESOURCES PRODUCED HERE" block — only shown if this province has at least one
+## resource-extraction building with output > 0; omitted entirely otherwise, per
+## plans/economy_production_ui_handoff.md §3.
+func _refresh_resources_produced() -> void:
+	for child in _resources_produced_container.get_children():
+		child.queue_free()
+
+	var econ: Dictionary = GameState.province_economy.get(_current_province_id, {})
+	var buildings: Dictionary = econ.get("buildings", {})
+	var resource_deposits: Dictionary = econ.get("resource_deposits", {})
+
+	var any_output := false
+	for building_type: String in _RES_BASE_OUTPUT_BY_LEVEL:
+		var level: int = int(buildings.get(building_type, 0))
+		if level <= 0:
+			continue
+		var resource_type: String = building_type.substr(4)
+		var deposit: float = float(resource_deposits.get(resource_type, 0))
+		if deposit <= 0.0:
+			continue
+
+		if not any_output:
+			var heading := Label.new()
+			heading.text = "RESOURCES PRODUCED HERE"
+			heading.add_theme_font_size_override("font_size", 11)
+			heading.add_theme_color_override("font_color", Color(0.96, 0.78, 0.38, 1.0))
+			_resources_produced_container.add_child(heading)
+			any_output = true
+
+		var base_by_level: Array = _RES_BASE_OUTPUT_BY_LEVEL[building_type]
+		var base_output: float = float(base_by_level[min(level, base_by_level.size()) - 1]) * (deposit / 100.0)
+
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var label := Label.new()
+		label.text = BUILDING_LABELS.get(building_type, building_type.capitalize())
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.add_theme_font_size_override("font_size", 11)
+		row.add_child(label)
+		var bar := ProgressBar.new()
+		bar.custom_minimum_size = Vector2(70, 12)
+		bar.max_value = base_by_level[base_by_level.size() - 1]
+		bar.value = base_output
+		bar.show_percentage = false
+		row.add_child(bar)
+		var value_label := Label.new()
+		value_label.text = "base %.1f" % base_output
+		value_label.add_theme_font_size_override("font_size", 10)
+		row.add_child(value_label)
+		_resources_produced_container.add_child(row)
+
+	_resources_produced_container.visible = any_output
 
 
 func _on_build_pressed(building_type: String) -> void:

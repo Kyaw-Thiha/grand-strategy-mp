@@ -45,6 +45,23 @@ var supply_routes: Dictionary = {}
 var naval_contact_markers: Dictionary = {}
 # resources: { resource_type → amount }, this player's own nation only
 var resources: Dictionary = {}
+# Branch B — net rate (+N/t or -N/t) per resource type, from RESOURCE_UPDATES' net_rates field.
+var resource_net_rates: Dictionary = {}
+var manpower_available: float = 0.0
+var manpower_ceiling: float = 0.0
+var chromium_available: bool = true
+var science_points: float = 0.0
+var convoy_capacity: float = 0.0
+var oil_priority: String = "balanced"
+# Branch B — Warehouse's per-resource storage ceiling, keyed same as `resources`.
+var resource_storage_cap: Dictionary = {}
+# Branch B — Industry Pool slider values (0-100), keyed by resource type + "construction_speed"
+# + "unit_production_speed".
+var industry_alloc: Dictionary = {}
+# Branch B — true while this nation has at least one division with an oil-consuming unit
+# actually being penalized this tick (RESOURCE_ECONOMY.md's "!" marker rule: only shown when
+# the penalty is actively biting, never purely for low stock with no active penalty).
+var oil_penalty_active: bool = false
 # province_economy: { province_id → { "buildings": {...}, "resource_deposits": {...},
 #   "construction_queue": [...] } } — off-schema, mirrors DivisionState.grid's precedent
 var province_economy: Dictionary = {}
@@ -141,6 +158,16 @@ func _apply_building_updates(data: Dictionary) -> void:
 func _apply_resource_updates(data: Dictionary) -> void:
 	for key: String in data.get("resources", {}):
 		resources[key] = data["resources"][key]
+	resource_net_rates = data.get("net_rates", {})
+	manpower_available = data.get("manpower_available", manpower_available)
+	manpower_ceiling = data.get("manpower_ceiling", manpower_ceiling)
+	chromium_available = data.get("chromium_available", chromium_available)
+	science_points = data.get("science_points", science_points)
+	convoy_capacity = data.get("convoy_capacity", convoy_capacity)
+	oil_priority = data.get("oil_priority", oil_priority)
+	oil_penalty_active = data.get("oil_penalty_active", false)
+	resource_storage_cap = data.get("resource_storage_cap", resource_storage_cap)
+	industry_alloc = data.get("industry_alloc", industry_alloc)
 	EventBus.resources_updated.emit()
 
 
