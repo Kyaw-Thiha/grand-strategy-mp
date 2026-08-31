@@ -20,6 +20,10 @@ export const UnitType = {
   FORCE_RECON_SNIPER: "force_recon_sniper",
   HOWITZER:           "howitzer",
   SELF_PROPELLED_GUN: "self_propelled_gun",
+  // Named in unit_production_handoff.md §7.1/§7.2 and ECONOMY_BUILDINGS.md's Barracks/Tank
+  // Plant entries but previously missing from this enum (Branch C — Phase 9 Task C).
+  MOTORISED_INF:   "motorised_infantry",
+  MECHANISED_INF:  "mechanised_infantry",
 } as const;
 
 export type UnitTypeValue = typeof UnitType[keyof typeof UnitType];

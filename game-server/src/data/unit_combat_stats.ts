@@ -35,4 +35,12 @@ export const UNIT_COMBAT_STATS: Record<string, UnitCombatStats> = {
   [UnitType.FORCE_RECON_SNIPER]: { pen: 15, armour:  0, hp_floor_pct: 20, stealth_level: 2, anti_stealth: 2, chromium_gated: false },
   [UnitType.HOWITZER]:           { pen: 55, armour:  0, hp_floor_pct:  0, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
   [UnitType.SELF_PROPELLED_GUN]: { pen: 50, armour: 10, hp_floor_pct: 30, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
+  // Branch C (Phase 9 Task C) — added alongside RAISE_DIVISION/production support.
+  // Motorised infantry: leg/mounted incapacitation bucket (Barracks-produced, same profile
+  // shape as INFANTRY), but oil/rubber-consuming per RESOURCE_ECONOMY.md's Oil section.
+  [UnitType.MOTORISED_INF]:  { pen: 10, armour:  0, hp_floor_pct: 20, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
+  // Mechanised infantry: vehicle incapacitation bucket (Tank Plant-produced per
+  // TACTICAL_COMBAT.md/ECONOMY_BUILDINGS.md — "belongs here despite its name"), lightly
+  // armoured halftrack-class.
+  [UnitType.MECHANISED_INF]: { pen: 15, armour: 10, hp_floor_pct: 30, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
 };
