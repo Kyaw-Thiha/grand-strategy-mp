@@ -38,14 +38,23 @@ func _on_pressed() -> void:
 		_stop_picking(false)
 		return
 	_picking = true
-	text = "Click a province..."
+	text = "Click your own province..."
 	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
 	if not EventBus.province_selected.is_connected(_on_province_picked):
 		EventBus.province_selected.connect(_on_province_picked)
 
 
+## Only the player's own territory is a valid deploy target — a click on neutral/enemy/allied
+## territory is rejected and picking mode stays active so the player can try again, rather than
+## silently accepting a province the server would reject anyway (RAISE_DIVISION/
+## UPDATE_MARSHALLING_PROVINCE both re-check ownership server-side too; this is the client-side
+## half so the picker doesn't show a selection that was never actually going to work).
 func _on_province_picked(province_id: String) -> void:
 	if not _picking:
+		return
+	var province_data: Dictionary = GameState.provinces.get(province_id, {})
+	if province_data.get("owner_id", "") != GameState.get_my_nation_id():
+		EventBus.notification_requested.emit("Can only deploy on your own territory.", "warning")
 		return
 	_stop_picking(false)
 	selected_province_id = province_id

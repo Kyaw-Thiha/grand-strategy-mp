@@ -38,6 +38,11 @@ const COLOR_NEUTRAL := Color(0.55, 0.55, 0.5, 1.0)
 const COLOR_GREEN := Color(0.3, 0.75, 0.35, 1.0)
 const COLOR_BLUE := Color(0.25, 0.55, 0.85, 1.0)
 
+# template_id -> the province the player last chose in that row's ProvincePickerButton, so a
+# manual override survives _refresh_templates() rebuilding the row (e.g. right after pressing
+# Raise, which itself triggers a refresh) instead of silently reverting to the capital default.
+var _chosen_home_province: Dictionary = {}
+
 
 func _ready() -> void:
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
@@ -158,9 +163,10 @@ func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> 
 
 	var action_row := HBoxContainer.new()
 
-	var default_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+	var capital_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+	var starting_province: String = _chosen_home_province.get(template_id, capital_province)
 	var province_picker := ProvincePickerButton.new()
-	province_picker.selected_province_id = default_province
+	province_picker.selected_province_id = starting_province
 	province_picker.custom_minimum_size = Vector2(100, 24)
 	province_picker.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 	action_row.add_child(province_picker)
@@ -168,12 +174,13 @@ func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> 
 	var raise_btn := Button.new()
 	raise_btn.text = "Raise"
 	raise_btn.custom_minimum_size = Vector2(52, 24)
-	raise_btn.disabled = default_province.is_empty()
-	raise_btn.tooltip_text = "Raise this division at the selected province" if not default_province.is_empty() else "No capital province known yet"
+	raise_btn.disabled = starting_province.is_empty()
+	raise_btn.tooltip_text = "Raise this division at the selected province" if not starting_province.is_empty() else "No capital province known yet"
 	raise_btn.pressed.connect(func() -> void:
 		_on_raise_pressed(template_id, cells, province_picker.selected_province_id)
 	)
 	province_picker.province_changed.connect(func(pid: String) -> void:
+		_chosen_home_province[template_id] = pid
 		raise_btn.disabled = pid.is_empty()
 	)
 	action_row.add_child(raise_btn)

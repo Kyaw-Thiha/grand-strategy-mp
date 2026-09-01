@@ -86,7 +86,7 @@ func _refresh_deploying() -> void:
 		child.queue_free()
 	if GameState.marshalling_divisions.is_empty():
 		var empty_label := Label.new()
-		empty_label.text = "No divisions currently marshalling. Raise one from the Production panel."
+		empty_label.text = "No divisions currently marshalling.\nRaise one from the Production panel."
 		_deploying_list.add_child(empty_label)
 		return
 	for mid: String in GameState.marshalling_divisions:
@@ -178,26 +178,52 @@ func _refresh_deployed_list() -> void:
 		list_container.remove_child(child)
 		child.queue_free()
 	var div_ids: Array = GameState.get_my_nation_divisions()
-	var stacks_map: Dictionary = {}
-	var solo: Array = []
+	if div_ids.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No divisions currently fielded."
+		list_container.add_child(empty_label)
+		return
+
+	# Primary grouping is by current location (province), per-province subheading, so the
+	# player can see at a glance where their forces actually are — a "Stack (N)" sub-grouping
+	# still applies within a province for divisions sharing a stack there.
+	var by_province: Dictionary = {}
 	for div_id: String in div_ids:
 		var div_data: Dictionary = GameState.get_division(div_id)
 		if div_data.is_empty():
 			continue
 		if div_data.get("combat_state", "") == "destroyed":
 			continue
-		var sid: String = div_data.get("stack_id", "")
+		var pid: String = _resolve_division_province(div_data)
+		if not by_province.has(pid):
+			by_province[pid] = []
+		by_province[pid].append({ "id": div_id, "data": div_data })
+
+	var province_ids: Array = by_province.keys()
+	province_ids.sort_custom(func(a: String, b: String) -> bool:
+		return _resolve_province_name(a) < _resolve_province_name(b)
+	)
+	for pid: String in province_ids:
+		var province_lbl := Label.new()
+		province_lbl.text = _resolve_province_name(pid)
+		province_lbl.add_theme_font_size_override("font_size", 12)
+		list_container.add_child(province_lbl)
+		_add_grouped_division_items(list_container, by_province[pid])
+
+
+## Splits one province's members into stack groups (with a "Stack (N)" sub-label) and solo
+## entries, same shape _refresh_deployed_list used before province-grouping was added.
+func _add_grouped_division_items(list_container: VBoxContainer, members_in_province: Array) -> void:
+	var stacks_map: Dictionary = {}
+	var solo: Array = []
+	for entry: Dictionary in members_in_province:
+		var sid: String = entry.data.get("stack_id", "")
 		if sid.is_empty():
-			solo.append({ "id": div_id, "data": div_data })
+			solo.append(entry)
 		else:
 			if not stacks_map.has(sid):
 				stacks_map[sid] = []
-			stacks_map[sid].append({ "id": div_id, "data": div_data })
-	if div_ids.is_empty():
-		var empty_label := Label.new()
-		empty_label.text = "No divisions currently fielded."
-		list_container.add_child(empty_label)
-		return
+			stacks_map[sid].append(entry)
 	for sid: String in stacks_map:
 		var members: Array = stacks_map[sid]
 		members.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -214,6 +240,43 @@ func _refresh_deployed_list() -> void:
 	for entry: Dictionary in solo:
 		var item: Button = _make_division_item(entry.id, entry.data)
 		list_container.add_child(item)
+
+
+## Resolves a division's current province via its subprovince_id -> province_id lookup
+## (MapLoader.get_subprovince_data — subprovinces already carry their parent province_id).
+## Empty string ("Unknown Location") for a division with no resolvable subprovince yet, e.g. one
+## still settling in right after deployment.
+func _resolve_division_province(div_data: Dictionary) -> String:
+	var subprovince_id: String = div_data.get("subprovince_id", "")
+	if subprovince_id.is_empty():
+		return ""
+	var map_loader: Node = _get_map_loader()
+	if map_loader == null or not map_loader.has_method("get_subprovince_data"):
+		return ""
+	var sp_data: Dictionary = map_loader.get_subprovince_data(subprovince_id)
+	return sp_data.get("province_id", "")
+
+
+func _resolve_province_name(province_id: String) -> String:
+	if province_id.is_empty():
+		return "Unknown Location"
+	var map_loader: Node = _get_map_loader()
+	if map_loader != null and map_loader.has_method("get_province_data"):
+		var pd: Dictionary = map_loader.get_province_data(province_id)
+		if not pd.is_empty():
+			return pd.get("name", province_id)
+	return province_id
+
+
+## Same fallback lookup pattern used elsewhere (see production_panel.gd's ProvincePickerButton
+## and strategic_bombing_detail_panel.gd) for resolving a MapLoader reference outside of a scene
+## that already owns one.
+func _get_map_loader() -> Node:
+	for child in Engine.get_main_loop().root.get_children():
+		var c: Node = child as Node
+		if c.name == "MapLoader":
+			return c
+	return null
 
 
 func _make_division_item(div_id: String, div_data: Dictionary) -> Button:
