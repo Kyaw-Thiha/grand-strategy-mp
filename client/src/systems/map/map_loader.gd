@@ -26,6 +26,7 @@ var _province_subprovince_ids: Dictionary = {} # province_id → PackedStringArr
 var _road_geometry: Dictionary = {}
 
 var _projection: MapProjection
+var _is_loaded: bool = false
 
 
 func load_map(map_id: String) -> void:
@@ -72,7 +73,17 @@ func load_map(map_id: String) -> void:
 	else:
 		push_warning("MapLoader: waypoints.json missing — run pipeline to generate it")
 
+	_is_loaded = true
 	map_loaded.emit(_provinces.size())
+
+
+## True once load_map() has fully finished (province data, generated scene, and click-area
+## collision shapes all populated) — check this synchronously before deciding whether to wait
+## for the map_loaded signal, since load_map() itself is fully synchronous (no `await`) and a
+## consumer that only ever listens for the signal would hang forever if it connects after the
+## signal already fired.
+func is_map_loaded() -> bool:
+	return _is_loaded
 
 
 func get_province_node(province_id: String) -> Node2D:
@@ -318,6 +329,7 @@ func _clear_loaded_map() -> void:
 	_province_subprovince_ids.clear()
 	_road_geometry.clear()
 	_projection = null
+	_is_loaded = false
 
 
 ## Loads and indexes the authoritative subprovince assets for a map.

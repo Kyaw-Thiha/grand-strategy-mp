@@ -21,6 +21,26 @@ var _picking: bool = false
 func _ready() -> void:
 	pressed.connect(_on_pressed)
 	_refresh_text()
+	_await_map_loaded_then_refresh()
+
+
+## The initial _refresh_text() above can run before MapLoader has finished loading (this button
+## is often created very early, e.g. Production panel rows built at game start), which shows
+## the raw province id instead of its display name. Waits for confirmed readiness — checking
+## is_map_loaded() synchronously first, since load_map() is fully synchronous and a listener
+## that only ever awaits the signal would hang forever if it connects after the signal already
+## fired — then re-resolves the text once the name lookup can actually succeed.
+func _await_map_loaded_then_refresh() -> void:
+	var map_loader: Node = _get_map_loader()
+	if map_loader == null:
+		return
+	if map_loader.has_method("is_map_loaded") and not map_loader.is_map_loaded():
+		if not map_loader.has_signal("map_loaded"):
+			return
+		await map_loader.map_loaded
+	if not is_inside_tree():
+		return
+	_refresh_text()
 
 
 func _exit_tree() -> void:

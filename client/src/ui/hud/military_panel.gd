@@ -32,6 +32,33 @@ func _ready() -> void:
 	EventBus.division_updated.connect(func(_id: String) -> void: _refresh_deployed_list())
 	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_deployed_list())
 
+	_await_map_ready_then_refresh_deployed()
+
+
+## The initial _refresh_deployed_list() above resolves every division to "Unknown Location" when
+## this panel is built before the map has finished loading (the common case — game start divisions
+## exist before the player ever interacts with anything). Two things have to actually be true for
+## get_province_at_world_position() to work, not just "MapLoader loaded": (1) MapLoader.
+## is_map_loaded() — confirmed synchronously first since load_map() is fully synchronous and an
+## await on the signal alone would hang forever if it already fired; and (2) at least one physics
+## frame has processed since the province click-area Area2D shapes were added to the tree — Godot's
+## physics broadphase doesn't index newly-added collision shapes until the next physics step, so a
+## same-frame intersect_point() query can miss them even with the map otherwise fully loaded. This
+## is exactly why province grouping "started working" only once something else (raising a
+## division) happened to trigger a refresh late enough for both conditions to be true by accident.
+func _await_map_ready_then_refresh_deployed() -> void:
+	var map_loader: Node = _get_map_loader()
+	if map_loader == null:
+		return
+	if map_loader.has_method("is_map_loaded") and not map_loader.is_map_loaded():
+		if not map_loader.has_signal("map_loaded"):
+			return
+		await map_loader.map_loaded
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+	_refresh_deployed_list()
+
 
 func _setup_tab_buttons() -> void:
 	var tc: TabContainer = get_node_or_null(_CONTENT_PATH + "/TabBar") as TabContainer
