@@ -79,7 +79,7 @@ func _refresh_templates() -> void:
 		deploying_counts[tid] = deploying_counts.get(tid, 0) + 1
 
 	for template: Dictionary in DivisionTemplateStore.get_templates():
-		var tid: String = template.get("template_id", "")
+		var tid: String = template.get("id", "")
 		var row := HBoxContainer.new()
 		var label := Label.new()
 		label.text = "%s   Fielded: %d   Deploying: %d" % [
