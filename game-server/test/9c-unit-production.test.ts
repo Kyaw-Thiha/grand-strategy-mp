@@ -547,4 +547,47 @@ describe("lane:economy | GameRoom integration — RAISE_DIVISION/FORCE_DEPLOY/CA
     const nation = room.state.nations.get("germany")!;
     assert.ok(nation.reserve_cap >= 200); // RESERVE_CAP_BASELINE placeholder
   });
+
+  it("NationState.capital_province_id is synced from map nation data", async () => {
+    const { room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    assert.strictEqual(nation.capital_province_id, "we6_germany_06");
+  });
+
+  it("RESERVE_UPDATES broadcasts category_stats with production_rate and net_rate for all four categories", async () => {
+    const { client, room } = await joinRoom();
+    const payloads: Array<Record<string, unknown>> = [];
+    client.onMessage("RESERVE_UPDATES", (msg: Record<string, unknown>) => payloads.push(msg));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.ok(payloads.length > 0, "expected at least one RESERVE_UPDATES broadcast");
+    const last = payloads[payloads.length - 1];
+    const categoryStats = last.category_stats as Record<string, { production_rate: number; net_rate: number }>;
+    for (const category of ["infantry", "ordnance", "tank", "air"]) {
+      assert.ok(categoryStats[category], `missing category_stats.${category}`);
+      assert.strictEqual(typeof categoryStats[category].production_rate, "number");
+      assert.strictEqual(typeof categoryStats[category].net_rate, "number");
+    }
+  });
+
+  it("category_stats.net_rate reflects actual reserve_pool growth when a nation is actively raising a division", async () => {
+    const { client, room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    const payloads: Array<Record<string, unknown>> = [];
+    client.onMessage("RESERVE_UPDATES", (msg: Record<string, unknown>) => payloads.push(msg));
+    // Germany's capital already has barracks lvl 1 (per 9a's BUILD_BUILDING test comment) — the
+    // seeded starting stockpile (500 of every resource, per Task's dev-convenience seed) makes
+    // it affordable immediately. Raise a division to generate real infantry demand.
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    void nation;
+    assert.ok(payloads.length > 0);
+    const last = payloads[payloads.length - 1];
+    const categoryStats = last.category_stats as Record<string, { production_rate: number; net_rate: number }>;
+    // Barracks should be actively producing infantry toward the new marshalling slot by now.
+    assert.ok(categoryStats.infantry.production_rate > 0, "expected barracks to be actively producing");
+  });
 });

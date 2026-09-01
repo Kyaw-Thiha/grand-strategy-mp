@@ -59,3 +59,9 @@ export function getUnitProductionStats(unitType: string): UnitProductionStats {
   if (!stats) throw new Error(`Unknown unit type for production: ${unitType}`);
   return stats;
 }
+
+/** Every unit_type produced by a given building — reverse lookup for category-level
+ * aggregation (economy_production_ui_handoff.md §7 Tab 2's four Reserve categories). */
+export function unitTypesForBuilding(buildingType: string): string[] {
+  return Object.keys(UNIT_PRODUCTION_STATS).filter((t) => UNIT_PRODUCTION_STATS[t].produced_by === buildingType);
+}

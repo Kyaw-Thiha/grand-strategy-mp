@@ -29,6 +29,9 @@ export class NationState extends Schema {
   @type("string")   nation_id: string  = "";
   @type("string")   player_id: string  = "";
   @type("boolean")  is_ready: boolean  = false;
+  // Synced so the client can default a per-template Raise action to a sensible province
+  // without needing a picker UI for the common case (Phase 9 Task C amendment).
+  @type("string")   capital_province_id: string = "";
   @type(["string"]) researched_perks   = new ArraySchema<string>();
   // Ten-resource national stockpile (money, grain, iron, oil, rubber, nitrates, tungsten,
   // chromium, aluminium, uranium) — see ECONOMY_BUILDINGS.md / RESOURCE_ECONOMY.md.

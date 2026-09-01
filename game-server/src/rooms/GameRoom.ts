@@ -7,7 +7,7 @@ import { getCachedFile } from "../data/map_cache.js";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES, serializeWing } from "./schema/AirWingState.js";
 import { NavalContactMarkerState, serializeNavalContactMarker } from "./schema/NavalContactMarkerState.js";
-import { getMapNationIds } from "../data/map_loader.js";
+import { getMapNations } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
@@ -71,7 +71,16 @@ import {
   resourceScarcityMultiplier,
   type DemandSlot,
 } from "../systems/unit_production_system.js";
-import { getUnitProductionStats } from "../data/unit_production_stats.js";
+import { getUnitProductionStats, unitTypesForBuilding } from "../data/unit_production_stats.js";
+
+// economy_production_ui_handoff.md §7 Tab 2 — the four fixed Reserve subheading categories,
+// mapping 1:1 to the four production buildings.
+const RESERVE_CATEGORY_BUILDING: Record<string, string> = {
+  infantry: "barracks",
+  ordnance: "ordnance_factory",
+  tank: "tank_plant",
+  air: "aircraft_factory",
+};
 
 // How many game ticks between subprovince-graph supply route recomputation/broadcast.
 // Matches the (unexported) SUPPLY_TICK_INTERVAL used by SupplySystem.tick()'s ring-based
@@ -183,11 +192,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     this.setState(new GameRoomState());
 
-    this.nationIds = await getMapNationIds(this.state.map_id);
-    for (const nationId of this.nationIds) {
+    const nationDefs = await getMapNations(this.state.map_id);
+    this.nationIds = nationDefs.map((n) => n.id);
+    for (const def of nationDefs) {
       const slot = new NationState();
-      slot.nation_id = nationId;
-      this.state.nations.set(nationId, slot);
+      slot.nation_id = def.id;
+      slot.capital_province_id = def.capital_province_id;
+      this.state.nations.set(def.id, slot);
     }
 
     this.onMessage("SELECT_NATION",    (client, msg) => this.handleSelectNation(client, msg));
@@ -2669,6 +2680,16 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
    * unit_production_handoff.md §6.1 and the branch plan's note on this).
    */
   private _unitProductionTick(): void {
+    // Snapshot per-nation, per-category Reserve totals before this tick's mutations — the delta
+    // after the tick is this tick's net rate (production - consumption), per
+    // RESOURCE_ECONOMY.md's "Reserve status — deficit/excess severity" formula. economy_
+    // production_ui_handoff.md §7 Tab 2's four categories map 1:1 to the four production
+    // buildings.
+    const categoryBefore = new Map<string, Record<string, number>>();
+    for (const [nationId, nation] of this.state.nations) {
+      categoryBefore.set(nationId, this._reserveTotalsByCategory(nation));
+    }
+
     this.unitProductionSystem.tickProduction(
       this.economyBuildingSystem.getAll(),
       (provinceId) => {
@@ -2708,11 +2729,35 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (this.unitProductionSystem.listMarshallingForNation(nationId).length > 0) {
         this._broadcastMarshallingForNation(nationId);
       }
+      const before = categoryBefore.get(nationId) ?? {};
+      const after = this._reserveTotalsByCategory(nation);
+      const categoryStats: Record<string, { production_rate: number; net_rate: number }> = {};
+      for (const [category, buildingType] of Object.entries(RESERVE_CATEGORY_BUILDING)) {
+        categoryStats[category] = {
+          production_rate: unitTypesForBuilding(buildingType).reduce(
+            (sum, unitType) => sum + this.unitProductionSystem.productionRateForType(unitType), 0,
+          ),
+          net_rate: (after[category] ?? 0) - (before[category] ?? 0),
+        };
+      }
       this.broadcastToNation("RESERVE_UPDATES", {
         reserve: Object.fromEntries(nation.reserve_pool),
         reserve_cap: nation.reserve_cap,
+        category_stats: categoryStats,
       }, nationId);
     }
+  }
+
+  /** Sums nation.reserve_pool per economy_production_ui_handoff.md §7 Tab 2's four categories
+   * (Infantry/Ordnance/Tank/Air, mapping 1:1 to the four production buildings). */
+  private _reserveTotalsByCategory(nation: NationState): Record<string, number> {
+    const totals: Record<string, number> = {};
+    for (const [category, buildingType] of Object.entries(RESERVE_CATEGORY_BUILDING)) {
+      totals[category] = unitTypesForBuilding(buildingType).reduce(
+        (sum, unitType) => sum + (nation.reserve_pool.get(unitType) ?? 0), 0,
+      );
+    }
+    return totals;
   }
 
   /** Pools marshalling-template demand and fielded-division-resupply demand for one nation into
