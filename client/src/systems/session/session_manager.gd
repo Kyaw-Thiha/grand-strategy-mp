@@ -16,6 +16,7 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"GAME_STARTED":
 			var assignments: Dictionary = data.get("nation_assignments", {})
 			var speed: int = data.get("game_speed", 1)
+			GameState.set_nation_capitals(data.get("nation_capitals", {}))
 			session_started.emit(assignments, speed)
 			if SceneManager.is_game_loading_pending():
 				SceneManager.confirm_game_start()

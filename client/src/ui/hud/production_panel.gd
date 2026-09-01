@@ -5,18 +5,38 @@ signal close_requested()
 @onready var _close_button: Button = %CloseButton
 @onready var _template_list: VBoxContainer = %TemplateList
 @onready var _btn_add_template: Button = %BtnAddTemplate
-@onready var _btn_raise: Button = %BtnRaise
 @onready var _reserve_list: VBoxContainer = %ReserveList
 
 const _CONTENT_PATH: String = "Margin/VBox/ContentBody"
 
-# unit_type -> category label, per RESOURCE_ECONOMY.md's Reserve status categories.
-const RESERVE_CATEGORIES := {
-	"Infantry": ["infantry", "assault_infantry", "recon_infantry", "mg", "cavalry", "at_infantry", "sniper", "commando", "flamethrower", "force_recon_sniper", "motorised_infantry"],
-	"Ordnance": ["artillery", "at_gun", "aa_gun", "howitzer"],
-	"Tank": ["armoured_car", "light_tank", "medium_tank", "heavy_tank", "at_gun_sp", "self_propelled_gun", "mechanised_infantry"],
-	"Air": ["cas_plane", "dive_bomber", "fighter", "naval_bomber", "heavy_fighter", "strategic_bomber", "tactical_bomber", "recon_plane"],
+# unit_type -> category, per RESOURCE_ECONOMY.md's Reserve status categories. Keys match the
+# server's RESERVE_CATEGORY_BUILDING keys (GameRoom.ts) so reserve_category_stats lookups
+# line up directly.
+const RESERVE_CATEGORY_UNIT_TYPES := {
+	"infantry": ["infantry", "assault_infantry", "recon_infantry", "mg", "cavalry", "at_infantry", "sniper", "commando", "flamethrower", "force_recon_sniper", "motorised_infantry"],
+	"ordnance": ["artillery", "at_gun", "aa_gun", "howitzer"],
+	"tank": ["armoured_car", "light_tank", "medium_tank", "heavy_tank", "at_gun_sp", "self_propelled_gun", "mechanised_infantry"],
+	"air": ["cas_plane", "dive_bomber", "fighter", "naval_bomber", "heavy_fighter", "strategic_bomber", "tactical_bomber", "recon_plane"],
 }
+const RESERVE_CATEGORY_LABELS := {
+	"infantry": "INFANTRY",
+	"ordnance": "ORDNANCE (Arty/AT/AA)",
+	"tank": "TANK",
+	"air": "AIR",
+}
+
+# RESOURCE_ECONOMY.md's "Reserve status — deficit/excess severity" five bands, placeholder
+# thresholds (structurally confirmed, exact cutoffs TBD from playtesting).
+const SEVERITY_HEAVY_DEFICIT := -0.15
+const SEVERITY_LIGHT_DEFICIT := -0.02
+const SEVERITY_SLIGHT_SURPLUS := 0.02
+const SEVERITY_HEAVY_SURPLUS := 0.15
+
+const COLOR_RED := Color(0.85, 0.25, 0.2, 1.0)
+const COLOR_AMBER := Color(0.9, 0.65, 0.15, 1.0)
+const COLOR_NEUTRAL := Color(0.55, 0.55, 0.5, 1.0)
+const COLOR_GREEN := Color(0.3, 0.75, 0.35, 1.0)
+const COLOR_BLUE := Color(0.25, 0.55, 0.85, 1.0)
 
 
 func _ready() -> void:
@@ -25,7 +45,6 @@ func _ready() -> void:
 	_btn_add_template.pressed.connect(func() -> void:
 		EventBus.division_builder_open_requested.emit("")
 	)
-	_btn_raise.pressed.connect(_on_raise_pressed)
 	DivisionTemplateStore.templates_changed.connect(func() -> void: _refresh_templates())
 	EventBus.marshalling_updated.connect(_refresh_templates)
 	EventBus.division_added.connect(func(_id: String) -> void: _refresh_templates())
@@ -73,13 +92,24 @@ func cycle_sub_tab(forward: bool) -> void:
 	tabs.current_tab = posmod(tabs.current_tab + (1 if forward else -1), count)
 
 
+# ── Templates tab ────────────────────────────────────────────────────────────
+
 func _refresh_templates() -> void:
 	for child in _template_list.get_children():
 		child.queue_free()
+	var my_nation: String = GameState.get_my_nation_id()
+
 	var fielded_counts: Dictionary = {}
 	for div_id: String in GameState.divisions:
-		var tid: String = GameState.divisions[div_id].get("template_id", "")
+		var div_data: Dictionary = GameState.divisions[div_id]
+		if div_data.get("nation_id", "") != my_nation:
+			continue
+		var tid: String = div_data.get("template_id", "")
 		fielded_counts[tid] = fielded_counts.get(tid, 0) + 1
+
+	# MARSHALLING_UPDATES is already per-nation-filtered server-side (broadcastToNation), so
+	# every entry in GameState.marshalling_divisions already belongs to the local player's own
+	# nation — no additional filtering needed here.
 	var deploying_counts: Dictionary = {}
 	for mid: String in GameState.marshalling_divisions:
 		var tid: String = GameState.marshalling_divisions[mid].get("template_id", "")
@@ -93,7 +123,11 @@ func _refresh_templates() -> void:
 
 
 ## Relocated from military_panel.gd (Phase 9 Task C amendment — Division Templates moved here
-## per economy_production_ui_handoff.md §7 Tab 1), extended with Fielded/Deploying counts.
+## per economy_production_ui_handoff.md §7 Tab 1), extended with Fielded/Deploying counts and a
+## per-template Raise action (the mockup predates RAISE_DIVISION existing at all — a per-row
+## button is the natural placement since the row already carries the template context a raise
+## action needs, rather than a single top-level button that would need to ask the player to
+## pick a template all over again).
 func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> Control:
 	var template_id: String = template.get("id", "")
 	var name_str: String   = template.get("name", "Unknown")
@@ -122,18 +156,30 @@ func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> 
 	counts_lbl.add_theme_font_size_override("font_size", 11)
 	vbox.add_child(counts_lbl)
 
-	var edit_row := HBoxContainer.new()
-	var edit_spacer := Control.new()
-	edit_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	edit_row.add_child(edit_spacer)
+	var action_row := HBoxContainer.new()
+	var action_spacer := Control.new()
+	action_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	action_row.add_child(action_spacer)
+
+	var raise_btn := Button.new()
+	raise_btn.text = "Raise"
+	raise_btn.custom_minimum_size = Vector2(52, 24)
+	var home_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+	raise_btn.disabled = home_province.is_empty()
+	raise_btn.tooltip_text = "Raise this division at the capital" if not home_province.is_empty() else "No capital province known yet"
+	raise_btn.pressed.connect(func() -> void:
+		_on_raise_pressed(template_id, cells)
+	)
+	action_row.add_child(raise_btn)
+
 	var edit_btn := Button.new()
 	edit_btn.text = "Edit"
 	edit_btn.custom_minimum_size = Vector2(48, 24)
 	edit_btn.pressed.connect(func() -> void:
 		EventBus.division_builder_open_requested.emit(template_id)
 	)
-	edit_row.add_child(edit_btn)
-	vbox.add_child(edit_row)
+	action_row.add_child(edit_btn)
+	vbox.add_child(action_row)
 
 	return container
 
@@ -169,23 +215,128 @@ static func _derive_division_type(cells: Array) -> String:
 	return "Mixed"
 
 
-func _on_raise_pressed() -> void:
-	# Opens the existing Division Template Viewer so the player picks which template to raise
-	# and which owned province to raise it from — reuses EventBus's existing open-request signal
-	# rather than a new picker UI. The actual RAISE_DIVISION submission with the chosen
-	# home_province_id happens wherever that viewer's confirm action lives; if it doesn't yet
-	# expose a "raise this template from this province" action, that action should call:
-	# CommandQueue.submit("RAISE_DIVISION", {"template_id": tid, "home_province_id": pid, "cells": cells})
-	EventBus.division_template_viewer_open_requested.emit()
+## Raises this specific template at the player's own nation's capital province — the capital is
+## a sensible default that needs no extra picker UI for the common case (nation_capitals is
+## synced once at GAME_STARTED, see game_state.gd's set_nation_capitals()).
+func _on_raise_pressed(template_id: String, cells: Array) -> void:
+	var home_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+	if home_province.is_empty():
+		return
+	var cell_payload: Array = []
+	for i: int in range(cells.size()):
+		var unit_type: String = cells[i]
+		if unit_type != "":
+			cell_payload.append({"cell_index": i, "unit_type": unit_type})
+	CommandQueue.submit("RAISE_DIVISION", {
+		"template_id": template_id,
+		"home_province_id": home_province,
+		"cells": cell_payload,
+	})
 
+
+# ── Reserve tab ──────────────────────────────────────────────────────────────
 
 func _refresh_reserve() -> void:
 	for child in _reserve_list.get_children():
 		child.queue_free()
-	for category: String in RESERVE_CATEGORIES:
+	for category: String in RESERVE_CATEGORY_UNIT_TYPES:
 		var total: float = 0.0
-		for unit_type: String in RESERVE_CATEGORIES[category]:
+		for unit_type: String in RESERVE_CATEGORY_UNIT_TYPES[category]:
 			total += float(GameState.reserve.get(unit_type, 0.0))
-		var row := Label.new()
-		row.text = "%s   %s HP-eq / %s cap" % [category, str(int(total)), str(int(GameState.reserve_cap))]
-		_reserve_list.add_child(row)
+		var stats: Dictionary = GameState.reserve_category_stats.get(category, {})
+		var production_rate: float = float(stats.get("production_rate", 0.0))
+		var net_rate: float = float(stats.get("net_rate", 0.0))
+		var severity: float = (net_rate / GameState.reserve_cap) if GameState.reserve_cap > 0.0 else 0.0
+		var has_demand: bool = production_rate > 0.0 or net_rate != 0.0 or total > 0.0
+
+		var section := VBoxContainer.new()
+		section.add_theme_constant_override("separation", 2)
+
+		var header := HBoxContainer.new()
+		var name_lbl := Label.new()
+		name_lbl.text = RESERVE_CATEGORY_LABELS.get(category, category)
+		name_lbl.add_theme_font_size_override("font_size", 12)
+		name_lbl.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+		header.add_child(name_lbl)
+		var stat_lbl := Label.new()
+		stat_lbl.text = "%d HP-eq   Prod %d/t" % [int(total), int(production_rate)]
+		stat_lbl.add_theme_font_size_override("font_size", 11)
+		header.add_child(stat_lbl)
+		section.add_child(header)
+
+		section.add_child(_make_reserve_bar(severity))
+
+		var band_lbl := Label.new()
+		band_lbl.text = _severity_band_label(severity, has_demand)
+		band_lbl.add_theme_font_size_override("font_size", 10)
+		band_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.5, 1.0))
+		section.add_child(band_lbl)
+
+		_reserve_list.add_child(section)
+
+
+## Fixed five-band gradient track (Red/Amber/Neutral/Green/Blue), center-anchored at zero net
+## rate, with a colored marker (▲) at the current severity position — per
+## economy_production_ui_handoff.md §7 Tab 2. Position AND marker color both encode severity
+## (deliberate redundancy for colorblind accessibility, per that doc).
+func _make_reserve_bar(severity: float) -> Control:
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(0, 22)
+	wrapper.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+
+	var track := HBoxContainer.new()
+	track.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	track.add_theme_constant_override("separation", 1)
+	var band_colors: Array[Color] = [COLOR_RED, COLOR_AMBER, COLOR_NEUTRAL, COLOR_GREEN, COLOR_BLUE]
+	for band_color: Color in band_colors:
+		var seg := ColorRect.new()
+		seg.color = band_color
+		seg.custom_minimum_size = Vector2(0, 12)
+		seg.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+		track.add_child(seg)
+	wrapper.add_child(track)
+
+	# Marker position: clamp severity to [-0.3, 0.3] (a bit past the heavy bands at ±0.15) and
+	# map linearly to [0, 1] across the track width.
+	var t: float = clampf((severity + 0.3) / 0.6, 0.0, 1.0)
+	var marker := Label.new()
+	marker.text = "▲"
+	marker.add_theme_font_size_override("font_size", 14)
+	marker.add_theme_color_override("font_color", _severity_band_color(severity))
+	marker.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	marker.anchor_left = t
+	marker.anchor_right = t
+	marker.offset_left = -7.0
+	marker.offset_top = 10.0
+	wrapper.add_child(marker)
+
+	return wrapper
+
+
+static func _severity_band_color(severity: float) -> Color:
+	if severity <= SEVERITY_HEAVY_DEFICIT:
+		return COLOR_RED
+	if severity < SEVERITY_LIGHT_DEFICIT:
+		return COLOR_AMBER
+	if severity < SEVERITY_SLIGHT_SURPLUS:
+		return COLOR_NEUTRAL
+	if severity < SEVERITY_HEAVY_SURPLUS:
+		return COLOR_GREEN
+	return COLOR_BLUE
+
+
+## Zero-demand (no production, no consumption, nothing banked) reads as a distinct label from
+## genuinely-matched Neutral demand, per the doc's explicit "— no demand —" vs "(balanced)"
+## distinction, even though both render at the same bar position.
+static func _severity_band_label(severity: float, has_demand: bool) -> String:
+	if not has_demand:
+		return "— no demand —"
+	if severity <= SEVERITY_HEAVY_DEFICIT:
+		return "(heavy deficit)"
+	if severity < SEVERITY_LIGHT_DEFICIT:
+		return "(light deficit)"
+	if severity < SEVERITY_SLIGHT_SURPLUS:
+		return "(balanced)"
+	if severity < SEVERITY_HEAVY_SURPLUS:
+		return "(slight surplus)"
+	return "(heavy surplus)"

@@ -146,11 +146,6 @@ layout_mode = 2
 tooltip_text = "Add new division template"
 text = "+"
 
-[node name="BtnRaise" type="Button" parent="Margin/VBox/ContentBody/TabBar/Templates"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Raise Division"
-
 [node name="TemplateList" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Templates"]
 unique_name_in_owner = true
 layout_mode = 2

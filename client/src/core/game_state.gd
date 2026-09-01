@@ -68,6 +68,8 @@ var province_economy: Dictionary = {}
 var marshalling_divisions: Dictionary = {}   # marshalling_id -> {template_id, home_province_id, aggregate_hp_pct, slots}
 var reserve: Dictionary = {}                 # unit_type -> HP-equivalent amount
 var reserve_cap: float = 0.0
+var reserve_category_stats: Dictionary = {}  # category ("infantry"/"ordnance"/"tank"/"air") -> {production_rate, net_rate}
+var nation_capitals: Dictionary = {}         # nation_id -> capital province_id, sent once at GAME_STARTED
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -187,7 +189,12 @@ func _apply_marshalling_updates(data: Dictionary) -> void:
 func _apply_reserve_updates(data: Dictionary) -> void:
 	reserve = data.get("reserve", {})
 	reserve_cap = float(data.get("reserve_cap", 0.0))
+	reserve_category_stats = data.get("category_stats", {})
 	EventBus.reserve_updated.emit()
+
+
+func set_nation_capitals(capitals: Dictionary) -> void:
+	nation_capitals = capitals
 
 
 ## Called by SessionManager when server sends DIVISION_UPDATES.
