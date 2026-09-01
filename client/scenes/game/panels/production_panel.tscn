@@ -131,6 +131,21 @@ layout_mode = 2
 size_flags_vertical = 3
 tooltip_text = "Templates"
 
+[node name="Header" type="HBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Templates"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Margin/VBox/ContentBody/TabBar/Templates/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "DIVISION TEMPLATES"
+
+[node name="BtnAddTemplate" type="Button" parent="Margin/VBox/ContentBody/TabBar/Templates/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+tooltip_text = "Add new division template"
+text = "+"
+
 [node name="BtnRaise" type="Button" parent="Margin/VBox/ContentBody/TabBar/Templates"]
 unique_name_in_owner = true
 layout_mode = 2

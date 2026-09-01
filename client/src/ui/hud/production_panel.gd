@@ -4,6 +4,7 @@ signal close_requested()
 
 @onready var _close_button: Button = %CloseButton
 @onready var _template_list: VBoxContainer = %TemplateList
+@onready var _btn_add_template: Button = %BtnAddTemplate
 @onready var _btn_raise: Button = %BtnRaise
 @onready var _reserve_list: VBoxContainer = %ReserveList
 
@@ -21,9 +22,15 @@ const RESERVE_CATEGORIES := {
 func _ready() -> void:
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
 	_setup_tab_buttons()
+	_btn_add_template.pressed.connect(func() -> void:
+		EventBus.division_builder_open_requested.emit("")
+	)
 	_btn_raise.pressed.connect(_on_raise_pressed)
+	DivisionTemplateStore.templates_changed.connect(func() -> void: _refresh_templates())
 	EventBus.marshalling_updated.connect(_refresh_templates)
+	EventBus.division_added.connect(func(_id: String) -> void: _refresh_templates())
 	EventBus.division_updated.connect(func(_id: String) -> void: _refresh_templates())
+	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_templates())
 	EventBus.reserve_updated.connect(_refresh_reserve)
 	_refresh_templates()
 	_refresh_reserve()
@@ -79,14 +86,87 @@ func _refresh_templates() -> void:
 		deploying_counts[tid] = deploying_counts.get(tid, 0) + 1
 
 	for template: Dictionary in DivisionTemplateStore.get_templates():
-		var tid: String = template.get("id", "")
-		var row := HBoxContainer.new()
-		var label := Label.new()
-		label.text = "%s   Fielded: %d   Deploying: %d" % [
-			template.get("name", tid), fielded_counts.get(tid, 0), deploying_counts.get(tid, 0),
-		]
-		row.add_child(label)
-		_template_list.add_child(row)
+		var item: Control = _make_template_item(
+			template, fielded_counts.get(template.get("id", ""), 0), deploying_counts.get(template.get("id", ""), 0),
+		)
+		_template_list.add_child(item)
+
+
+## Relocated from military_panel.gd (Phase 9 Task C amendment — Division Templates moved here
+## per economy_production_ui_handoff.md §7 Tab 1), extended with Fielded/Deploying counts.
+func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> Control:
+	var template_id: String = template.get("id", "")
+	var name_str: String   = template.get("name", "Unknown")
+	var cells: Array       = template.get("cells", [])
+
+	var container := PanelContainer.new()
+	container.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	container.add_child(vbox)
+
+	var name_lbl := Label.new()
+	name_lbl.text = name_str
+	name_lbl.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(name_lbl)
+
+	var type_lbl := Label.new()
+	type_lbl.text = _derive_division_type(cells)
+	type_lbl.add_theme_font_size_override("font_size", 11)
+	type_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.5, 1.0))
+	vbox.add_child(type_lbl)
+
+	var counts_lbl := Label.new()
+	counts_lbl.text = "Fielded: %d    Deploying: %d" % [fielded, deploying]
+	counts_lbl.add_theme_font_size_override("font_size", 11)
+	vbox.add_child(counts_lbl)
+
+	var edit_row := HBoxContainer.new()
+	var edit_spacer := Control.new()
+	edit_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	edit_row.add_child(edit_spacer)
+	var edit_btn := Button.new()
+	edit_btn.text = "Edit"
+	edit_btn.custom_minimum_size = Vector2(48, 24)
+	edit_btn.pressed.connect(func() -> void:
+		EventBus.division_builder_open_requested.emit(template_id)
+	)
+	edit_row.add_child(edit_btn)
+	vbox.add_child(edit_row)
+
+	return container
+
+
+static func _derive_division_type(cells: Array) -> String:
+	const ARMOR_TYPES := ["light_tank", "medium_tank", "heavy_tank",
+		"armoured_car", "at_gun_sp", "self_propelled_gun"]
+	const ARTY_TYPES  := ["artillery", "howitzer", "at_gun", "aa_gun"]
+	var armor := 0
+	var arty  := 0
+	var inf   := 0
+	var total := 0
+	for unit_type: String in cells:
+		if unit_type == "":
+			continue
+		total += 1
+		if unit_type in ARMOR_TYPES:
+			armor += 1
+		elif unit_type in ARTY_TYPES:
+			arty += 1
+		else:
+			inf += 1
+	if total == 0:
+		return "Empty"
+	if armor >= 3:
+		return "Armoured Assault"
+	if armor >= 2 and inf >= 2:
+		return "Combined-Arms"
+	if arty >= 2 and inf >= 3:
+		return "Supported Infantry"
+	if inf >= 5:
+		return "Infantry Division"
+	return "Mixed"
 
 
 func _on_raise_pressed() -> void:
