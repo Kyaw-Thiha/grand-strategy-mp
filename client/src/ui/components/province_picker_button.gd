@@ -87,11 +87,11 @@ func _resolve_display_name(province_id: String) -> String:
 	return province_id
 
 
-## Same fallback lookup used by strategic_bombing_detail_panel.gd for resolving a province's
-## display name outside of the panel that already owns a MapLoader reference.
+## MapLoader is nested under the "Game" scene root (game.tscn: Game > MapLoader), not a direct
+## child of the true scene tree root — find_child(recursive=true) is required, matching
+## bombing_detail_panel.gd's version of this same lookup.
 func _get_map_loader() -> Node:
-	for child in Engine.get_main_loop().root.get_children():
-		var c: Node = child as Node
-		if c.name == "MapLoader":
-			return c
-	return null
+	var main_loop: MainLoop = Engine.get_main_loop()
+	if main_loop == null:
+		return null
+	return main_loop.root.find_child("MapLoader", true, false)

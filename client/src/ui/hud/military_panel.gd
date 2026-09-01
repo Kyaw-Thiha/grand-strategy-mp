@@ -272,11 +272,15 @@ func _resolve_province_name(province_id: String) -> String:
 ## and strategic_bombing_detail_panel.gd) for resolving a MapLoader reference outside of a scene
 ## that already owns one.
 func _get_map_loader() -> Node:
-	for child in Engine.get_main_loop().root.get_children():
-		var c: Node = child as Node
-		if c.name == "MapLoader":
-			return c
-	return null
+	# MapLoader is nested under the "Game" scene root (game.tscn: Game > MapLoader), not a direct
+	# child of the true scene tree root — find_child(recursive=true) is required, matching
+	# bombing_detail_panel.gd's version of this same lookup. A one-level get_children() scan
+	# (the pattern this used to copy from strategic_bombing_detail_panel.gd) never finds it,
+	# which is why province grouping was always showing "Unknown Location."
+	var main_loop: MainLoop = Engine.get_main_loop()
+	if main_loop == null:
+		return null
+	return main_loop.root.find_child("MapLoader", true, false)
 
 
 func _make_division_item(div_id: String, div_data: Dictionary) -> Button:

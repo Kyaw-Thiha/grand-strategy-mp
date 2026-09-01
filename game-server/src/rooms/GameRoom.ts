@@ -1827,14 +1827,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       // scanCombatFreeze/resetFreezeTracking doc comments for why this order is load-bearing.
       this.subprovinceSystem.resetFreezeTracking();
       this.subprovinceSystem.scanCombatFreeze(this.state.divisions.values());
+      const subprovinceChanged = new Set<string>();
       for (const division of this.state.divisions.values()) {
         const startPosition = this.movementSystem.getTickStartPosition(division.division_id);
+        const subprovinceBefore = division.subprovince_id;
         this.subprovinceSystem.checkCaptureAfterMovement(
           division,
           this.state,
           (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
           startPosition,
         );
+        // checkCaptureAfterMovement recomputes subprovince_id every tick for every division,
+        // including stationary/idle ones — but the DIVISION_UPDATES filter below (toUpdate) only
+        // includes divisions that moved, fought, or had a supply change this tick. Without this,
+        // a freshly-deployed or otherwise-stationary division's subprovince_id is computed
+        // server-side but never actually reaches the client (stays at the "" schema default
+        // there forever), which broke client-side province-of-current-location lookups (e.g.
+        // military_panel.gd's DEPLOYED section grouping).
+        if (division.subprovince_id !== subprovinceBefore) subprovinceChanged.add(division.division_id);
       }
       for (const { nationId, provinceId } of this.subprovinceSystem.getTrackedAttackerProvincePairs()) {
         this.subprovinceSystem.revertNationCaptureIfProvinceEmpty(nationId, provinceId, this.state, (sessionFilter, type, msg) =>
@@ -2051,7 +2061,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );
 
-      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
+      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged, ...subprovinceChanged]);
       this.broadcastFilteredDivisionUpdates(toUpdate);
     } catch (err) {
       console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
