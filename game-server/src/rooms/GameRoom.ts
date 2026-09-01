@@ -70,6 +70,7 @@ import {
   standingReserveMissingPct,
   resourceScarcityMultiplier,
   type DemandSlot,
+  type MarshallingData,
 } from "../systems/unit_production_system.js";
 import { getUnitProductionStats, unitTypesForBuilding } from "../data/unit_production_stats.js";
 
@@ -643,38 +644,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const data = this.unitProductionSystem.getMarshalling(msg.marshalling_id);
       if (!data || data.nation_id !== nation.nation_id) return;
       if (this.unitProductionSystem.aggregateHpPct(data) < 0.5) return; // §5.2 — inclusive at exactly 50%
-
-      const div = new DivisionState();
-      div.division_id = `division_${data.marshalling_id}`;
-      div.nation_id = nation.nation_id;
-      div.template_id = data.template_id;
-      div.combat_state = "idle";
-      div.supply_status = "normal";
-      const pos = this._provinceCityPositionLookup.get(data.home_province_id);
-      if (pos) {
-        div.position_lng = pos.lng;
-        div.position_lat = pos.lat;
-      }
-      for (const slot of data.slots) {
-        if (slot.cell_index < 0 || slot.cell_index >= div.grid.cells.length) continue;
-        div.grid.cells[slot.cell_index].unit_type = slot.unit_type;
-        div.grid.cells[slot.cell_index].hp = slot.current_hp;
-      }
-      const templateCells = data.slots
-        .filter((s) => s.unit_type !== "")
-        .map((s) => ({ unit_type: s.unit_type, row: Math.floor(s.cell_index / 5), col: s.cell_index % 5 }));
-      div.division_type = this.movementSystem.classifyDivisionType(templateCells);
-      div.engagement_radius = this.movementSystem.computeEngagementRadius(templateCells);
-      div.movement_profile_json = JSON.stringify(this.movementSystem.computeMovementProfile(templateCells));
-
-      this.state.divisions.set(div.division_id, div);
-      this.unitProductionSystem.removeMarshalling(msg.marshalling_id);
-
-      this.broadcast("DIVISIONS_SPAWNED", {
-        shared_profile_json: div.movement_profile_json,
-        divisions: [this.serializeDivision(div)],
-      });
-      this._broadcastMarshallingForNation(nation.nation_id);
+      this._deployMarshalling(data, nation);
     });
 
     this.onMessage("CANCEL_MARSHALLING", (client, msg: { marshalling_id: string }) => {
@@ -2746,6 +2716,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
 
     this.unitProductionSystem.tickMarshalling(this.state.nations);
+
+    // Auto-deploy — a division that has every slot fully produced (100% aggregate HP) deploys
+    // itself, no Force Deploy click needed. Below 100%, the player still needs Force Deploy
+    // (>=50%) or to keep waiting.
+    for (const [nationId, nation] of this.state.nations) {
+      for (const data of this.unitProductionSystem.listMarshallingForNation(nationId)) {
+        if (this.unitProductionSystem.aggregateHpPct(data) >= 1.0) {
+          this._deployMarshalling(data, nation);
+        }
+      }
+    }
+
     this.unitProductionSystem.tickFieldDelivery(this.state.divisions.values(), this.state.nations);
 
     for (const [nationId, nation] of this.state.nations) {
@@ -2839,6 +2821,44 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       });
     }
     return slots;
+  }
+
+  /** Shared by FORCE_DEPLOY and the >=100%-aggregate-HP auto-deploy check in
+   * _unitProductionTick() — constructs the real DivisionState, positions it at
+   * home_province_id's city position, and reuses the DIVISIONS_SPAWNED broadcast so the
+   * client needs no special-casing for which trigger caused the deploy. */
+  private _deployMarshalling(data: MarshallingData, nation: NationState): void {
+    const div = new DivisionState();
+    div.division_id = `division_${data.marshalling_id}`;
+    div.nation_id = nation.nation_id;
+    div.template_id = data.template_id;
+    div.combat_state = "idle";
+    div.supply_status = "normal";
+    const pos = this._provinceCityPositionLookup.get(data.home_province_id);
+    if (pos) {
+      div.position_lng = pos.lng;
+      div.position_lat = pos.lat;
+    }
+    for (const slot of data.slots) {
+      if (slot.cell_index < 0 || slot.cell_index >= div.grid.cells.length) continue;
+      div.grid.cells[slot.cell_index].unit_type = slot.unit_type;
+      div.grid.cells[slot.cell_index].hp = slot.current_hp;
+    }
+    const templateCells = data.slots
+      .filter((s) => s.unit_type !== "")
+      .map((s) => ({ unit_type: s.unit_type, row: Math.floor(s.cell_index / 5), col: s.cell_index % 5 }));
+    div.division_type = this.movementSystem.classifyDivisionType(templateCells);
+    div.engagement_radius = this.movementSystem.computeEngagementRadius(templateCells);
+    div.movement_profile_json = JSON.stringify(this.movementSystem.computeMovementProfile(templateCells));
+
+    this.state.divisions.set(div.division_id, div);
+    this.unitProductionSystem.removeMarshalling(data.marshalling_id);
+
+    this.broadcast("DIVISIONS_SPAWNED", {
+      shared_profile_json: div.movement_profile_json,
+      divisions: [this.serializeDivision(div)],
+    });
+    this._broadcastMarshallingForNation(nation.nation_id);
   }
 
   private _broadcastMarshallingForNation(nationId: string): void {

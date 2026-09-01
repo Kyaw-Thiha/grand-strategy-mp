@@ -530,6 +530,31 @@ describe("lane:economy | GameRoom integration — RAISE_DIVISION/FORCE_DEPLOY/CA
     assert.ok(div!.grid.cells[0].hp >= 50);
   });
 
+  it("auto-deploys at 100% aggregate HP with no FORCE_DEPLOY sent at all", async () => {
+    const { client, room } = await joinRoom();
+    const nation = room.state.nations.get("germany")!;
+    nation.reserve_pool.set("infantry", 1000); // seed Reserve so Marshalling fills fast
+    const beforeDivisions = room.state.divisions.size;
+
+    client.send("RAISE_DIVISION", {
+      template_id: "tmpl1",
+      home_province_id: "we6_germany_06",
+      cells: [{ cell_index: 0, unit_type: "infantry" }],
+    });
+    await room.waitForNextPatch();
+    const marshallingId = getMarshallingIdForGermany(room);
+
+    // MARSHALLING_RATE=20/tick reaches 100 HP (full) in 5 ticks — wide margin for real-timer
+    // slack, same reasoning as the FORCE_DEPLOY test above.
+    await new Promise((resolve) => setTimeout(resolve, 9000));
+
+    assert.strictEqual(room.state.divisions.size, beforeDivisions + 1, "expected auto-deploy to have created the division without any FORCE_DEPLOY message");
+    const div = room.state.divisions.get(`division_${marshallingId}`);
+    assert.ok(div, "expected the auto-deployed division to exist under the derived division_id");
+    assert.strictEqual(div!.grid.cells[0].hp, 100);
+    assert.strictEqual((room as any).unitProductionSystem.getMarshalling(marshallingId), undefined, "expected the marshalling entry to be removed once auto-deployed");
+  });
+
   it("CANCEL_MARSHALLING removes the marshalling entry and returns already-allocated stock to reserve_pool", async () => {
     const { client, room } = await joinRoom();
     const nation = room.state.nations.get("germany")!;
