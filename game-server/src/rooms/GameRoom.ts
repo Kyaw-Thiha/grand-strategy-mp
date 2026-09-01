@@ -689,6 +689,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       this._broadcastMarshallingForNation(nation.nation_id);
     });
 
+    // Client-side province-picker override (Phase 9 Task C amendment) — lets the player change
+    // a marshalling division's deploy province before FORCE_DEPLOY, reusing the same
+    // ownership-guard shape as CANCEL_MARSHALLING plus a check that the new province is also
+    // owned by this nation.
+    this.onMessage("UPDATE_MARSHALLING_PROVINCE", (client, msg: { marshalling_id: string; home_province_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const data = this.unitProductionSystem.getMarshalling(msg.marshalling_id);
+      if (!data || data.nation_id !== nation.nation_id) return;
+      const targetProvince = this.state.provinces.get(msg.home_province_id);
+      if (!targetProvince || targetProvince.owner_id !== nation.nation_id) return;
+      this.unitProductionSystem.updateMarshallingProvince(msg.marshalling_id, msg.home_province_id);
+      this._broadcastMarshallingForNation(nation.nation_id);
+    });
+
     // Branch B — Oil's 3-way allocation-priority toggle (RESOURCE_ECONOMY.md's Oil section).
     // Nation-scoped, not province-scoped — no province ownership check needed.
     this.onMessage("SET_OIL_PRIORITY", (client, msg: { priority: OilPriority }) => {
@@ -1566,9 +1584,14 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     for (const [id, nation] of this.state.nations.entries()) {
       assignments[id] = nation.player_id;
     }
+    const capitals: Record<string, string> = {};
+    for (const [id, nation] of this.state.nations.entries()) {
+      capitals[id] = nation.capital_province_id;
+    }
     this.broadcast("GAME_STARTED", {
       nation_assignments: assignments,
       game_speed: this.state.game_speed,
+      nation_capitals: capitals,
     });
 
     // Send initial province ownership so clients can validate RELOCATE targets immediately

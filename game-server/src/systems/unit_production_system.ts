@@ -319,6 +319,17 @@ export class UnitProductionSystem {
     this.marshalling.delete(id);
   }
 
+  /** Overrides a marshalling division's home_province_id before it deploys (client-facing
+   * province-picker override, Phase 9 Task C amendment). Safe to change freely up to
+   * FORCE_DEPLOY — MARSHALLING_RATE is a flat national constant regardless of province, so this
+   * has no effect on fill rate, only on where the division appears once deployed. */
+  updateMarshallingProvince(id: string, newProvinceId: string): boolean {
+    const data = this.marshalling.get(id);
+    if (!data) return false;
+    data.home_province_id = newProvinceId;
+    return true;
+  }
+
   tickMarshalling(nations: NationMap): void {
     for (const data of this.marshalling.values()) {
       const nation = nations.get(data.nation_id);

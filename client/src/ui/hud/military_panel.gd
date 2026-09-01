@@ -90,40 +90,75 @@ func _refresh_deploying() -> void:
 		_deploying_list.add_child(empty_label)
 		return
 	for mid: String in GameState.marshalling_divisions:
-		var data: Dictionary = GameState.marshalling_divisions[mid]
-		var pct: float = float(data.get("aggregate_hp_pct", 0.0)) * 100.0
-		var row := HBoxContainer.new()
-		var label := Label.new()
-		var by_type: Dictionary = {}
-		for slot: Dictionary in data.get("slots", []):
-			if float(slot.get("current_hp", 0.0)) >= 100.0:
-				continue
-			var ut: String = slot.get("unit_type", "")
-			by_type[ut] = by_type.get(ut, 0) + 1
-		var missing_parts: Array[String] = []
-		for ut: String in by_type:
-			missing_parts.append("%dx %s" % [by_type[ut], ut])
-		label.text = "%s   %d%% agg. HP   Missing: %s" % [
-			data.get("template_id", ""), int(pct), ", ".join(missing_parts) if missing_parts.size() > 0 else "none",
-		]
-		row.add_child(label)
+		_deploying_list.add_child(_make_deploying_item(mid, GameState.marshalling_divisions[mid]))
 
-		var btn_cancel := Button.new()
-		btn_cancel.text = "Cancel"
-		btn_cancel.pressed.connect(func() -> void:
-			CommandQueue.submit("CANCEL_MARSHALLING", {"marshalling_id": mid})
-		)
-		row.add_child(btn_cancel)
 
-		var btn_deploy := Button.new()
-		btn_deploy.text = "Force Deploy"
-		btn_deploy.disabled = pct < 50.0
-		btn_deploy.pressed.connect(func() -> void:
-			CommandQueue.submit("FORCE_DEPLOY", {"marshalling_id": mid})
-		)
-		row.add_child(btn_deploy)
+## Card styling matches _make_division_item's DEPLOYED rows underneath, so the Land tab reads as
+## one consistent list rather than two visually different sections. Reuses the same
+## ProvincePickerButton component as the Production panel's per-template Raise row — the home
+## province chosen at raise time is freely overridable up until FORCE_DEPLOY (see
+## unit_production_system.ts's updateMarshallingProvince — MARSHALLING_RATE is flat/national, so
+## changing province has no effect on fill rate, only on where the division appears once
+## deployed).
+func _make_deploying_item(mid: String, data: Dictionary) -> Control:
+	var pct: float = float(data.get("aggregate_hp_pct", 0.0)) * 100.0
 
-		_deploying_list.add_child(row)
+	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	card.add_child(vbox)
+
+	var by_type: Dictionary = {}
+	for slot: Dictionary in data.get("slots", []):
+		if float(slot.get("current_hp", 0.0)) >= 100.0:
+			continue
+		var ut: String = slot.get("unit_type", "")
+		by_type[ut] = by_type.get(ut, 0) + 1
+	var missing_parts: Array[String] = []
+	for ut: String in by_type:
+		missing_parts.append("%dx %s" % [by_type[ut], ut])
+
+	var title_lbl := Label.new()
+	title_lbl.text = "%s   %d%% agg. HP" % [data.get("template_id", ""), int(pct)]
+	title_lbl.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(title_lbl)
+
+	var missing_lbl := Label.new()
+	missing_lbl.text = "Missing: %s" % (", ".join(missing_parts) if missing_parts.size() > 0 else "none")
+	missing_lbl.add_theme_font_size_override("font_size", 11)
+	missing_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.5, 1.0))
+	vbox.add_child(missing_lbl)
+
+	var action_row := HBoxContainer.new()
+
+	var province_picker := ProvincePickerButton.new()
+	province_picker.selected_province_id = data.get("home_province_id", "")
+	province_picker.custom_minimum_size = Vector2(100, 24)
+	province_picker.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	province_picker.province_changed.connect(func(pid: String) -> void:
+		CommandQueue.submit("UPDATE_MARSHALLING_PROVINCE", {"marshalling_id": mid, "home_province_id": pid})
+	)
+	action_row.add_child(province_picker)
+
+	var btn_cancel := Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.pressed.connect(func() -> void:
+		CommandQueue.submit("CANCEL_MARSHALLING", {"marshalling_id": mid})
+	)
+	action_row.add_child(btn_cancel)
+
+	var btn_deploy := Button.new()
+	btn_deploy.text = "Force Deploy"
+	btn_deploy.disabled = pct < 50.0
+	btn_deploy.pressed.connect(func() -> void:
+		CommandQueue.submit("FORCE_DEPLOY", {"marshalling_id": mid})
+	)
+	action_row.add_child(btn_deploy)
+
+	vbox.add_child(action_row)
+	return card
 
 
 # ── Deployed divisions ──────────────────────────────────────────────────────

@@ -362,6 +362,21 @@ describe("lane:economy | Aggregate HP% and CANCEL_MARSHALLING", () => {
     assert.strictEqual(nation.reserve_pool.get("infantry"), 40);
     assert.strictEqual(sys.getMarshalling(id), undefined);
   });
+
+  it("updateMarshallingProvince overrides home_province_id, no effect on fill state", () => {
+    const sys = new UnitProductionSystem();
+    const id = sys.startMarshalling("n1", "t1", "capital", [{ cell_index: 0, unit_type: "infantry" }]);
+    sys.getMarshalling(id)!.slots[0].current_hp = 30;
+    assert.ok(sys.updateMarshallingProvince(id, "province_b"));
+    const data = sys.getMarshalling(id)!;
+    assert.strictEqual(data.home_province_id, "province_b");
+    assert.strictEqual(data.slots[0].current_hp, 30);
+  });
+
+  it("updateMarshallingProvince on an unknown marshalling_id returns false, no throw", () => {
+    const sys = new UnitProductionSystem();
+    assert.strictEqual(sys.updateMarshallingProvince("not_real", "province_b"), false);
+  });
 });
 
 describe("lane:economy | Field-supply delivery — simplified placeholder", () => {

@@ -157,20 +157,30 @@ func _make_template_item(template: Dictionary, fielded: int, deploying: int) -> 
 	vbox.add_child(counts_lbl)
 
 	var action_row := HBoxContainer.new()
-	var action_spacer := Control.new()
-	action_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	action_row.add_child(action_spacer)
+
+	var default_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+	var province_picker := ProvincePickerButton.new()
+	province_picker.selected_province_id = default_province
+	province_picker.custom_minimum_size = Vector2(100, 24)
+	province_picker.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	action_row.add_child(province_picker)
 
 	var raise_btn := Button.new()
 	raise_btn.text = "Raise"
 	raise_btn.custom_minimum_size = Vector2(52, 24)
-	var home_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
-	raise_btn.disabled = home_province.is_empty()
-	raise_btn.tooltip_text = "Raise this division at the capital" if not home_province.is_empty() else "No capital province known yet"
+	raise_btn.disabled = default_province.is_empty()
+	raise_btn.tooltip_text = "Raise this division at the selected province" if not default_province.is_empty() else "No capital province known yet"
 	raise_btn.pressed.connect(func() -> void:
-		_on_raise_pressed(template_id, cells)
+		_on_raise_pressed(template_id, cells, province_picker.selected_province_id)
+	)
+	province_picker.province_changed.connect(func(pid: String) -> void:
+		raise_btn.disabled = pid.is_empty()
 	)
 	action_row.add_child(raise_btn)
+
+	var action_spacer := Control.new()
+	action_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	action_row.add_child(action_spacer)
 
 	var edit_btn := Button.new()
 	edit_btn.text = "Edit"
@@ -215,11 +225,11 @@ static func _derive_division_type(cells: Array) -> String:
 	return "Mixed"
 
 
-## Raises this specific template at the player's own nation's capital province — the capital is
-## a sensible default that needs no extra picker UI for the common case (nation_capitals is
-## synced once at GAME_STARTED, see game_state.gd's set_nation_capitals()).
-func _on_raise_pressed(template_id: String, cells: Array) -> void:
-	var home_province: String = GameState.nation_capitals.get(GameState.get_my_nation_id(), "")
+## Raises this specific template at whichever province the row's ProvincePickerButton currently
+## holds — defaults to the nation's capital (nation_capitals synced once at GAME_STARTED, see
+## game_state.gd's set_nation_capitals()), overridable by clicking the picker and choosing a
+## different owned province on the map.
+func _on_raise_pressed(template_id: String, cells: Array, home_province: String) -> void:
 	if home_province.is_empty():
 		return
 	var cell_payload: Array = []
@@ -275,34 +285,35 @@ func _refresh_reserve() -> void:
 		_reserve_list.add_child(section)
 
 
-## Fixed five-band gradient track (Red/Amber/Neutral/Green/Blue), center-anchored at zero net
-## rate, with a colored marker (▲) at the current severity position — per
-## economy_production_ui_handoff.md §7 Tab 2. Position AND marker color both encode severity
-## (deliberate redundancy for colorblind accessibility, per that doc).
+## Continuous five-color gradient track (Red -> Amber -> Neutral -> Green -> Blue), center-
+## anchored at zero net rate, with a marker (▲) at the current severity position — per
+## economy_production_ui_handoff.md §7 Tab 2's "gradient track" wording. This is a real blended
+## gradient, not five discrete blocks: color at any point (including the marker) is a continuous
+## weighted blend of the two nearest band colors based on how close severity is to each, not a
+## snap to one of five fixed colors. Position AND marker color both encode severity (deliberate
+## redundancy for colorblind accessibility, per that doc).
 func _make_reserve_bar(severity: float) -> Control:
 	var wrapper := Control.new()
 	wrapper.custom_minimum_size = Vector2(0, 22)
 	wrapper.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 
-	var track := HBoxContainer.new()
+	var track := TextureRect.new()
+	track.texture = GradientTexture1D.new()
+	track.texture.gradient = _severity_gradient()
+	track.texture.width = 256
 	track.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	track.add_theme_constant_override("separation", 1)
-	var band_colors: Array[Color] = [COLOR_RED, COLOR_AMBER, COLOR_NEUTRAL, COLOR_GREEN, COLOR_BLUE]
-	for band_color: Color in band_colors:
-		var seg := ColorRect.new()
-		seg.color = band_color
-		seg.custom_minimum_size = Vector2(0, 12)
-		seg.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-		track.add_child(seg)
+	track.custom_minimum_size = Vector2(0, 12)
+	track.offset_bottom = 12
+	track.stretch_mode = TextureRect.STRETCH_SCALE
 	wrapper.add_child(track)
 
 	# Marker position: clamp severity to [-0.3, 0.3] (a bit past the heavy bands at ±0.15) and
-	# map linearly to [0, 1] across the track width.
+	# map linearly to [0, 1] across the track width — t=0.5 (dead center) is severity=0.
 	var t: float = clampf((severity + 0.3) / 0.6, 0.0, 1.0)
 	var marker := Label.new()
 	marker.text = "▲"
 	marker.add_theme_font_size_override("font_size", 14)
-	marker.add_theme_color_override("font_color", _severity_band_color(severity))
+	marker.add_theme_color_override("font_color", _severity_gradient().sample(t))
 	marker.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	marker.anchor_left = t
 	marker.anchor_right = t
@@ -313,16 +324,20 @@ func _make_reserve_bar(severity: float) -> Control:
 	return wrapper
 
 
-static func _severity_band_color(severity: float) -> Color:
-	if severity <= SEVERITY_HEAVY_DEFICIT:
-		return COLOR_RED
-	if severity < SEVERITY_LIGHT_DEFICIT:
-		return COLOR_AMBER
-	if severity < SEVERITY_SLIGHT_SURPLUS:
-		return COLOR_NEUTRAL
-	if severity < SEVERITY_HEAVY_SURPLUS:
-		return COLOR_GREEN
-	return COLOR_BLUE
+## One Gradient resource shared by the track texture and the marker's own color sample, so both
+## are guaranteed pixel-consistent. Stops are placed at each band's CENTER severity (not its
+## edges) so a band's pure color sits at its middle and blends smoothly toward its neighbors —
+## Gradient.sample() does the continuous interpolation, no hand-rolled lerp needed. Band centers,
+## same [-0.3, 0.3] -> [0, 1] mapping _make_reserve_bar uses for the marker:
+## heavy deficit -0.225 -> t=0.125, light deficit -0.085 -> t≈0.358, neutral 0 -> t=0.5,
+## slight surplus +0.085 -> t≈0.642, heavy surplus +0.225 -> t=0.875.
+static func _severity_gradient() -> Gradient:
+	var g := Gradient.new()
+	# Direct offsets/colors assignment fully replaces Gradient.new()'s default two-point list —
+	# avoids leaving a stray default point behind, unlike incrementally calling add_point().
+	g.offsets = PackedFloat32Array([0.125, 0.358, 0.5, 0.642, 0.875])
+	g.colors = PackedColorArray([COLOR_RED, COLOR_AMBER, COLOR_NEUTRAL, COLOR_GREEN, COLOR_BLUE])
+	return g
 
 
 ## Zero-demand (no production, no consumption, nothing banked) reads as a distinct label from
