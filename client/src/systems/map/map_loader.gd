@@ -106,6 +106,27 @@ func get_province_focus_position(province_id: String) -> Vector2:
 	return project_lng_lat(float(city_position[0]), float(city_position[1]))
 
 
+## Returns the province id whose click-detection Area2D contains the given world position, or ""
+## if none. Reuses the exact same Area2D collision shapes / physics space already powering
+## province click detection (map_interaction.gd's _on_area_input_event), so "which province is
+## this point in" stays consistent with "which province would a click here select" by
+## construction — no separate point-in-polygon math to keep in sync with that.
+func get_province_at_world_position(pos: Vector2) -> String:
+	var space_state: PhysicsDirectSpaceState2D = get_viewport().get_world_2d().direct_space_state
+	var query := PhysicsPointQueryParameters2D.new()
+	query.position = pos
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var results: Array[Dictionary] = space_state.intersect_point(query)
+	for result: Dictionary in results:
+		var collider: Object = result.get("collider")
+		if collider is Area2D:
+			var province_id: String = (collider as Area2D).get_meta("province_id", "")
+			if not province_id.is_empty():
+				return province_id
+	return ""
+
+
 func get_all_province_ids() -> Array[String]:
 	var ids: Array[String] = []
 	for k in _province_data.keys():

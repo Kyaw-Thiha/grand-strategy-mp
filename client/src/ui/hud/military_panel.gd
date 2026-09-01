@@ -204,10 +204,15 @@ func _refresh_deployed_list() -> void:
 		return _resolve_province_name(a) < _resolve_province_name(b)
 	)
 	for pid: String in province_ids:
+		var province_margin := MarginContainer.new()
+		province_margin.add_theme_constant_override("margin_top", 10)
+		province_margin.add_theme_constant_override("margin_bottom", 4)
 		var province_lbl := Label.new()
 		province_lbl.text = _resolve_province_name(pid)
-		province_lbl.add_theme_font_size_override("font_size", 12)
-		list_container.add_child(province_lbl)
+		province_lbl.add_theme_font_size_override("font_size", 15)
+		province_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.2, 1))
+		province_margin.add_child(province_lbl)
+		list_container.add_child(province_margin)
 		_add_grouped_division_items(list_container, by_province[pid])
 
 
@@ -242,19 +247,22 @@ func _add_grouped_division_items(list_container: VBoxContainer, members_in_provi
 		list_container.add_child(item)
 
 
-## Resolves a division's current province via its subprovince_id -> province_id lookup
-## (MapLoader.get_subprovince_data — subprovinces already carry their parent province_id).
-## Empty string ("Unknown Location") for a division with no resolvable subprovince yet, e.g. one
-## still settling in right after deployment.
+## Resolves a division's current province directly from its position (position_lng/lat, already
+## reliably synced — the same fields military_system.gd uses to place map icons), via
+## MapLoader.get_province_at_world_position(). Deliberately NOT going through
+## division.subprovince_id/get_subprovince_data() any more: subprovince_id is only ever
+## broadcast to the client on the tick it actually changes (see GameRoom.ts's gameTick()
+## subprovinceChanged tracking), which is fragile for this purpose and left every division
+## reading as unresolved. Position-based lookup uses the exact same physics query already
+## powering province click detection (map_interaction.gd) — no separate data path to go stale.
 func _resolve_division_province(div_data: Dictionary) -> String:
-	var subprovince_id: String = div_data.get("subprovince_id", "")
-	if subprovince_id.is_empty():
-		return ""
+	var lng: float = float(div_data.get("position_lng", 0.0))
+	var lat: float = float(div_data.get("position_lat", 0.0))
 	var map_loader: Node = _get_map_loader()
-	if map_loader == null or not map_loader.has_method("get_subprovince_data"):
+	if map_loader == null or not map_loader.has_method("project_lng_lat") or not map_loader.has_method("get_province_at_world_position"):
 		return ""
-	var sp_data: Dictionary = map_loader.get_subprovince_data(subprovince_id)
-	return sp_data.get("province_id", "")
+	var world_pos: Vector2 = map_loader.project_lng_lat(lng, lat)
+	return map_loader.get_province_at_world_position(world_pos)
 
 
 func _resolve_province_name(province_id: String) -> String:
