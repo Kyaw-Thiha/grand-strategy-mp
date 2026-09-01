@@ -101,6 +101,12 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"RESERVE_UPDATES":
 			GameState._apply_reserve_updates(data)
 
+		"MARKET_UPDATES":
+			GameState._apply_market_updates(data)
+
+		"TRADE_ROUTE_UPDATES":
+			GameState._apply_trade_route_updates(data)
+
 		"PROVINCE_CAPTURED":
 			GameState._apply_province_captured(data)
 

@@ -8,6 +8,7 @@ signal close_requested()
 const _CONTENT_PATH: String = "Margin/VBox/ContentBody"
 const _NATIONS_LIST_PATH: String = "Margin/VBox/ContentBody/TabBar/Nations/Scroll/ListContainer"
 const _ALLIANCE_LIST_PATH: String = "Margin/VBox/ContentBody/TabBar/Alliance/Scroll/ListContainer"
+const _TRADE_ROUTES_LIST_PATH: String = "Margin/VBox/ContentBody/TabBar/TradeRoutes/Scroll/ListContainer"
 const _MAX_ALLIANCE_SIZE: int = 5
 
 var _nation_definitions: Array[Dictionary] = []
@@ -29,6 +30,7 @@ func _ready() -> void:
 		EventBus.phase_changed.connect(func(_phase: String) -> void:
 			_populate_pages()
 		)
+		EventBus.trade_routes_updated.connect(_populate_trade_routes_page)
 	_populate_pages()
 
 
@@ -118,6 +120,7 @@ func _load_nation_definitions() -> void:
 func _populate_pages() -> void:
 	_populate_nations_page()
 	_populate_alliance_page()
+	_populate_trade_routes_page()
 
 
 func _populate_nations_page() -> void:
@@ -235,6 +238,87 @@ func _populate_alliance_page() -> void:
 				actions.append({"label": "Ally", "action": "invite", "target": nation_id})
 			_add_nation_row(list_container, nation_id, false, actions)
 		alliance_number += 1
+
+
+## Trade Routes tab — the one and only place trade routes are created, accepted, rejected,
+## or ended. Economy → My Trade only mirrors this read-only.
+func _populate_trade_routes_page() -> void:
+	var list_container: VBoxContainer = get_node_or_null(_TRADE_ROUTES_LIST_PATH) as VBoxContainer
+	if list_container == null:
+		return
+	_clear_container(list_container)
+
+	var my_nation_id: String = GameState.get_my_nation_id()
+	if my_nation_id.is_empty():
+		_add_empty_label(list_container, "SELECT A NATION")
+		return
+
+	_add_section_header(list_container, "MY TRADE ROUTES", [])
+	var my_routes: Array = GameState.get_my_trade_routes()
+	if my_routes.is_empty():
+		_add_empty_label(list_container, "No trade routes yet.")
+	else:
+		for route: Dictionary in my_routes:
+			_add_trade_route_row(list_container, route, my_nation_id)
+
+	var propose_margin := MarginContainer.new()
+	propose_margin.add_theme_constant_override("margin_top", 10)
+	var propose_btn := Button.new()
+	propose_btn.text = "+ Propose New Route"
+	propose_btn.pressed.connect(func() -> void: EventBus.propose_trade_route_open_requested.emit())
+	propose_margin.add_child(propose_btn)
+	list_container.add_child(propose_margin)
+
+
+func _add_trade_route_row(parent: VBoxContainer, route: Dictionary, my_nation_id: String) -> void:
+	var route_id: String = str(route.get("route_id", ""))
+	var status: String = str(route.get("status", ""))
+	var is_recipient: bool = route.get("nation_b_id", "") == my_nation_id
+	var partner_id: String = route.get("nation_b_id", "") if route.get("nation_a_id", "") == my_nation_id else route.get("nation_a_id", "")
+
+	var row: HBoxContainer = HBoxContainer.new()
+	row.custom_minimum_size = Vector2(0, 36)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+
+	var label: Label = Label.new()
+	label.text = "%s   %s %d/t <-> %s %d/t   %s" % [
+		_get_nation_name(partner_id),
+		str(route.get("a_sends_resource", "")).capitalize(), int(route.get("a_sends_rate", 0)),
+		str(route.get("b_sends_resource", "")).capitalize(), int(route.get("b_sends_rate", 0)),
+		status.capitalize(),
+	]
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+
+	if status == "proposed" and is_recipient:
+		var accept_btn := Button.new()
+		accept_btn.text = "Accept"
+		accept_btn.pressed.connect(func() -> void:
+			CommandQueue.submit("RESPOND_TRADE_ROUTE", {"route_id": route_id, "accept": true})
+		)
+		row.add_child(accept_btn)
+		var reject_btn := Button.new()
+		reject_btn.text = "Reject"
+		reject_btn.pressed.connect(func() -> void:
+			CommandQueue.submit("RESPOND_TRADE_ROUTE", {"route_id": route_id, "accept": false})
+		)
+		row.add_child(reject_btn)
+	elif status == "proposed":
+		var cancel_btn := Button.new()
+		cancel_btn.text = "Cancel"
+		cancel_btn.pressed.connect(func() -> void:
+			CommandQueue.submit("END_TRADE_ROUTE", {"route_id": route_id})
+		)
+		row.add_child(cancel_btn)
+	else:
+		var end_btn := Button.new()
+		end_btn.text = "End"
+		end_btn.pressed.connect(func() -> void:
+			CommandQueue.submit("END_TRADE_ROUTE", {"route_id": route_id})
+		)
+		row.add_child(end_btn)
 
 
 func _add_section_header(parent: VBoxContainer, title: String, action_specs: Array[Dictionary]) -> void:

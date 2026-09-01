@@ -5,6 +5,7 @@ const BombingRunIndicatorScene := preload("res://scenes/systems/air/bombing_run_
 const DubinsInterpolator := preload("res://src/systems/air/dubins_interpolator.gd")
 const MoveOrderOverlay := preload("res://src/systems/military/move_order_overlay.gd")
 const AirRangeOverlay := preload("res://src/systems/air/air_range_overlay.gd")
+const AirDetectionOverlay := preload("res://src/systems/air/air_detection_overlay.gd")
 const RECON_RADIUS_DEG   := 1.0
 const COMBAT_RADIUS_DEG  := 0.3
 
@@ -39,6 +40,7 @@ var _pending_chain: Array[String] = []
 var _shift_chain_started: bool = false
 var _pending_route_overlay: Node2D = null
 var _range_overlay: Node2D = null
+var _detection_overlay: Node2D = null
 var _recon_radius_px: float = 0.0
 var _combat_radius_px: float = 0.0
 var _wing_fuel: Dictionary = {}  # wing_id → float
@@ -74,6 +76,8 @@ func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -
 		EventBus.air_wing_detected.connect(_on_air_wing_detected)
 	if not EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
 		EventBus.air_wing_detection_lost.connect(_on_air_wing_detection_lost)
+	if not EventBus.radar_updated.is_connected(_on_radar_updated):
+		EventBus.radar_updated.connect(_on_radar_updated)
 	EventBus.air_combat_started.connect(_on_air_combat_started)
 	EventBus.air_combat_ended.connect(_on_air_combat_ended)
 	if not EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
@@ -87,6 +91,11 @@ func setup(map_loader: Node, icon_layer: Node2D, military_system: Node = null) -
 		_range_overlay = AirRangeOverlay.new()
 		_range_overlay.setup(_map_loader)
 		_icon_layer.add_child(_range_overlay)
+	if _detection_overlay == null:
+		_detection_overlay = AirDetectionOverlay.new()
+		var my_color: Color = NATION_COLORS.get(GameState.get_my_nation_id(), NEUTRAL_COLOR)
+		_detection_overlay.setup(_map_loader, my_color)
+		_icon_layer.add_child(_detection_overlay)
 	# Hydrate any wings already in GameState (late join / scene reload).
 	# Also replay cached AIR_WING_PATH payloads: the initial loiter paths arrive from the server
 	# before the game scene finishes loading, so the signal connection isn't up yet and they're
@@ -226,6 +235,8 @@ func _on_air_wing_removed(wing_id: String) -> void:
 	_last_synced_gen_id.erase(wing_id)
 	_detected_wings.erase(wing_id)
 	_wing_fuel.erase(wing_id)
+	if _detection_overlay != null:
+		_detection_overlay.remove_wing_entry(wing_id)
 	if _selected_wing_id == wing_id:
 		_selected_wing_id = ""
 		EventBus.air_wing_deselected.emit()
@@ -670,8 +681,36 @@ func _on_air_bombing_province_result(data: Dictionary) -> void:
 		_strategic_bombing_banners[key].add_combat(data)
 
 
+## Keeps the own-nation detection-radius overlay circle following an airborne wing's live
+## interpolated position. Enemy wings never get a circle — showing one would reveal how big
+## their detection radius is, information the player shouldn't have.
 func _sync_detection_overlay(wing_id: String) -> void:
-	pass  # Deferred: detection overlay follows icon during TRANSIT
+	if _detection_overlay == null:
+		return
+	var data: Dictionary = GameState.get_air_wing(wing_id)
+	if data.is_empty() or data.get("nation_id", "") != GameState.get_my_nation_id():
+		return
+	var ls: String = data.get("lifecycle_state", "")
+	if ls == "idle" or ls == "refuel":
+		_detection_overlay.remove_wing_entry(wing_id)
+		return
+	var pos: Vector2 = _get_interpolated_wing_position(wing_id)
+	if pos == Vector2.INF:
+		pos = Vector2(float(data.get("position_lng", 0.0)), float(data.get("position_lat", 0.0)))
+	_detection_overlay.set_wing_entry(wing_id, pos.x, pos.y, data.get("mission", ""))
+
+
+func _on_radar_updated(data: Dictionary) -> void:
+	if _detection_overlay == null:
+		return
+	if data.get("nation_id", "") != GameState.get_my_nation_id():
+		return
+	_detection_overlay.set_radar_entry(
+		data.get("key", ""),
+		float(data.get("position_lng", 0.0)),
+		float(data.get("position_lat", 0.0)),
+		float(data.get("radius_deg", 0.0)),
+	)
 
 
 func _append_pending_milestone(milestone_id: String) -> void:
@@ -869,6 +908,8 @@ func cleanup() -> void:
 		EventBus.air_wing_detected.disconnect(_on_air_wing_detected)
 	if EventBus.air_wing_detection_lost.is_connected(_on_air_wing_detection_lost):
 		EventBus.air_wing_detection_lost.disconnect(_on_air_wing_detection_lost)
+	if EventBus.radar_updated.is_connected(_on_radar_updated):
+		EventBus.radar_updated.disconnect(_on_radar_updated)
 	if EventBus.air_bombing_result.is_connected(_on_air_bombing_result):
 		EventBus.air_bombing_result.disconnect(_on_air_bombing_result)
 	if EventBus.province_aa_fired.is_connected(_on_province_aa_fired):

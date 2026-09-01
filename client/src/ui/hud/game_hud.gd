@@ -25,6 +25,7 @@ const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
 @onready var _more_button: Button                  = %MoreButton
 @onready var _more_flyout: PanelContainer           = %MoreFlyout
 @onready var _more_flyout_list: VBoxContainer       = %MoreFlyoutList
+@onready var _market_button: Button                = %MarketButton
 
 # Branch B — resources shown in the top bar's always-4 (RESOURCE_ECONOMY.md's roster order),
 # everything else goes in the "[v N more]" hover flyout. Order matches
@@ -139,6 +140,7 @@ func _ready() -> void:
 	_more_button.mouse_exited.connect(_on_more_button_mouse_exited)
 	_more_flyout.mouse_entered.connect(func() -> void: _more_flyout.visible = true)
 	_more_flyout.mouse_exited.connect(func() -> void: _more_flyout.visible = false)
+	_market_button.pressed.connect(func() -> void: EventBus.market_panel_open_requested.emit())
 
 	hud_manager.setup(_side_panel_anchor, _center_panel_anchor, overlay_dim)
 	_register_initial_ui_input_ownership()
@@ -269,6 +271,44 @@ func _ready() -> void:
 	if spawn_panel.has_signal("close_requested"):
 		spawn_panel.connect("close_requested", func() -> void:
 			hud_manager.hide_panel("air_wing_spawn")
+		)
+
+	# Market — full-center, opened from the top bar or Economy → My Trade (Phase 9 Branch D)
+	var market_wrapper: Control = _build_full_center_wrapper("res://src/ui/hud/market_panel.gd", Color(0.79, 0.60, 0.19, 1.0))
+	var market_panel: Node = market_wrapper.get_node("OuterMargin/Center/Panel")
+	hud_manager.register_panel("market", market_wrapper, HUDManager.PlacementMode.FULL_CENTER)
+	EventBus.market_panel_open_requested.connect(func() -> void:
+		hud_manager.show_panel("market")
+	)
+	if market_panel.has_signal("close_requested"):
+		market_panel.connect("close_requested", func() -> void:
+			hud_manager.hide_panel("market")
+		)
+
+	# Propose Trade Route — full-center, opened from Diplomacy → Trade Routes (Phase 9 Branch D).
+	# Small form content (well under viewport width) — HUDManager._center_panel() correctly
+	# shrink-wraps and centers this via get_combined_minimum_size() without needing the
+	# full-rect wrapper Market needs (see _build_full_center_wrapper's doc comment).
+	var propose_route_panel := PanelContainer.new()
+	propose_route_panel.set_script(load("res://src/ui/hud/propose_trade_route_panel.gd"))
+	propose_route_panel.theme = _DOCK_BUTTON_STYLE_NORMAL
+	var propose_route_sb := StyleBoxFlat.new()
+	propose_route_sb.bg_color = Color(0.07, 0.05, 0.03, 0.96)
+	propose_route_sb.border_width_left = 3
+	propose_route_sb.border_color = Color(0.48, 0.31, 0.69, 1.0)
+	propose_route_sb.corner_radius_top_left = 4
+	propose_route_sb.corner_radius_top_right = 4
+	propose_route_sb.corner_radius_bottom_right = 4
+	propose_route_sb.corner_radius_bottom_left = 4
+	propose_route_panel.add_theme_stylebox_override("panel", propose_route_sb)
+	hud_manager.register_panel("propose_trade_route", propose_route_panel, HUDManager.PlacementMode.FULL_CENTER)
+	EventBus.propose_trade_route_open_requested.connect(func() -> void:
+		propose_route_panel.open_propose_modal()
+		hud_manager.show_panel("propose_trade_route")
+	)
+	if propose_route_panel.has_signal("close_requested"):
+		propose_route_panel.connect("close_requested", func() -> void:
+			hud_manager.hide_panel("propose_trade_route")
 		)
 
 	# Division Template Viewer — full-center, opened from mini-comp grid click
@@ -504,6 +544,79 @@ func _register_initial_ui_input_ownership() -> void:
 		_chat_panel,
 	]:
 		_register_ui_input_ownership_root(root)
+
+
+## Builds a FULL_CENTER wrapper for a code-built popup that (a) needs its box shrink-wrapped
+## to its own content and centered on both axes — like every other panel — rather than
+## stretched to fill the screen, and (b) has some content wide/tall enough to need internal
+## scrolling capped at a fixed size (e.g. Market's per-resource columns), which requires a
+## bounded layout context to clip against.
+##
+## Structure: full-rect Control root > full-rect MarginContainer ("OuterMargin", generous edge
+## margins so the box never touches screen edges even at max size) > CenterContainer (centers
+## its child using the child's own natural minimum size, on both axes) > PanelContainer
+## ("Panel", the actual visible bordered box, carrying the given script).
+##
+## Registering the ROOT (not the inner Panel) with HUDManager is required:
+## HUDManager._center_panel() only takes its "just fill the available area" branch when the
+## registered node's own anchors are already full-rect (checked via
+## anchor_left/top/right/bottom == 0/0/1/1) — a plain PanelContainer sized only by its own
+## content falls into the OTHER branch instead, which sizes/positions the panel using
+## get_combined_minimum_size() computed with NO surrounding size constraint; for a
+## multi-column panel like Market whose ScrollContainer only clips when something upstream
+## actually bounds its size, that unconstrained minimum size can exceed the viewport,
+## producing a huge, top-left-pinned, off-screen-clipped panel instead of a centered one. The
+## CenterContainer here provides exactly that bound (screen size minus OuterMargin's margins)
+## while still shrink-wrapping and centering the box like every other panel.
+##
+## Note: assigning a Control's `.anchors_preset` property from GDScript does nothing at
+## runtime (it is an editor-only inspector convenience) — full-rect anchoring must be set via
+## the real anchor_left/top/right/bottom + grow_horizontal/vertical properties, as done here.
+func _build_full_center_wrapper(script_path: String, accent_color: Color) -> Control:
+	var root := Control.new()
+	root.anchor_left = 0.0
+	root.anchor_top = 0.0
+	root.anchor_right = 1.0
+	root.anchor_bottom = 1.0
+	root.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	root.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+	var outer_margin := MarginContainer.new()
+	outer_margin.name = "OuterMargin"
+	outer_margin.anchor_left = 0.0
+	outer_margin.anchor_top = 0.0
+	outer_margin.anchor_right = 1.0
+	outer_margin.anchor_bottom = 1.0
+	outer_margin.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	outer_margin.grow_vertical = Control.GROW_DIRECTION_BOTH
+	outer_margin.add_theme_constant_override("margin_left", 48)
+	outer_margin.add_theme_constant_override("margin_top", 42)
+	outer_margin.add_theme_constant_override("margin_right", 48)
+	outer_margin.add_theme_constant_override("margin_bottom", 42)
+	root.add_child(outer_margin)
+
+	var center := CenterContainer.new()
+	center.name = "Center"
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer_margin.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.name = "Panel"
+	panel.theme = _DOCK_BUTTON_STYLE_NORMAL
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.07, 0.05, 0.03, 0.96)
+	sb.border_width_left = 3
+	sb.border_color = accent_color
+	sb.corner_radius_top_left = 4
+	sb.corner_radius_top_right = 4
+	sb.corner_radius_bottom_right = 4
+	sb.corner_radius_bottom_left = 4
+	panel.add_theme_stylebox_override("panel", sb)
+	panel.set_script(load(script_path))
+	center.add_child(panel)
+
+	return root
 
 
 ## Registers one interactive UI root and its text descendants for map input ownership.

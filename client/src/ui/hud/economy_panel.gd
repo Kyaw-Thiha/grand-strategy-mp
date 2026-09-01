@@ -17,6 +17,7 @@ const NATIONAL_SLICES := ["construction_speed", "unit_production_speed"]
 @onready var _close_button: Button = %CloseButton
 @onready var _resources_list: VBoxContainer = %ResourcesList
 @onready var _industry_list: VBoxContainer = %IndustryList
+@onready var _my_trade_list: VBoxContainer = %MyTradeList
 
 # slice_key -> value, for every slice (visible or not) — always sums to 100 across the
 # currently-VISIBLE slices only (hidden restricted slices a nation lacks access to stay fixed
@@ -38,6 +39,9 @@ func _ready() -> void:
 	EventBus.resources_updated.connect(_on_resources_updated_for_industry_seed)
 	_refresh_resources()
 	_build_industry_sliders()
+	EventBus.market_updated.connect(_refresh_my_trade)
+	EventBus.trade_routes_updated.connect(_refresh_my_trade)
+	_refresh_my_trade()
 
 
 ## GameState.industry_alloc may still be empty (schema default) the first time this panel's
@@ -259,3 +263,64 @@ func _on_reset_pressed() -> void:
 	_local_alloc["construction_speed"] = 50.0
 	CommandQueue.submit("SET_INDUSTRY_ALLOCATION", {"allocations": _local_alloc.duplicate()})
 	_build_industry_sliders()
+
+
+## Tab 3 — My Trade. Deliberately narrow scope, per plans/economy_production_ui_handoff.md §4
+## Tab 3: only this player's own resting spot orders (with Cancel) and a read-only mirror of
+## their trade routes. Not a market browser (that's the Market modal) and not where routes are
+## created or ended (that's Diplomacy → Trade Routes).
+func _refresh_my_trade() -> void:
+	for child in _my_trade_list.get_children():
+		child.queue_free()
+
+	var header := Label.new()
+	header.text = "MY SPOT ORDERS"
+	_my_trade_list.add_child(header)
+
+	var my_orders: Array = GameState.get_my_market_orders()
+	if my_orders.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No open orders."
+		_my_trade_list.add_child(empty_label)
+	else:
+		for order: Dictionary in my_orders:
+			var row := HBoxContainer.new()
+			var side_text: String = "Sell" if order.get("side", "") == "sell" else "Buy"
+			var label := Label.new()
+			label.text = "%s  %s  %d @ %.2f" % [
+				side_text, str(order.get("resource_type", "")).capitalize(),
+				int(order.get("quantity", 0)), float(order.get("price", 0.0)),
+			]
+			row.add_child(label)
+			var cancel_btn := Button.new()
+			cancel_btn.text = "Cancel"
+			cancel_btn.pressed.connect(_on_cancel_order_pressed.bind(str(order.get("order_id", ""))))
+			row.add_child(cancel_btn)
+			_my_trade_list.add_child(row)
+
+	var market_link_btn := Button.new()
+	market_link_btn.text = "Market"
+	market_link_btn.pressed.connect(func() -> void: EventBus.market_panel_open_requested.emit())
+	_my_trade_list.add_child(market_link_btn)
+
+	var routes_header := Label.new()
+	routes_header.text = "TRADE ROUTES  (read-only — manage in Diplomacy)"
+	_my_trade_list.add_child(routes_header)
+
+	var my_routes: Array = GameState.get_my_trade_routes()
+	if my_routes.is_empty():
+		var empty_routes := Label.new()
+		empty_routes.text = "No trade routes."
+		_my_trade_list.add_child(empty_routes)
+	else:
+		var my_nation_id: String = GameState.get_my_nation_id()
+		for route: Dictionary in my_routes:
+			var partner_id: String = route.get("nation_b_id", "") if route.get("nation_a_id", "") == my_nation_id else route.get("nation_a_id", "")
+			var status: String = str(route.get("status", ""))
+			var route_row := Label.new()
+			route_row.text = "-> %s   %s" % [partner_id.capitalize(), status.capitalize()]
+			_my_trade_list.add_child(route_row)
+
+
+func _on_cancel_order_pressed(order_id: String) -> void:
+	CommandQueue.submit("CANCEL_MARKET_ORDER", {"order_id": order_id})

@@ -140,3 +140,12 @@ signal province_detail_closed()
 signal production_panel_open_requested()
 signal marshalling_updated()
 signal reserve_updated()
+
+# ── Market / Trade (Phase 9 Branch D) ─────────────────────────────────────────
+
+signal market_updated()
+signal trade_routes_updated()
+signal market_panel_open_requested()
+signal market_panel_closed()
+signal propose_trade_route_open_requested()
+signal propose_trade_route_closed()

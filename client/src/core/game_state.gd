@@ -70,6 +70,13 @@ var reserve: Dictionary = {}                 # unit_type -> HP-equivalent amount
 var reserve_cap: float = 0.0
 var reserve_category_stats: Dictionary = {}  # category ("infantry"/"ordnance"/"tank"/"air") -> {production_rate, net_rate}
 var nation_capitals: Dictionary = {}         # nation_id -> capital province_id, sent once at GAME_STARTED
+# Branch D — market_orders: { order_id -> {order_id, nation_id, resource_type, side, quantity, price} }
+# Full public order book, every nation's orders visible (needed for the Market panel's
+# BUY/SELL top-3 columns across all ten resources).
+var market_orders: Dictionary = {}
+# Branch D — trade_routes: { route_id -> {route_id, nation_a_id, nation_b_id, kind, status,
+#   a_sends_resource, a_sends_rate, b_sends_resource, b_sends_rate} }
+var trade_routes: Dictionary = {}
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -97,6 +104,8 @@ func reset_session_state() -> void:
 	naval_contact_markers.clear()
 	resources.clear()
 	province_economy.clear()
+	market_orders.clear()
+	trade_routes.clear()
 
 
 # ── Write gate ───────────────────────────────────────────────────────────────
@@ -191,6 +200,50 @@ func _apply_reserve_updates(data: Dictionary) -> void:
 	reserve_cap = float(data.get("reserve_cap", 0.0))
 	reserve_category_stats = data.get("category_stats", {})
 	EventBus.reserve_updated.emit()
+
+
+## Called by SessionManager when server sends MARKET_UPDATES — the full public order book,
+## replaced wholesale each time (small collection, always sent in full, same pattern as
+## _apply_relations_updated's clear-then-repopulate).
+func _apply_market_updates(data: Dictionary) -> void:
+	market_orders.clear()
+	for entry: Dictionary in data.get("orders", []):
+		var oid: String = entry.get("order_id", "")
+		if oid.is_empty():
+			continue
+		market_orders[oid] = entry
+	EventBus.market_updated.emit()
+
+
+## Called by SessionManager when server sends TRADE_ROUTE_UPDATES — the full trade route list.
+func _apply_trade_route_updates(data: Dictionary) -> void:
+	trade_routes.clear()
+	for entry: Dictionary in data.get("routes", []):
+		var rid: String = entry.get("route_id", "")
+		if rid.is_empty():
+			continue
+		trade_routes[rid] = entry
+	EventBus.trade_routes_updated.emit()
+
+
+## Returns this player's own nation's resting orders, newest last.
+func get_my_market_orders() -> Array:
+	var nation_id := get_my_nation_id()
+	var result: Array = []
+	for order: Dictionary in market_orders.values():
+		if order.get("nation_id", "") == nation_id:
+			result.append(order)
+	return result
+
+
+## Returns this player's own nation's trade routes (proposed, active, or disrupted).
+func get_my_trade_routes() -> Array:
+	var nation_id := get_my_nation_id()
+	var result: Array = []
+	for route: Dictionary in trade_routes.values():
+		if route.get("nation_a_id", "") == nation_id or route.get("nation_b_id", "") == nation_id:
+			result.append(route)
+	return result
 
 
 func set_nation_capitals(capitals: Dictionary) -> void:
