@@ -138,3 +138,5 @@ signal province_economy_updated(province_id: String)  ## empty string = bulk/mul
 signal province_detail_open_requested(province_id: String)
 signal province_detail_closed()
 signal production_panel_open_requested()
+signal marshalling_updated()
+signal reserve_updated()

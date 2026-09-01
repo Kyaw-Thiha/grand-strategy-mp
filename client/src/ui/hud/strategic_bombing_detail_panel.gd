@@ -177,10 +177,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _get_map_loader() -> Node:
-	for child in Engine.get_main_loop().root.get_children():
-		var c: Node = child as Node
-		if c.name == "MapLoader":
-			return c
-	var ml := load("res://src/systems/map/map_loader.gd")
-	var inst: Node = ml.new()
-	return inst
+	# MapLoader is nested under the "Game" scene root (game.tscn: Game > MapLoader), not a direct
+	# child of the true scene tree root — a one-level get_children() scan never finds it.
+	# find_child(recursive=true) is the correct lookup, matching bombing_detail_panel.gd's
+	# already-correct version of this same pattern.
+	var ml2: MainLoop = Engine.get_main_loop()
+	if ml2 == null:
+		return null
+	var root_node: Window = ml2.root
+	var ml: Node = root_node.find_child("MapLoader", true, false)
+	if ml == null:
+		ml = preload("res://src/systems/map/map_loader.gd").new()
+	return ml

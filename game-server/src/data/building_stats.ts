@@ -3,6 +3,9 @@ export interface BuildingStats {
   // from level 0 -> 1, index 4 is the cost to go from level 4 -> 5.
   construction_points_by_level: number[];
   resource_cost_by_level: Partial<Record<string, number>>[];
+  // Branch C (Phase 9 Task C) — build_points/tick at that level. Only present for
+  // barracks/tank_plant/ordnance_factory/aircraft_factory; undefined for every other type.
+  base_rate_by_level?: number[];
 }
 
 // The 24-key buildings{} schema per MAP_DATA_CONTRACT.md / map/tools/map_pipeline/pipeline.py's
@@ -38,12 +41,21 @@ function defaultCostByLevel(): Partial<Record<string, number>>[] {
   return [50, 90, 140, 200, 270].map((money) => ({ money }));
 }
 
+// TBD playtesting — placeholder curve. build_points/tick at that building level.
+const PRODUCTION_BASE_RATE_BY_TYPE: Partial<Record<string, number[]>> = {
+  barracks:         [3, 6, 10, 15, 21],
+  tank_plant:       [2, 4, 7, 11, 16],
+  ordnance_factory: [3, 6, 10, 15, 21],
+  aircraft_factory: [2, 4, 7, 11, 16],
+};
+
 const STAT_TABLE: Record<string, BuildingStats> = Object.fromEntries(
   BUILDING_TYPES.map((buildingType) => [
     buildingType,
     {
       construction_points_by_level: [...DEFAULT_CONSTRUCTION_POINTS],
       resource_cost_by_level: defaultCostByLevel(),
+      base_rate_by_level: PRODUCTION_BASE_RATE_BY_TYPE[buildingType],
     },
   ]),
 );

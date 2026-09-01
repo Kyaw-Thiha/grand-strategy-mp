@@ -131,28 +131,35 @@ layout_mode = 2
 size_flags_vertical = 3
 tooltip_text = "Templates"
 
-[node name="PlaceholderTemplates" type="Label" parent="Margin/VBox/ContentBody/TabBar/Templates"]
+[node name="Header" type="HBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Templates"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Margin/VBox/ContentBody/TabBar/Templates/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "DIVISION TEMPLATES"
+
+[node name="BtnAddTemplate" type="Button" parent="Margin/VBox/ContentBody/TabBar/Templates/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+tooltip_text = "Add new division template"
+text = "+"
+
+[node name="TemplateList" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Templates"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
-text = "No templates yet."
-horizontal_alignment = 1
-vertical_alignment = 1
-autowrap_mode = 2
 
 [node name="Reserve" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar"]
 layout_mode = 2
 size_flags_vertical = 3
 tooltip_text = "Reserve"
 
-[node name="PlaceholderReserve" type="Label" parent="Margin/VBox/ContentBody/TabBar/Reserve"]
+[node name="ReserveList" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar/Reserve"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
-text = "No Reserve data yet."
-horizontal_alignment = 1
-vertical_alignment = 1
-autowrap_mode = 2
 
 [node name="Naval" type="VBoxContainer" parent="Margin/VBox/ContentBody/TabBar"]
 layout_mode = 2

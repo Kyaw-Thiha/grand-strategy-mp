@@ -1,18 +1,18 @@
 extends PanelContainer
 ## Military panel — side-docked, with Land/Air/Naval sub-tabs.
-## Land tab lists division templates from DivisionTemplateStore.
+## Land tab tracks REAL division instances only (DEPLOYING = marshalling, DEPLOYED = fielded).
+## Division Templates (the blueprint side) live in the Production panel instead, per
+## economy_production_ui_handoff.md §7/§8 — this panel used to also show the template list,
+## but that's been relocated, not duplicated (Phase 9 Task C amendment).
 ## Air and Naval tabs are placeholders for Phase 12/13.
-##
-## NOTE: The original active-division list code is DISABLED below.
-## Search for "DISABLED" to find it. Re-enable when the active-division list is restored.
 
 signal close_requested()
-# DISABLED: restore alongside the active-division list
-# signal division_clicked(division_id: String)
+signal division_clicked(division_id: String)
 
 const _CONTENT_PATH: String = "Margin/VBox/ContentBody"
 
 @onready var _close_button: Button = %CloseButton
+@onready var _deploying_list: VBoxContainer = %DeployingList
 
 
 func _ready() -> void:
@@ -20,17 +20,44 @@ func _ready() -> void:
 	_setup_tab_buttons()
 	_inject_land_header()
 	_inject_air_header()
-	_refresh_template_list()
+	_refresh_deployed_list()
 	_refresh_air_list()
-	DivisionTemplateStore.templates_changed.connect(func() -> void: _refresh_template_list())
 	EventBus.air_wing_added.connect(func(_id: String) -> void: _refresh_air_list())
 	EventBus.air_wing_updated.connect(func(_id: String) -> void: _refresh_air_list())
 	EventBus.air_wing_removed.connect(func(_id: String) -> void: _refresh_air_list())
+	EventBus.marshalling_updated.connect(_refresh_deploying)
+	_refresh_deploying()
 
-	# DISABLED: re-enable when active-division list is restored
-	# EventBus.division_added.connect(func(_id: String) -> void: _refresh_land_list())
-	# EventBus.division_updated.connect(func(_id: String) -> void: _refresh_land_list())
-	# EventBus.division_removed.connect(func(_id: String) -> void: _refresh_land_list())
+	EventBus.division_added.connect(func(_id: String) -> void: _refresh_deployed_list())
+	EventBus.division_updated.connect(func(_id: String) -> void: _refresh_deployed_list())
+	EventBus.division_removed.connect(func(_id: String) -> void: _refresh_deployed_list())
+
+	_await_map_ready_then_refresh_deployed()
+
+
+## The initial _refresh_deployed_list() above resolves every division to "Unknown Location" when
+## this panel is built before the map has finished loading (the common case — game start divisions
+## exist before the player ever interacts with anything). Two things have to actually be true for
+## get_province_at_world_position() to work, not just "MapLoader loaded": (1) MapLoader.
+## is_map_loaded() — confirmed synchronously first since load_map() is fully synchronous and an
+## await on the signal alone would hang forever if it already fired; and (2) at least one physics
+## frame has processed since the province click-area Area2D shapes were added to the tree — Godot's
+## physics broadphase doesn't index newly-added collision shapes until the next physics step, so a
+## same-frame intersect_point() query can miss them even with the map otherwise fully loaded. This
+## is exactly why province grouping "started working" only once something else (raising a
+## division) happened to trigger a refresh late enough for both conditions to be true by accident.
+func _await_map_ready_then_refresh_deployed() -> void:
+	var map_loader: Node = _get_map_loader()
+	if map_loader == null:
+		return
+	if map_loader.has_method("is_map_loaded") and not map_loader.is_map_loaded():
+		if not map_loader.has_signal("map_loaded"):
+			return
+		await map_loader.map_loaded
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+	_refresh_deployed_list()
 
 
 func _setup_tab_buttons() -> void:
@@ -70,115 +97,248 @@ func cycle_sub_tab(forward: bool) -> void:
 	tabs.current_tab = posmod(tabs.current_tab + (1 if forward else -1), count)
 
 
-# ── Land header injection ─────────────────────────────────────────────────
+# ── Land header ────────────────────────────────────────────────────────────
 
 func _inject_land_header() -> void:
 	var title_lbl: Label = get_node_or_null(
 		_CONTENT_PATH + "/TabBar/Land/Header/HBox/Title") as Label
 	if title_lbl != null:
-		title_lbl.text = "DIVISION TEMPLATES"
+		title_lbl.text = "LAND FORCES"
 
-	var hbox: HBoxContainer = get_node_or_null(
-		_CONTENT_PATH + "/TabBar/Land/Header/HBox") as HBoxContainer
-	if hbox == null:
+
+# ── Deploying divisions ────────────────────────────────────────────────────
+
+func _refresh_deploying() -> void:
+	for child in _deploying_list.get_children():
+		child.queue_free()
+	if GameState.marshalling_divisions.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No divisions currently marshalling.\nRaise one from the Production panel."
+		_deploying_list.add_child(empty_label)
 		return
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	hbox.add_child(spacer)
-	var add_btn := Button.new()
-	add_btn.text = "+"
-	add_btn.custom_minimum_size = Vector2(28, 28)
-	add_btn.tooltip_text = "Add new division template"
-	add_btn.pressed.connect(func() -> void:
-		EventBus.division_builder_open_requested.emit("")
+	for mid: String in GameState.marshalling_divisions:
+		_deploying_list.add_child(_make_deploying_item(mid, GameState.marshalling_divisions[mid]))
+
+
+## Card styling matches _make_division_item's DEPLOYED rows underneath, so the Land tab reads as
+## one consistent list rather than two visually different sections. Reuses the same
+## ProvincePickerButton component as the Production panel's per-template Raise row — the home
+## province chosen at raise time is freely overridable up until FORCE_DEPLOY (see
+## unit_production_system.ts's updateMarshallingProvince — MARSHALLING_RATE is flat/national, so
+## changing province has no effect on fill rate, only on where the division appears once
+## deployed).
+func _make_deploying_item(mid: String, data: Dictionary) -> Control:
+	var pct: float = float(data.get("aggregate_hp_pct", 0.0)) * 100.0
+
+	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	card.add_child(vbox)
+
+	var by_type: Dictionary = {}
+	for slot: Dictionary in data.get("slots", []):
+		if float(slot.get("current_hp", 0.0)) >= 100.0:
+			continue
+		var ut: String = slot.get("unit_type", "")
+		by_type[ut] = by_type.get(ut, 0) + 1
+	var missing_parts: Array[String] = []
+	for ut: String in by_type:
+		missing_parts.append("%dx %s" % [by_type[ut], ut])
+
+	var title_lbl := Label.new()
+	title_lbl.text = "%s   %d%% agg. HP" % [data.get("template_id", ""), int(pct)]
+	title_lbl.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(title_lbl)
+
+	var missing_lbl := Label.new()
+	missing_lbl.text = "Missing: %s" % (", ".join(missing_parts) if missing_parts.size() > 0 else "none")
+	missing_lbl.add_theme_font_size_override("font_size", 11)
+	missing_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.5, 1.0))
+	vbox.add_child(missing_lbl)
+
+	var action_row := HBoxContainer.new()
+
+	var province_picker := ProvincePickerButton.new()
+	province_picker.selected_province_id = data.get("home_province_id", "")
+	province_picker.custom_minimum_size = Vector2(100, 24)
+	province_picker.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
+	province_picker.province_changed.connect(func(pid: String) -> void:
+		CommandQueue.submit("UPDATE_MARSHALLING_PROVINCE", {"marshalling_id": mid, "home_province_id": pid})
 	)
-	hbox.add_child(add_btn)
+	action_row.add_child(province_picker)
+
+	var btn_cancel := Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.pressed.connect(func() -> void:
+		CommandQueue.submit("CANCEL_MARSHALLING", {"marshalling_id": mid})
+	)
+	action_row.add_child(btn_cancel)
+
+	var btn_deploy := Button.new()
+	btn_deploy.text = "Force Deploy"
+	btn_deploy.disabled = pct < 50.0
+	btn_deploy.pressed.connect(func() -> void:
+		CommandQueue.submit("FORCE_DEPLOY", {"marshalling_id": mid})
+	)
+	action_row.add_child(btn_deploy)
+
+	vbox.add_child(action_row)
+	return card
 
 
-# ── Template list ─────────────────────────────────────────────────────────
+# ── Deployed divisions ──────────────────────────────────────────────────────
+# Real, currently-fielded division instances — the battlefield-instance counterpart to
+# Production's Templates tab (economy_production_ui_handoff.md §8). Reuses the Scroll/
+# ListContainer node the template list previously rendered into, now vacated since templates
+# moved to the Production panel. Clicking a row centers/selects it on the strategic map,
+# consistent with STRATEGIC_COMBAT.md's existing division-dot click behavior, rather than
+# opening another overlay.
 
-func _refresh_template_list() -> void:
+func _refresh_deployed_list() -> void:
 	var list_container: VBoxContainer = get_node_or_null(
-		_CONTENT_PATH + "/TabBar/Land/Scroll/ListContainer") as VBoxContainer
+		_CONTENT_PATH + "/TabBar/Land/Scroll/ListContainer")
 	if list_container == null:
 		return
 	for child: Node in list_container.get_children():
 		list_container.remove_child(child)
 		child.queue_free()
+	var div_ids: Array = GameState.get_my_nation_divisions()
+	if div_ids.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No divisions currently fielded."
+		list_container.add_child(empty_label)
+		return
 
-	for template: Dictionary in DivisionTemplateStore.get_templates():
-		var item: Control = _make_template_item(template)
+	# Primary grouping is by current location (province), per-province subheading, so the
+	# player can see at a glance where their forces actually are — a "Stack (N)" sub-grouping
+	# still applies within a province for divisions sharing a stack there.
+	var by_province: Dictionary = {}
+	for div_id: String in div_ids:
+		var div_data: Dictionary = GameState.get_division(div_id)
+		if div_data.is_empty():
+			continue
+		if div_data.get("combat_state", "") == "destroyed":
+			continue
+		var pid: String = _resolve_division_province(div_data)
+		if not by_province.has(pid):
+			by_province[pid] = []
+		by_province[pid].append({ "id": div_id, "data": div_data })
+
+	var province_ids: Array = by_province.keys()
+	province_ids.sort_custom(func(a: String, b: String) -> bool:
+		return _resolve_province_name(a) < _resolve_province_name(b)
+	)
+	for pid: String in province_ids:
+		var province_margin := MarginContainer.new()
+		province_margin.add_theme_constant_override("margin_top", 10)
+		province_margin.add_theme_constant_override("margin_bottom", 4)
+		var province_lbl := Label.new()
+		province_lbl.text = _resolve_province_name(pid)
+		province_lbl.add_theme_font_size_override("font_size", 15)
+		province_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.2, 1))
+		province_margin.add_child(province_lbl)
+		list_container.add_child(province_margin)
+		_add_grouped_division_items(list_container, by_province[pid])
+
+
+## Splits one province's members into stack groups (with a "Stack (N)" sub-label) and solo
+## entries, same shape _refresh_deployed_list used before province-grouping was added.
+func _add_grouped_division_items(list_container: VBoxContainer, members_in_province: Array) -> void:
+	var stacks_map: Dictionary = {}
+	var solo: Array = []
+	for entry: Dictionary in members_in_province:
+		var sid: String = entry.data.get("stack_id", "")
+		if sid.is_empty():
+			solo.append(entry)
+		else:
+			if not stacks_map.has(sid):
+				stacks_map[sid] = []
+			stacks_map[sid].append(entry)
+	for sid: String in stacks_map:
+		var members: Array = stacks_map[sid]
+		members.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return int(a.data.get("stack_position", 0)) < int(b.data.get("stack_position", 0))
+		)
+		var group_lbl: Label = Label.new()
+		group_lbl.text = "Stack (%d)" % members.size()
+		group_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.2, 1))
+		group_lbl.add_theme_font_size_override("font_size", 11)
+		list_container.add_child(group_lbl)
+		for member: Dictionary in members:
+			var item: Button = _make_division_item(member.id, member.data)
+			list_container.add_child(item)
+	for entry: Dictionary in solo:
+		var item: Button = _make_division_item(entry.id, entry.data)
 		list_container.add_child(item)
 
 
-func _make_template_item(template: Dictionary) -> Control:
-	var template_id: String = template.get("id", "")
-	var name_str: String   = template.get("name", "Unknown")
-	var cells: Array       = template.get("cells", [])
+## Resolves a division's current province directly from its position (position_lng/lat, already
+## reliably synced — the same fields military_system.gd uses to place map icons), via
+## MapLoader.get_province_at_world_position(). Deliberately NOT going through
+## division.subprovince_id/get_subprovince_data() any more: subprovince_id is only ever
+## broadcast to the client on the tick it actually changes (see GameRoom.ts's gameTick()
+## subprovinceChanged tracking), which is fragile for this purpose and left every division
+## reading as unresolved. Position-based lookup uses the exact same physics query already
+## powering province click detection (map_interaction.gd) — no separate data path to go stale.
+func _resolve_division_province(div_data: Dictionary) -> String:
+	var lng: float = float(div_data.get("position_lng", 0.0))
+	var lat: float = float(div_data.get("position_lat", 0.0))
+	var map_loader: Node = _get_map_loader()
+	if map_loader == null or not map_loader.has_method("project_lng_lat") or not map_loader.has_method("get_province_at_world_position"):
+		return ""
+	var world_pos: Vector2 = map_loader.project_lng_lat(lng, lat)
+	return map_loader.get_province_at_world_position(world_pos)
 
-	var container := PanelContainer.new()
-	container.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 2)
-	container.add_child(vbox)
+func _resolve_province_name(province_id: String) -> String:
+	if province_id.is_empty():
+		return "Unknown Location"
+	var map_loader: Node = _get_map_loader()
+	if map_loader != null and map_loader.has_method("get_province_data"):
+		var pd: Dictionary = map_loader.get_province_data(province_id)
+		if not pd.is_empty():
+			return pd.get("name", province_id)
+	return province_id
 
-	var name_lbl := Label.new()
-	name_lbl.text = name_str
-	name_lbl.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(name_lbl)
 
-	var type_lbl := Label.new()
-	type_lbl.text = _derive_division_type(cells)
-	type_lbl.add_theme_font_size_override("font_size", 11)
-	type_lbl.add_theme_color_override("font_color", Color(0.7, 0.65, 0.5, 1.0))
-	vbox.add_child(type_lbl)
+## Same fallback lookup pattern used elsewhere (see production_panel.gd's ProvincePickerButton
+## and strategic_bombing_detail_panel.gd) for resolving a MapLoader reference outside of a scene
+## that already owns one.
+func _get_map_loader() -> Node:
+	# MapLoader is nested under the "Game" scene root (game.tscn: Game > MapLoader), not a direct
+	# child of the true scene tree root — find_child(recursive=true) is required, matching
+	# bombing_detail_panel.gd's version of this same lookup. A one-level get_children() scan
+	# (the pattern this used to copy from strategic_bombing_detail_panel.gd) never finds it,
+	# which is why province grouping was always showing "Unknown Location."
+	var main_loop: MainLoop = Engine.get_main_loop()
+	if main_loop == null:
+		return null
+	return main_loop.root.find_child("MapLoader", true, false)
 
-	var edit_row := HBoxContainer.new()
-	var edit_spacer := Control.new()
-	edit_spacer.size_flags_horizontal = Control.SIZE_FILL | Control.SIZE_EXPAND
-	edit_row.add_child(edit_spacer)
-	var edit_btn := Button.new()
-	edit_btn.text = "Edit"
-	edit_btn.custom_minimum_size = Vector2(48, 24)
-	edit_btn.pressed.connect(func() -> void:
-		EventBus.division_builder_open_requested.emit(template_id)
+
+func _make_division_item(div_id: String, div_data: Dictionary) -> Button:
+	var btn: Button = Button.new()
+	btn.custom_minimum_size.y = 48
+	btn.layout_mode = 2
+	btn.size_flags_horizontal = 3
+	btn.size_flags_vertical = 3
+	var div_type: String = div_data.get("division_type", "infantry")
+	var hp: float = float(div_data.get("hp", 100.0))
+	var label_text: String = "%s [%s]\nHP: %.0f%%" % [div_id, div_type.capitalize(), hp]
+	var lbl: Label = Label.new()
+	lbl.text = label_text
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.layout_mode = 2
+	lbl.size_flags_vertical = 3
+	btn.add_child(lbl)
+	btn.pressed.connect(func() -> void:
+		division_clicked.emit(div_id)
+		EventBus.division_center_camera_requested.emit(div_id)
+		EventBus.division_selected.emit(div_id)
 	)
-	edit_row.add_child(edit_btn)
-	vbox.add_child(edit_row)
-
-	return container
-
-
-static func _derive_division_type(cells: Array) -> String:
-	const ARMOR_TYPES := ["light_tank", "medium_tank", "heavy_tank",
-		"armoured_car", "at_gun_sp", "self_propelled_gun"]
-	const ARTY_TYPES  := ["artillery", "howitzer", "at_gun", "aa_gun"]
-	var armor := 0
-	var arty  := 0
-	var inf   := 0
-	var total := 0
-	for unit_type: String in cells:
-		if unit_type == "":
-			continue
-		total += 1
-		if unit_type in ARMOR_TYPES:
-			armor += 1
-		elif unit_type in ARTY_TYPES:
-			arty += 1
-		else:
-			inf += 1
-	if total == 0:
-		return "Empty"
-	if armor >= 3:
-		return "Armoured Assault"
-	if armor >= 2 and inf >= 2:
-		return "Combined-Arms"
-	if arty >= 2 and inf >= 3:
-		return "Supported Infantry"
-	if inf >= 5:
-		return "Infantry Division"
-	return "Mixed"
+	return btn
 
 
 # ── Air tab ────────────────────────────────────────────────────────────────

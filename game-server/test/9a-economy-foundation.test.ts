@@ -108,12 +108,15 @@ describe("lane:economy | NationState economy fields", () => {
     return { client, room };
   }
 
-  it("new nation starts with seeded starting money, zero of everything else", async () => {
+  it("new nation starts with a seeded stockpile of every resource (dev/testing convenience, Branch C amendment)", async () => {
+    // Originally "zero of everything else" — amended once Branch C's Reserve/Marshalling
+    // mechanics needed to be testable/observable immediately without waiting on real-time
+    // extraction ticks (see _initNationEconomy()'s doc comment in GameRoom.ts).
     const { room } = await joinRoom();
     const nation = room.state.nations.get("germany");
     assert.ok(nation);
     assert.ok((nation!.resources.get("money") ?? 0) > 0);
-    assert.strictEqual(nation!.resources.get("iron") ?? 0, 0);
+    assert.ok((nation!.resources.get("iron") ?? 0) > 0);
   });
 
   it("reserve_pool starts empty (populated by Branch C)", async () => {

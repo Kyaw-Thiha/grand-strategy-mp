@@ -26,6 +26,7 @@ var _province_subprovince_ids: Dictionary = {} # province_id → PackedStringArr
 var _road_geometry: Dictionary = {}
 
 var _projection: MapProjection
+var _is_loaded: bool = false
 
 
 func load_map(map_id: String) -> void:
@@ -72,7 +73,17 @@ func load_map(map_id: String) -> void:
 	else:
 		push_warning("MapLoader: waypoints.json missing — run pipeline to generate it")
 
+	_is_loaded = true
 	map_loaded.emit(_provinces.size())
+
+
+## True once load_map() has fully finished (province data, generated scene, and click-area
+## collision shapes all populated) — check this synchronously before deciding whether to wait
+## for the map_loaded signal, since load_map() itself is fully synchronous (no `await`) and a
+## consumer that only ever listens for the signal would hang forever if it connects after the
+## signal already fired.
+func is_map_loaded() -> bool:
+	return _is_loaded
 
 
 func get_province_node(province_id: String) -> Node2D:
@@ -104,6 +115,27 @@ func get_province_focus_position(province_id: String) -> Vector2:
 	if city_position.size() < 2:
 		return Vector2.INF
 	return project_lng_lat(float(city_position[0]), float(city_position[1]))
+
+
+## Returns the province id whose click-detection Area2D contains the given world position, or ""
+## if none. Reuses the exact same Area2D collision shapes / physics space already powering
+## province click detection (map_interaction.gd's _on_area_input_event), so "which province is
+## this point in" stays consistent with "which province would a click here select" by
+## construction — no separate point-in-polygon math to keep in sync with that.
+func get_province_at_world_position(pos: Vector2) -> String:
+	var space_state: PhysicsDirectSpaceState2D = get_viewport().get_world_2d().direct_space_state
+	var query := PhysicsPointQueryParameters2D.new()
+	query.position = pos
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var results: Array[Dictionary] = space_state.intersect_point(query)
+	for result: Dictionary in results:
+		var collider: Object = result.get("collider")
+		if collider is Area2D:
+			var province_id: String = (collider as Area2D).get_meta("province_id", "")
+			if not province_id.is_empty():
+				return province_id
+	return ""
 
 
 func get_all_province_ids() -> Array[String]:
@@ -297,6 +329,7 @@ func _clear_loaded_map() -> void:
 	_province_subprovince_ids.clear()
 	_road_geometry.clear()
 	_projection = null
+	_is_loaded = false
 
 
 ## Loads and indexes the authoritative subprovince assets for a map.

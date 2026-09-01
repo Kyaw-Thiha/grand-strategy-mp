@@ -103,13 +103,16 @@
       "source_prefixes": [
         "src/systems/economy_",
         "src/systems/resource_economy_system.ts",
+        "src/systems/unit_production_system.ts",
         "src/data/building_stats.ts",
         "src/data/resource_stats.ts",
-        "src/data/unit_resource_tags.ts"
+        "src/data/unit_resource_tags.ts",
+        "src/data/unit_production_stats.ts"
       ],
       "tests": [
         "test/9a-economy-foundation.test.ts",
-        "test/9b-resource-economy.test.ts"
+        "test/9b-resource-economy.test.ts",
+        "test/9c-unit-production.test.ts"
       ]
     }
   },

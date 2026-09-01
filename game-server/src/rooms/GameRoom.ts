@@ -7,7 +7,7 @@ import { getCachedFile } from "../data/map_cache.js";
 import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES, serializeWing } from "./schema/AirWingState.js";
 import { NavalContactMarkerState, serializeNavalContactMarker } from "./schema/NavalContactMarkerState.js";
-import { getMapNationIds } from "../data/map_loader.js";
+import { getMapNations } from "../data/map_loader.js";
 import { MovementSystem } from "../systems/movement_system.js";
 import { CombatSystem, _isGridLocked } from "../systems/combat_system.js";
 import { SupplySystem } from "../systems/supply_system.js";
@@ -64,12 +64,35 @@ import { AIR_WING_STARTING_POSITIONS } from "../data/maps/western_europe_6/air_w
 import { DEFAULT_TEMPLATE } from "../data/maps/western_europe_6/default_template.js";
 import { EconomyBuildingSystem } from "../systems/economy_building_system.js";
 import { getBuildingStats } from "../data/building_stats.js";
+import {
+  UnitProductionSystem,
+  scoreTypeForBuilding,
+  standingReserveMissingPct,
+  resourceScarcityMultiplier,
+  type DemandSlot,
+  type MarshallingData,
+} from "../systems/unit_production_system.js";
+import { getUnitProductionStats, unitTypesForBuilding } from "../data/unit_production_stats.js";
+
+// economy_production_ui_handoff.md §7 Tab 2 — the four fixed Reserve subheading categories,
+// mapping 1:1 to the four production buildings.
+const RESERVE_CATEGORY_BUILDING: Record<string, string> = {
+  infantry: "barracks",
+  ordnance: "ordnance_factory",
+  tank: "tank_plant",
+  air: "aircraft_factory",
+};
 
 // How many game ticks between subprovince-graph supply route recomputation/broadcast.
 // Matches the (unexported) SUPPLY_TICK_INTERVAL used by SupplySystem.tick()'s ring-based
 // tier recalculation cadence in supply_system.ts, kept in sync deliberately rather than
 // sharing an import.
 const SUPPLY_TICK_INTERVAL = 5;
+
+// Branch C — Warehouse's Reserve-cap extension (ECONOMY_BUILDINGS.md's Warehouse entry, Bulk
+// Storage path). TBD playtesting — never-zero floor, same shape as resource_storage_cap.
+const RESERVE_CAP_BASELINE = 200;
+const RESERVE_CAP_PER_WAREHOUSE_LEVEL = 40;
 
 interface JwtPayload {
   sub: string;
@@ -139,6 +162,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private airNavalBomberSystem       = new AirNavalBomberSystem();
   private economyBuildingSystem = new EconomyBuildingSystem();
   private resourceEconomySystem = new ResourceEconomySystem();
+  private unitProductionSystem = new UnitProductionSystem();
   private _industryAllocCooldownByNation = new Map<string, number>();
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
@@ -169,11 +193,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
     this.setState(new GameRoomState());
 
-    this.nationIds = await getMapNationIds(this.state.map_id);
-    for (const nationId of this.nationIds) {
+    const nationDefs = await getMapNations(this.state.map_id);
+    this.nationIds = nationDefs.map((n) => n.id);
+    for (const def of nationDefs) {
       const slot = new NationState();
-      slot.nation_id = nationId;
-      this.state.nations.set(nationId, slot);
+      slot.nation_id = def.id;
+      slot.capital_province_id = def.capital_province_id;
+      this.state.nations.set(def.id, slot);
     }
 
     this.onMessage("SELECT_NATION",    (client, msg) => this.handleSelectNation(client, msg));
@@ -581,6 +607,74 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         buildings: econ.buildings,
         construction_queue: econ.construction_queue,
       });
+    });
+
+    // Branch C — raising a division does NOT create a DivisionState immediately; it lives only
+    // in unitProductionSystem's own MarshallingData map until FORCE_DEPLOY. home_province_id
+    // mirrors CREATE_WING's home_airbase_province_id — used only to position the division once
+    // it deploys (unit_production_handoff.md never resolved "nearest friendly city"; there is
+    // no existing "nearest" search anywhere in this codebase to reuse).
+    this.onMessage("RAISE_DIVISION", (client, msg: {
+      template_id: string;
+      home_province_id: string;
+      cells: Array<{ cell_index: number; unit_type: string }>;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const province = this.state.provinces.get(msg.home_province_id);
+      if (!province || province.owner_id !== nation.nation_id) return;
+
+      this.unitProductionSystem.startMarshalling(
+        nation.nation_id, msg.template_id, msg.home_province_id, msg.cells,
+      );
+      this._broadcastMarshallingForNation(nation.nation_id);
+    });
+
+    // Branch C — reuses the existing DIVISIONS_SPAWNED broadcast (same one startGame() sends)
+    // so the client needs zero new code to render the division on the map once deployed.
+    this.onMessage("FORCE_DEPLOY", (client, msg: { marshalling_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const data = this.unitProductionSystem.getMarshalling(msg.marshalling_id);
+      if (!data || data.nation_id !== nation.nation_id) return;
+      if (this.unitProductionSystem.aggregateHpPct(data) < 0.5) return; // §5.2 — inclusive at exactly 50%
+      this._deployMarshalling(data, nation);
+    });
+
+    this.onMessage("CANCEL_MARSHALLING", (client, msg: { marshalling_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const data = this.unitProductionSystem.getMarshalling(msg.marshalling_id);
+      if (!data || data.nation_id !== nation.nation_id) return;
+      this.unitProductionSystem.cancelMarshalling(msg.marshalling_id, this.state.nations);
+      this._broadcastMarshallingForNation(nation.nation_id);
+    });
+
+    // Client-side province-picker override (Phase 9 Task C amendment) — lets the player change
+    // a marshalling division's deploy province before FORCE_DEPLOY, reusing the same
+    // ownership-guard shape as CANCEL_MARSHALLING plus a check that the new province is also
+    // owned by this nation.
+    this.onMessage("UPDATE_MARSHALLING_PROVINCE", (client, msg: { marshalling_id: string; home_province_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const data = this.unitProductionSystem.getMarshalling(msg.marshalling_id);
+      if (!data || data.nation_id !== nation.nation_id) return;
+      const targetProvince = this.state.provinces.get(msg.home_province_id);
+      if (!targetProvince || targetProvince.owner_id !== nation.nation_id) return;
+      this.unitProductionSystem.updateMarshallingProvince(msg.marshalling_id, msg.home_province_id);
+      this._broadcastMarshallingForNation(nation.nation_id);
     });
 
     // Branch B — Oil's 3-way allocation-priority toggle (RESOURCE_ECONOMY.md's Oil section).
@@ -1460,9 +1554,14 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     for (const [id, nation] of this.state.nations.entries()) {
       assignments[id] = nation.player_id;
     }
+    const capitals: Record<string, string> = {};
+    for (const [id, nation] of this.state.nations.entries()) {
+      capitals[id] = nation.capital_province_id;
+    }
     this.broadcast("GAME_STARTED", {
       nation_assignments: assignments,
       game_speed: this.state.game_speed,
+      nation_capitals: capitals,
     });
 
     // Send initial province ownership so clients can validate RELOCATE targets immediately
@@ -1728,14 +1827,24 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       // scanCombatFreeze/resetFreezeTracking doc comments for why this order is load-bearing.
       this.subprovinceSystem.resetFreezeTracking();
       this.subprovinceSystem.scanCombatFreeze(this.state.divisions.values());
+      const subprovinceChanged = new Set<string>();
       for (const division of this.state.divisions.values()) {
         const startPosition = this.movementSystem.getTickStartPosition(division.division_id);
+        const subprovinceBefore = division.subprovince_id;
         this.subprovinceSystem.checkCaptureAfterMovement(
           division,
           this.state,
           (sessionFilter, type, msg) => this._broadcastToFilteredNations(sessionFilter, type, msg),
           startPosition,
         );
+        // checkCaptureAfterMovement recomputes subprovince_id every tick for every division,
+        // including stationary/idle ones — but the DIVISION_UPDATES filter below (toUpdate) only
+        // includes divisions that moved, fought, or had a supply change this tick. Without this,
+        // a freshly-deployed or otherwise-stationary division's subprovince_id is computed
+        // server-side but never actually reaches the client (stays at the "" schema default
+        // there forever), which broke client-side province-of-current-location lookups (e.g.
+        // military_panel.gd's DEPLOYED section grouping).
+        if (division.subprovince_id !== subprovinceBefore) subprovinceChanged.add(division.division_id);
       }
       for (const { nationId, provinceId } of this.subprovinceSystem.getTrackedAttackerProvincePairs()) {
         this.subprovinceSystem.revertNationCaptureIfProvinceEmpty(nationId, provinceId, this.state, (sessionFilter, type, msg) =>
@@ -1772,6 +1881,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       );
 
       this._economyTick();
+      this._unitProductionTick();
 
       // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
       // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
@@ -1951,7 +2061,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         (type, msg, nationId) => this.broadcastToNation(type, msg, nationId),
       );
 
-      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged]);
+      const toUpdate = new Set([...activeBefore, ...combatChanged, ...supplyChanged, ...subprovinceChanged]);
       this.broadcastFilteredDivisionUpdates(toUpdate);
     } catch (err) {
       console.error(`[GameRoom] gameTick ${this.tickCount} THREW:`, err);
@@ -2520,16 +2630,22 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   /**
-   * Seed each nation's starting resources. Only money gets a nonzero starting stockpile —
-   * TBD playtesting placeholder — so BUILD_BUILDING is testable standalone before Branch B's
-   * resource-production ticks exist (without this, buildings would be permanently
-   * unaffordable until Branch B merges).
+   * Seed each nation's starting resources. TBD playtesting placeholder values — every one of
+   * the ten resources gets a modest nonzero starting stockpile (not just money) so a nation can
+   * immediately afford building/unit production and Branch C's Reserve/Marshalling mechanics
+   * are observable without waiting on real-time extraction ticks. This is a dev/testing
+   * convenience seed, distinct from `map/tools/map_pipeline/pipeline.py --resource-preset
+   * playtest`, which seeds per-province resource *deposits* (abundance) so extraction ticks
+   * have something to extract from once a nation actually builds the matching extraction
+   * building — the two are complementary, not redundant: this seeds the stockpile a nation
+   * starts with, that seeds what a built extraction building can pull from over time.
    */
   private _initNationEconomy(): void {
     const STARTING_MONEY = 500; // TBD playtesting — starting stockpile placeholder
+    const STARTING_RESOURCE_STOCKPILE = 500; // TBD playtesting — same placeholder magnitude as money
     for (const [nationId, nation] of this.state.nations) {
-      nation.resources.set("money", STARTING_MONEY);
       for (const resType of TEN_RESOURCES) {
+        nation.resources.set(resType, resType === "money" ? STARTING_MONEY : STARTING_RESOURCE_STOCKPILE);
         nation.resource_storage_cap.set(resType, HOSPITAL_STORAGE_CAP_BASE);
       }
       // Branch B (Step 2b edge case) — seed manpower_available = manpower_ceiling at init,
@@ -2559,6 +2675,213 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
    * economyBuildingSystem.tick() (construction) so this tick's fresh resource stockpile is
    * available to that tick's SET_INDUSTRY_ALLOCATION-driven multipliers next tick.
    */
+  /**
+   * Branch C — production tick (building -> Reserve), the auto-scheduler (idle buildings pull a
+   * new order), and the two Reserve delivery ticks (Marshalling off-map, field-supply on-map).
+   * Full recompute every tick, not real event-triggered invalidation — a deliberate
+   * simplification given this game's small division/building counts (see
+   * unit_production_handoff.md §6.1 and the branch plan's note on this).
+   */
+  private _unitProductionTick(): void {
+    // Snapshot per-nation, per-category Reserve totals before this tick's mutations — the delta
+    // after the tick is this tick's net rate (production - consumption), per
+    // RESOURCE_ECONOMY.md's "Reserve status — deficit/excess severity" formula. economy_
+    // production_ui_handoff.md §7 Tab 2's four categories map 1:1 to the four production
+    // buildings.
+    const categoryBefore = new Map<string, Record<string, number>>();
+    for (const [nationId, nation] of this.state.nations) {
+      categoryBefore.set(nationId, this._reserveTotalsByCategory(nation));
+    }
+
+    this.unitProductionSystem.tickProduction(
+      this.economyBuildingSystem.getAll(),
+      (provinceId) => {
+        const ownerId = this.state.provinces.get(provinceId)?.owner_id;
+        return ownerId ? this.state.nations.get(ownerId) : undefined;
+      },
+      (allocPct) => industrySliceMultiplier(allocPct),
+    );
+
+    const econForIdleScan = [...this.economyBuildingSystem.getAll().entries()].map(([pid, econ]) => ({
+      province_id: pid,
+      buildings: econ.buildings,
+      owner_id: this.state.provinces.get(pid)?.owner_id ?? "",
+    }));
+    const idleBuildings = this.unitProductionSystem.listIdleBuildings(econForIdleScan);
+    for (const idle of idleBuildings) {
+      const ownerId = this.state.provinces.get(idle.province_id)?.owner_id;
+      const nation = ownerId ? this.state.nations.get(ownerId) : undefined;
+      if (!nation || !ownerId) continue;
+      const chromiumAvailable = isChromiumAvailable(nation.resources.get("chromium") ?? 0);
+      const openSlots = this._collectOpenDemandSlots(idle.building_type, ownerId);
+      const scarcityFn = (unitType: string) => resourceScarcityMultiplier(
+        unitType,
+        (resType) => nation.resources.get(resType) ?? 0,
+        (resType) => nation.resource_storage_cap.get(resType) ?? 0,
+      );
+      const scores = scoreTypeForBuilding(idle.building_type, openSlots, chromiumAvailable, scarcityFn);
+      if (scores.size === 0) continue; // no demand at all (real or standing-reserve) — stays idle, not an error
+      const [bestType] = [...scores.entries()].sort((a, b) => b[1] - a[1])[0];
+      this.unitProductionSystem.assignOrder(idle.province_id, idle.building_type, bestType);
+    }
+
+    this.unitProductionSystem.tickMarshalling(this.state.nations);
+
+    // Auto-deploy — a division that has every slot fully produced (100% aggregate HP) deploys
+    // itself, no Force Deploy click needed. Below 100%, the player still needs Force Deploy
+    // (>=50%) or to keep waiting.
+    for (const [nationId, nation] of this.state.nations) {
+      for (const data of this.unitProductionSystem.listMarshallingForNation(nationId)) {
+        if (this.unitProductionSystem.aggregateHpPct(data) >= 1.0) {
+          this._deployMarshalling(data, nation);
+        }
+      }
+    }
+
+    this.unitProductionSystem.tickFieldDelivery(this.state.divisions.values(), this.state.nations);
+
+    for (const [nationId, nation] of this.state.nations) {
+      if (this.unitProductionSystem.listMarshallingForNation(nationId).length > 0) {
+        this._broadcastMarshallingForNation(nationId);
+      }
+      const before = categoryBefore.get(nationId) ?? {};
+      const after = this._reserveTotalsByCategory(nation);
+      const categoryStats: Record<string, { production_rate: number; net_rate: number }> = {};
+      for (const [category, buildingType] of Object.entries(RESERVE_CATEGORY_BUILDING)) {
+        categoryStats[category] = {
+          production_rate: unitTypesForBuilding(buildingType).reduce(
+            (sum, unitType) => sum + this.unitProductionSystem.productionRateForType(unitType), 0,
+          ),
+          net_rate: (after[category] ?? 0) - (before[category] ?? 0),
+        };
+      }
+      this.broadcastToNation("RESERVE_UPDATES", {
+        reserve: Object.fromEntries(nation.reserve_pool),
+        reserve_cap: nation.reserve_cap,
+        category_stats: categoryStats,
+      }, nationId);
+    }
+  }
+
+  /** Sums nation.reserve_pool per economy_production_ui_handoff.md §7 Tab 2's four categories
+   * (Infantry/Ordnance/Tank/Air, mapping 1:1 to the four production buildings). */
+  private _reserveTotalsByCategory(nation: NationState): Record<string, number> {
+    const totals: Record<string, number> = {};
+    for (const [category, buildingType] of Object.entries(RESERVE_CATEGORY_BUILDING)) {
+      totals[category] = unitTypesForBuilding(buildingType).reduce(
+        (sum, unitType) => sum + (nation.reserve_pool.get(unitType) ?? 0), 0,
+      );
+    }
+    return totals;
+  }
+
+  /** Pools marshalling-template demand and fielded-division-resupply demand for one nation into
+   * DemandSlot[], scoped to that nation so chromium/scoring stays per-nation-correct. */
+  private _collectOpenDemandSlots(buildingType: string, nationId: string): DemandSlot[] {
+    const slots: DemandSlot[] = [];
+    for (const data of this.unitProductionSystem.listMarshallingForNation(nationId)) {
+      for (const slot of data.slots) {
+        if (slot.unit_type === "" || slot.current_hp >= 100) continue;
+        const stats = getUnitProductionStats(slot.unit_type);
+        if (stats.produced_by !== buildingType) continue;
+        slots.push({
+          slot_id: `${data.marshalling_id}:${slot.cell_index}`,
+          unit_type: slot.unit_type,
+          missing_pct: (100 - slot.current_hp) / 100,
+          stream: "marshalling",
+        });
+      }
+    }
+    const fieldedCountByType = new Map<string, number>();
+    for (const div of this.state.divisions.values()) {
+      if (div.nation_id !== nationId || !div.grid) continue;
+      for (const cell of div.grid.cells) {
+        if (cell.unit_type === "" || cell.hp >= 100) continue;
+        const stats = getUnitProductionStats(cell.unit_type);
+        if (stats.produced_by === buildingType) {
+          slots.push({
+            slot_id: `${div.division_id}:${cell.unit_type}`,
+            unit_type: cell.unit_type,
+            missing_pct: (100 - cell.hp) / 100,
+            stream: "field_resupply",
+          });
+        }
+      }
+      for (const cell of div.grid.cells) {
+        if (cell.unit_type === "") continue;
+        fieldedCountByType.set(cell.unit_type, (fieldedCountByType.get(cell.unit_type) ?? 0) + 1);
+      }
+    }
+
+    // Standing Reserve amendment (see unit_production_system.ts's DemandStream doc comment) —
+    // synthetic demand toward a buffer sized off the nation's currently-fielded roster, so idle
+    // buildings have something to build even with zero raising/resupply demand anywhere.
+    const nation = this.state.nations.get(nationId);
+    for (const [unitType, fieldedCount] of fieldedCountByType) {
+      const stats = getUnitProductionStats(unitType);
+      if (stats.produced_by !== buildingType) continue;
+      const currentReserve = nation?.reserve_pool.get(unitType) ?? 0;
+      const missingPct = standingReserveMissingPct(fieldedCount, currentReserve);
+      if (missingPct <= 0) continue;
+      slots.push({
+        slot_id: `standing:${nationId}:${unitType}`,
+        unit_type: unitType,
+        missing_pct: missingPct,
+        stream: "standing_reserve",
+      });
+    }
+    return slots;
+  }
+
+  /** Shared by FORCE_DEPLOY and the >=100%-aggregate-HP auto-deploy check in
+   * _unitProductionTick() — constructs the real DivisionState, positions it at
+   * home_province_id's city position, and reuses the DIVISIONS_SPAWNED broadcast so the
+   * client needs no special-casing for which trigger caused the deploy. */
+  private _deployMarshalling(data: MarshallingData, nation: NationState): void {
+    const div = new DivisionState();
+    div.division_id = `division_${data.marshalling_id}`;
+    div.nation_id = nation.nation_id;
+    div.template_id = data.template_id;
+    div.combat_state = "idle";
+    div.supply_status = "normal";
+    const pos = this._provinceCityPositionLookup.get(data.home_province_id);
+    if (pos) {
+      div.position_lng = pos.lng;
+      div.position_lat = pos.lat;
+    }
+    for (const slot of data.slots) {
+      if (slot.cell_index < 0 || slot.cell_index >= div.grid.cells.length) continue;
+      div.grid.cells[slot.cell_index].unit_type = slot.unit_type;
+      div.grid.cells[slot.cell_index].hp = slot.current_hp;
+    }
+    const templateCells = data.slots
+      .filter((s) => s.unit_type !== "")
+      .map((s) => ({ unit_type: s.unit_type, row: Math.floor(s.cell_index / 5), col: s.cell_index % 5 }));
+    div.division_type = this.movementSystem.classifyDivisionType(templateCells);
+    div.engagement_radius = this.movementSystem.computeEngagementRadius(templateCells);
+    div.movement_profile_json = JSON.stringify(this.movementSystem.computeMovementProfile(templateCells));
+
+    this.state.divisions.set(div.division_id, div);
+    this.unitProductionSystem.removeMarshalling(data.marshalling_id);
+
+    this.broadcast("DIVISIONS_SPAWNED", {
+      shared_profile_json: div.movement_profile_json,
+      divisions: [this.serializeDivision(div)],
+    });
+    this._broadcastMarshallingForNation(nation.nation_id);
+  }
+
+  private _broadcastMarshallingForNation(nationId: string): void {
+    const list = this.unitProductionSystem.listMarshallingForNation(nationId).map((d) => ({
+      marshalling_id: d.marshalling_id,
+      template_id: d.template_id,
+      home_province_id: d.home_province_id,
+      aggregate_hp_pct: this.unitProductionSystem.aggregateHpPct(d),
+      slots: d.slots,
+    }));
+    this.broadcastToNation("MARSHALLING_UPDATES", { marshalling: list }, nationId);
+  }
+
   private _economyTick(): void {
     tickPopulation(this.state.provinces.values());
 
@@ -2616,6 +2939,10 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const totalWarehouseLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["warehouse"] ?? 0), 0);
       const cap = storageCapForLevel(totalWarehouseLevel, HOSPITAL_STORAGE_CAP_BASE, HOSPITAL_STORAGE_CAP_PER_LEVEL);
       for (const resType of TEN_RESOURCES) nation.resource_storage_cap.set(resType, cap);
+
+      // Reserve — the "other half" of Warehouse's base effect, deferred until Branch C because
+      // Reserve didn't exist before this branch. Same shared-cap shape as resource_storage_cap.
+      nation.reserve_cap = storageCapForLevel(totalWarehouseLevel, RESERVE_CAP_BASELINE, RESERVE_CAP_PER_WAREHOUSE_LEVEL);
 
       // Town Hall — effective VP value, computed/broadcast but not consumed by any scoring
       // system yet (none exists).

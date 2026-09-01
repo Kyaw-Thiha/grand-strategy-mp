@@ -284,10 +284,16 @@ export function assignIdleBuildings(
   return assignments;
 }
 ```
-**Edge case — zero demand.** A building with no open compatible demand slots stays idle,
-produces nothing, does not throw and does not default to an arbitrary unit type "just to stay
-busy" — matches the Reserve severity system's own "zero demand reads as Neutral, never a
-deficit" principle used elsewhere in this design.
+**Edge case — zero demand (superseded, see `unit_production_handoff.md` §6.6).** This section
+originally read: "a building with no open compatible demand slots stays idle, produces nothing,
+does not throw and does not default to an arbitrary unit type 'just to stay busy' — matches the
+Reserve severity system's own 'zero demand reads as Neutral, never a deficit' principle." That
+was confirmed **not** the intended design (2026-08-31 amendment) — an idle building now also
+draws on a third, synthetic **Standing Reserve** demand stream (sized off the nation's
+currently-fielded roster, tapering to zero once Reserve reaches its buffer target) before
+falling back to true idle. "Zero demand" in the sense this edge case describes now only occurs
+once that buffer is fully topped up *and* no marshalling/resupply demand exists either — see
+`unit_production_handoff.md` §6.6 for the full formula and reasoning, not re-derived here.
 
 ---
 

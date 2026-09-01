@@ -65,6 +65,11 @@ var oil_penalty_active: bool = false
 # province_economy: { province_id → { "buildings": {...}, "resource_deposits": {...},
 #   "construction_queue": [...] } } — off-schema, mirrors DivisionState.grid's precedent
 var province_economy: Dictionary = {}
+var marshalling_divisions: Dictionary = {}   # marshalling_id -> {template_id, home_province_id, aggregate_hp_pct, slots}
+var reserve: Dictionary = {}                 # unit_type -> HP-equivalent amount
+var reserve_cap: float = 0.0
+var reserve_category_stats: Dictionary = {}  # category ("infantry"/"ordnance"/"tank"/"air") -> {production_rate, net_rate}
+var nation_capitals: Dictionary = {}         # nation_id -> capital province_id, sent once at GAME_STARTED
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -169,6 +174,27 @@ func _apply_resource_updates(data: Dictionary) -> void:
 	resource_storage_cap = data.get("resource_storage_cap", resource_storage_cap)
 	industry_alloc = data.get("industry_alloc", industry_alloc)
 	EventBus.resources_updated.emit()
+
+
+func _apply_marshalling_updates(data: Dictionary) -> void:
+	marshalling_divisions.clear()
+	for entry: Dictionary in data.get("marshalling", []):
+		var mid: String = entry.get("marshalling_id", "")
+		if mid.is_empty():
+			continue
+		marshalling_divisions[mid] = entry
+	EventBus.marshalling_updated.emit()
+
+
+func _apply_reserve_updates(data: Dictionary) -> void:
+	reserve = data.get("reserve", {})
+	reserve_cap = float(data.get("reserve_cap", 0.0))
+	reserve_category_stats = data.get("category_stats", {})
+	EventBus.reserve_updated.emit()
+
+
+func set_nation_capitals(capitals: Dictionary) -> void:
+	nation_capitals = capitals
 
 
 ## Called by SessionManager when server sends DIVISION_UPDATES.
