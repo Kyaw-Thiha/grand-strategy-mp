@@ -160,6 +160,30 @@ export class ProposalState extends Schema {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phase 9 Branch D — Economy Market (spot market order book + standing trade routes)
+
+export class MarketOrderState extends Schema {
+  @type("string") order_id: string = "";
+  @type("string") nation_id: string = "";
+  @type("string") resource_type: string = "";
+  @type("string") side: string = "buy";       // "buy" | "sell"
+  @type("number") quantity: number = 0;       // remaining, decremented as fills happen
+  @type("number") price: number = 0;          // per-unit, money
+}
+
+export class TradeRouteState extends Schema {
+  @type("string") route_id: string = "";
+  @type("string") nation_a_id: string = "";
+  @type("string") nation_b_id: string = "";
+  @type("string") kind: string = "land";      // "land" | "port"
+  @type("string") status: string = "proposed"; // "proposed" | "active" | "disrupted"
+  @type("string") a_sends_resource: string = "";
+  @type("number") a_sends_rate: number = 0;   // per tick
+  @type("string") b_sends_resource: string = "";
+  @type("number") b_sends_rate: number = 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class GameRoomState extends Schema {
   @type("string") phase: string = "lobby";
@@ -176,6 +200,8 @@ export class GameRoomState extends Schema {
   @type({ map: AirWingState })  air_wings  = new MapSchema<AirWingState>();
   @type({ map: NavalContactMarkerState })
   naval_contact_markers = new MapSchema<NavalContactMarkerState>();
+  @type({ map: MarketOrderState }) market_orders = new MapSchema<MarketOrderState>();
+  @type({ map: TradeRouteState })  trade_routes   = new MapSchema<TradeRouteState>();
 
   // Province-to-province adjacency, parsed once from map_data.json at room init.
   // Server-side only — not schema-synced, mirrors DivisionState.grid's pattern above.

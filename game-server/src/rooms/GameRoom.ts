@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { getCachedFile } from "../data/map_cache.js";
-import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState } from "./schema/GameRoomState.js";
+import { GameRoomState, PlayerState, NationState, DivisionState, ProvinceState, RelationState, MarketOrderState, TradeRouteState } from "./schema/GameRoomState.js";
 import { AirWingState, WING_LIFECYCLE, MISSION_TYPES, serializeWing } from "./schema/AirWingState.js";
 import { NavalContactMarkerState, serializeNavalContactMarker } from "./schema/NavalContactMarkerState.js";
 import { getMapNations } from "../data/map_loader.js";
@@ -73,6 +73,7 @@ import {
   type MarshallingData,
 } from "../systems/unit_production_system.js";
 import { getUnitProductionStats, unitTypesForBuilding } from "../data/unit_production_stats.js";
+import { matchOrder, nationsShareBorder, nationsShareNavalAccess, tickTradeRoutes, SPOT_SPREAD_PCT } from "../systems/market_system.js";
 
 // economy_production_ui_handoff.md §7 Tab 2 — the four fixed Reserve subheading categories,
 // mapping 1:1 to the four production buildings.
@@ -164,6 +165,8 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private resourceEconomySystem = new ResourceEconomySystem();
   private unitProductionSystem = new UnitProductionSystem();
   private _industryAllocCooldownByNation = new Map<string, number>();
+  private _marketOrderIdCounter = 0;
+  private _tradeRouteIdCounter = 0;
   private airSpatialBucket = new AirSpatialBucket();
   private _provinceCityPositionLookup = new Map<string, { lng: number; lat: number }>();
   private playerEmails = new Map<string, string>();
@@ -710,6 +713,205 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         nation.industry_alloc.set(key, Math.max(0, Math.min(100, value)));
       }
       this._industryAllocCooldownByNation.set(nation.nation_id, now);
+    });
+
+    // ── Phase 9 Branch D — Economy Market ─────────────────────────────────────────────────
+
+    this.onMessage("PLACE_MARKET_ORDER", (client, msg: {
+      resource_type: string; side: "buy" | "sell"; quantity: number; price: number;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+
+      if (!TEN_RESOURCES.includes(msg.resource_type) || msg.resource_type === "money") return;
+      if (msg.side !== "buy" && msg.side !== "sell") return;
+      if (!(msg.quantity > 0) || !(msg.price > 0)) return;
+
+      // Rejected up front, before it ever reaches the book, per the design doc's explicit rule.
+      // Buy-side affordability must cover the worst case (zero immediate fill, so the entire
+      // order rests and gets escrowed at price × (1 + spread), per the buy-side spread reserve
+      // below) — checking against the raw quantity × price would let a fully-affordable-looking
+      // order that ends up resting drive the nation's money negative.
+      if (msg.side === "sell") {
+        if ((nation.resources.get(msg.resource_type) ?? 0) < msg.quantity) return;
+      } else {
+        if ((nation.resources.get("money") ?? 0) < msg.quantity * msg.price * (1 + SPOT_SPREAD_PCT)) return;
+      }
+
+      const order = new MarketOrderState();
+      order.order_id = `mkt_${++this._marketOrderIdCounter}`;
+      order.nation_id = nation.nation_id;
+      order.resource_type = msg.resource_type;
+      order.side = msg.side;
+      order.quantity = msg.quantity;
+      order.price = msg.price;
+
+      const result = matchOrder(order, this.state.market_orders);
+
+      if (msg.side === "sell") {
+        // Full quantity held once at placement (resource, not price-dependent) — the filled
+        // portion's revenue lands via `proceeds`; any unfilled remainder stays reserved for
+        // the resting order posted below.
+        nation.resources.set(msg.resource_type, (nation.resources.get(msg.resource_type) ?? 0) - msg.quantity);
+        nation.resources.set("money", (nation.resources.get("money") ?? 0) + result.proceeds);
+      } else {
+        nation.resources.set(msg.resource_type, (nation.resources.get(msg.resource_type) ?? 0) + result.filled);
+        // Money for the filled portion is exactly `proceeds` (negative = cost, at each resting
+        // counterparty's own price, spread already included). The unfilled remainder is
+        // escrowed at this order's own limit price PLUS its own buy-side spread — this is the
+        // buyer's half of "symmetric spread penalty ... applied to both legs"
+        // (RESOURCE_ECONOMY.md): whenever this resting order eventually gets filled by someone
+        // else's sell, it must already have paid its own spread cut, exactly mirroring how a
+        // resting SELL order's spread is deducted at its own posting/crediting time. Escrowing
+        // only `remaining * price` here (no spread) would let a resting buy order dodge its
+        // half of the fee entirely — see CANCEL_MARKET_ORDER's matching refund formula.
+        nation.resources.set(
+          "money",
+          (nation.resources.get("money") ?? 0) + result.proceeds - result.remaining * msg.price * (1 + SPOT_SPREAD_PCT),
+        );
+      }
+
+      // Credit each resting counterparty whose order this trade consumed — the spread penalty
+      // is applied independently to each leg, symmetric per RESOURCE_ECONOMY.md.
+      const affectedNationIds = new Set<string>([nation.nation_id]);
+      for (const fill of result.fills) {
+        const counterparty = this.state.nations.get(fill.nation_id);
+        if (!counterparty) continue;
+        if (fill.side === "buy") {
+          counterparty.resources.set(msg.resource_type, (counterparty.resources.get(msg.resource_type) ?? 0) + fill.qty);
+        } else {
+          const grossValue = fill.qty * fill.price;
+          counterparty.resources.set("money", (counterparty.resources.get("money") ?? 0) + grossValue * (1 - SPOT_SPREAD_PCT));
+        }
+        affectedNationIds.add(fill.nation_id);
+      }
+
+      if (result.remaining > 0) {
+        order.quantity = result.remaining;
+        this.state.market_orders.set(order.order_id, order);
+      }
+
+      this.broadcast("MARKET_UPDATES", { orders: [...this.state.market_orders.values()].map((o) => ({ ...o })) });
+      // Push an immediate resource snapshot to everyone whose stockpile just changed, rather
+      // than making them wait up to one full tick for the next routine _economyTick() broadcast.
+      for (const affectedNationId of affectedNationIds) this._broadcastResourceSnapshot(affectedNationId);
+    });
+
+    this.onMessage("CANCEL_MARKET_ORDER", (client, msg: { order_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const order = this.state.market_orders.get(msg.order_id);
+      if (!order || order.nation_id !== nation.nation_id) return;
+
+      if (order.side === "sell") {
+        nation.resources.set(order.resource_type, (nation.resources.get(order.resource_type) ?? 0) + order.quantity);
+      } else {
+        // Refund must match PLACE_MARKET_ORDER's escrow formula exactly — includes the
+        // buy-side spread reserved at posting time, not just the raw quantity*price.
+        nation.resources.set(
+          "money",
+          (nation.resources.get("money") ?? 0) + order.quantity * order.price * (1 + SPOT_SPREAD_PCT),
+        );
+      }
+      this.state.market_orders.delete(msg.order_id);
+      this.broadcast("MARKET_UPDATES", { orders: [...this.state.market_orders.values()].map((o) => ({ ...o })) });
+      this._broadcastResourceSnapshot(nation.nation_id);
+    });
+
+    this.onMessage("PROPOSE_TRADE_ROUTE", (client, msg: {
+      partner_nation_id: string; kind: "land" | "port";
+      a_sends_resource: string; a_sends_rate: number;
+      b_sends_resource: string; b_sends_rate: number;
+    }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const partner = this.state.nations.get(msg.partner_nation_id);
+      if (!partner || partner.nation_id === nation.nation_id) return;
+      if (this.getRelationStance(nation.nation_id, partner.nation_id) === "war") return;
+      if (msg.a_sends_resource === msg.b_sends_resource) return; // defense-in-depth, client already blocks this
+      if (!TEN_RESOURCES.includes(msg.a_sends_resource) || !TEN_RESOURCES.includes(msg.b_sends_resource)) return;
+      if (!(msg.a_sends_rate >= 0) || !(msg.b_sends_rate >= 0)) return;
+
+      const alreadyExists = [...this.state.trade_routes.values()].some((r) =>
+        r.status !== "disrupted" &&
+        ((r.nation_a_id === nation.nation_id && r.nation_b_id === partner.nation_id) ||
+         (r.nation_a_id === partner.nation_id && r.nation_b_id === nation.nation_id)));
+      if (alreadyExists) return;
+
+      const eligible = msg.kind === "land"
+        ? nationsShareBorder(nation.nation_id, partner.nation_id, this.state.provinces, this.state.provinceNeighbors)
+        : nationsShareNavalAccess(nation.nation_id, partner.nation_id, this.state.provinces);
+      if (!eligible) return;
+
+      const route = new TradeRouteState();
+      route.route_id = `route_${++this._tradeRouteIdCounter}`;
+      route.nation_a_id = nation.nation_id;
+      route.nation_b_id = partner.nation_id;
+      route.kind = msg.kind;
+      route.status = "proposed";
+      route.a_sends_resource = msg.a_sends_resource;
+      route.a_sends_rate = msg.a_sends_rate;
+      route.b_sends_resource = msg.b_sends_resource;
+      route.b_sends_rate = msg.b_sends_rate;
+      this.state.trade_routes.set(route.route_id, route);
+      this._broadcastTradeRoutes();
+
+      this.notifyAffectedDiplomacyPlayers(
+        new Set([nation.nation_id, partner.nation_id]),
+        `${nation.nation_id} proposed a trade route to ${partner.nation_id}`,
+      );
+    });
+
+    this.onMessage("RESPOND_TRADE_ROUTE", (client, msg: { route_id: string; accept: boolean }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const route = this.state.trade_routes.get(msg.route_id);
+      if (!route || route.status !== "proposed") return;
+      // Only the recipient (nation_b) may respond — the proposer (nation_a) cannot accept/reject
+      // their own proposal.
+      if (route.nation_b_id !== nation.nation_id) return;
+
+      if (msg.accept) {
+        route.status = "active";
+      } else {
+        this.state.trade_routes.delete(msg.route_id);
+      }
+      this._broadcastTradeRoutes();
+      this.notifyAffectedDiplomacyPlayers(
+        new Set([route.nation_a_id, route.nation_b_id]),
+        `${nation.nation_id} ${msg.accept ? "accepted" : "rejected"} a trade route proposal`,
+      );
+    });
+
+    this.onMessage("END_TRADE_ROUTE", (client, msg: { route_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const route = this.state.trade_routes.get(msg.route_id);
+      if (!route) return;
+      // Either party may end an active (or proposed) route unilaterally — no mutual consent
+      // required to end, only to establish.
+      if (route.nation_a_id !== nation.nation_id && route.nation_b_id !== nation.nation_id) return;
+      this.state.trade_routes.delete(msg.route_id);
+      this._broadcastTradeRoutes();
+      this.notifyAffectedDiplomacyPlayers(
+        new Set([route.nation_a_id, route.nation_b_id]),
+        `${nation.nation_id} ended a trade route`,
+      );
     });
 
     if (process.env.DEV_MODE === "true") {
@@ -1737,6 +1939,23 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     }
   }
 
+  // Trade routes are a small, globally-relevant collection (same reasoning as market_orders) —
+  // broadcast the full list on every mutation, mirroring MARKET_UPDATES' shape.
+  private _broadcastTradeRoutes(): void {
+    this.broadcast("TRADE_ROUTE_UPDATES", { routes: [...this.state.trade_routes.values()].map((r) => ({ ...r })) });
+  }
+
+  // Sends a minimal, immediate resource-stockpile snapshot to one nation — used by market
+  // trades so a client sees its new resource/money balance right away instead of waiting up
+  // to one full server tick for the next regular _economyTick() RESOURCE_UPDATES broadcast.
+  // Deliberately partial (resources only) — GameState._apply_resource_updates() merges by key
+  // and defaults every other field, so a partial payload here is safe.
+  private _broadcastResourceSnapshot(nationId: string): void {
+    const nation = this.state.nations.get(nationId);
+    if (!nation) return;
+    this.broadcastToNation("RESOURCE_UPDATES", { resources: Object.fromEntries(nation.resources) }, nationId);
+  }
+
   private broadcastToNation(type: string, msg: unknown, nationId: string): void {
     for (const c of this.clients) {
       const p = this.state.players.get(c.sessionId);
@@ -1882,6 +2101,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this._economyTick();
       this._unitProductionTick();
+
+      const tradeRouteStatusesBefore = new Map([...this.state.trade_routes.values()].map((r) => [r.route_id, r.status]));
+      tickTradeRoutes(
+        this.state.trade_routes,
+        this.state.nations,
+        this.state.provinces,
+        this.state.provinceNeighbors,
+        (type, msg) => this.broadcast(type, msg),
+      );
+      const anyRouteStatusChanged = [...this.state.trade_routes.values()]
+        .some((r) => tradeRouteStatusesBefore.get(r.route_id) !== r.status);
+      if (anyRouteStatusChanged) this._broadcastTradeRoutes();
 
       // Subprovince-graph supply routes (Task 8) — recomputed and broadcast on the same cadence
       // as the (currently no-op) legacy supply tick above. Routes are per-recipient-filtered data
