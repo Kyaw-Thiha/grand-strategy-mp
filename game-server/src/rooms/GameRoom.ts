@@ -67,6 +67,8 @@ import { getBuildingStats } from "../data/building_stats.js";
 import {
   UnitProductionSystem,
   scoreTypeForBuilding,
+  standingReserveMissingPct,
+  resourceScarcityMultiplier,
   type DemandSlot,
 } from "../systems/unit_production_system.js";
 import { getUnitProductionStats } from "../data/unit_production_stats.js";
@@ -2614,16 +2616,22 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   }
 
   /**
-   * Seed each nation's starting resources. Only money gets a nonzero starting stockpile —
-   * TBD playtesting placeholder — so BUILD_BUILDING is testable standalone before Branch B's
-   * resource-production ticks exist (without this, buildings would be permanently
-   * unaffordable until Branch B merges).
+   * Seed each nation's starting resources. TBD playtesting placeholder values — every one of
+   * the ten resources gets a modest nonzero starting stockpile (not just money) so a nation can
+   * immediately afford building/unit production and Branch C's Reserve/Marshalling mechanics
+   * are observable without waiting on real-time extraction ticks. This is a dev/testing
+   * convenience seed, distinct from `map/tools/map_pipeline/pipeline.py --resource-preset
+   * playtest`, which seeds per-province resource *deposits* (abundance) so extraction ticks
+   * have something to extract from once a nation actually builds the matching extraction
+   * building — the two are complementary, not redundant: this seeds the stockpile a nation
+   * starts with, that seeds what a built extraction building can pull from over time.
    */
   private _initNationEconomy(): void {
     const STARTING_MONEY = 500; // TBD playtesting — starting stockpile placeholder
+    const STARTING_RESOURCE_STOCKPILE = 500; // TBD playtesting — same placeholder magnitude as money
     for (const [nationId, nation] of this.state.nations) {
-      nation.resources.set("money", STARTING_MONEY);
       for (const resType of TEN_RESOURCES) {
+        nation.resources.set(resType, resType === "money" ? STARTING_MONEY : STARTING_RESOURCE_STOCKPILE);
         nation.resource_storage_cap.set(resType, HOSPITAL_STORAGE_CAP_BASE);
       }
       // Branch B (Step 2b edge case) — seed manpower_available = manpower_ceiling at init,
@@ -2682,8 +2690,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (!nation || !ownerId) continue;
       const chromiumAvailable = isChromiumAvailable(nation.resources.get("chromium") ?? 0);
       const openSlots = this._collectOpenDemandSlots(idle.building_type, ownerId);
-      const scores = scoreTypeForBuilding(idle.building_type, openSlots, chromiumAvailable);
-      if (scores.size === 0) continue; // no demand — stays idle, not an error
+      const scarcityFn = (unitType: string) => resourceScarcityMultiplier(
+        unitType,
+        (resType) => nation.resources.get(resType) ?? 0,
+        (resType) => nation.resource_storage_cap.get(resType) ?? 0,
+      );
+      const scores = scoreTypeForBuilding(idle.building_type, openSlots, chromiumAvailable, scarcityFn);
+      if (scores.size === 0) continue; // no demand at all (real or standing-reserve) — stays idle, not an error
       const [bestType] = [...scores.entries()].sort((a, b) => b[1] - a[1])[0];
       this.unitProductionSystem.assignOrder(idle.province_id, idle.building_type, bestType);
     }
@@ -2719,19 +2732,43 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         });
       }
     }
+    const fieldedCountByType = new Map<string, number>();
     for (const div of this.state.divisions.values()) {
       if (div.nation_id !== nationId || !div.grid) continue;
       for (const cell of div.grid.cells) {
         if (cell.unit_type === "" || cell.hp >= 100) continue;
         const stats = getUnitProductionStats(cell.unit_type);
-        if (stats.produced_by !== buildingType) continue;
-        slots.push({
-          slot_id: `${div.division_id}:${cell.unit_type}`,
-          unit_type: cell.unit_type,
-          missing_pct: (100 - cell.hp) / 100,
-          stream: "field_resupply",
-        });
+        if (stats.produced_by === buildingType) {
+          slots.push({
+            slot_id: `${div.division_id}:${cell.unit_type}`,
+            unit_type: cell.unit_type,
+            missing_pct: (100 - cell.hp) / 100,
+            stream: "field_resupply",
+          });
+        }
       }
+      for (const cell of div.grid.cells) {
+        if (cell.unit_type === "") continue;
+        fieldedCountByType.set(cell.unit_type, (fieldedCountByType.get(cell.unit_type) ?? 0) + 1);
+      }
+    }
+
+    // Standing Reserve amendment (see unit_production_system.ts's DemandStream doc comment) —
+    // synthetic demand toward a buffer sized off the nation's currently-fielded roster, so idle
+    // buildings have something to build even with zero raising/resupply demand anywhere.
+    const nation = this.state.nations.get(nationId);
+    for (const [unitType, fieldedCount] of fieldedCountByType) {
+      const stats = getUnitProductionStats(unitType);
+      if (stats.produced_by !== buildingType) continue;
+      const currentReserve = nation?.reserve_pool.get(unitType) ?? 0;
+      const missingPct = standingReserveMissingPct(fieldedCount, currentReserve);
+      if (missingPct <= 0) continue;
+      slots.push({
+        slot_id: `standing:${nationId}:${unitType}`,
+        unit_type: unitType,
+        missing_pct: missingPct,
+        stream: "standing_reserve",
+      });
     }
     return slots;
   }

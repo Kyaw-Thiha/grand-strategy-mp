@@ -274,6 +274,58 @@ relying on it.**
   Reserve can cover both streams, there's no contention and the split is
   moot.
 
+### 6.6 Standing Reserve production (amendment, confirmed 2026-08-31)
+
+**This section amends §6.1/§6.2's original framing.** The system as originally
+drafted was pure demand-pull: an idle production building with no open
+marshalling/resupply demand slot anywhere stays idle and produces nothing —
+explicitly not even "an arbitrary unit type just to stay busy"
+(`phase-9-task-c-unit-production-reserve.md`'s own zero-demand edge case), and
+RESOURCE_ECONOMY.md's Reserve severity section treats zero production against
+zero consumption as the expected, non-problematic Neutral steady state. On
+review, this was confirmed **not** the intended design: Reserve existing as a
+buffer only makes sense if buildings actually bank toward it in the
+background, not only in direct reaction to an active raise or a fresh combat
+loss.
+
+**Confirmed behavior:** an idle production building generates a third,
+synthetic demand stream — **Standing Reserve demand** — sized off the
+nation's currently-*fielded* roster (real, deployed divisions only; a
+division still in Marshalling does not count toward its own type's Standing
+Reserve target, since it already generates real marshalling demand):
+
+```
+standing_target(unit_type) = fielded_count(unit_type) × STANDING_RESERVE_BUFFER_FRACTION × 100  // HP-equivalent
+standing_missing_pct(unit_type) = clamp01((standing_target − reserve_pool[unit_type]) / standing_target)
+```
+
+This slots into §6.2's existing pooled ranking as a third `stream` value
+(alongside `"marshalling"` and `"field_resupply"`) — same missing-%/
+`build_points`-weighted aggregation (§6.2/§6.3), same chromium hard-gate and
+§6.4 resource-scarcity deprioritization, no separate mechanism needed. It
+naturally tapers to zero (no synthetic demand at all) once Reserve reaches
+the buffer target for that type, so this is not an unbounded background
+sink — a building stops treating it as demand the moment the buffer's full,
+and resumes if the buffer later drains (combat losses, a marshalling draw,
+or storage-cap overflow waste). A unit type nobody currently fields yet still
+generates zero Standing Reserve demand — consistent with the
+zero-demand-reads-as-neutral principle for a type that's never been fielded
+at all.
+
+**`STANDING_RESERVE_BUFFER_FRACTION`** — TBD playtesting, same
+named-placeholder convention as `MARSHALLING_RATE`/`build_points`. Implemented
+placeholder value: `0.5` (Reserve target = half of what's currently fielded,
+per unit type).
+
+**Interaction with RESOURCE_ECONOMY.md's severity bands:** with Standing
+Reserve active, `production_rate > 0` while `consumption_rate == 0` is now a
+normal, frequent state (a nation quietly topping up its buffer) — this reads
+as a *surplus* band, not Neutral, which is the correct signal ("Reserve is
+growing, nothing to worry about"). Neutral is reached once the buffer is
+genuinely full and no marshalling/resupply demand exists either — the
+zero-demand-reads-as-neutral principle still holds, just for a narrower
+condition than before this amendment.
+
 ---
 
 ## 7. Building Taxonomy
@@ -500,9 +552,10 @@ type NewBuildingKeys = "barracks" | "tank_plant" | "ordnance_factory" | "aircraf
 4. **§6.5's two-layer split is an interpretation**, not a verbatim design
    statement — confirm with design before building it as specified.
 5. **Numeric constants** — `build_points` per unit type/tier, `base_rate` per
-   building level, `MARSHALLING_RATE`, exact Resilience/Throughput perk
-   magnitudes. All explicitly deferred to playtesting; implement as named,
-   tunable config, not hardcoded values.
+   building level, `MARSHALLING_RATE`, `STANDING_RESERVE_BUFFER_FRACTION`
+   (§6.6), exact Resilience/Throughput perk magnitudes. All explicitly
+   deferred to playtesting; implement as named, tunable config, not
+   hardcoded values.
 
 ---
 

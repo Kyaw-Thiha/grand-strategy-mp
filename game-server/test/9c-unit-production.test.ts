@@ -10,7 +10,8 @@ import { UnitType } from "../src/types/tactical_types.js";
 import { AIR_UNIT_TYPES } from "../src/rooms/schema/AirWingState.js";
 import {
   rankDemand, scoreTypeForBuilding, assignIdleBuildings, DemandSlot,
-  UnitProductionSystem,
+  UnitProductionSystem, standingReserveMissingPct, resourceScarcityMultiplier,
+  STANDING_RESERVE_BUFFER_FRACTION,
 } from "../src/systems/unit_production_system.js";
 import { NationState, DivisionState, type GameRoomState } from "../src/rooms/schema/GameRoomState.js";
 
@@ -137,6 +138,61 @@ describe("lane:economy | Chromium hard-gate — exclusion, not deprioritization"
     const slots: DemandSlot[] = [{ slot_id: "a", unit_type: "heavy_tank", missing_pct: 1.0, stream: "marshalling" }];
     assert.ok(scoreTypeForBuilding("tank_plant", slots, true).has("heavy_tank"));
     assert.ok(!scoreTypeForBuilding("tank_plant", slots, false).has("heavy_tank"));
+  });
+});
+
+describe("lane:economy | Resource scarcity deprioritization (§6.4, general — distinct from chromium's hard gate)", () => {
+  it("a candidate type needing a scarce resource is deprioritized by a multiplier, not removed from consideration entirely", () => {
+    // medium_tank is an OIL_CONSUMING_TYPES member; oil at 5% of cap is well under the
+    // RESOURCE_SCARCITY_THRESHOLD (15%).
+    const mult = resourceScarcityMultiplier("medium_tank", (r) => (r === "oil" ? 5 : 0), (r) => (r === "oil" ? 100 : 0));
+    assert.ok(mult < 1.0, "expected a deprioritization multiplier below 1.0");
+    assert.ok(mult > 0, "must never fully exclude — that's chromium's hard-gate job, not this");
+  });
+
+  it("plentiful resources apply no deprioritization at all (multiplier stays 1.0)", () => {
+    const mult = resourceScarcityMultiplier("medium_tank", () => 100, () => 100);
+    assert.strictEqual(mult, 1.0);
+  });
+
+  it("a unit type tagged to no resource (e.g. a non-oil, non-vehicle, non-infantry type doesn't exist, but infantry with plentiful nitrates) is unaffected by an unrelated resource's scarcity", () => {
+    // infantry is INFANTRY_ARTILLERY_TYPES (nitrates), not OIL_CONSUMING_TYPES — an oil
+    // shortage must not affect its score at all.
+    const mult = resourceScarcityMultiplier("infantry", (r) => (r === "oil" ? 0 : 100), (r) => (r === "oil" ? 100 : 100));
+    assert.strictEqual(mult, 1.0);
+  });
+
+  it("scoreTypeForBuilding applies the scarcity multiplier on top of missing_pct x build_points", () => {
+    const slots: DemandSlot[] = [{ slot_id: "a", unit_type: "medium_tank", missing_pct: 1.0, stream: "marshalling" }];
+    const withoutScarcity = scoreTypeForBuilding("tank_plant", slots, true);
+    const withScarcity = scoreTypeForBuilding("tank_plant", slots, true, () => 0.5);
+    assert.strictEqual(withScarcity.get("medium_tank"), (withoutScarcity.get("medium_tank") ?? 0) * 0.5);
+  });
+});
+
+describe("lane:economy | Standing Reserve amendment — production continues absent explicit demand", () => {
+  it("a fielded roster with zero Reserve generates standing demand proportional to the buffer target", () => {
+    // 10 medium_tanks fielded, buffer fraction 0.5 -> target = 10*0.5*100 = 500 HP-eq.
+    const pct = standingReserveMissingPct(10, 0);
+    assert.strictEqual(pct, 1.0);
+  });
+
+  it("standing demand tapers to 0 once Reserve reaches the buffer target", () => {
+    const target = 10 * STANDING_RESERVE_BUFFER_FRACTION * 100;
+    assert.strictEqual(standingReserveMissingPct(10, target), 0);
+    assert.strictEqual(standingReserveMissingPct(10, target * 2), 0); // never negative past the target either
+  });
+
+  it("a unit_type with zero currently fielded generates no standing demand at all", () => {
+    assert.strictEqual(standingReserveMissingPct(0, 0), 0);
+  });
+
+  it("standing demand feeds scoreTypeForBuilding like any other demand slot, so an idle building with zero real demand still has something to build", () => {
+    const slots: DemandSlot[] = [
+      { slot_id: "standing:n1:infantry", unit_type: "infantry", missing_pct: standingReserveMissingPct(5, 0), stream: "standing_reserve" },
+    ];
+    const scores = scoreTypeForBuilding("barracks", slots, true);
+    assert.ok((scores.get("infantry") ?? 0) > 0);
   });
 });
 
@@ -443,7 +499,11 @@ describe("lane:economy | GameRoom integration — RAISE_DIVISION/FORCE_DEPLOY/CA
     const marshallingId = getMarshallingIdForGermany(room);
 
     // MARSHALLING_RATE=20/tick, TICK_MS=1000 — 3 ticks reaches hp>=50 for the single slot.
-    await new Promise((resolve) => setTimeout(resolve, 3500));
+    // Wide margin (well past the 3-tick minimum): real setInterval-based gameTick isn't
+    // perfectly precise under load (89 provinces, 61 divisions, now also a per-nation
+    // Standing-Reserve roster scan every tick) — a tight margin here is real-timer flakiness,
+    // not a correctness issue.
+    await new Promise((resolve) => setTimeout(resolve, 6000));
 
     client.send("FORCE_DEPLOY", { marshalling_id: marshallingId });
     await room.waitForNextPatch();

@@ -3,6 +3,7 @@ import type { NationState, DivisionState } from "../rooms/schema/GameRoomState.j
 import { getUnitProductionStats, PRODUCTION_BUILDING_TYPES } from "../data/unit_production_stats.js";
 import { getBuildingStats } from "../data/building_stats.js";
 import { UNIT_COMBAT_STATS } from "../data/unit_combat_stats.js";
+import { OIL_CONSUMING_TYPES, VEHICLE_TYPES, INFANTRY_ARTILLERY_TYPES } from "../data/unit_resource_tags.js";
 
 export type BroadcastFn = (type: string, msg: unknown) => void;
 export type BroadcastToNationFn = (type: string, msg: unknown, nationId: string) => void;
@@ -23,11 +24,23 @@ function fieldSupplyLineCapacity(): number {
 
 // ─── Auto-scheduler: priority ranking + cost-weighted scoring (§6.2/§6.3) ──────────────────
 
+// Amendment to unit_production_handoff.md §6 (2026-08-31, user decision — see that document's
+// "Standing Reserve Production" addendum): the written design as originally drafted was a pure
+// demand-pull system where a building with no open marshalling/resupply slot stays idle and
+// produces nothing ("does not default to an arbitrary unit type 'just to stay busy'", per
+// phase-9-task-c-unit-production-reserve.md's own zero-demand edge case). The user confirmed
+// this was not the intended behavior: idle production buildings should keep banking into
+// Reserve toward a standing buffer sized off the nation's currently-fielded roster, even with
+// zero active marshalling/resupply demand — that's the actual point of Reserve existing as a
+// buffer at all. "marshalling"/"field_resupply" demand always outranks this synthetic demand in
+// practice because its missing_pct is computed off a much larger target (see below).
+export type DemandStream = "marshalling" | "field_resupply" | "standing_reserve";
+
 export interface DemandSlot {
   slot_id: string;
   unit_type: string;
   missing_pct: number; // 0.0 - 1.0
-  stream: "marshalling" | "field_resupply";
+  stream: DemandStream;
 }
 
 /** §6.2 — pools marshalling-template demand and fielded-division-resupply demand into one ranking. */
@@ -39,22 +52,80 @@ export function isChromiumGated(unitType: string): boolean {
   return UNIT_COMBAT_STATS[unitType]?.chromium_gated ?? false;
 }
 
+// TBD playtesting — placeholder. Standing Reserve target = (count of unit_type currently
+// present across a nation's fielded divisions' grid cells) x this fraction x
+// HP_EQUIVALENT_PER_UNIT. Tapers to zero missing_pct once the buffer target is reached, so
+// buildings naturally stop treating this as demand once Reserve is topped up — never an
+// unbounded background sink.
+export const STANDING_RESERVE_BUFFER_FRACTION = 0.5;
+
+/**
+ * Amendment (see DemandStream's doc comment above) — synthetic demand so an idle production
+ * building whose nation has no one raising/resupplying still has something useful to build:
+ * keep Reserve topped up toward a fraction of what's currently fielded. Returns 0 (no synthetic
+ * demand) once reserve already meets or exceeds the target, or if nothing of this type is
+ * fielded at all (a type nobody fields yet generates no standing demand — matches the
+ * zero-demand-reads-as-neutral principle used elsewhere in this design, just no longer treating
+ * *all* idle time as zero-demand).
+ */
+export function standingReserveMissingPct(fieldedCount: number, currentReserve: number): number {
+  const target = fieldedCount * STANDING_RESERVE_BUFFER_FRACTION * HP_EQUIVALENT_PER_UNIT;
+  if (target <= 0) return 0;
+  return Math.max(0, Math.min(1, (target - currentReserve) / target));
+}
+
+// TBD playtesting — placeholder curve, shape confirmed (soft, monotonic, never fully excludes)
+// not exact numbers. Mirrors oilSpeedMultiplier's "never a hard stop" shape from
+// resource_economy_system.ts, applied here as a scoring deprioritization instead of a speed
+// penalty.
+const RESOURCE_SCARCITY_THRESHOLD = 0.15; // fraction of storage cap below which scarcity kicks in
+const RESOURCE_SCARCITY_FLOOR = 0.2; // worst-case multiplier — deprioritized, never excluded
+
+/**
+ * §6.4 — "if a resource needed by a candidate unit type is running low, apply a
+ * deprioritization multiplier." Distinct from chromium's hard exclusion (isChromiumGated):
+ * this only ever softens a score, never removes a type from consideration. Reuses the existing
+ * unit_resource_tags.ts sets (oil/vehicle/infantry-artillery) rather than a new per-unit
+ * resource-cost-vector table, which doesn't exist anywhere in this codebase yet.
+ */
+export function resourceScarcityMultiplier(
+  unitType: string,
+  resourceStock: (resourceType: string) => number,
+  resourceCap: (resourceType: string) => number,
+): number {
+  let mult = 1.0;
+  const applyIfScarce = (resourceType: string) => {
+    const cap = resourceCap(resourceType);
+    if (cap <= 0) return; // cap unknown/not yet computed this tick — treat as not scarce
+    const ratio = resourceStock(resourceType) / cap;
+    if (ratio >= RESOURCE_SCARCITY_THRESHOLD) return;
+    const severity = 1 - ratio / RESOURCE_SCARCITY_THRESHOLD;
+    mult = Math.min(mult, 1.0 - severity * (1.0 - RESOURCE_SCARCITY_FLOOR));
+  };
+  if (OIL_CONSUMING_TYPES.has(unitType)) applyIfScarce("oil");
+  if (VEHICLE_TYPES.has(unitType)) applyIfScarce("rubber");
+  if (INFANTRY_ARTILLERY_TYPES.has(unitType)) applyIfScarce("nitrates");
+  return Math.max(RESOURCE_SCARCITY_FLOOR, mult);
+}
+
 /**
  * §6.3 — build_points-weighted missing-% aggregation per unit_type. §6.4/§2c of the plan —
  * chromium is a hard exclusion filter here, not a scoring multiplier (RESOURCE_ECONOMY.md:
- * "cannot be built at all" below threshold).
+ * "cannot be built at all" below threshold). The general §6.4 resource-scarcity case (any other
+ * resource running low) is a soft multiplier instead, via resourceScarcityMultiplierFn.
  */
 export function scoreTypeForBuilding(
   buildingType: string,
   openSlots: DemandSlot[],
   chromiumAvailable: boolean,
+  resourceScarcityMultiplierFn: (unitType: string) => number = () => 1.0,
 ): Map<string, number> {
   const scores = new Map<string, number>();
   for (const slot of openSlots) {
     const stats = getUnitProductionStats(slot.unit_type);
     if (stats.produced_by !== buildingType) continue;
     if (isChromiumGated(slot.unit_type) && !chromiumAvailable) continue;
-    const score = slot.missing_pct * stats.build_points;
+    const score = slot.missing_pct * stats.build_points * resourceScarcityMultiplierFn(slot.unit_type);
     scores.set(slot.unit_type, (scores.get(slot.unit_type) ?? 0) + score);
   }
   return scores;
