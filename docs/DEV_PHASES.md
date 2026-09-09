@@ -1377,6 +1377,10 @@ Phase 9 the way an earlier draft of this plan assumed.
       Uranium research-currency-injection mechanic (a one-time lump deposit into this pool),
       and Phase 11's unit specialization trees all spend from the same pool, not separate
       per-system currencies
+- [ ] Per-node completion-time floor — a node's research time approaches a minimum
+      (asymptote) as funding rate increases, never reaches zero; this is the anti-snowball
+      mechanism (no amount of currency buys instant tech), formalized alongside the
+      concurrency cost curve above. See `RESEARCH.md` — Anti-Snowball Floor
 
 ### Godot
 - [ ] `DiplomacySystem` — proposal cache, propose/respond methods
@@ -1408,9 +1412,10 @@ works.
 wired into the existing Armoured branch skeleton already defined in TACTICAL_COMBAT.md
 (motorisation → mechanisation → APC → improved APC → IFV). Nothing here commits to final
 content for Infantry, Artillery, Air, or Naval doctrine trees — those are not designed yet.
-This phase exists so the *mechanism* (adjacency-web tree, variants coexisting in the same
-division, tier-local mutual exclusivity) is real and testable against one concrete branch,
-without blocking on design work that hasn't happened.
+This phase exists so the *mechanism* — adjacency-web tree, live-recomputed effective
+stats, tier-local mutual exclusivity with respec, and the Auto/Manual perk-activation
+seam — is real and testable against one concrete branch, without blocking on design work
+that hasn't happened. Full mechanism spec: `RESEARCH.md`.
 
 **Why minimal, and why its own phase rather than waiting:** the spatially-adjacent web
 system (paths unlock adjacent paths at the same tier, variable width/depth per unit
@@ -1429,23 +1434,37 @@ currency pool Phase 10 establishes (see Phase 10's Colyseus notes). Building the
 mechanism before that currency model exists would mean stubbing the funding side instead,
 which is the same retrofit risk this phase is otherwise trying to avoid for combat systems.
 
-**Testing:** Unit tests confirming a variant unlock does not retroactively break any
-existing division template (the "no template ever breaks due to missing research"
-guarantee from the unit research design tenets).
+**Testing:** Unit tests confirming that un-researching a mutually-exclusive perk (via
+respec) or a lineage chain simply falling back to its highest-still-researched tier never
+breaks an existing division template (the "no template ever breaks" guarantee — see
+`RESEARCH.md`).
 
 ### Colyseus
-- [ ] Adjacency-web tree data structure — paths, tiers, per-path-per-tier node definitions,
-      adjacency unlock rule (unlocking a tier unlocks the next tier same-path + same-tier
-      adjacent-path), tier-local mutual exclusivity flag (not path-local)
+- [ ] Adjacency-web tree data structure — paths (no fixed count), tiers, per-path-per-tier
+      node definitions, adjacency unlock rule (unlocking a tier unlocks the next tier
+      same-path + same-tier adjacent-path), tier-local mutual exclusivity flag (not
+      path-local)
 - [ ] Armoured branch populated into this structure using the existing TACTICAL_COMBAT.md
       skeleton (motorisation → mechanisation → APC → improved APC → IFV) as real tree
       content — the only branch with real content in this phase
 - [ ] Infantry, Artillery, Air, Naval branches — empty stub trees only (structure exists,
       zero nodes defined); explicitly not designed in this phase
-- [ ] Variant coexistence — researching a specialization produces a new unit *variant*
-      that coexists with the unverspecialized base and with other variants of the same base
-      unit, never a destructive replace; a template referencing an unresearched variant
-      defaults silently to the base unit, never breaks
+- [ ] `compute_stats(unit_type, active_perk_ids)` — the effective-stats function takes the
+      active perk set as an explicit argument, never hardcodes "all researched." Called
+      with `all_researched_perks_for(unit_type)` for now (Auto mode is the only mode
+      shipped this phase), so Manual mode can be added later purely as new UI wired to
+      this same function — see `RESEARCH.md` — Auto/Manual
+- [ ] Live recompute — a fielded division's effective stats are derived from
+      (template + current nation research state) on every read, never snapshotted at
+      raise time. Un-researching a perk (via respec) immediately drops it from every
+      division using it
+- [ ] Lineage-chain fallback — a template referencing a since-superseded chain tier (e.g.
+      APC after IFV is researched) resolves to the *highest currently researched* tier in
+      that chain, never straight to the unspecialised base
+- [ ] Respec — re-selecting a different option at an already-decided mutually-exclusive
+      tier requires confirmation, keeps the old perk fully active until the new research
+      completes (no downtime), then un-researches the old perk atomically; no currency
+      refunded
 - [ ] Research draws from the Phase 10 research-currency pool; no separate currency
       introduced for unit research specifically
 
@@ -1460,18 +1479,23 @@ guarantee from the unit research design tenets).
 - [ ] `LandDoctrineUI` panel — Armoured sub-tab populated with real content; Infantry/
       Artillery sub-tabs present but empty, clearly marked not-yet-available rather than
       hidden, so the panel structure is correct even though most content is stubbed
-- [ ] `DivisionBuilder` — variant selection at the unit-slot level once a variant is
-      researched; unresearched slots show the base unit only, no broken or greyed-out state
+- [ ] `DivisionBuilder` — chain-tier selection at the unit-slot level once a lineage
+      variant is researched; slots with no research yet show the base unit only, no
+      broken or greyed-out state. Per-slot Auto/Manual perk toggle UI is explicitly
+      **not** built this phase — deferred, see `RESEARCH.md` — but the underlying field
+      exists on every slot (always `"auto"` for now) so the later UI needs no data migration
 
 ### Verification gate
 Research the Armoured tree's motorisation node → mechanisation node becomes available
 (same-path, next-tier) → Infantry's stub tree remains empty and clearly marked, not
 silently populated with placeholder content. Build a division template referencing a
-not-yet-researched Armoured variant → template loads using the base unit, does not error.
-Research a variant → existing saved templates referencing the base unit are unaffected;
-only newly-built templates can select the variant. Confirm Infantry/Artillery/Air/Naval
-panels render their empty-stub state without crashing or showing Armoured's content by
-mistake.
+not-yet-researched Armoured chain tier → template loads using the base unit, does not
+error. Research APC, then improved APC → a division built from that template now shows
+improved-APC stats without re-saving the template (live recompute). Un-research APC via
+respec (choose a conflicting mutually-exclusive option elsewhere in the tree, confirm,
+wait for it to complete) → division falls back to the base unit, no error. Confirm
+Infantry/Artillery/Air/Naval panels render their empty-stub state without crashing or
+showing Armoured's content by mistake.
 
 ---
 

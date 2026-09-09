@@ -472,22 +472,21 @@ FILE: src/systems/map/map_renderer.gd
 
 ```
 MODULE: MapInteraction
-PURPOSE: Detects province hover and left-click selection. Emits signals for other
-         systems to act on.
+PURPOSE: Handles all mouse and touch input on the map. Detects province clicks and
+         hovers, manages selection state. Emits signals for other systems to act on.
 OWNS: Currently selected province_id, currently hovered province_id.
 EXPOSES:
   signals:
     province_clicked(province_id: String)
     province_hovered(province_id: String)
+    province_right_clicked(province_id: String)
     selection_cleared()
   methods:
-    get_hovered_province_id() -> String
-    deselect()
-    set_player_input_enabled(enabled: bool)
+    get_selected_province() -> String
+    disable_input()
+    enable_input()
 CONSUMES:
-  signals:
-    EventBus.pause_menu_blocking_changed
-    EventBus.chat_input_focus_changed
+  signals: (none)
   reads: MapLoader.get_all_province_ids() for click detection
 FORBIDDEN FROM: game logic, rendering, writing GameState
 AUTOLOAD: no
@@ -500,31 +499,20 @@ FILE: src/systems/map/map_interaction.gd
 
 ```
 MODULE: CameraSystem
-PURPOSE: Owns the 2D map camera. Pan, zoom, zoom limits, smooth keyboard movement,
-         and right-button drag gesture classification.
-OWNS: Camera2D node, current zoom level, current pan position, active drag gesture.
+PURPOSE: Owns the 2D map camera. Pan, zoom, zoom limits, smooth movement, edge scroll.
+OWNS: Camera2D node, current zoom level, current pan position.
 EXPOSES:
-  signals:
-    zoom_changed(level: float)
-    right_click_requested(screen_position: Vector2, shift_pressed: bool)
+  signals: (none)
   methods:
     pan_to_province(province_id: String)
     pan_to_position(position: Vector2)
-    smooth_pan_to_position(position: Vector2)
-    center_on_position(position: Vector2)
     set_zoom(level: float)
-    set_player_input_enabled(enabled: bool)
+    get_zoom() -> float
+    enable_edge_scroll(enabled: bool)
 CONSUMES:
-  signals:
-    EventBus.pause_menu_blocking_changed
-    EventBus.chat_input_focus_changed
-    EventBus.ui_pointer_blocking_changed
-    EventBus.ui_text_input_focus_changed
-  reads:
-    MapLoader.get_map_bounds()
-    MapLoader.get_province_focus_position(id)
-    MapLoader.get_province_node(id)
-FORBIDDEN FROM: game state, rendering, resolving gameplay right-click actions
+  signals: (none — input driven internally)
+  reads: MapLoader.get_province_node(id) for pan_to_province()
+FORBIDDEN FROM: game state, rendering, input other than camera controls
 AUTOLOAD: no
 FILE: src/systems/map/camera_system.gd
 ```
@@ -568,36 +556,6 @@ CONSUMES:
 FORBIDDEN FROM: resolving combat (server only), direct state mutation
 AUTOLOAD: no
 FILE: src/systems/military/military_system.gd
-```
-
----
-
-### SupplyLineOverlay `[MVP]`
-
-```
-MODULE: SupplyLineOverlay
-PURPOSE: Renders GameState.supply_routes as a polyline per selected/visible division —
-         the "Supply line visualisation and out-of-supply display" module once listed under
-         Later/Optional; implemented (Batch 7 and follow-ups), not deferred. Recomputes no
-         route data itself — every visual field (points, color, pulse) is derived purely from
-         the server-authoritative SupplyRoute last received for that division.
-OWNS: One Line2D per division with a currently-displayable route. No GameState writes.
-EXPOSES:
-  methods:
-    setup(loader: MapLoader, military_system: Node)
-CONSUMES:
-  signals:
-    EventBus.supply_route_updated, division_revealed, division_hidden,
-    division_appeared, division_vanishing, division_selection_changed,
-    division_active_changed
-  reads:
-    GameState.supply_routes, GameState.divisions
-    MapLoader.get_subprovince_data/get_subprovince_polygon/get_road_geometry_points
-    MilitarySystem.get_division_world_position (keeps the line's start point glued to a
-      moving division between server broadcasts)
-FORBIDDEN FROM: recomputing route data, writing GameState
-AUTOLOAD: no
-FILE: src/systems/military/supply_line_overlay.gd
 ```
 
 ---
@@ -779,10 +737,7 @@ EXPOSES:
     close_all()
 CONSUMES:
   signals:
-    EventBus.division_selected      # updates active land inspector or enemy panel
-    EventBus.division_selection_changed # drives owned-land single/multi state
-    EventBus.division_hover_changed # drives delayed owned-land preview
-    EventBus.division_screen_position_updated # positions contextual land UI
+    EventBus.division_selected      # shows FriendlyDivisionPanel or EnemyDivisionPanel
     EventBus.province_selected      # shows FriendlyProvincePanel
     EventBus.division_deselected    # hides all bottom panels
     EventBus.province_deselected    # hides all bottom panels
@@ -913,34 +868,24 @@ SCENE: scenes/game/pause_menu.tscn
 
 ---
 
-### Contextual Selection Displays — informational
+### Bottom Selection Panel (4 states) — informational
 
-Selection displays read `GameState` and emit intent through `EventBus`; they do not submit
-commands directly or mutate selection/gameplay state.
+No formal module contract (container pattern, not a standalone module). Documents
+the 4 panel scripts and their selection behavior:
 
 | Script | Triggered by | Buttons / Content |
 |---|---|---|
-| `LandSelectionSurround` | Single owned `division_selection_changed` plus projected counter position | Hollow connected selection visual; Composition, Center Camera, and eligible Hold/Retreat intent controls |
-| `LandSelectionPopover` | Multi-selection and legacy explicit inspector requests | Collapsed/expanded multi roster; composition; contextual Retreat/Reposition; Hold overflow |
+| `FriendlyDivisionPanel` | `EventBus.division_selected` when nation_id == my_nation | Move, Hold (disabled), Cancel; HP/suppression bars |
 | `EnemyDivisionPanel` | `EventBus.division_selected` when nation_id != my_nation | Intel badge, apparent composition (read-only) |
 | `FriendlyProvincePanel` | `EventBus.province_selected` | Province name + nation, Upgrade/Build Radar/Manage Prod. (visible only for owner) |
-| `FriendlyStackPanel` | Uninstanced placeholder for future positional-stack reorder UI | — |
+| `FriendlyStackPanel` | Placeholder for future multi-select | — |
 
-`LandSelectionSurround` is positioned in screen space from the active division counter. An SDF
-surface unions the enclosure and tray without seams while cutting out the counter center. Its full
-visual root ignores pointer input; only its tightly bounded native action controls stop pointer
-fall-through. Composition opens the existing template viewer while preserving selection. Center
-Camera is resolved outside the UI and executed by `CameraSystem`. `MilitarySystem` publishes Hold
-and Retreat eligibility and revalidates captured action intent before `CommandQueue` submission.
-`GameHUD` evaluates full-surface top-right, top-left, lower-right, and lower-left placements against
-the viewport and stable HUD reservations, retains valid placement through camera interpolation, and
-suspends the surface while any managed panel is open. Placement changes, context changes, and
-division removal invalidate captured presses without mutating selection.
-Remaining selection panels are centered at the bottom and stop pointer fall-through.
+All 4: centered at bottom via global_position math (no anchor manipulation),
+`mouse_filter = STOP` to prevent click fall-through to map layer,
+StyleBoxFlat border (4px all sides, golden color `Color(0.32, 0.22, 0.12)`).
 
 FILES:
-- `src/ui/hud/land_selection_surround.gd` / `scenes/game/land_selection_surround.tscn`
-- `src/ui/hud/land_selection_popover.gd` / `scenes/game/panels/land_selection_popover.tscn`
+- `src/ui/hud/friendly_division_panel.gd` / `scenes/game/panels/friendly_division_panel.tscn`
 - `src/ui/hud/friendly_province_panel.gd` / `scenes/game/panels/friendly_province_panel.tscn`
 - `src/ui/hud/enemy_division_panel.gd` / `scenes/game/panels/enemy_division_panel.tscn`
 - `src/ui/hud/friendly_stack_panel.gd` / `scenes/game/panels/friendly_stack_panel.tscn`
@@ -981,7 +926,8 @@ These are defined by name and priority. Full contracts written when implementati
 | Module | Priority | Purpose |
 |---|---|---|
 | `PoliticsSystem` | `[LATER]` | Nation ideology, government type, political decisions |
-| `TechSystem` | `[LATER]` | Research tree display and queue management |
+| `TechSystem` | `[LATER]` | Research tree display and queue management. Mirrors per-nation researched-node set and active projects from GameState; per-template unit-slot perk selection (`perk_mode: "auto"\|"manual"`, `active_perks`) lives on DivisionBuilder's template data, not here — Auto is the only mode with UI until Manual mode ships (see RESEARCH.md) |
+| `SupplySystem` | `[LATER]` | Supply line visualisation and out-of-supply display |
 | `CosmeticSystem` | `[LATER]` | Apply owned cosmetics (skins, themes) to game visuals |
 | `ShopSystem` | `[LATER]` | In-game cosmetic store, purchase flow |
 | `MinimapSystem` | `[LATER]` | Small viewport minimap, click to pan camera |
