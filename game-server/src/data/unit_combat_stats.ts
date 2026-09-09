@@ -43,4 +43,10 @@ export const UNIT_COMBAT_STATS: Record<string, UnitCombatStats> = {
   // TACTICAL_COMBAT.md/ECONOMY_BUILDINGS.md — "belongs here despite its name"), lightly
   // armoured halftrack-class.
   [UnitType.MECHANISED_INF]: { pen: 15, armour: 10, hp_floor_pct: 30, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
+  // Phase 11 Branch A — Improved APC / IFV: the mechanised-infantry lineage chain's next two
+  // tiers, monotonically improving armour/hp_floor_pct up the chain (TACTICAL_COMBAT.md:
+  // "each upgrade improves the unit's armour value and suppression resistance"). Exact
+  // numbers are TBD-playtesting placeholders, per project convention.
+  [UnitType.IMPROVED_APC]: { pen: 16, armour: 16, hp_floor_pct: 32, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
+  [UnitType.IFV]:          { pen: 18, armour: 20, hp_floor_pct: 35, stealth_level: 0, anti_stealth: 0, chromium_gated: false },
 };

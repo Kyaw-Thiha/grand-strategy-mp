@@ -24,6 +24,11 @@ export const UnitType = {
   // Plant entries but previously missing from this enum (Branch C — Phase 9 Task C).
   MOTORISED_INF:   "motorised_infantry",
   MECHANISED_INF:  "mechanised_infantry",
+  // Phase 11 Branch A — top two rungs of the Armoured lineage chain (RESEARCH.md,
+  // TACTICAL_COMBAT.md's "Motorisation and Mechanisation"): mechanised_infantry ->
+  // improved_apc -> ifv, each a distinct grid entity replacing the previous tier.
+  IMPROVED_APC:    "improved_apc",
+  IFV:             "ifv",
 } as const;
 
 export type UnitTypeValue = typeof UnitType[keyof typeof UnitType];

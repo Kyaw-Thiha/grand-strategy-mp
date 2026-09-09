@@ -55,6 +55,77 @@ export const PERK_REGISTRY: Record<string, PerkDefinition> = {
     modifiers: { damage_mult: 1.10 },
   },
 
+  // Phase 11 Branch A — Armour research tree (real content)
+  "armour_medium_hull_upgrade_1": {
+    perk_id: "armour_medium_hull_upgrade_1",
+    scope: "unit_type",
+    applies_to_unit: "medium_tank",
+    modifiers: { damage_mult: 1.10 },
+  },
+  "armour_heavy_hull_upgrade_1": {
+    perk_id: "armour_heavy_hull_upgrade_1",
+    scope: "unit_type",
+    applies_to_unit: "heavy_tank",
+    modifiers: { suppression_resist_mult: 1.15 },
+  },
+  "mechanisation_suppression_resist_1": {
+    perk_id: "mechanisation_suppression_resist_1",
+    scope: "unit_type",
+    applies_to_unit: "mechanised_infantry",
+    modifiers: { suppression_resist_mult: 1.15 },
+  },
+  "mechanisation_suppression_resist_2": {
+    perk_id: "mechanisation_suppression_resist_2",
+    scope: "unit_type",
+    applies_to_unit: "improved_apc",
+    modifiers: { suppression_resist_mult: 1.25 },
+  },
+  "mechanisation_suppression_resist_3": {
+    perk_id: "mechanisation_suppression_resist_3",
+    scope: "unit_type",
+    applies_to_unit: "ifv",
+    modifiers: { suppression_resist_mult: 1.35 },
+  },
+  // Existence-check-only perk (no stat modifiers) — DivisionBuilder's motorised toggle
+  // (Branch D) checks for this id directly rather than reading a modifier value.
+  "motorisation_unlocked": {
+    perk_id: "motorisation_unlocked",
+    scope: "global",
+    modifiers: {},
+  },
+
+  // Phase 11 Branch A — Infantry sample tree (placeholder, not final balance)
+  "assault_suppression_resist_1": {
+    perk_id: "assault_suppression_resist_1",
+    scope: "unit_type",
+    applies_to_unit: "assault_infantry",
+    modifiers: { suppression_resist_mult: 1.10 },
+  },
+  "assault_suppression_resist_2": {
+    perk_id: "assault_suppression_resist_2",
+    scope: "unit_type",
+    applies_to_unit: "assault_infantry",
+    modifiers: { suppression_resist_mult: 1.20 },
+  },
+  "infantry_fire_move_1": {
+    perk_id: "infantry_fire_move_1",
+    scope: "unit_type",
+    applies_to_unit: "infantry",
+    modifiers: { movement_mult: 1.15 },
+  },
+  "infantry_bayonet_1": {
+    perk_id: "infantry_bayonet_1",
+    scope: "unit_type",
+    applies_to_unit: "infantry",
+    modifiers: { damage_mult: 1.20 },
+  },
+  "infantry_marksman_1": {
+    perk_id: "infantry_marksman_1",
+    scope: "unit_type",
+    applies_to_unit: "infantry",
+    modifiers: { observation_mult: 1.20 },
+  },
+
   // Formation synergy (handled in combat round logic, not resolvePerkModifiers)
   "sniper_recon_enhanced": {
     perk_id: "sniper_recon_enhanced",
