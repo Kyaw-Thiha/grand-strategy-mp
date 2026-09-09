@@ -57,15 +57,16 @@ that's a real strategic decision, not a stat optimization puzzle.
 
 ## The Perk Tree Shape (applies to every building below)
 
-Every building's research tree follows the same structural rules established for unit
-specialization (see the unit research design tenets — out of scope for this document,
-referenced for shape only):
+Every building's research tree follows the same structural rules established in
+`RESEARCH.md` (the authoritative shared-mechanism doc for both building and unit trees):
 
 - **Paths are spatially adjacent, not hard-locked, not a free-for-all.** A building has
-  2–4 named paths (its "archetypes" — what the building can be optimized toward).
-  Unlocking a tier in one path unlocks the next tier in that same path, plus the same
-  tier in the immediately adjacent path(s). Distant paths cost more by structure (more
-  total nodes to cross), not by an arbitrary tax.
+  one or more named paths (its "archetypes" — what the building can be optimized
+  toward). There is no fixed path-count floor or ceiling — a building with a single
+  genuine lever (see Uranium Mine below) gets one path; a building with several real
+  tradeoffs gets more. Unlocking a tier in one path unlocks the next tier in that same
+  path, plus the same tier in the immediately adjacent path(s). Distant paths cost more
+  by structure (more total nodes to cross), not by an arbitrary tax.
 - **Paths are not mutually exclusive by default.** A player can freely invest across
   all of a building's paths if they choose to spread their research. Nothing locks a
   player out of a path just because they invested in an adjacent one.
@@ -78,6 +79,11 @@ referenced for shape only):
   path. Players are free to take all available perks across all paths at any
   non-locked tier if they invest enough — locks exist only where a deliberate
   this-or-that identity choice is wanted, not as a general path-exclusivity rule.
+- **Respec is possible but costly.** Choosing a new option at an already-decided
+  mutually-exclusive tier triggers a confirmation prompt, then starts researching the
+  new perk while the old one stays fully active for the entire duration (no downtime).
+  The old perk is un-researched only the instant the new one completes. No currency is
+  refunded. See `RESEARCH.md` for the full rationale.
 - **Width and depth scale with building complexity**, using smaller bands than units
   (buildings are a supporting system, not the main event):
 
@@ -834,10 +840,12 @@ Factory, and Aircraft Factory are *not* part of this out-of-scope group — they
 this list's defensive/detection buildings.)
 
 **Unit specialization research** (Infantry, Armoured, Artillery, Air, Naval doctrine
-trees) — covered by the unit research design tenets and the per-branch trees built on
-top of them. This document's perk-tree *shape* (adjacency, width/depth bands, tier-local
-mutual exclusivity) is shared with that system but the actual unit trees are not
-defined here.
+trees) — covered by `RESEARCH.md` and the per-branch trees built on top of it. This
+document's perk-tree *shape* (adjacency, width/depth bands, tier-local mutual
+exclusivity) is shared with that system, but building perks stay purely additive/
+redistribute — they do not carry the qualitative "new mechanic" perk shape that unit
+trees use (see `RESEARCH.md`'s Perk Taxonomy). The actual unit trees are not defined
+here.
 
 **Exact resource-to-nation/map placement** — which nations start with access to which
 resources, and whether resources remain province-level scalars or gain any point-placed
@@ -846,4 +854,4 @@ component, is a map-authoring decision covered elsewhere.
 **Research panel top-level structure** (which sub-panel each tree lives in, hotkey
 allocation) — the Economy & Industry panel referenced throughout this document as the
 home for these trees is defined at the panel-structure level elsewhere; this document
-defines tree contents, not panel chrome.
+defines tree contents, not panel chrome. UI layout itself is deferred — see `RESEARCH.md`.

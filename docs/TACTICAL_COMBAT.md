@@ -667,6 +667,11 @@ doctrine, not from infantry development.
 - Specialisation path within the branch: basic APC (half-track) → improved APC (full
   tracked) → infantry fighting vehicle (IFV, provides fire support from the vehicle)
 - Each upgrade improves the unit's armour value and suppression resistance in the grid
+- This chain is a **lineage chain** in `RESEARCH.md`'s perk taxonomy — each tier is a
+  distinct grid entity that sequentially replaces the previous one, not an additive
+  perk stacked on top of a fixed base unit. A template referencing a since-superseded
+  tier still works; a nation's fielded units use whichever tier is currently the
+  highest researched (see `RESEARCH.md` — Live Effective Stats)
 
 **Research tree structure summary:**
 ```
