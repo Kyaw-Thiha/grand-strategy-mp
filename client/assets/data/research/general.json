@@ -1,0 +1,19 @@
+[
+  {
+    "id": "general_motorisation",
+    "branch": "General",
+    "unit_id": "motorisation",
+    "path_id": "logistics",
+    "tier": 1,
+    "mutex_group_id": null,
+    "name": "Motorisation",
+    "short_description": "Trucks for your infantry, no combat changes.",
+    "description": "Builds enough truck production to move infantry by vehicle. Unlocks the motorised toggle in the division builder for eligible unit types. This is a strategic map speed upgrade only, it changes nothing on the 5x5 combat grid.",
+    "cost": { "money": 0, "science": 0 },
+    "badges": ["mechanic"],
+    "size": "notable",
+    "requires": [],
+    "image_asset": "res://assets/icons/table-cells-solid-full.svg",
+    "effects": [{ "type": "perk", "perk_id": "motorisation_unlocked" }]
+  }
+]

@@ -66,6 +66,9 @@ signal research_started(entry_id: String)
 signal research_progress_changed(entry_id: String, progress: float)
 signal research_completed(entry_id: String, effects: Dictionary)
 signal research_rejected(entry_id: String, reason: String)
+## Server-driven — fires whenever GameState.research changes from a RESEARCH_INIT/
+## RESEARCH_UPDATES broadcast. Distinct from the four client-local-prototype signals above.
+signal research_updated()
 
 # ── Selection (Phase 5c) ─────────────────────────────────────────────────────
 signal province_selected(province_id: String)

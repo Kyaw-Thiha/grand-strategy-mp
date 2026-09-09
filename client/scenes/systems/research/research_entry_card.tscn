@@ -1,0 +1,59 @@
+[gd_scene load_steps=2 format=3 uid="uid://dqx7research1a"]
+
+[ext_resource type="Script" uid="uid://c1ef13gwwaefp" path="res://src/systems/research/research_entry_card.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_default"]
+bg_color = Color(0.08, 0.06, 0.04, 0.72)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.16, 0.09, 0.65)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="ResearchEntryCard" type="PanelContainer"]
+custom_minimum_size = Vector2(230, 148)
+theme_override_styles/panel = SubResource("StyleBoxFlat_default")
+script = ExtResource("1")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Layout" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Research Entry"
+autowrap_mode = 3
+
+[node name="DescriptionLabel" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+text = ""
+autowrap_mode = 3
+
+[node name="ScienceLabel" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+text = "Research points: 0"
+horizontal_alignment = 2
+
+[node name="ProgressBar" type="ProgressBar" parent="Margin/Layout"]
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+show_percentage = false
+
+[node name="StatusLabel" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+text = "Locked"
+horizontal_alignment = 2

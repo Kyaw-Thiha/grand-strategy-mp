@@ -433,6 +433,11 @@ func _ready() -> void:
 	hud_manager.set_panel_shortcut("diplomacy", KEY_T)
 	hud_manager.set_panel_shortcut("research",  KEY_Q)
 	hud_manager.set_panel_shortcut("production", KEY_R)
+	# Shift+Q expands straight to Research's Full Tree — closes the sidebar automatically
+	# (show_panel's existing FULL_CENTER-closes-SIDE_DOCKED behavior), matching the Full Tree
+	# button's own current behavior. Pressing Shift+Q again while it's open closes it and
+	# restores the sidebar, via the same _previous_side_docked mechanism.
+	hud_manager.set_panel_shift_shortcut("research_tree", KEY_Q)
 
 	# Bottom selection bar — reactive to EventBus selection signals
 	EventBus.division_selected.connect(_on_division_selected)

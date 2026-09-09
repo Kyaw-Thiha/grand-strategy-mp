@@ -1,42 +1,40 @@
 extends Control
-## Uses inspector-authored research cards and delegates runtime state to ResearchSystem.
+## Loads real research tree content from JSON (client/assets/data/research/*.json), builds
+## cards dynamically, and delegates runtime state to ResearchSystem — which is itself now a
+## display cache reflecting server-synced GameState.research, not the sole authority
+## (see research_system.gd's doc comment and event_bus.gd's research_updated signal).
 
 signal close_requested()
 
-const ResearchEntryCardScript: GDScript = preload("res://src/systems/research/research_entry_card.gd")
+const ResearchEntryCardScene: PackedScene = preload("res://scenes/systems/research/research_entry_card.tscn")
+const ResearchTreeDataLoader = preload("res://src/systems/research/research_tree_data_loader.gd")
 
 @onready var _research_system: Variant = %ResearchSystem
 @onready var _status_label: Label = %StatusLabel
 @onready var _close_button: Button = %CloseButton
+@onready var _research_grid: GridContainer = %ResearchGrid
 
 var _entry_cards: Array[Variant] = []
 
 
-## Registers static scene cards with the local research system.
+## Loads real research definitions from JSON and builds one card per node.
 ## Parameters: none.
 ## Returns: nothing.
 func _ready() -> void:
-	_collect_entry_cards(self)
 	_research_system.entries_changed.connect(_refresh_tree)
 	_close_button.pressed.connect(_request_close)
-	for card: Variant in _entry_cards:
-		card.entry_pressed.connect(_on_entry_pressed)
 
-	var definitions: Array = []
-	for card: Variant in _entry_cards:
-		var definition: Dictionary = card.get_definition()
-		if not String(definition.get("id", "")).is_empty():
-			definitions.append(definition)
+	var definitions: Array = ResearchTreeDataLoader.load_all_definitions()
+	_build_cards(definitions)
 
 	if not _research_system.load_from_definitions(definitions):
-		_status_label.text = "No research entries are authored in this scene."
+		_status_label.text = "No research entries are authored yet."
 		return
 
+	if has_node("/root/EventBus"):
+		EventBus.research_updated.connect(_on_research_updated)
+
 	_refresh_tree()
-
-
-func _process(delta: float) -> void:
-	_research_system.advance(delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -60,7 +58,7 @@ func get_research_system() -> Node:
 	return _research_system
 
 
-## Returns authored research definitions collected from this tree scene.
+## Returns loaded research definitions.
 ## Parameters: none.
 ## Returns: array of research definition dictionaries.
 func get_research_definitions() -> Array[Dictionary]:
@@ -79,11 +77,26 @@ func refresh_from_research_system() -> void:
 	_refresh_tree()
 
 
-func _collect_entry_cards(node: Node) -> void:
-	for child: Node in node.get_children():
-		if child.get_script() == ResearchEntryCardScript:
-			_entry_cards.append(child)
-		_collect_entry_cards(child)
+func _build_cards(definitions: Array) -> void:
+	for card: Variant in _entry_cards:
+		card.queue_free()
+	_entry_cards.clear()
+
+	# Empty-stub branches (Naval this phase) simply contribute zero cards — no dedicated
+	# "Coming Soon" panel yet (that presentation is Branch C's RESEARCH_UI_HANDOFF.md §4.5 scope).
+	for definition: Dictionary in definitions:
+		var card: Variant = ResearchEntryCardScene.instantiate()
+		card.entry_id = definition.get("id", "")
+		card.column_name = definition.get("column", "")
+		card.row = int(definition.get("row", 0))
+		card.title = definition.get("title", "")
+		card.description = definition.get("description", "")
+		card.science_value = int(definition.get("science_value", 0))
+		card.exclusive_group = definition.get("exclusive_group", "")
+		card.effects = definition.get("effects", {})
+		_research_grid.add_child(card)
+		card.entry_pressed.connect(_on_entry_pressed)
+		_entry_cards.append(card)
 
 
 func _refresh_tree() -> void:
@@ -108,6 +121,9 @@ func _refresh_tree() -> void:
 		_status_label.text = "Researching: " + active_entry.get("title", active_entry_id)
 
 
+func _on_research_updated() -> void:
+	_research_system.sync_from_server_state(GameState.research)
+
+
 func _on_entry_pressed(entry_id: String) -> void:
-	_research_system.start_research(entry_id)
-	_refresh_tree()
+	CommandQueue.submit("START_RESEARCH", {"node_id": entry_id})

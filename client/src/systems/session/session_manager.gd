@@ -101,6 +101,12 @@ func _on_server_event(type: String, data: Dictionary) -> void:
 		"RESERVE_UPDATES":
 			GameState._apply_reserve_updates(data)
 
+		"RESEARCH_INIT":
+			GameState._apply_research_init(data)
+
+		"RESEARCH_UPDATES":
+			GameState._apply_research_updates(data)
+
 		"MARKET_UPDATES":
 			GameState._apply_market_updates(data)
 

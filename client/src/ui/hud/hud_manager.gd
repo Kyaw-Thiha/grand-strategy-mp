@@ -23,6 +23,11 @@ var _registry: Dictionary = {}
 var _currently_open: String = ""
 # physical_keycode (int) → panel_name (String)
 var _shortcut_map: Dictionary = {}
+# physical_keycode (int) → panel_name (String) — Shift + the plain shortcut's key, per
+# UI_UX_DESIGN.md §9.1's "Shift = expand" modifier grammar (e.g. Shift+Q expands the Research
+# sidebar straight to its Full Tree view). Checked before _shortcut_map so the plain key still
+# works unmodified.
+var _shift_shortcut_map: Dictionary = {}
 # Previously-open side-docked panel — saved before a FULL_CENTER panel opens, restored on close
 var _previous_side_docked: String = ""
 var _player_input_blocked: bool = false
@@ -60,6 +65,13 @@ func _input(event: InputEvent) -> void:
 		return
 
 	var scancode: int = key.physical_keycode
+
+	# Shift-modified panel shortcut routing (expand straight to a panel's deeper view) —
+	# checked first so it takes priority over the plain shortcut for the same key.
+	if key.shift_pressed and _shift_shortcut_map.has(scancode):
+		_toggle_by_shortcut(_shift_shortcut_map[scancode])
+		get_tree().root.set_input_as_handled()
+		return
 
 	# Panel shortcut routing
 	if _shortcut_map.has(scancode):
@@ -157,6 +169,16 @@ func set_panel_shortcut(panel_name: String, physical_keycode: int) -> void:
 		push_warning("HUDManager: cannot set shortcut — panel '%s' not registered" % panel_name)
 		return
 	_shortcut_map[physical_keycode] = panel_name
+
+
+## Sets a Shift-modified shortcut for a registered panel — the "expand" convention
+## (UI_UX_DESIGN.md §9.1), e.g. Shift+Q jumping straight to Research's Full Tree while the
+## plain Q key still opens/closes the regular sidebar.
+func set_panel_shift_shortcut(panel_name: String, physical_keycode: int) -> void:
+	if not _registry.has(panel_name):
+		push_warning("HUDManager: cannot set shift shortcut — panel '%s' not registered" % panel_name)
+		return
+	_shift_shortcut_map[physical_keycode] = panel_name
 
 
 ## Removes panel from registry. Hides it first if currently open.

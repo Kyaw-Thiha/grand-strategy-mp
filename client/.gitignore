@@ -21,4 +21,9 @@ server_config.json
 Thumbs.db
 
 assets/source
-assets/data
+# assets/data holds map-pipeline-generated output (regenerated, not committed) — EXCEPT
+# assets/data/research/, hand-authored source content tracked despite living in the same
+# parent directory (Phase 11 Branch A). Git requires ignoring via a wildcard, not the bare
+# directory name, for a subdirectory negation below to actually take effect.
+assets/data/*
+!assets/data/research/

@@ -77,6 +77,9 @@ var market_orders: Dictionary = {}
 # Branch D — trade_routes: { route_id -> {route_id, nation_a_id, nation_b_id, kind, status,
 #   a_sends_resource, a_sends_rate, b_sends_resource, b_sends_rate} }
 var trade_routes: Dictionary = {}
+# Phase 11 Branch A — this nation's own research state, server-authoritative.
+# { researched_node_ids: Array[String], active_projects: Array[{node_id, points_remaining, points_total, respec_displaces}] }
+var research: Dictionary = {}
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -193,6 +196,25 @@ func _apply_marshalling_updates(data: Dictionary) -> void:
 			continue
 		marshalling_divisions[mid] = entry
 	EventBus.marshalling_updated.emit()
+
+
+## Called by SessionManager when server sends RESEARCH_INIT at game start — one entry per
+## nation, every nation's initial state identical (nothing researched, per RESEARCH.md's
+## Session Scope), so this just picks out the local player's own nation.
+func _apply_research_init(data: Dictionary) -> void:
+	var nations: Dictionary = data.get("nations", {})
+	research = nations.get(get_my_nation_id(), {})
+	EventBus.research_updated.emit()
+
+
+## Called by SessionManager when server sends RESEARCH_UPDATES — per-nation filtered
+## (broadcastToNation), so any message reaching this client is already this player's own.
+func _apply_research_updates(data: Dictionary) -> void:
+	research = {
+		"researched_node_ids": data.get("researched_node_ids", []),
+		"active_projects": data.get("active_projects", []),
+	}
+	EventBus.research_updated.emit()
 
 
 func _apply_reserve_updates(data: Dictionary) -> void:
