@@ -258,7 +258,8 @@ terrain (see §3).
 | Panel | Source system(s) | Notes |
 |---|---|---|
 | **Military** | MilitarySystem, DivisionBuilder, AirSystem, NavalSystem | Single top-level panel with **Land / Air / Naval sub-tabs** — see rationale below |
-| **Economy / Trade** | EconomySystem | Resources, production, build queue, province management |
+| **Economy / Trade** | EconomySystem | Resources, Industry Pool allocation, own trade orders/routes |
+| **Production** | UnitProductionSystem | Division templates, unit production queue, and Reserve — split into its own side-docked panel, separate from Economy |
 | **Diplomacy** | DiplomacySystem | Propose/respond, treaties, map-sharing agreements |
 | **Research** | TechSystem | General Technology tree (Phase 8+) |
 | **Politics** | PoliticsSystem *(later)* | Reserved panel-row slot, no redesign needed when it ships |
@@ -741,7 +742,9 @@ requiring a tooltip lookup.
    of whether their letters "spell" anything.
 3. **Shift is one consistent modifier grammar:** expand / queue / alternate-target —
    reused identically everywhere (waypoint chaining, control-group add, all-chat,
-   map-mode-reverse) rather than meaning something different per key.
+   map-mode-reverse, and a panel's own hotkey held with Shift jumping straight to that
+   panel's deeper full-center view, e.g. Shift+Q for Research's Full Tree) rather than
+   meaning something different per key.
 4. **Escape is one recursive rule**, not a list of special cases (see §9.6).
 5. Right hand stays on the mouse; all primary binds are left-hand reachable. Left-handed
    mirror preset ships as a first-class alternative, not an afterthought. All bindings
@@ -783,14 +786,19 @@ requiring a tooltip lookup.
 **Panels**
 | Key | Panel |
 |---|---|
-| Q | Military (Land/Air/Naval sub-tabs) |
+| Q | Research |
 | E | Economy / Trade |
 | T | Diplomacy |
-| Y | Research |
+| Y | Military (Land/Air/Naval sub-tabs) |
+| R | Production (division templates, unit production queue, Reserve) |
 | U, I… | *(reserved)* Politics, Espionage |
+| Shift + Q | Research — expand straight to Full Tree (closes the sidebar; see §9.1) |
 | Tab (panel open) | Cycle sub-tabs within current panel |
 | same key again | Close current panel |
 | different panel key | Close current, open new |
+
+Q and Y were swapped from an earlier draft (Q now opens Research, Y now opens Military) —
+corrected here to match the live binding, which is the one players have actually been using.
 
 **Map & navigation**
 | Key | Action |

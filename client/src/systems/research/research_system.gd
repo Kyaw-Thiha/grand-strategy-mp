@@ -1,6 +1,13 @@
 extends Node
 ## Owns local prototype research state for the research tree.
 ## This is client-local until server-side research authority is implemented.
+##
+## Phase 11 Branch A update: `start_research()`/`advance()` below remain for the offline/
+## preview test harness (client/test/research_system_test.gd), but the live click path no
+## longer calls them — CommandQueue routes START_RESEARCH to the server, and
+## `sync_from_server_state()` overwrites this node's display dictionaries from
+## GameState.research on every RESEARCH_INIT/RESEARCH_UPDATES broadcast. This node is now a
+## display cache reflecting server truth, not the authority, for the real gameplay flow.
 
 signal entries_changed()
 
@@ -51,6 +58,13 @@ func load_from_definitions(definitions: Array) -> bool:
 			"science_value": maxi(int(definition.get("science_value", 1)), 0),
 			"exclusive_group": definition.get("exclusive_group", ""),
 			"effects": definition.get("effects", {}),
+			# Real per-node prerequisite ids (RESEARCH.md's adjacency-web rule — OR semantics,
+			# available once ANY listed id is researched), when the source data provides them.
+			# Distinct from "has_requires: false" (key absent entirely) so content that never
+			# specifies requires falls back to the legacy row-adjacency heuristic below, rather
+			# than being treated as prereq-free tier-1 content.
+			"has_requires": definition.has("requires"),
+			"requires": definition.get("requires", []),
 		}
 
 		_entries_by_id[entry_id] = normalized_entry
@@ -83,6 +97,43 @@ func advance(delta_seconds: float) -> void:
 
 	if science_value <= 0 or next_progress >= float(science_value):
 		_complete_active_entry()
+
+	entries_changed.emit()
+
+
+## Overwrites this node's display dictionaries from server-authoritative research state
+## (GameState.research), replacing whatever the local prototype simulation last computed.
+## A sync, not a re-simulation — progress values come from the server's own tick, never
+## recomputed locally.
+## Parameters:
+## - research_data: GameState.research's contents ({researched_node_ids, active_projects}).
+## Returns: nothing.
+func sync_from_server_state(research_data: Dictionary) -> void:
+	_completed_entries.clear()
+	for entry_id: Variant in research_data.get("researched_node_ids", []):
+		var id: String = String(entry_id)
+		if not _entries_by_id.has(id):
+			continue
+		_completed_entries[id] = true
+		_progress_by_id[id] = float(get_entry(id).get("science_value", 0))
+
+	_active_entry_id = ""
+	for raw_project: Variant in research_data.get("active_projects", []):
+		if not raw_project is Dictionary:
+			continue
+		var project: Dictionary = raw_project
+		var node_id: String = project.get("node_id", "")
+		if not _entries_by_id.has(node_id):
+			continue
+		var points_total: float = float(project.get("points_total", 1.0))
+		var points_remaining: float = float(project.get("points_remaining", 0.0))
+		_progress_by_id[node_id] = maxf(points_total - points_remaining, 0.0)
+		_started_entries[node_id] = true
+		# Branch A's minimal display only highlights one "active" card at a time even though
+		# the server allows unlimited concurrent projects (RESEARCH.md — no hard slot limit).
+		# Showing every concurrently-active project is Branch C's UI-layer job.
+		if _active_entry_id.is_empty():
+			_active_entry_id = node_id
 
 	entries_changed.emit()
 
@@ -188,12 +239,29 @@ func is_available(entry_id: String) -> bool:
 	if not _entries_by_id.has(entry_id) or is_researched(entry_id):
 		return false
 
-	var entry: Dictionary = get_entry(entry_id)
-	var row: int = int(entry.get("row", 0))
-	if row > 0 and not _is_previous_row_complete(row):
+	if not _prerequisites_met(entry_id):
 		return false
 
 	return not _has_exclusive_conflict(entry_id)
+
+
+## Checks real per-node prerequisites (RESEARCH.md's adjacency-web rule — OR semantics,
+## satisfied once ANY listed requires id is researched) when the source data provides them;
+## falls back to the legacy "any entry in the previous row is researched" heuristic for
+## content authored without explicit requires (e.g. client/test/research_system_test.gd).
+func _prerequisites_met(entry_id: String) -> bool:
+	var entry: Dictionary = get_entry(entry_id)
+	if entry.get("has_requires", false):
+		var requires: Array = entry.get("requires", [])
+		if requires.is_empty():
+			return true
+		for req_id: Variant in requires:
+			if is_researched(String(req_id)):
+				return true
+		return false
+
+	var row: int = int(entry.get("row", 0))
+	return row <= 0 or _is_previous_row_complete(row)
 
 
 ## Returns the saved progress amount for an entry.
@@ -231,10 +299,8 @@ func get_unavailable_reason(entry_id: String) -> String:
 	if not _entries_by_id.has(entry_id):
 		return "Unknown research entry"
 
-	var entry: Dictionary = get_entry(entry_id)
-	var row: int = int(entry.get("row", 0))
-	if row > 0 and not _is_previous_row_complete(row):
-		return "Complete any research in the previous row first"
+	if not _prerequisites_met(entry_id):
+		return "Complete a required prerequisite first"
 
 	if _has_exclusive_conflict(entry_id):
 		return "Another exclusive research path is already selected"

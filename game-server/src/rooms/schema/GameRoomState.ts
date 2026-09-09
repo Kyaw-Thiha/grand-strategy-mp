@@ -69,6 +69,10 @@ export class NationState extends Schema {
   // combat_system.ts (which has no access to per-province building data) can read it directly
   // without needing economyBuildingSystem threaded through. Floor-clamped, never approaches 0.
   @type("number") hospital_damage_mult: number = 1.0;
+  // Phase 11 Branch A — how many research projects this nation currently has active.
+  // Derived/cached, recomputed each research tick; meaningfully consumed once Branch B's
+  // concurrency cost curve reads it to compute the rising per-project cost multiplier.
+  @type("number") active_research_count: number = 0;
 }
 
 export class ProvinceState extends Schema {

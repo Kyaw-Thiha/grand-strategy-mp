@@ -27,6 +27,7 @@ import { ProvinceAaSystem }          from "../systems/air_province_aa_system.js"
 import { QUALITY_DEFAULTS }           from "../data/naval_contact_quality.js";
 import { AirSpatialBucket } from "../systems/air_spatial_bucket.js";
 import { ServerVisibilitySystem } from "../systems/server_visibility_system.js";
+import { ResearchSystem } from "../systems/research_system.js";
 import { loadProvincePIPData }    from "../utils/geo_utils.js";
 import {
   ResourceEconomySystem,
@@ -164,6 +165,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
   private economyBuildingSystem = new EconomyBuildingSystem();
   private resourceEconomySystem = new ResourceEconomySystem();
   private unitProductionSystem = new UnitProductionSystem();
+  private researchSystem = new ResearchSystem();
   private _industryAllocCooldownByNation = new Map<string, number>();
   private _marketOrderIdCounter = 0;
   private _tradeRouteIdCounter = 0;
@@ -634,6 +636,35 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
         nation.nation_id, msg.template_id, msg.home_province_id, msg.cells,
       );
       this._broadcastMarshallingForNation(nation.nation_id);
+    });
+
+    this.onMessage("START_RESEARCH", (client, msg: { node_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      const started = this.researchSystem.startResearch(nation.nation_id, msg.node_id);
+      if (started) {
+        this.broadcastToNation(
+          "RESEARCH_UPDATES",
+          { nation_id: nation.nation_id, ...this.researchSystem.serialize(nation.nation_id) },
+          nation.nation_id,
+        );
+      }
+    });
+    this.onMessage("CANCEL_RESEARCH", (client, msg: { node_id: string }) => {
+      if (this.state.phase !== "running") return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const nation = this.getNationForPlayer(player.userId);
+      if (!nation) return;
+      this.researchSystem.cancelResearch(nation.nation_id, msg.node_id);
+      this.broadcastToNation(
+        "RESEARCH_UPDATES",
+        { nation_id: nation.nation_id, ...this.researchSystem.serialize(nation.nation_id) },
+        nation.nation_id,
+      );
     });
 
     // Branch C — reuses the existing DIVISIONS_SPAWNED broadcast (same one startGame() sends)
@@ -1735,6 +1766,13 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     this._initRelations();
     this.broadcastRelations();
     this._initNationEconomy();
+    for (const nationId of this.nationIds) this.researchSystem.init(nationId);
+    // Every nation starts identical (nothing researched, research is fully session-local per
+    // RESEARCH.md's Session Scope) — one broadcast, same PROVINCE_ECONOMY_INIT shape, no
+    // per-nation privacy concern at this specific moment.
+    const researchInit: Record<string, { researched_node_ids: string[]; active_projects: unknown[] }> = {};
+    for (const nationId of this.nationIds) researchInit[nationId] = this.researchSystem.serialize(nationId);
+    this.broadcast("RESEARCH_INIT", { nations: researchInit });
     // Resources are per-nation private data (each player only sees their own nation's
     // stockpile) — sent per-client via client.send(), not a global broadcast. Nothing
     // produces resources yet in this branch, so this is a one-time snapshot of the seeded
@@ -2101,6 +2139,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
 
       this._economyTick();
       this._unitProductionTick();
+      this.researchSystem.tick(this.state, (type, msg) => this.broadcast(type, msg));
 
       const tradeRouteStatusesBefore = new Map([...this.state.trade_routes.values()].map((r) => [r.route_id, r.status]));
       tickTradeRoutes(

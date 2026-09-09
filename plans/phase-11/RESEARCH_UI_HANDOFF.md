@@ -15,17 +15,21 @@
 
 ## 1. Panel Structure & Entry Points
 
-- **Sidebar quick-access panel** — non-modal, hotkey `Y` (per `UI_UX_DESIGN.md` §5),
-  slides in alongside the map, map stays interactive behind it. This is the existing
-  "Available research" panel, restructured per §3 below.
-- **Full Tree modal** — opened via the "Full Tree" button in the sidebar header.
-  Full-center overlay, dims the map (same visual treatment as the Diplomacy panel),
-  and **replaces** the sidebar view while open — the two don't coexist on screen.
+- **Sidebar quick-access panel** — non-modal, hotkey `Q` (corrected from an earlier draft
+  that documented `Y`; `Q` is the live binding per `UI_UX_DESIGN.md` §5), slides in alongside
+  the map, map stays interactive behind it. This is the existing "Available research" panel,
+  restructured per §3 below.
+- **Full Tree modal** — opened via the "Full Tree" button in the sidebar header, or the
+  `Shift+Q` keyboard shortcut (Branch A's expand-shortcut addition, per `UI_UX_DESIGN.md`
+  §9.1's "Shift = expand" modifier grammar). Full-center overlay, dims the map (same visual
+  treatment as the Diplomacy panel), and **replaces** the sidebar view while open — the two
+  don't coexist on screen.
 - **Branch tabs** inside Full Tree: `Tab` key cycles through them, clicking a tab
   title also switches — same interaction pattern already used by the Diplomacy
   panel's Nations / Alliance / Trade Routes tabs.
-- `Esc` or the `✕` button closes Full Tree and returns to the map (sidebar does not
-  auto-reopen; player re-invokes it with `Y` if they want it).
+- `Esc`, the `✕` button, or `Shift+Q` again closes Full Tree and returns to the map. The
+  sidebar auto-reopens if it was open right before Full Tree opened (`HUDManager`'s existing
+  `_previous_side_docked` restore); otherwise the player re-invokes it with `Q`.
 
 ---
 
@@ -507,7 +511,11 @@ Per node, the UI layer expects (naming indicative, not a schema mandate):
 - `badges: []` — any of `mechanic`, `lineage`, `redistribute`, `additive`
 - `size: "minor" | "notable"` — independent of badges
 - `mutex_group_id` (nullable) — nodes sharing a group render as one bracketed row
-- `name`, `description`, `cost_rp`
+- `name`, `short_description`, `description`, `cost_rp` — `short_description` is the glance-
+  friendly line shown on cards and the hover tooltip (§5, §6.1); `description` is the fuller
+  text shown only in the click-to-open popup body (§6.2). Two fields, deliberately, decided
+  during Branch A after the first playtest showed the popup-length text also rendering on
+  cards made the tree cramped and hard to scan.
 - `requires: [{node_id, met: bool}]` — for the Locked popup's requirement list
 - `image_asset` — for the popup header image
 - `state` — derived at render time from live game/research data, not stored on the node
@@ -569,5 +577,6 @@ rect), toggling arrow visibility per side — no new rendering pipeline.
   content for the Phase 11 MVP; everything else renders the empty-stub state in §4.5).
 - `DEV_PHASES.md` Phase 11 — the Colyseus/Godot task breakdown this UI plugs into,
   including the shared adjacency-web rendering widget this panel is built from.
-- `UI_UX_DESIGN.md` §5 — `Y` hotkey placement, full-center overlay pattern for
-  decision-heavy panels, and the Tab-cycles-subtabs precedent this reuses.
+- `UI_UX_DESIGN.md` §5, §9.1 — `Q` hotkey placement, the `Shift+Q` expand-to-Full-Tree
+  convention, full-center overlay pattern for decision-heavy panels, and the
+  Tab-cycles-subtabs precedent this reuses.

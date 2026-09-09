@@ -66,7 +66,7 @@ text = "RESEARCH"
 [node name="FullTreeButton" type="Button" parent="Margin/VBox/Header"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Full Tree"
+text = "Full Tree (Shift+Q)"
 
 [node name="CloseButton" type="Button" parent="Margin/VBox/Header"]
 unique_name_in_owner = true

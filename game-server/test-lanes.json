@@ -117,6 +117,15 @@
         "test/9c-unit-production.test.ts",
         "test/9d-economy-market.test.ts"
       ]
+    },
+    "research": {
+      "source_prefixes": [
+        "src/systems/research_system.ts",
+        "src/data/research_tree_loader.ts"
+      ],
+      "tests": [
+        "test/11a-research-tree-foundation.test.ts"
+      ]
     }
   },
   "shared": {

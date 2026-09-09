@@ -184,6 +184,5 @@ func _on_entry_card_input(event: InputEvent, entry_id: String) -> void:
 	var mouse_event: InputEventMouseButton = event
 	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
 		return
-	if _research_system != null:
-		_research_system.start_research(entry_id)
+	CommandQueue.submit("START_RESEARCH", {"node_id": entry_id})
 	accept_event()

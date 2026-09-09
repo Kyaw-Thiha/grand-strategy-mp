@@ -52,6 +52,36 @@ registration style — see above). Text-glyph badges, not icon textures — conf
 building icon assets exist yet" (line ~22); Branch C's ⚙▣⇄➕ badges are `Label`s with unicode
 glyphs, matching that precedent, not a new icon-texture system.
 
+**Also newly added during Branch A, already in the JSON schema, wire it up here:** every node
+now carries both `short_description` (glance-friendly, shown on cards and the hover tooltip)
+and `description` (fuller text, shown only inside the click-to-open popup body). Branch A's
+client loader (`research_tree_data_loader.gd`) already carries both through in the definitions
+dict it hands to `research_system.gd.load_from_definitions()` — `short_description` under that
+key and the full text under `full_description` — because Branch A's minimal card-only UI has
+no separate popup surface yet. This branch's card rendering (`research_entry_card.gd`,
+`research_drawer_panel.gd`) should read `short_description`/`full_description` directly rather
+than the combined `branch · Tier N\n\n...` string Branch A stitched into `description` as a
+stopgap for its single flat grid — that stitching goes away once real branch tabs (Step 5) make
+the branch/tier context visually obvious without needing to print it into every card's body.
+The popup (Step 4) is what actually reads `full_description`, per `RESEARCH_UI_HANDOFF.md` §7.
+
+**Newly flagged during Branch A's manual verification, in scope for this branch:** Branch A's
+server ticks research progress once per second (`TICK_MS = 1000`) and broadcasts
+`RESEARCH_UPDATES` on every tick a project is in flight — correct and sufficient for Branch A's
+own checkpoint ("watch progress tick and complete"), but the result is a visibly stepped bar
+(e.g. 0%→25%→50%→75%→100% for a 4-point placeholder cost), not the smooth per-frame fill the
+old client-local prototype had via its own `_process(delta)` ticking. Neither `RESEARCH.md` nor
+this plan's earlier branch descriptions call this out explicitly, so it was never anyone's
+stated job — it lands here because Step 4b item 6 and Step 2a's IN PROGRESS section are the
+places that actually render the progress bar in its final form. **Fix:** interpolate
+client-side between the last two known `(points_remaining, received_at)` samples from
+`GameState.research` using frame `delta`, the same way the retired local prototype's
+`research_system.gd.advance(delta)` used to animate — but driven by the server's real rate
+*estimated from consecutive samples*, not a hardcoded client-side constant, so it stays correct
+if Branch B's real currency-funded rate ever varies per node or per nation. Do not attempt to
+reduce the server's 1-second tick interval or broadcast more often — this is a presentation-layer
+smoothing problem, not a network-chattiness one.
+
 **Keep test runs minimal and targeted.** This branch is almost entirely client-side UI — most
 verification here is manual/visual, not automated. Where server-side logic genuinely changes
 (none expected — this branch should not need to touch `game-server/` at all, it's presentation
@@ -246,7 +276,9 @@ its two-color binary logic.
 ### 2a. Section logic (client-side, no new server state needed)
 
 **IN PROGRESS:** `GameState.research`'s active projects, sorted by soonest-`points_remaining`
-first (ascending) — always shown, never filtered by search/branch.
+first (ascending) — always shown, never filtered by search/branch. Progress values feeding this
+section's bars go through the same client-side interpolation described in the Context note
+above, not the raw stepped server sample directly.
 
 **NEW:** client-side-only recency tracking — on each `EventBus.research_updated` fire, diff
 the newly-available node id set against the previous snapshot; any node that just transitioned
@@ -367,7 +399,9 @@ pinned footer. `open_for_node(node_id: String)` reads the node's def + live stat
    prerequisite, computed from `GameState.research`), footer `[Close]` only.
 5. **Researched → read-only** (§6.5): same shell, no requirements block, `[Close]` only.
 6. **Researching → progress + Cancel** (§6.6): progress bar (reuse the existing animated fill
-   widget), `[Cancel Research][Close]`. Clicking Cancel Research swaps the popup body to the
+   widget, now driven by client-side interpolation between `RESEARCH_UPDATES` samples per the
+   Context note above — do not bind the bar's value directly to the last raw server sample,
+   which is what produces Branch A's stepped look), `[Cancel Research][Close]`. Clicking Cancel Research swaps the popup body to the
    confirmation sub-step showing `invested_so_far`/`refund`/`forfeit` (Branch B's server-
    computed numbers, arrived via the last `RESEARCH_UPDATES` for this node — do not
    recompute client-side) with `[Back][Confirm Cancel]`. Confirm Cancel submits
@@ -591,3 +625,4 @@ plainly instead, per this branch's judgment call in the Critical Pre-Read):
 | Full Tree's pan/zoom canvas should be built with a `Camera2D`/`SubViewport`, mirroring the strategic map | **Wrong** — that's world-space camera code for the actual map; Full Tree's canvas is UI-space, correctly implemented as a plain `Control` with directly-manipulated `position`/`scale`, only borrowing `camera_system.gd`'s *interaction shape* (threshold-gated drag, cursor-anchored zoom, smoothstep ease) |
 | Branch B's inline Cancel button (added on in-progress cards) should stay alongside the new popup's Cancel flow | **Wrong** — Branch C's popup supersedes it entirely; the inline button is removed once every click routes through the popup, per §6's "every click now opens a popup" rule |
 | The "NEW" section needs a new server-side field to track recency | **Wrong** — it's a purely client-side, purely visual convenience computed by diffing available-node snapshots across `EventBus.research_updated` events; no schema/broadcast change needed |
+| Progress bars should just bind directly to the latest `RESEARCH_UPDATES` `points_remaining` value, like Branch A's minimal display did | **Wrong for this branch** — that produces the stepped 0%→25%→50%→...→100% look Branch A's own manual verification surfaced (server ticks/broadcasts once per second). This branch interpolates client-side between consecutive samples using frame `delta` for a smooth fill, per the Context note above |

@@ -36,6 +36,9 @@ export const UNIT_PRODUCTION_STATS: Record<string, UnitProductionStats> = {
   [UnitType.AT_GUN_SP]:          { build_points: 100, produced_by: "tank_plant" },
   [UnitType.SELF_PROPELLED_GUN]: { build_points: 110, produced_by: "tank_plant" },
   [UnitType.MECHANISED_INF]:     { build_points: 70,  produced_by: "tank_plant" },
+  // Phase 11 Branch A — lineage chain's next two tiers, same produced_by as the base.
+  [UnitType.IMPROVED_APC]:       { build_points: 85,  produced_by: "tank_plant" },
+  [UnitType.IFV]:                { build_points: 100, produced_by: "tank_plant" },
 
   // Ordnance Factory — crew-served, towed roster (TACTICAL_COMBAT.md's "no incapacitation" bucket).
   [UnitType.ARTILLERY]: { build_points: 70, produced_by: "ordnance_factory" },
