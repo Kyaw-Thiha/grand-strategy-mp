@@ -12,7 +12,7 @@ const RESOURCE_ORDER := ["money", "grain", "iron", "oil", "rubber",
 # Common / Restricted / National grouping per plans/economy_production_ui_handoff.md §4 Tab 2.
 const COMMON_SLICES := ["money", "grain", "iron"]
 const RESTRICTED_SLICES := ["oil", "rubber", "nitrates", "tungsten", "chromium", "aluminium", "uranium"]
-const NATIONAL_SLICES := ["construction_speed", "unit_production_speed"]
+const NATIONAL_SLICES := ["construction_speed", "unit_production_speed", "research_speed"]
 
 @onready var _close_button: Button = %CloseButton
 @onready var _resources_list: VBoxContainer = %ResourcesList
@@ -138,6 +138,20 @@ func _refresh_resources() -> void:
 	var manpower_row := Label.new()
 	manpower_row.text = "Manpower avail: %d / %d" % [int(GameState.manpower_available), int(GameState.manpower_ceiling)]
 	_resources_list.add_child(manpower_row)
+
+	# Science — a sibling scalar, not one of the ten RESOURCE_ORDER entries, so it gets its own
+	# hand-written row (same visual shape as the others, no cap/bar since science has no
+	# resource_storage_cap entry). First real sink for this field (Branch B).
+	var science_row := HBoxContainer.new()
+	var science_name_label := Label.new()
+	science_name_label.custom_minimum_size = Vector2(90, 0)
+	science_name_label.text = "Science"
+	science_row.add_child(science_name_label)
+	var science_amount_label := Label.new()
+	science_amount_label.custom_minimum_size = Vector2(60, 0)
+	science_amount_label.text = str(int(GameState.science_points))
+	science_row.add_child(science_amount_label)
+	_resources_list.add_child(science_row)
 
 
 func _build_industry_sliders() -> void:

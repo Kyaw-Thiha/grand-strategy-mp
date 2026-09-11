@@ -8,6 +8,13 @@ const CARD_BG: Color = Color(0.12, 0.08, 0.05, 0.96)
 const CARD_BG_ACTIVE: Color = Color(0.16, 0.12, 0.06, 0.98)
 const CARD_BORDER: Color = Color(0.42, 0.30, 0.16, 1.0)
 const CARD_BORDER_ACTIVE: Color = Color(0.84, 0.68, 0.30, 1.0)
+const COST_AFFORDABLE_COLOR: Color = Color(1, 1, 1, 1)
+const COST_INSUFFICIENT_COLOR: Color = Color(0.85, 0.3, 0.3, 1.0)
+
+# Client-side display-only mirror of research_stats.ts's RESEARCH_CONCURRENCY_COST_STEP — used
+# purely to show the player what the price *will* be before they click. The server remains the
+# source of truth on the actual charge; a mismatch here is a display bug, never an exploit.
+const RESEARCH_CONCURRENCY_COST_STEP_CLIENT_MIRROR: float = 0.25
 
 @onready var _full_tree_button: Button = %FullTreeButton
 @onready var _close_button: Button = %CloseButton
@@ -20,6 +27,34 @@ var _research_system: Node = null
 func _ready() -> void:
 	_full_tree_button.pressed.connect(func() -> void: full_tree_requested.emit())
 	_close_button.pressed.connect(func() -> void: close_requested.emit())
+	EventBus.research_updated.connect(_on_research_updated_for_cancel_toast)
+	# Branch B — cost/affordability is computed inline in _create_entry_card(), which only
+	# runs from _refresh_entries(). Without this, a passive money/science change (extraction
+	# income, another research action) would never re-tint an unaffordable card until some
+	# unrelated research state change happened to rebuild the list.
+	EventBus.resources_updated.connect(_refresh_entries)
+
+
+## Reports CANCEL_RESEARCH's refund/forfeit numbers via a toast once the server confirms them.
+## Parameters: none.
+## Returns: nothing.
+func _on_research_updated_for_cancel_toast() -> void:
+	var cancelled: Dictionary = GameState.last_cancelled_research
+	if cancelled.is_empty():
+		return
+	var node_id: String = cancelled.get("node_id", "")
+	var node_name: String = node_id
+	if _research_system != null and _research_system.has_method("get_entry"):
+		var entry: Dictionary = _research_system.get_entry(node_id)
+		node_name = entry.get("title", node_id)
+	var refund: Dictionary = cancelled.get("refund", {})
+	var forfeit: Dictionary = cancelled.get("forfeit", {})
+	var refund_total: float = float(refund.get("money", 0.0)) + float(refund.get("science", 0.0))
+	var forfeit_total: float = float(forfeit.get("money", 0.0)) + float(forfeit.get("science", 0.0))
+	EventBus.notification_requested.emit(
+		"Cancelled: %s — refunded %d, forfeited %d" % [node_name, int(refund_total), int(forfeit_total)],
+		"research",
+	)
 
 
 ## Injects the shared research system owned by the full tree scene.
@@ -131,11 +166,13 @@ func _create_entry_card(entry: Dictionary) -> Control:
 	layout.add_child(title)
 
 	var meta: Label = Label.new()
-	meta.text = "%s - Research points: %d" % [
-		entry.get("column", "Research"),
-		int(entry.get("science_value", 0)),
-	]
-	meta.modulate = Color(0.82, 0.74, 0.58, 1.0)
+	var base_cost: Dictionary = entry.get("cost", {"money": 0, "science": 0})
+	var multiplier: float = 1.0 + float(GameState.active_research_count) * RESEARCH_CONCURRENCY_COST_STEP_CLIENT_MIRROR
+	var money_cost: int = int(ceil(float(base_cost.get("money", 0)) * multiplier))
+	var science_cost: int = int(ceil(float(base_cost.get("science", 0)) * multiplier))
+	meta.text = "%s - $%d · SCI %d" % [entry.get("column", "Research"), money_cost, science_cost]
+	var affordable: bool = GameState.resources.get("money", 0.0) >= money_cost and GameState.science_points >= science_cost
+	meta.modulate = COST_AFFORDABLE_COLOR if (affordable or is_active) else COST_INSUFFICIENT_COLOR
 	layout.add_child(meta)
 
 	var description: Label = Label.new()
@@ -155,6 +192,14 @@ func _create_entry_card(entry: Dictionary) -> Control:
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	status.text = "Researching" if is_active else "Available"
 	layout.add_child(status)
+
+	if is_active:
+		var btn_cancel: Button = Button.new()
+		btn_cancel.text = "Cancel"
+		btn_cancel.pressed.connect(func() -> void:
+			CommandQueue.submit("CANCEL_RESEARCH", {"node_id": entry_id})
+		)
+		layout.add_child(btn_cancel)
 
 	return card
 

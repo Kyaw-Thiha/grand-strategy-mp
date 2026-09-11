@@ -1,7 +1,17 @@
-import type { GameRoomState } from "../rooms/schema/GameRoomState.js";
+import type { GameRoomState, NationState } from "../rooms/schema/GameRoomState.js";
 import { loadResearchTree, isNodeAvailable, type ResearchNodeDef } from "../data/research_tree_loader.js";
+import { industrySliceMultiplier } from "./resource_economy_system.js";
+import {
+  RESEARCH_CONCURRENCY_COST_STEP,
+  RESEARCH_CANCEL_REFUND_RATE,
+} from "../data/research_stats.js";
 
 export type BroadcastFn = (type: string, message: unknown) => void;
+
+export interface ResearchCost {
+  money: number;
+  science: number;
+}
 
 export interface ResearchProgress {
   node_id: string;
@@ -10,6 +20,23 @@ export interface ResearchProgress {
   // Set when this project, on completion, displaces an already-researched mutex sibling.
   // The sibling stays fully active until this instant — see RESEARCH.md's Respec section.
   respec_displaces: string | null;
+  // The concurrency-adjusted cost actually charged at start time — locked in, never
+  // recomputed later even if the nation's concurrent count changes afterward. Cancel's
+  // refund/forfeit math is based on this, not the node's raw base cost.
+  cost_charged: ResearchCost;
+}
+
+// Rising, uncapped — deliberately NOT industrySliceMultiplier's saturating shape (that one
+// caps; this one should keep climbing, since its whole job is discouraging, not merely
+// diminishing, ever-more parallel research). Called once, at startResearch time, against
+// the nation's active project count *before* this new one is added.
+export function researchConcurrencyCostMultiplier(activeCountBeforeThisOne: number): number {
+  return 1.0 + activeCountBeforeThisOne * RESEARCH_CONCURRENCY_COST_STEP;
+}
+
+function computeNodeCost(node: ResearchNodeDef, activeCountBeforeThisOne: number): ResearchCost {
+  const mult = researchConcurrencyCostMultiplier(activeCountBeforeThisOne);
+  return { money: node.cost.money * mult, science: node.cost.science * mult };
 }
 
 export interface NationResearchData {
@@ -96,19 +123,24 @@ export class ResearchSystem {
   }
 
   /**
-   * Starts research on `nodeId` for `nationId`. No hard concurrency limit this branch
-   * (RESEARCH.md: soft cost cap via Branch B's concurrency curve, never a hard slot limit).
-   * Returns false (no-op) on: unknown node, already active, already researched (unless it's
-   * a different option in the same mutex group — the respec case), or unmet prerequisites.
+   * Starts research on `nodeId` for `nation`. No hard concurrency limit this branch
+   * (RESEARCH.md: soft cost cap via the concurrency curve below, never a hard slot limit).
+   * Returns false (no-op, no deduction) on: unknown node, already active, already researched
+   * (unless it's a different option in the same mutex group — the respec case), unmet
+   * prerequisites, or insufficient money/science at the concurrency-adjusted cost.
    */
-  startResearch(nationId: string, nodeId: string): boolean {
+  startResearch(nation: NationState, nodeId: string): boolean {
     const tree = loadResearchTree();
     const node = tree.nodes.get(nodeId);
     if (!node) return false;
-    const d = this._get(nationId);
+    const d = this._get(nation.nation_id);
     if (d.active_projects.some((p) => p.node_id === nodeId)) return false;
     if (d.researched_node_ids.has(nodeId)) return false;
     if (!isNodeAvailable(tree, nodeId, d.researched_node_ids)) return false;
+
+    const cost = computeNodeCost(node, d.active_projects.length);
+    if ((nation.resources.get("money") ?? 0) < cost.money) return false;
+    if (nation.science_points < cost.science) return false;
 
     let respecDisplaces: string | null = null;
     if (node.mutex_group_id) {
@@ -116,12 +148,17 @@ export class ResearchSystem {
       if (sibling) respecDisplaces = sibling;
     }
 
+    nation.resources.set("money", (nation.resources.get("money") ?? 0) - cost.money);
+    nation.science_points -= cost.science;
+
     d.active_projects.push({
       node_id: nodeId,
       points_remaining: RESEARCH_PROGRESS_PER_TICK_PLACEHOLDER * 4,
       points_total: RESEARCH_PROGRESS_PER_TICK_PLACEHOLDER * 4,
       respec_displaces: respecDisplaces,
+      cost_charged: cost,
     });
+    nation.active_research_count = d.active_projects.length;
     return true;
   }
 
@@ -140,11 +177,37 @@ export class ResearchSystem {
   }
 
   /** Cancels an in-progress project. Progress resets to 0 — no partial state persists,
-   *  restarting later begins from scratch. No refund this branch (Branch B adds the
-   *  fixed-rate partial refund per RESEARCH.md's Cancelling In-Progress Research). */
-  cancelResearch(nationId: string, nodeId: string): void {
-    const d = this._get(nationId);
+   *  restarting later begins from scratch. Refunds a fixed fraction of currency actually
+   *  invested so far (based on the cost locked in at start time, not the node's raw base
+   *  cost); the remainder is forfeited (burned, not redistributed — matches the spot-market-
+   *  spread convention). Returns null if no such active project exists for this nation. */
+  cancelResearch(
+    nation: NationState,
+    nodeId: string,
+  ): { node_id: string; refund: ResearchCost; forfeit: ResearchCost } | null {
+    const d = this._get(nation.nation_id);
+    const project = d.active_projects.find((p) => p.node_id === nodeId);
+    if (!project) return null;
+
+    const investedFraction = 1 - project.points_remaining / project.points_total;
+    const investedMoney = project.cost_charged.money * investedFraction;
+    const investedScience = project.cost_charged.science * investedFraction;
+    const refund: ResearchCost = {
+      money: investedMoney * RESEARCH_CANCEL_REFUND_RATE,
+      science: investedScience * RESEARCH_CANCEL_REFUND_RATE,
+    };
+    const forfeit: ResearchCost = {
+      money: investedMoney - refund.money,
+      science: investedScience - refund.science,
+    };
+
+    nation.resources.set("money", (nation.resources.get("money") ?? 0) + refund.money);
+    nation.science_points += refund.science;
+
     d.active_projects = d.active_projects.filter((p) => p.node_id !== nodeId);
+    nation.active_research_count = d.active_projects.length;
+
+    return { node_id: nodeId, refund, forfeit };
   }
 
   tick(state: GameRoomState, broadcast: BroadcastFn): void {
@@ -154,16 +217,21 @@ export class ResearchSystem {
       // an unchanged snapshot.
       if (d.active_projects.length === 0) continue;
 
+      const nation = state.nations.get(nationId);
+      // Anti-snowball floor (RESEARCH.md): reuses industrySliceMultiplier directly rather than
+      // reinventing the saturating curve — 0% allocation still progresses at the base rate
+      // (never a precondition), 100% completes faster but never exceeds the function's own
+      // asymptotic cap (no amount of currency buys instant tech).
+      const rate =
+        RESEARCH_PROGRESS_PER_TICK_PLACEHOLDER *
+        industrySliceMultiplier(nation?.industry_alloc.get("research_speed") ?? 0);
+
       const completed: ResearchProgress[] = [];
       for (const project of d.active_projects) {
-        project.points_remaining = Math.max(
-          0,
-          project.points_remaining - RESEARCH_PROGRESS_PER_TICK_PLACEHOLDER,
-        );
+        project.points_remaining = Math.max(0, project.points_remaining - rate);
         if (project.points_remaining <= 0) completed.push(project);
       }
 
-      const nation = state.nations.get(nationId);
       if (completed.length > 0) {
         d.active_projects = d.active_projects.filter((p) => !completed.includes(p));
         for (const project of completed) {
@@ -183,7 +251,11 @@ export class ResearchSystem {
       // Broadcast every tick a project is in flight, not just on completion — this is what
       // gives the client a smoothly-filling progress bar instead of a jump straight from
       // "just started" to "done" (the only two states a completion-only broadcast produces).
-      broadcast("RESEARCH_UPDATES", { nation_id: nationId, ...this.serialize(nationId) });
+      broadcast("RESEARCH_UPDATES", {
+        nation_id: nationId,
+        ...this.serialize(nationId),
+        active_research_count: nation?.active_research_count ?? 0,
+      });
     }
   }
 
@@ -200,6 +272,13 @@ export class ResearchSystem {
         }
       } else if (effect.type === "unlocks_unit_type") {
         this._migrateLineageUnitsForNation(state, nationId, effect.unit_type);
+      } else if (effect.type === "uranium_injection") {
+        // Uranium's one documented research-currency use case (RESOURCE_ECONOMY.md) — a
+        // one-time science grant, gated on nonzero uranium *access* (presence, not a stock
+        // threshold), not a general resource-gated bonus pattern for other resources.
+        if ((nation.resources.get("uranium") ?? 0) > 0) {
+          nation.science_points += effect.amount.science;
+        }
       }
     }
   }

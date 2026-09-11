@@ -65,6 +65,9 @@ func load_from_definitions(definitions: Array) -> bool:
 			# than being treated as prereq-free tier-1 content.
 			"has_requires": definition.has("requires"),
 			"requires": definition.get("requires", []),
+			# Branch B — real {money, science} base cost, for the drawer/full-tree cards' live
+			# concurrency-adjusted cost display and insufficient-funds check.
+			"cost": definition.get("cost", {"money": 0, "science": 0}),
 		}
 
 		_entries_by_id[entry_id] = normalized_entry

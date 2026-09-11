@@ -4,6 +4,10 @@ extends PanelContainer
 ## In the editor every card previews as locked; at runtime ResearchTreeView applies live state.
 
 signal entry_pressed(entry_id: String)
+signal cancel_pressed(entry_id: String)
+
+const COST_AFFORDABLE_COLOR: Color = Color(1, 1, 1, 1)
+const COST_INSUFFICIENT_COLOR: Color = Color(0.85, 0.3, 0.3, 1.0)
 
 const STATE_UNAVAILABLE: String = "full_dark"
 const STATE_AVAILABLE: String = "dark"
@@ -33,6 +37,10 @@ const STATE_RESEARCHED: String = "normal"
 	set(value):
 		science_value = maxi(value, 0)
 		_refresh_editor_preview()
+@export var money_cost: int = 0:
+	set(value):
+		money_cost = maxi(value, 0)
+		_refresh_editor_preview()
 @export var exclusive_group: String = "":
 	set(value):
 		exclusive_group = value
@@ -44,11 +52,13 @@ const STATE_RESEARCHED: String = "normal"
 @onready var _science_label: Label = $Margin/Layout/ScienceLabel
 @onready var _progress_bar: ProgressBar = $Margin/Layout/ProgressBar
 @onready var _status_label: Label = $Margin/Layout/StatusLabel
+@onready var _cancel_button: Button = $Margin/Layout/CancelButton
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	custom_minimum_size = Vector2(230, 148)
+	_cancel_button.pressed.connect(func() -> void: cancel_pressed.emit(entry_id))
 	if Engine.is_editor_hint():
 		_refresh_editor_preview()
 
@@ -66,7 +76,19 @@ func get_definition() -> Dictionary:
 		"science_value": science_value,
 		"exclusive_group": exclusive_group,
 		"effects": effects,
+		"cost": {"money": money_cost, "science": science_value},
 	}
+
+
+## Overrides the cost label with the live concurrency-adjusted cost (recomputed by the owner
+## every refresh from GameState.active_research_count, distinct from this card's own base
+## money_cost/science_value export fields, which reflect the node's raw JSON cost).
+## Parameters:
+## - display_money: live money cost to show.
+## - display_science: live science cost to show.
+## Returns: nothing.
+func set_live_cost(display_money: int, display_science: int) -> void:
+	_science_label.text = "$%d · SCI %d" % [display_money, display_science]
 
 
 ## Applies live runtime state to the existing card controls.
@@ -80,6 +102,16 @@ func apply_runtime_state(state: String, progress_ratio: float, is_active: bool) 
 	_progress_bar.value = clampf(progress_ratio, 0.0, 1.0)
 	_status_label.text = _get_status_text(state, progress_ratio, is_active)
 	_apply_state_style(state, is_active)
+	_cancel_button.visible = is_active
+
+
+## Tints the cost label to flag an unaffordable node — the first insufficient-funds pattern
+## in this codebase, kept deliberately simple (a color change, nothing fancier).
+## Parameters:
+## - affordable: whether the nation can currently pay this node's live cost.
+## Returns: nothing.
+func set_affordable(affordable: bool) -> void:
+	_science_label.modulate = COST_AFFORDABLE_COLOR if affordable else COST_INSUFFICIENT_COLOR
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -109,7 +141,7 @@ func _apply_text() -> void:
 		display_title = entry_id if not entry_id.is_empty() else "Research Entry"
 	_title_label.text = display_title
 	_description_label.text = description
-	_science_label.text = "Research points: %d" % science_value
+	_science_label.text = "$%d · SCI %d" % [money_cost, science_value]
 
 
 func _get_status_text(state: String, progress_ratio: float, is_active: bool) -> String:

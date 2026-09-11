@@ -121,10 +121,12 @@
     "research": {
       "source_prefixes": [
         "src/systems/research_system.ts",
-        "src/data/research_tree_loader.ts"
+        "src/data/research_tree_loader.ts",
+        "src/data/research_stats.ts"
       ],
       "tests": [
-        "test/11a-research-tree-foundation.test.ts"
+        "test/11a-research-tree-foundation.test.ts",
+        "test/11b-research-currency.test.ts"
       ]
     }
   },

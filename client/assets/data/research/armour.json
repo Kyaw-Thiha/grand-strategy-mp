@@ -9,12 +9,22 @@
     "name": "Light Tank Chassis",
     "short_description": "Fast scout tank with better side armour.",
     "description": "A fast, lightly armoured chassis built for scouting and flanking runs. Improves side armour resilience while shifting columns in combat.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "armour_flank_resist_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "armour_flank_resist_1"
+      }
+    ]
   },
   {
     "id": "armour_medium_tank_chassis",
@@ -26,12 +36,22 @@
     "name": "Medium Tank Chassis",
     "short_description": "Balanced tank, the backbone of a mechanised force.",
     "description": "A balanced mix of armour and mobility. This is the doctrine backbone a mechanised infantry force builds around.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "armour_medium_hull_upgrade_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "armour_medium_hull_upgrade_1"
+      }
+    ]
   },
   {
     "id": "armour_heavy_tank_chassis",
@@ -43,12 +63,22 @@
     "name": "Heavy Tank Chassis",
     "short_description": "Slow tank with heavy front armour.",
     "description": "Thick front armour built to shrug off standard anti tank fire, at the cost of speed.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "armour_heavy_hull_upgrade_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "armour_heavy_hull_upgrade_1"
+      }
+    ]
   },
   {
     "id": "armour_medium_mechanisation_apc",
@@ -60,12 +90,25 @@
     "name": "Mechanised Infantry (APC)",
     "short_description": "Half track transport for infantry riding with your tanks.",
     "description": "A half track transport that lets infantry ride alongside a panzer division. Carries partial armour and can't be fully suppressed by machine gun fire alone.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["mechanic", "lineage"],
+    "cost": {
+      "money": 40,
+      "science": 20
+    },
+    "badges": [
+      "mechanic",
+      "lineage"
+    ],
     "size": "notable",
-    "requires": ["armour_medium_tank_chassis"],
+    "requires": [
+      "armour_medium_tank_chassis"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "mechanisation_suppression_resist_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "mechanisation_suppression_resist_1"
+      }
+    ]
   },
   {
     "id": "armour_medium_improved_apc",
@@ -77,14 +120,28 @@
     "name": "Improved APC",
     "short_description": "Full tracked upgrade with more armour.",
     "description": "A full tracked hull replaces the half track. Better off road speed, more armour, and more suppression resistance. This is a new grid entity, not a stat patch on the old one.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["lineage", "additive"],
+    "cost": {
+      "money": 60,
+      "science": 30
+    },
+    "badges": [
+      "lineage",
+      "additive"
+    ],
     "size": "notable",
-    "requires": ["armour_medium_mechanisation_apc"],
+    "requires": [
+      "armour_medium_mechanisation_apc"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
     "effects": [
-      { "type": "unlocks_unit_type", "unit_type": "improved_apc" },
-      { "type": "perk", "perk_id": "mechanisation_suppression_resist_2" }
+      {
+        "type": "unlocks_unit_type",
+        "unit_type": "improved_apc"
+      },
+      {
+        "type": "perk",
+        "perk_id": "mechanisation_suppression_resist_2"
+      }
     ]
   },
   {
@@ -97,14 +154,28 @@
     "name": "IFV",
     "short_description": "Top of the line, fires back on its own.",
     "description": "An infantry fighting vehicle that provides its own fire support, on top of the Improved APC's protection. The top of the mechanised infantry lineage chain.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["lineage", "mechanic"],
+    "cost": {
+      "money": 80,
+      "science": 40
+    },
+    "badges": [
+      "lineage",
+      "mechanic"
+    ],
     "size": "notable",
-    "requires": ["armour_medium_improved_apc"],
+    "requires": [
+      "armour_medium_improved_apc"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
     "effects": [
-      { "type": "unlocks_unit_type", "unit_type": "ifv" },
-      { "type": "perk", "perk_id": "mechanisation_suppression_resist_3" }
+      {
+        "type": "unlocks_unit_type",
+        "unit_type": "ifv"
+      },
+      {
+        "type": "perk",
+        "perk_id": "mechanisation_suppression_resist_3"
+      }
     ]
   }
 ]

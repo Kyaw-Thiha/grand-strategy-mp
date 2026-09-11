@@ -82,17 +82,22 @@ describe("lane:research | Research tick (placeholder rate, no currency)", () => 
     const state = new GameRoomState();
     const nation = new NationState();
     nation.nation_id = "test_nation";
+    // Branch B introduces real currency costs — fund generously so these tree/tick-mechanic
+    // tests stay decoupled from currency enforcement (that's 11b's own job to test).
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     state.nations.set("test_nation", nation);
     return state;
   }
 
   it("multiple concurrent projects for the same nation all progress simultaneously, independently — no hard slot limit", () => {
     const state = freshState();
+    const nation = state.nations.get("test_nation")!;
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    assert.ok(sys.startResearch("test_nation", "armour_light_tank_chassis"));
-    assert.ok(sys.startResearch("test_nation", "armour_medium_tank_chassis"));
-    assert.ok(sys.startResearch("test_nation", "armour_heavy_tank_chassis"));
+    assert.ok(sys.startResearch(nation, "armour_light_tank_chassis"));
+    assert.ok(sys.startResearch(nation, "armour_medium_tank_chassis"));
+    assert.ok(sys.startResearch(nation, "armour_heavy_tank_chassis"));
     let broadcasts: unknown[] = [];
     for (let i = 0; i < 4; i++) sys.tick(state, (type, msg) => broadcasts.push({ type, msg }));
     const researched = sys.getResearchedNodeIds("test_nation");
@@ -103,12 +108,12 @@ describe("lane:research | Research tick (placeholder rate, no currency)", () => 
 
   it("on completion: node added to researched_node_ids, and a perk effect pushes perk_id into nation.researched_perks", () => {
     const state = freshState();
+    const nation = state.nations.get("test_nation")!;
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    sys.startResearch("test_nation", "armour_light_tank_chassis");
+    sys.startResearch(nation, "armour_light_tank_chassis");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
     assert.ok(sys.getResearchedNodeIds("test_nation").has("armour_light_tank_chassis"));
-    const nation = state.nations.get("test_nation")!;
     assert.ok(Array.from(nation.researched_perks).includes("armour_flank_resist_1"));
   });
 });
@@ -138,6 +143,8 @@ describe("lane:research | Lineage-chain fallback (RESEARCH.md's 'no template eve
     const state = new GameRoomState();
     const nation = new NationState();
     nation.nation_id = "test_nation";
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     state.nations.set("test_nation", nation);
     const div = new DivisionState();
     div.nation_id = "test_nation";
@@ -146,13 +153,13 @@ describe("lane:research | Lineage-chain fallback (RESEARCH.md's 'no template eve
 
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    sys.startResearch("test_nation", "armour_medium_tank_chassis");
+    sys.startResearch(nation, "armour_medium_tank_chassis");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
-    sys.startResearch("test_nation", "armour_medium_mechanisation_apc");
+    sys.startResearch(nation, "armour_medium_mechanisation_apc");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
     assert.strictEqual(div.grid.cells[0].unit_type, "mechanised_infantry"); // apc node has no unlocks_unit_type effect (base tier)
 
-    sys.startResearch("test_nation", "armour_medium_improved_apc");
+    sys.startResearch(nation, "armour_medium_improved_apc");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
     assert.strictEqual(div.grid.cells[0].unit_type, "improved_apc");
   });
@@ -161,9 +168,13 @@ describe("lane:research | Lineage-chain fallback (RESEARCH.md's 'no template eve
 describe("lane:research | START_RESEARCH prerequisites and adjacency", () => {
   it("a tier-2 node is rejected until its requires[] node is researched", () => {
     clearResearchTreeCache();
+    const nation = new NationState();
+    nation.nation_id = "test_nation";
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    assert.strictEqual(sys.startResearch("test_nation", "armour_medium_mechanisation_apc"), false);
+    assert.strictEqual(sys.startResearch(nation, "armour_medium_mechanisation_apc"), false);
   });
 
   it("unlocking a tier unlocks the next tier same-path AND the same-tier adjacent-path node, per RESEARCH.md's adjacency-web rule", () => {
@@ -171,6 +182,8 @@ describe("lane:research | START_RESEARCH prerequisites and adjacency", () => {
     const state = new GameRoomState();
     const nation = new NationState();
     nation.nation_id = "test_nation";
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     state.nations.set("test_nation", nation);
     const sys = new ResearchSystem();
     sys.init("test_nation");
@@ -178,53 +191,53 @@ describe("lane:research | START_RESEARCH prerequisites and adjacency", () => {
     // infantry_assault_t2_flexible_response requires EITHER infantry_standard_t1 (own related
     // path) OR infantry_assault_t1 (adjacent path, same tier) — OR semantics per the adjacency
     // web. Completing just the assault-path tier-1 node should already unlock it.
-    assert.ok(sys.startResearch("test_nation", "infantry_assault_t1"));
+    assert.ok(sys.startResearch(nation, "infantry_assault_t1"));
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
-    assert.ok(sys.startResearch("test_nation", "infantry_assault_t2_flexible_response"));
+    assert.ok(sys.startResearch(nation, "infantry_assault_t2_flexible_response"));
   });
 });
 
 describe("lane:research | Mutex tiers and respec", () => {
-  function freshState(): { state: GameRoomState; sys: ResearchSystem } {
+  function freshState(): { state: GameRoomState; sys: ResearchSystem; nation: NationState } {
     clearResearchTreeCache();
     const state = new GameRoomState();
     const nation = new NationState();
     nation.nation_id = "test_nation";
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     state.nations.set("test_nation", nation);
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    return { state, sys };
+    return { state, sys, nation };
   }
 
   it("starting a mutex-group node when a DIFFERENT option in that group is already RESEARCHED (respec case): the old node stays in researched_node_ids/researched_perks for the full duration of the new research — no downtime", () => {
-    const { state, sys } = freshState();
-    sys.startResearch("test_nation", "infantry_standard_t1");
+    const { state, sys, nation } = freshState();
+    sys.startResearch(nation, "infantry_standard_t1");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
-    sys.startResearch("test_nation", "infantry_fire_move_doctrine");
+    sys.startResearch(nation, "infantry_fire_move_doctrine");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
     assert.ok(sys.getResearchedNodeIds("test_nation").has("infantry_fire_move_doctrine"));
 
-    assert.ok(sys.startResearch("test_nation", "infantry_bayonet_doctrine"));
+    assert.ok(sys.startResearch(nation, "infantry_bayonet_doctrine"));
     // Mid-research: old node/perk must still be active.
     sys.tick(state, () => {});
     assert.ok(sys.getResearchedNodeIds("test_nation").has("infantry_fire_move_doctrine"));
-    const nation = state.nations.get("test_nation")!;
     assert.ok(Array.from(nation.researched_perks).includes("infantry_fire_move_1"));
   });
 
   it("on the new node's completion, the old mutex sibling is atomically removed from researched_node_ids and, if it had a perk effect, from researched_perks — live-recompute drops it immediately", () => {
-    const { state, sys } = freshState();
-    sys.startResearch("test_nation", "infantry_standard_t1");
+    const { state, sys, nation } = freshState();
+    sys.startResearch(nation, "infantry_standard_t1");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
-    sys.startResearch("test_nation", "infantry_fire_move_doctrine");
+    sys.startResearch(nation, "infantry_fire_move_doctrine");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
-    sys.startResearch("test_nation", "infantry_bayonet_doctrine");
+    sys.startResearch(nation, "infantry_bayonet_doctrine");
     for (let i = 0; i < 4; i++) sys.tick(state, () => {});
 
     const researched = sys.getResearchedNodeIds("test_nation");
     assert.ok(!researched.has("infantry_fire_move_doctrine"));
     assert.ok(researched.has("infantry_bayonet_doctrine"));
-    const nation = state.nations.get("test_nation")!;
     assert.ok(!Array.from(nation.researched_perks).includes("infantry_fire_move_1"));
     assert.ok(Array.from(nation.researched_perks).includes("infantry_bayonet_1"));
   });
@@ -235,13 +248,15 @@ describe("lane:research | CANCEL_RESEARCH", () => {
     clearResearchTreeCache();
     const sys = new ResearchSystem();
     sys.init("test_nation");
-    sys.startResearch("test_nation", "armour_light_tank_chassis");
     const state = new GameRoomState();
     const nation = new NationState();
     nation.nation_id = "test_nation";
+    nation.resources.set("money", 1_000_000);
+    nation.science_points = 1_000_000;
     state.nations.set("test_nation", nation);
+    sys.startResearch(nation, "armour_light_tank_chassis");
     sys.tick(state, () => {}); // one tick of progress
-    sys.cancelResearch("test_nation", "armour_light_tank_chassis");
+    sys.cancelResearch(nation, "armour_light_tank_chassis");
     assert.strictEqual(sys.serialize("test_nation").active_projects.length, 0);
     assert.ok(!sys.getResearchedNodeIds("test_nation").has("armour_light_tank_chassis"));
   });
@@ -274,6 +289,12 @@ describe("lane:research | GameRoom integration — START_RESEARCH end-to-end ove
 
   it("client sending START_RESEARCH over the wire actually reaches researchSystem and broadcasts RESEARCH_UPDATES back", async () => {
     const { client, room } = await joinRoom();
+    // Branch B gives nodes real currency costs — the seeded starting stockpile (see
+    // _initNationEconomy) covers money, but science_points starts at 0 (no School-tick
+    // accrual has happened yet); fund it directly so this end-to-end plumbing test isn't
+    // gated on currency, which is 11b's own concern to test.
+    const germanNation = (room.state as GameRoomState).nations.get("germany");
+    if (germanNation) germanNation.science_points = 1_000_000;
     const updates: Record<string, unknown>[] = [];
     client.onMessage("RESEARCH_UPDATES", (msg: Record<string, unknown>) => updates.push(msg));
 
