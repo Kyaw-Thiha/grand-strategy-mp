@@ -1105,7 +1105,10 @@ func _refresh_resource_bar() -> void:
 		if has_access:
 			flyout_resources.append(res_type)
 
-	_more_button.text = "v %d more" % flyout_resources.size()
+	# Science is a sibling scalar (GameState.science_points), not one of the ten tradeable
+	# resources in _ALL_RESOURCE_ORDER, so it doesn't go through the has_access loop above —
+	# every nation always has it (a flat baseline trickle applies regardless of School level).
+	_more_button.text = "v %d more" % (flyout_resources.size() + 1)
 
 	for child in _more_flyout_list.get_children():
 		child.queue_free()
@@ -1114,6 +1117,10 @@ func _refresh_resource_bar() -> void:
 		var row := Label.new()
 		row.text = "%s   %d   %s%d/t" % [res_type.to_upper(), int(GameState.resources.get(res_type, 0.0)), "+" if rate >= 0 else "", int(rate)]
 		_more_flyout_list.add_child(row)
+
+	var science_row := Label.new()
+	science_row.text = "SCIENCE   %d" % int(GameState.science_points)
+	_more_flyout_list.add_child(science_row)
 
 
 func _position_more_flyout() -> void:

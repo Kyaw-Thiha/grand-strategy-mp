@@ -57,3 +57,8 @@ show_percentage = false
 layout_mode = 2
 text = "Locked"
 horizontal_alignment = 2
+
+[node name="CancelButton" type="Button" parent="Margin/Layout"]
+layout_mode = 2
+visible = false
+text = "Cancel"

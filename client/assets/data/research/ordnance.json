@@ -1,5 +1,7 @@
 [
-  { "_comment": "Sample content, placeholder only. Real content is a future authoring pass." },
+  {
+    "_comment": "Sample content, placeholder only. Real content is a future authoring pass."
+  },
   {
     "id": "ordnance_at_gun_t1",
     "branch": "Ordnance",
@@ -10,8 +12,13 @@
     "name": "Anti-Tank Gun",
     "short_description": "Towed gun for the anti tank line.",
     "description": "A towed anti tank gun for the anti tank line.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
@@ -27,8 +34,13 @@
     "name": "Howitzer",
     "short_description": "Indirect fire piece for the artillery line.",
     "description": "An indirect fire artillery piece for the artillery line.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
@@ -44,10 +56,17 @@
     "name": "Self-Propelled AT Gun",
     "short_description": "Mounts the AT gun on a mobile chassis.",
     "description": "Mounts the anti tank gun on a mobile chassis. A new rule for self propelled repositioning, not a stat change.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["mechanic"],
+    "cost": {
+      "money": 40,
+      "science": 20
+    },
+    "badges": [
+      "mechanic"
+    ],
     "size": "notable",
-    "requires": ["ordnance_at_gun_t1"],
+    "requires": [
+      "ordnance_at_gun_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
     "effects": []
   },
@@ -61,10 +80,17 @@
     "name": "Barrage Coordination",
     "short_description": "More suppression, less observation range.",
     "description": "Trades some observation range for heavier suppression output per round.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["redistribute"],
+    "cost": {
+      "money": 40,
+      "science": 20
+    },
+    "badges": [
+      "redistribute"
+    ],
     "size": "notable",
-    "requires": ["ordnance_howitzer_t1"],
+    "requires": [
+      "ordnance_howitzer_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
     "effects": []
   }

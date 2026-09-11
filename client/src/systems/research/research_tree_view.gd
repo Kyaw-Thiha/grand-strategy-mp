@@ -9,6 +9,11 @@ signal close_requested()
 const ResearchEntryCardScene: PackedScene = preload("res://scenes/systems/research/research_entry_card.tscn")
 const ResearchTreeDataLoader = preload("res://src/systems/research/research_tree_data_loader.gd")
 
+# Client-side display-only mirror of research_stats.ts's RESEARCH_CONCURRENCY_COST_STEP — see
+# research_drawer_panel.gd's identical constant for the same rationale (display only, server
+# remains authoritative on the actual charge).
+const RESEARCH_CONCURRENCY_COST_STEP_CLIENT_MIRROR: float = 0.25
+
 @onready var _research_system: Variant = %ResearchSystem
 @onready var _status_label: Label = %StatusLabel
 @onready var _close_button: Button = %CloseButton
@@ -33,6 +38,10 @@ func _ready() -> void:
 
 	if has_node("/root/EventBus"):
 		EventBus.research_updated.connect(_on_research_updated)
+		# Branch B — live cost/affordability (set_live_cost/set_affordable) is only recomputed
+		# inside _refresh_tree(). Without this, a passive money/science change would never
+		# re-tint an unaffordable card until an unrelated research state change rebuilt it.
+		EventBus.resources_updated.connect(_refresh_tree)
 
 	_refresh_tree()
 
@@ -92,10 +101,12 @@ func _build_cards(definitions: Array) -> void:
 		card.title = definition.get("title", "")
 		card.description = definition.get("description", "")
 		card.science_value = int(definition.get("science_value", 0))
+		card.money_cost = int(definition.get("cost", {}).get("money", 0))
 		card.exclusive_group = definition.get("exclusive_group", "")
 		card.effects = definition.get("effects", {})
 		_research_grid.add_child(card)
 		card.entry_pressed.connect(_on_entry_pressed)
+		card.cancel_pressed.connect(_on_cancel_pressed)
 		_entry_cards.append(card)
 
 
@@ -107,11 +118,23 @@ func _refresh_tree() -> void:
 			card.apply_runtime_state("full_dark", 0.0, false)
 			continue
 
+		var is_active: bool = _research_system.get_active_entry_id() == entry_id
 		card.apply_runtime_state(
 			_research_system.get_entry_state(entry_id),
 			_research_system.get_progress_ratio(entry_id),
-			_research_system.get_active_entry_id() == entry_id
+			is_active
 		)
+
+		# Live concurrency-adjusted cost + insufficient-funds display (Branch B) — recomputed
+		# every refresh, distinct from the card's own base money_cost/science_value fields.
+		var entry: Dictionary = _research_system.get_entry(entry_id)
+		var base_cost: Dictionary = entry.get("cost", {"money": 0, "science": 0})
+		var multiplier: float = 1.0 + float(GameState.active_research_count) * RESEARCH_CONCURRENCY_COST_STEP_CLIENT_MIRROR
+		var live_money_cost: int = int(ceil(float(base_cost.get("money", 0)) * multiplier))
+		var live_science_cost: int = int(ceil(float(base_cost.get("science", 0)) * multiplier))
+		card.set_live_cost(live_money_cost, live_science_cost)
+		var affordable: bool = GameState.resources.get("money", 0.0) >= live_money_cost and GameState.science_points >= live_science_cost
+		card.set_affordable(affordable or is_active)
 
 	var active_entry_id: String = _research_system.get_active_entry_id()
 	if active_entry_id.is_empty():
@@ -123,7 +146,32 @@ func _refresh_tree() -> void:
 
 func _on_research_updated() -> void:
 	_research_system.sync_from_server_state(GameState.research)
+	_report_cancelled_research_if_any()
 
 
 func _on_entry_pressed(entry_id: String) -> void:
 	CommandQueue.submit("START_RESEARCH", {"node_id": entry_id})
+
+
+func _on_cancel_pressed(entry_id: String) -> void:
+	CommandQueue.submit("CANCEL_RESEARCH", {"node_id": entry_id})
+
+
+## Reports CANCEL_RESEARCH's refund/forfeit numbers via a toast once the server confirms them.
+## Parameters: none.
+## Returns: nothing.
+func _report_cancelled_research_if_any() -> void:
+	var cancelled: Dictionary = GameState.last_cancelled_research
+	if cancelled.is_empty():
+		return
+	var node_id: String = cancelled.get("node_id", "")
+	var entry: Dictionary = _research_system.get_entry(node_id)
+	var node_name: String = entry.get("title", node_id)
+	var refund: Dictionary = cancelled.get("refund", {})
+	var forfeit: Dictionary = cancelled.get("forfeit", {})
+	var refund_total: float = float(refund.get("money", 0.0)) + float(refund.get("science", 0.0))
+	var forfeit_total: float = float(forfeit.get("money", 0.0)) + float(forfeit.get("science", 0.0))
+	EventBus.notification_requested.emit(
+		"Cancelled: %s — refunded %d, forfeited %d" % [node_name, int(refund_total), int(forfeit_total)],
+		"research",
+	)

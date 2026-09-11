@@ -1465,7 +1465,7 @@ breaks an existing division template (the "no template ever breaks" guarantee â€
       tier requires confirmation, keeps the old perk fully active until the new research
       completes (no downtime), then un-researches the old perk atomically; no currency
       refunded
-- [ ] Research draws from the Phase 10 research-currency pool; no separate currency
+- [x] Research draws from the Phase 10 research-currency pool; no separate currency
       introduced for unit research specifically
 
 ### Godot

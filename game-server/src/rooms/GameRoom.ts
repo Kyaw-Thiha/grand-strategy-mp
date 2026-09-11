@@ -50,6 +50,8 @@ import {
   HOSPITAL_STORAGE_CAP_BASE,
   HOSPITAL_STORAGE_CAP_PER_LEVEL,
   SCIENCE_PER_SCHOOL_LEVEL,
+  SCIENCE_BASE_GAIN_PER_TICK,
+  STARTING_SCIENCE_POINTS,
   CONVOY_CAPACITY_PER_SHIPYARD_LEVEL,
   TOWN_HALL_VP_MULT_PER_LEVEL,
   INFRASTRUCTURE_BONUS_PER_LEVEL,
@@ -644,13 +646,32 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (!player) return;
       const nation = this.getNationForPlayer(player.userId);
       if (!nation) return;
-      const started = this.researchSystem.startResearch(nation.nation_id, msg.node_id);
+      const started = this.researchSystem.startResearch(nation, msg.node_id);
       if (started) {
         this.broadcastToNation(
           "RESEARCH_UPDATES",
-          { nation_id: nation.nation_id, ...this.researchSystem.serialize(nation.nation_id) },
+          {
+            nation_id: nation.nation_id,
+            ...this.researchSystem.serialize(nation.nation_id),
+            active_research_count: nation.active_research_count,
+            // Money/science snapshot, piggybacked on this same message — without this, the
+            // client's GameState.resources/science_points (and therefore every other research
+            // card's displayed affordability) wouldn't reflect this deduction until the next
+            // regular per-tick RESOURCE_UPDATES broadcast (up to ~1s later, per TICK_MS), which
+            // is exactly the stale-display window a rapid double-click could hit.
+            money: nation.resources.get("money") ?? 0,
+            science_points: nation.science_points,
+          },
           nation.nation_id,
         );
+      } else {
+        // Same "ERROR" feedback pattern used elsewhere (MOVE_ORDER_REJECTED etc.) — without
+        // this, a rejected click (insufficient funds, already active, unmet prerequisites)
+        // is a silent no-op with zero client-visible feedback, which matters here specifically
+        // because the client's displayed cost/affordability can be briefly stale (it only
+        // refreshes on the next RESOURCE_UPDATES/RESEARCH_UPDATES broadcast) — e.g. clicking a
+        // second card right after a first one that just spent the shared currency.
+        client.send("ERROR", { message: "Cannot start research: unaffordable, already active, or prerequisites not met." });
       }
     });
     this.onMessage("CANCEL_RESEARCH", (client, msg: { node_id: string }) => {
@@ -659,10 +680,18 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       if (!player) return;
       const nation = this.getNationForPlayer(player.userId);
       if (!nation) return;
-      this.researchSystem.cancelResearch(nation.nation_id, msg.node_id);
+      const cancelled = this.researchSystem.cancelResearch(nation, msg.node_id);
       this.broadcastToNation(
         "RESEARCH_UPDATES",
-        { nation_id: nation.nation_id, ...this.researchSystem.serialize(nation.nation_id) },
+        {
+          nation_id: nation.nation_id,
+          ...this.researchSystem.serialize(nation.nation_id),
+          active_research_count: nation.active_research_count,
+          cancelled,
+          // Same immediate money/science snapshot rationale as START_RESEARCH above.
+          money: nation.resources.get("money") ?? 0,
+          science_points: nation.science_points,
+        },
         nation.nation_id,
       );
     });
@@ -2914,6 +2943,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
     const STARTING_MONEY = 500; // TBD playtesting — starting stockpile placeholder
     const STARTING_RESOURCE_STOCKPILE = 500; // TBD playtesting — same placeholder magnitude as money
     for (const [nationId, nation] of this.state.nations) {
+      nation.science_points = STARTING_SCIENCE_POINTS;
       for (const resType of TEN_RESOURCES) {
         nation.resources.set(resType, resType === "money" ? STARTING_MONEY : STARTING_RESOURCE_STOCKPILE);
         nation.resource_storage_cap.set(resType, HOSPITAL_STORAGE_CAP_BASE);
@@ -2930,7 +2960,7 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       // slice, same as any player-submitted SET_INDUSTRY_ALLOCATION (see that handler's reject-
       // if-not-100 check). Leaving industry_alloc empty at init (schema default) would show a
       // client panel where every slider reads 0%, which doesn't sum to 100 at all.
-      for (const key of [...TEN_RESOURCES, "construction_speed", "unit_production_speed"]) {
+      for (const key of [...TEN_RESOURCES, "construction_speed", "unit_production_speed", "research_speed"]) {
         nation.industry_alloc.set(key, 0);
       }
       nation.industry_alloc.set("money", 50);
@@ -3181,9 +3211,11 @@ export class GameRoom extends Room<{ state: GameRoomState }> {
       const totalHospitalLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["hospital"] ?? 0), 0);
       nation.hospital_damage_mult = hospitalDamageMultiplier(totalHospitalLevel);
 
-      // School — science output. No consumer exists yet; intentional stockpile-with-no-sink.
+      // School — science output on top of a flat baseline trickle every nation gets
+      // regardless of School level (see SCIENCE_BASE_GAIN_PER_TICK's doc comment).
       const totalSchoolLevel = ownedEconomies.reduce((sum, e) => sum + (e.buildings["school"] ?? 0), 0);
-      nation.science_points += scienceGainForTick(totalSchoolLevel, SCIENCE_PER_SCHOOL_LEVEL);
+      nation.science_points +=
+        SCIENCE_BASE_GAIN_PER_TICK + scienceGainForTick(totalSchoolLevel, SCIENCE_PER_SCHOOL_LEVEL);
 
       // Shipyard — convoy capacity, only counted in provinces with has_port. Nothing consumes
       // this yet; Branch D's trade routes are the consumer.

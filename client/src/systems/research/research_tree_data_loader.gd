@@ -75,4 +75,8 @@ static func _remap_node(raw_node: Dictionary) -> Dictionary:
 		"requires": raw_node.get("requires", []),
 		"short_description": short_description,
 		"full_description": full_description,
+		# Branch B — real {money, science} base cost, passed through for the drawer/full-tree
+		# cards' live concurrency-adjusted cost display (research_system.gd.load_from_definitions
+		# carries this straight into its normalized entry dictionary).
+		"cost": cost,
 	}

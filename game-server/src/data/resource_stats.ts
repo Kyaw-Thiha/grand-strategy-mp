@@ -64,6 +64,13 @@ export const RAMP_TICKS = 120; // TBD playtesting — Rubber Plantation's ramp-u
 export const BAUXITE_TO_ALUMINIUM_RATIO = 0.8; // TBD playtesting — refinery conversion efficiency
 
 export const SCIENCE_PER_SCHOOL_LEVEL = 0.3;         // TBD playtesting
+// Branch B — a flat baseline science trickle every nation gets regardless of School level,
+// same "the building does the heavy lifting, but a floor always exists" spirit as every
+// resource-extraction building's zero-industry guarantee (ECONOMY_BUILDINGS.md's Design
+// Philosophy). Without this, a nation with zero School levels never accrues any research
+// currency at all, which stalls the whole research system before a player builds one.
+export const SCIENCE_BASE_GAIN_PER_TICK = 1;         // TBD playtesting
+export const STARTING_SCIENCE_POINTS = 50;           // TBD playtesting — starting stockpile placeholder
 // TBD playtesting — Warehouse base per-resource cap. Deliberately well above _initNationEconomy's
 // STARTING_MONEY seed (500) so the starting stockpile isn't clamped flush against the cap
 // before any trickle/extraction has a chance to grow it.

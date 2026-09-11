@@ -9,11 +9,28 @@
     "name": "Motorisation",
     "short_description": "Trucks for your infantry, no combat changes.",
     "description": "Builds enough truck production to move infantry by vehicle. Unlocks the motorised toggle in the division builder for eligible unit types. This is a strategic map speed upgrade only, it changes nothing on the 5x5 combat grid.",
-    "cost": { "money": 0, "science": 0 },
+    "cost": { "money": 20, "science": 10 },
     "badges": ["mechanic"],
     "size": "notable",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
     "effects": [{ "type": "perk", "perk_id": "motorisation_unlocked" }]
+  },
+  {
+    "id": "general_uranium_research_program",
+    "branch": "General",
+    "unit_id": "uranium_research",
+    "path_id": "logistics",
+    "tier": 2,
+    "mutex_group_id": null,
+    "name": "Uranium Research Program",
+    "short_description": "One-time science windfall, requires uranium access.",
+    "description": "Directs national research effort toward uranium's non-nuclear applications. Requires nonzero uranium stock to pay off — a nation with no uranium access completes this node with no bonus. Not a weapon, a one-time research-currency injection (see RESOURCE_ECONOMY.md's Uranium section).",
+    "cost": { "money": 50, "science": 25 },
+    "badges": ["additive"],
+    "size": "notable",
+    "requires": [],
+    "image_asset": "res://assets/icons/table-cells-solid-full.svg",
+    "effects": [{ "type": "uranium_injection", "amount": { "science": 50 } }]
   }
 ]

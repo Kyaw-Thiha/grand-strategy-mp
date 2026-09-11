@@ -20,7 +20,7 @@
     "test:movement": "NODE_ENV=test mocha --grep 'lane:movement' 'test/movement-jerk.test.ts'",
     "test:core": "NODE_ENV=test mocha --grep 'lane:core' 'test/GameRoom.test.ts'",
     "test:economy": "NODE_ENV=test mocha --grep 'lane:economy' 'test/9a-economy-foundation.test.ts' 'test/9b-resource-economy.test.ts'",
-    "test:research": "NODE_ENV=test mocha --grep 'lane:research' 'test/11a-research-tree-foundation.test.ts'",
+    "test:research": "NODE_ENV=test mocha --grep 'lane:research' 'test/11a-research-tree-foundation.test.ts' 'test/11b-research-currency.test.ts'",
     "bot-fight": "NODE_ENV=development tsx scripts/bot_fight.ts"
   },
   "author": "",

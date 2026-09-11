@@ -80,6 +80,15 @@ var trade_routes: Dictionary = {}
 # Phase 11 Branch A — this nation's own research state, server-authoritative.
 # { researched_node_ids: Array[String], active_projects: Array[{node_id, points_remaining, points_total, respec_displaces}] }
 var research: Dictionary = {}
+# Phase 11 Branch B — mirrors NationState.active_research_count, sent explicitly in every
+# RESEARCH_UPDATES broadcast (the schema field itself isn't part of the message body).
+var active_research_count: int = 0
+# Phase 11 Branch B — the most recent CANCEL_RESEARCH result ({node_id, refund, forfeit}),
+# carried in the same RESEARCH_UPDATES broadcast that applies the cancellation. Consumed by
+# whichever research panel wants to report it (it knows the node's display name; GameState
+# does not) via EventBus.research_updated, then cleared so it isn't re-reported on the next
+# unrelated update.
+var last_cancelled_research: Dictionary = {}
 
 
 # ── Session reset ─────────────────────────────────────────────────────────────
@@ -214,7 +223,29 @@ func _apply_research_updates(data: Dictionary) -> void:
 		"researched_node_ids": data.get("researched_node_ids", []),
 		"active_projects": data.get("active_projects", []),
 	}
+	active_research_count = int(data.get("active_research_count", active_research_count))
+
+	# Branch B — START_RESEARCH/CANCEL_RESEARCH piggyback an immediate money/science snapshot
+	# on this same message. Without this, resources/science_points would only reflect the
+	# deduction on the next regular per-tick RESOURCE_UPDATES broadcast (up to ~1s later,
+	# per TICK_MS) — exactly the stale-display window a rapid double-click could hit. Emitting
+	# resources_updated here too keeps the Economy panel/top bar and every other research
+	# card's affordability check in sync at the same instant, not just this one.
+	if data.has("money"):
+		resources["money"] = data.get("money")
+	if data.has("science_points"):
+		science_points = float(data.get("science_points", science_points))
+
+	# Branch B — CANCEL_RESEARCH's refund/forfeit numbers, computed server-side (not
+	# recomputed client-side, since the concurrency-adjusted cost actually charged at start
+	# time is server-authoritative state the client doesn't independently track). Left for
+	# whichever research panel wants to report it (it has the node's display name); cleared
+	# after this signal fires so it isn't re-reported on the next unrelated update.
+	var cancelled: Variant = data.get("cancelled")
+	last_cancelled_research = cancelled if cancelled is Dictionary else {}
 	EventBus.research_updated.emit()
+	EventBus.resources_updated.emit()
+	last_cancelled_research = {}
 
 
 func _apply_reserve_updates(data: Dictionary) -> void:

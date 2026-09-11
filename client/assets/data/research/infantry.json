@@ -1,5 +1,7 @@
 [
-  { "_comment": "Sample content, placeholder only. Real content is a future authoring pass." },
+  {
+    "_comment": "Sample content, placeholder only. Real content is a future authoring pass."
+  },
   {
     "id": "infantry_standard_t1",
     "branch": "Infantry",
@@ -10,12 +12,22 @@
     "name": "Basic Infantry Training",
     "short_description": "Standard drill for line infantry.",
     "description": "Standardised drill and small unit tactics for line infantry.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "infantry_suppression_resist_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "infantry_suppression_resist_1"
+      }
+    ]
   },
   {
     "id": "infantry_assault_t1",
@@ -27,12 +39,22 @@
     "name": "Assault Tactics",
     "short_description": "Close quarters drills for assault infantry.",
     "description": "Close quarters aggression drills for assault infantry.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["mechanic"],
+    "cost": {
+      "money": 20,
+      "science": 10
+    },
+    "badges": [
+      "mechanic"
+    ],
     "size": "minor",
     "requires": [],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "assault_suppression_resist_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "assault_suppression_resist_1"
+      }
+    ]
   },
   {
     "id": "infantry_assault_t2_flexible_response",
@@ -44,12 +66,25 @@
     "name": "Flexible Response",
     "short_description": "Cross trained squads from either doctrine.",
     "description": "Squads cross trained in both standard and assault doctrine, opening up once either tier one path is complete. This shows off the adjacency web rule, where finishing an adjacent path also unlocks this node.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["redistribute"],
+    "cost": {
+      "money": 40,
+      "science": 20
+    },
+    "badges": [
+      "redistribute"
+    ],
     "size": "notable",
-    "requires": ["infantry_standard_t1", "infantry_assault_t1"],
+    "requires": [
+      "infantry_standard_t1",
+      "infantry_assault_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "assault_suppression_resist_2" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "assault_suppression_resist_2"
+      }
+    ]
   },
   {
     "id": "infantry_fire_move_doctrine",
@@ -61,12 +96,24 @@
     "name": "Fire & Move Doctrine",
     "short_description": "Alternating fire and manoeuvre pairs.",
     "description": "Alternating fire and manoeuvre pairs. Mutually exclusive with Bayonet Doctrine and Marksman Training at this tier.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["mechanic"],
+    "cost": {
+      "money": 60,
+      "science": 30
+    },
+    "badges": [
+      "mechanic"
+    ],
     "size": "notable",
-    "requires": ["infantry_standard_t1"],
+    "requires": [
+      "infantry_standard_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "infantry_fire_move_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "infantry_fire_move_1"
+      }
+    ]
   },
   {
     "id": "infantry_bayonet_doctrine",
@@ -78,12 +125,25 @@
     "name": "Bayonet Doctrine",
     "short_description": "Trades suppression resistance for melee shock.",
     "description": "A close assault doctrine that trades ranged suppression resistance for melee shock effect. Mutually exclusive with Fire & Move and Marksman Training at this tier.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["mechanic", "additive"],
+    "cost": {
+      "money": 60,
+      "science": 30
+    },
+    "badges": [
+      "mechanic",
+      "additive"
+    ],
     "size": "notable",
-    "requires": ["infantry_standard_t1"],
+    "requires": [
+      "infantry_standard_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "infantry_bayonet_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "infantry_bayonet_1"
+      }
+    ]
   },
   {
     "id": "infantry_marksman_training",
@@ -95,11 +155,23 @@
     "name": "Marksman Training",
     "short_description": "Flat accuracy boost from precision rifle drills.",
     "description": "Precision rifle training for a flat accuracy boost. Mutually exclusive with Fire & Move and Bayonet Doctrine at this tier.",
-    "cost": { "money": 0, "science": 0 },
-    "badges": ["additive"],
+    "cost": {
+      "money": 60,
+      "science": 30
+    },
+    "badges": [
+      "additive"
+    ],
     "size": "notable",
-    "requires": ["infantry_standard_t1"],
+    "requires": [
+      "infantry_standard_t1"
+    ],
     "image_asset": "res://assets/icons/table-cells-solid-full.svg",
-    "effects": [{ "type": "perk", "perk_id": "infantry_marksman_1" }]
+    "effects": [
+      {
+        "type": "perk",
+        "perk_id": "infantry_marksman_1"
+      }
+    ]
   }
 ]

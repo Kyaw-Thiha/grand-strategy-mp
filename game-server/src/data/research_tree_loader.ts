@@ -5,7 +5,11 @@ import { readFileSync } from "fs";
 /** Effect shapes a completed research node can carry (RESEARCH.md's Perk Taxonomy). */
 export type ResearchEffect =
   | { type: "perk"; perk_id: string }
-  | { type: "unlocks_unit_type"; unit_type: string };
+  | { type: "unlocks_unit_type"; unit_type: string }
+  // Uranium's research-currency injection (RESOURCE_ECONOMY.md) — a one-time science grant on
+  // completion, gated on the nation having nonzero uranium stock at that moment. This is
+  // Uranium's one documented special case, not a general resource-gated bonus pattern.
+  | { type: "uranium_injection"; amount: { science: number } };
 
 export interface ResearchNodeDef {
   id: string;
