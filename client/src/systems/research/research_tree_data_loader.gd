@@ -54,6 +54,7 @@ static func _remap_node(raw_node: Dictionary) -> Dictionary:
 	var short_description: String = raw_node.get("short_description", "")
 	var full_description: String = raw_node.get("description", "")
 	var cost: Dictionary = raw_node.get("cost", {})
+	var mutex_group_id_raw: Variant = raw_node.get("mutex_group_id", null)
 	return {
 		"id": raw_node.get("id", ""),
 		"column": "%s / %s" % [branch, path_id],
@@ -79,4 +80,14 @@ static func _remap_node(raw_node: Dictionary) -> Dictionary:
 		# cards' live concurrency-adjusted cost display (research_system.gd.load_from_definitions
 		# carries this straight into its normalized entry dictionary).
 		"cost": cost,
+		# Branch C additions — needed by the popup (image header, mutex warning body) and the
+		# Full Tree left rail's per-unit grouping/sort (RESEARCH_UI_HANDOFF.md §3.1/§4.1).
+		# Branch A's loader dropped these on the floor since its minimal card-only UI never
+		# needed them; carried through here so research_system.gd's normalized entry (see its
+		# load_from_definitions()) can pass them on to the card/popup layer.
+		"unit_id": raw_node.get("unit_id", ""),
+		"path_id": path_id,
+		"tier": tier,
+		"mutex_group_id": String(mutex_group_id_raw) if mutex_group_id_raw != null else "",
+		"image_asset": raw_node.get("image_asset", ""),
 	}
