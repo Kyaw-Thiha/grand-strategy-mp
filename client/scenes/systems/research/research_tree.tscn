@@ -1,8 +1,9 @@
-[gd_scene load_steps=3 format=3 uid="uid://cbuwtcevrakg0"]
+[gd_scene load_steps=5 format=3 uid="uid://cbuwtcevrakg0"]
 
 [ext_resource type="Script" uid="uid://ddhcx77ea8mt5" path="res://src/systems/research/research_tree_view.gd" id="1"]
 [ext_resource type="Script" uid="uid://cur26uct7771r" path="res://src/systems/research/research_system.gd" id="2"]
 [ext_resource type="Theme" uid="uid://bxm46dfawg64w" path="res://assets/themes/hud_dark.tres" id="4"]
+[ext_resource type="Script" path="res://src/systems/research/research_tree_canvas.gd" id="5"]
 
 [node name="ResearchTree" type="Control" unique_id=2018616258]
 layout_mode = 3
@@ -52,7 +53,7 @@ theme_override_constants/margin_bottom = 20
 
 [node name="Layout" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin" unique_id=477441953]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 10
 
 [node name="TitleRow" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout" unique_id=1517340087]
 layout_mode = 2
@@ -74,15 +75,238 @@ layout_mode = 2
 text = "Click an available entry to start or resume research."
 autowrap_mode = 3
 
-[node name="Scroll" type="ScrollContainer" parent="OuterMargin/Panel/ContentMargin/Layout" unique_id=690988358]
+[node name="TabButtons" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="BtnInfantry" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+text = "Infantry"
+
+[node name="BtnOrdnance" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Ordnance"
+
+[node name="BtnArmour" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Armour"
+
+[node name="BtnAir" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Air"
+
+[node name="BtnNaval" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Naval"
+
+[node name="BtnEconomy" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Economy"
+
+[node name="BtnGeneral" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/TabButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "General"
+
+[node name="TabBar" type="TabContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 0
+custom_minimum_size = Vector2(0, 1)
+tabs_visible = false
+current_tab = 0
+tab_alignment = 0
+theme_override_constants/side_margin = 0
+
+[node name="Infantry" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="Ordnance" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="Armour" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="Air" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="Naval" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="Economy" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="General" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/TabBar"]
+layout_mode = 2
+
+[node name="MainBody" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="LeftRail" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SearchBox" type="LineEdit" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/LeftRail"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Search units"
+
+[node name="UnitScroll" type="ScrollContainer" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/LeftRail"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="UnitList" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/LeftRail/UnitScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="RightSide" type="VBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+
+[node name="Toolbar" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BtnZoomOut" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "-"
+
+[node name="BtnFit" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Fit"
+
+[node name="BtnZoomIn" type="Button" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "+"
+
+[node name="CanvasViewport" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide"]
+unique_name_in_owner = true
+clip_contents = true
+custom_minimum_size = Vector2(0, 320)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="ResearchGrid" type="GridContainer" parent="OuterMargin/Panel/ContentMargin/Layout/Scroll" unique_id=330293937]
+[node name="TreeCanvas" type="Control" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
 unique_name_in_owner = true
-layout_mode = 2
+layout_mode = 0
+offset_right = 1600.0
+offset_bottom = 1200.0
+script = ExtResource("5")
+
+[node name="ComingSoonLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
 size_flags_horizontal = 3
-theme_override_constants/h_separation = 14
-theme_override_constants/v_separation = 12
-columns = 4
+size_flags_vertical = 3
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+text = "🔧 Coming Soon
+This branch's doctrine tree is still in development for this build."
+
+[node name="ArrowUp" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+grow_horizontal = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 22
+text = "▲"
+mouse_filter = 2
+
+[node name="ArrowDown" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 22
+text = "▼"
+mouse_filter = 2
+
+[node name="ArrowLeft" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+grow_vertical = 2
+vertical_alignment = 1
+theme_override_font_sizes/font_size = 22
+text = "◄"
+mouse_filter = 2
+
+[node name="ArrowRight" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/MainBody/RightSide/CanvasViewport"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+grow_horizontal = 0
+grow_vertical = 2
+vertical_alignment = 1
+theme_override_font_sizes/font_size = 22
+text = "►"
+mouse_filter = 2
+
+[node name="LegendFooter" type="HBoxContainer" parent="OuterMargin/Panel/ContentMargin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="LegendLabel" type="Label" parent="OuterMargin/Panel/ContentMargin/Layout/LegendFooter"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+modulate = Color(0.82, 0.74, 0.58, 1)
+text = "Legend:  🟧 Available   🟩 Researched   ▓ Researching   ▪dim Locked"
