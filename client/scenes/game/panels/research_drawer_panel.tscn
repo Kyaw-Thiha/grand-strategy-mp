@@ -99,10 +99,19 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="Hint" type="Label" parent="Margin/VBox/ContentBody"]
+[node name="FilterRow" type="HBoxContainer" parent="Margin/VBox/ContentBody"]
 layout_mode = 2
-text = "Available research"
-modulate = Color(0.82, 0.74, 0.58, 1)
+theme_override_constants/separation = 6
+
+[node name="SearchBox" type="LineEdit" parent="Margin/VBox/ContentBody/FilterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "🔍 search"
+
+[node name="BranchFilter" type="OptionButton" parent="Margin/VBox/ContentBody/FilterRow"]
+unique_name_in_owner = true
+layout_mode = 2
 
 [node name="Scroll" type="ScrollContainer" parent="Margin/VBox/ContentBody"]
 layout_mode = 2
