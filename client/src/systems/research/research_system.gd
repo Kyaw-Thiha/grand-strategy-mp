@@ -24,6 +24,22 @@ var _progress_by_id: Dictionary = {}
 var _completed_entries: Dictionary = {}
 var _started_entries: Dictionary = {}
 var _active_entry_id: String = ""
+# Every concurrently-active project's node_id (RESEARCH.md — no hard slot limit), distinct
+# from _active_entry_id which Branch A kept as "the first one found" for its single-card
+# highlight. Branch C's IN PROGRESS sidebar section needs the full set.
+var _active_entry_ids: Array[String] = []
+
+# ── Branch C: client-side progress interpolation ───────────────────────────────────────────
+# The server ticks/broadcasts research progress once per second (game-server's research
+# system TICK_MS = 1000), which produces a visibly stepped bar if rendered directly. These
+# dictionaries let get_progress_ratio() interpolate between the last two known samples using
+# frame delta, driven by a rate *estimated from consecutive samples* rather than a hardcoded
+# client constant — see phase-11-task-c-ui-interaction.md's Context section.
+var _active_points_total: Dictionary = {}       # node_id -> float
+var _active_remaining_interp: Dictionary = {}   # node_id -> float, decays every _process()
+var _active_remaining_rate: Dictionary = {}     # node_id -> estimated points/sec
+var _active_remaining_last_raw: Dictionary = {} # node_id -> last raw server points_remaining
+var _active_remaining_last_time: Dictionary = {}# node_id -> Time.get_ticks_msec()/1000.0 at last sample
 
 
 ## Loads research definitions from dictionaries.
@@ -68,6 +84,20 @@ func load_from_definitions(definitions: Array) -> bool:
 			# Branch B — real {money, science} base cost, for the drawer/full-tree cards' live
 			# concurrency-adjusted cost display and insufficient-funds check.
 			"cost": definition.get("cost", {"money": 0, "science": 0}),
+			# Branch C additions — carried through from research_tree_data_loader.gd's remapped
+			# definitions (see its own doc comment) so the popup/badges/mutex bracket/Full Tree
+			# left rail can read them without a second data pass. Not in Branch A's original
+			# normalized_entry shape, which only needed enough for a flat card grid.
+			"branch": definition.get("branch", ""),
+			"unit_id": definition.get("unit_id", ""),
+			"path_id": definition.get("path_id", ""),
+			"tier": int(definition.get("tier", int(definition.get("row", 0)))),
+			"mutex_group_id": definition.get("mutex_group_id", ""),
+			"badges": definition.get("badges", []),
+			"size": definition.get("size", "minor"),
+			"short_description": definition.get("short_description", ""),
+			"full_description": definition.get("full_description", ""),
+			"image_asset": definition.get("image_asset", ""),
 		}
 
 		_entries_by_id[entry_id] = normalized_entry
@@ -121,6 +151,9 @@ func sync_from_server_state(research_data: Dictionary) -> void:
 		_progress_by_id[id] = float(get_entry(id).get("science_value", 0))
 
 	_active_entry_id = ""
+	_active_entry_ids.clear()
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var seen_node_ids: Dictionary = {}
 	for raw_project: Variant in research_data.get("active_projects", []):
 		if not raw_project is Dictionary:
 			continue
@@ -128,17 +161,58 @@ func sync_from_server_state(research_data: Dictionary) -> void:
 		var node_id: String = project.get("node_id", "")
 		if not _entries_by_id.has(node_id):
 			continue
+		seen_node_ids[node_id] = true
 		var points_total: float = float(project.get("points_total", 1.0))
 		var points_remaining: float = float(project.get("points_remaining", 0.0))
 		_progress_by_id[node_id] = maxf(points_total - points_remaining, 0.0)
 		_started_entries[node_id] = true
-		# Branch A's minimal display only highlights one "active" card at a time even though
+		_active_entry_ids.append(node_id)
+		# Branch A's minimal display only highlighted one "active" card at a time even though
 		# the server allows unlimited concurrent projects (RESEARCH.md — no hard slot limit).
-		# Showing every concurrently-active project is Branch C's UI-layer job.
+		# _active_entry_id is kept only for legacy single-active callers; Branch C's UI reads
+		# _active_entry_ids for the full set.
 		if _active_entry_id.is_empty():
 			_active_entry_id = node_id
 
+		_active_points_total[node_id] = points_total
+		if _active_remaining_last_time.has(node_id):
+			var dt: float = now - float(_active_remaining_last_time[node_id])
+			var raw_delta: float = float(_active_remaining_last_raw[node_id]) - points_remaining
+			if dt > 0.0:
+				_active_remaining_rate[node_id] = maxf(raw_delta / dt, 0.0)
+		else:
+			_active_remaining_rate[node_id] = 0.0
+		_active_remaining_last_raw[node_id] = points_remaining
+		_active_remaining_last_time[node_id] = now
+		# Re-anchor the interpolated value to the fresh server sample every time one arrives —
+		# corrects any drift the frame-by-frame decay accumulated since the last sample.
+		_active_remaining_interp[node_id] = points_remaining
+
+	# Drop interpolation bookkeeping for anything no longer active (completed or cancelled).
+	for stale_id: Variant in _active_points_total.keys().duplicate():
+		if not seen_node_ids.has(String(stale_id)):
+			_active_points_total.erase(stale_id)
+			_active_remaining_interp.erase(stale_id)
+			_active_remaining_rate.erase(stale_id)
+			_active_remaining_last_raw.erase(stale_id)
+			_active_remaining_last_time.erase(stale_id)
+
 	entries_changed.emit()
+
+
+## Decays each active project's interpolated remaining-points value toward zero at its
+## estimated per-second rate, giving the progress bars a smooth per-frame fill instead of the
+## server's stepped once-per-second samples. Never lets the interpolated value run past what
+## the next real sample will correct to (rate is re-estimated, and the value re-anchored, on
+## every sync_from_server_state() call), so the worst case is a brief plateau if the network
+## hiccups, never a runaway overshoot.
+func _process(delta: float) -> void:
+	for node_id: Variant in _active_remaining_interp.keys():
+		var rate: float = float(_active_remaining_rate.get(node_id, 0.0))
+		if rate <= 0.0:
+			continue
+		var remaining: float = float(_active_remaining_interp[node_id])
+		_active_remaining_interp[node_id] = maxf(remaining - rate * delta, 0.0)
 
 
 ## Starts or resumes a research entry if it is available.
@@ -280,6 +354,17 @@ func get_progress_science_value(entry_id: String) -> float:
 ## - entry_id: identifier of the entry.
 ## Returns: 0.0 to 1.0, or 1.0 for zero-duration completed entries.
 func get_progress_ratio(entry_id: String) -> float:
+	# Branch C — prefer the client-side interpolated sample for currently-active projects, so
+	# progress bars fill smoothly between the server's once-per-second broadcasts instead of
+	# stepping. Falls back to the legacy science_value-ratio path for anything not currently
+	# an active project (researched/locked/available nodes have no interpolation state).
+	if _active_points_total.has(entry_id):
+		var total: float = float(_active_points_total[entry_id])
+		if total <= 0.0:
+			return 1.0
+		var remaining: float = float(_active_remaining_interp.get(entry_id, 0.0))
+		return clampf((total - remaining) / total, 0.0, 1.0)
+
 	var entry: Dictionary = get_entry(entry_id)
 	var science_value: int = int(entry.get("science_value", 0))
 	if science_value <= 0:
@@ -287,11 +372,44 @@ func get_progress_ratio(entry_id: String) -> float:
 	return clampf(get_progress_science_value(entry_id) / float(science_value), 0.0, 1.0)
 
 
-## Returns the active entry id.
+## Returns the active entry id — the first concurrently-active project found, kept for legacy
+## single-active callers. Prefer get_active_entry_ids() for the full concurrent set.
 ## Parameters: none.
 ## Returns: active research id, or empty string when none is active.
 func get_active_entry_id() -> String:
 	return _active_entry_id
+
+
+## Returns every currently-active (in-progress) research node id, sorted soonest-to-complete
+## first (ascending remaining points) — the sort order the IN PROGRESS sidebar section wants
+## per RESEARCH_UI_HANDOFF.md §3.1.
+## Parameters: none.
+## Returns: array of node ids currently mid-research.
+func get_active_entry_ids() -> Array[String]:
+	var ids: Array[String] = _active_entry_ids.duplicate()
+	ids.sort_custom(func(a: String, b: String) -> bool:
+		return float(_active_remaining_interp.get(a, 0.0)) < float(_active_remaining_interp.get(b, 0.0))
+	)
+	return ids
+
+
+## Returns a {node_id, met} array describing each of a node's prerequisites, for the Locked
+## popup's ✓/✗ requirements checklist (RESEARCH_UI_HANDOFF.md §6.4).
+## Parameters:
+## - entry_id: identifier of the entry whose requirements to check.
+## Returns: array of {"node_id": String, "title": String, "met": bool} dictionaries.
+func get_requirement_status(entry_id: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var entry: Dictionary = get_entry(entry_id)
+	for raw_req_id: Variant in entry.get("requires", []):
+		var req_id: String = String(raw_req_id)
+		var req_entry: Dictionary = get_entry(req_id)
+		result.append({
+			"node_id": req_id,
+			"title": req_entry.get("title", req_id),
+			"met": is_researched(req_id),
+		})
+	return result
 
 
 ## Returns a user-facing reason an entry cannot currently be researched.
@@ -334,6 +452,13 @@ func _is_previous_row_complete(row: int) -> bool:
 	return false
 
 
+## Branch C fix: a mutex tier's options must stay clickable even after a sibling completes —
+## RESEARCH.md's Respec rule explicitly allows re-selecting a different option at an already-
+## decided mutex tier (old perk stays active until the new one completes, then is displaced,
+## no refund). Only an option ALREADY mid-research at this tier blocks its siblings (you can't
+## run two mutex options concurrently) — a merely RESEARCHED sibling is a respec candidate, not
+## a hard lock, and surfaces as the mutex-conflict warning popup instead (research_node_popup.gd
+## variant 3 / RESEARCH_UI_HANDOFF.md §6.3), never a Locked state.
 func _has_exclusive_conflict(entry_id: String) -> bool:
 	var entry: Dictionary = get_entry(entry_id)
 	var exclusive_group: String = entry.get("exclusive_group", "")
@@ -347,10 +472,33 @@ func _has_exclusive_conflict(entry_id: String) -> bool:
 		if other_entry.get("exclusive_group", "") != exclusive_group:
 			continue
 		var other_progress: float = float(_progress_by_id.get(other_entry_id, 0.0))
-		if is_researched(other_entry_id) or other_progress > 0.0 or _started_entries.has(other_entry_id):
+		if (other_progress > 0.0 or _started_entries.has(other_entry_id)) and not is_researched(other_entry_id):
 			return true
 
 	return false
+
+
+## Returns the id of a mutex-group sibling that is already researched (a respec candidate) for
+## the given node, or "" when there is none. Used by research_node_popup.gd to decide between
+## the plain Confirm/Cancel body and the mutex-conflict warning body (RESEARCH_UI_HANDOFF.md
+## §6.2 vs §6.3).
+## Parameters:
+## - entry_id: identifier of the entry being opened in the popup.
+## Returns: the displaced sibling's node id, or an empty string.
+func get_mutex_respec_conflict(entry_id: String) -> String:
+	var entry: Dictionary = get_entry(entry_id)
+	var exclusive_group: String = entry.get("exclusive_group", "")
+	if exclusive_group.is_empty():
+		return ""
+	for other_entry_id: String in _entry_order:
+		if other_entry_id == entry_id:
+			continue
+		var other_entry: Dictionary = get_entry(other_entry_id)
+		if other_entry.get("exclusive_group", "") != exclusive_group:
+			continue
+		if is_researched(other_entry_id):
+			return other_entry_id
+	return ""
 
 
 func _complete_active_entry() -> void:

@@ -83,7 +83,7 @@ func _input(event: InputEvent) -> void:
 	match scancode:
 		KEY_TAB:
 			if _currently_open != "":
-				panel_sub_tab_cycle_requested.emit(_currently_open, true)
+				panel_sub_tab_cycle_requested.emit(_currently_open, not key.shift_pressed)
 			else:
 				EventBus.notification_cycle_next.emit()
 			get_tree().root.set_input_as_handled()

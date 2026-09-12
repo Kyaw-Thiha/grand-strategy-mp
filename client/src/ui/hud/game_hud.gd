@@ -5,6 +5,7 @@ extends CanvasLayer
 ## Panel behaviour (hotkeys, swap rules, Tab/Escape) wired in p5b.
 
 const _HUDManagerClass = preload("res://src/ui/hud/hud_manager.gd")
+const _ResearchNodePopupScene := preload("res://scenes/systems/research/research_node_popup.tscn")
 
 @onready var hud_manager: _HUDManagerClass = $HUDManager
 @onready var overlay_dim: ColorRect = %OverlayDim
@@ -467,6 +468,17 @@ func _ready() -> void:
 	_land_selection_surround.action_requested.connect(_on_land_selection_action_requested)
 	for action_button: Button in _land_selection_surround.get_all_control_buttons():
 		_register_ui_input_ownership_root(action_button)
+
+	# Research node popup — Phase 11 Branch C. Instantiated once and added LAST here (after
+	# every other panel this _ready() has already added, including the FULL_CENTER anchor and
+	# every SIDE_DOCKED drawer), so normal Godot draw order puts it above both. Deliberately
+	# NOT registered through HUDManager — HUDManager.show_panel() closes any other open
+	# FULL_CENTER panel first, which would close Full Tree if this popup were one of those
+	# panels. See phase-11-task-c-ui-interaction.md's Critical Pre-Read for the full rationale.
+	var research_node_popup: Control = _ResearchNodePopupScene.instantiate()
+	add_child(research_node_popup)
+	if research_node_popup.has_method("setup") and _research_tree_panel.has_method("get_research_system"):
+		research_node_popup.setup(_research_tree_panel.get_research_system())
 
 
 func _process(delta: float) -> void:

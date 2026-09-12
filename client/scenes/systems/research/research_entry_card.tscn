@@ -30,6 +30,10 @@ theme_override_constants/margin_bottom = 10
 layout_mode = 2
 theme_override_constants/separation = 6
 
+[node name="BadgeRow" type="HBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
 [node name="TitleLabel" type="Label" parent="Margin/Layout"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
@@ -57,8 +61,3 @@ show_percentage = false
 layout_mode = 2
 text = "Locked"
 horizontal_alignment = 2
-
-[node name="CancelButton" type="Button" parent="Margin/Layout"]
-layout_mode = 2
-visible = false
-text = "Cancel"
