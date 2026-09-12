@@ -69,6 +69,11 @@ signal research_rejected(entry_id: String, reason: String)
 ## Server-driven — fires whenever GameState.research changes from a RESEARCH_INIT/
 ## RESEARCH_UPDATES broadcast. Distinct from the four client-local-prototype signals above.
 signal research_updated()
+## Phase 11 Branch C — requests the shared node popup open for one node. Emitted by both the
+## sidebar drawer and Full Tree; the popup itself is instantiated once by game_hud.gd as a
+## top-level overlay Control, never registered through HUDManager (see
+## plans/phase-11/phase-11-task-c-ui-interaction.md's Critical Pre-Read).
+signal research_node_popup_requested(node_id: String)
 
 # ── Selection (Phase 5c) ─────────────────────────────────────────────────────
 signal province_selected(province_id: String)
